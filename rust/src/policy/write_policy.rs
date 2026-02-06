@@ -2,6 +2,8 @@ use aerospike_core::{CommitLevel, Expiration, GenerationPolicy, RecordExistsActi
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use crate::expressions::{is_expression, py_to_expression};
+
 /// Convert a TTL integer value to an Expiration enum
 fn parse_ttl(ttl_val: i64) -> Expiration {
     match ttl_val {
@@ -100,6 +102,13 @@ pub fn parse_write_policy(
     // Durable delete
     if let Some(val) = dict.get_item("durable_delete")? {
         policy.durable_delete = val.extract::<bool>()?;
+    }
+
+    // Filter expression
+    if let Some(val) = dict.get_item("filter_expression")? {
+        if is_expression(&val) {
+            policy.base_policy.filter_expression = Some(py_to_expression(&val)?);
+        }
     }
 
     Ok(policy)

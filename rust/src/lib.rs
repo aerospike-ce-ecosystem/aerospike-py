@@ -4,6 +4,7 @@ mod async_client;
 mod client;
 mod constants;
 mod errors;
+pub mod expressions;
 mod operations;
 mod policy;
 pub mod query;

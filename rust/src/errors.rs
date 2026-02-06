@@ -91,9 +91,10 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
         AsError::InvalidArgument(msg) => {
             InvalidArgError::new_err(format!("Invalid argument: {msg}"))
         }
-        AsError::ServerError(rc, _in_doubt, _node) => {
+        AsError::ServerError(rc, in_doubt, _node) => {
             let code = result_code_to_int(rc);
-            let msg = format!("AEROSPIKE_ERR ({code}): {err}");
+            let doubt_suffix = if *in_doubt { " [in_doubt]" } else { "" };
+            let msg = format!("AEROSPIKE_ERR ({code}): {err}{doubt_suffix}");
             match rc {
                 // Record-level: specific subclasses
                 ResultCode::KeyNotFoundError => RecordNotFound::new_err(msg),
@@ -128,6 +129,51 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
         AsError::InvalidNode(msg) => ClusterError::new_err(format!("Invalid node: {msg}")),
         AsError::NoMoreConnections => ClusterError::new_err("No more connections available"),
         _ => ClientError::new_err(format!("{err}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_result_code_to_int_ok() {
+        assert_eq!(result_code_to_int(&ResultCode::Ok), 0);
+    }
+
+    #[test]
+    fn test_result_code_to_int_key_not_found() {
+        assert_eq!(result_code_to_int(&ResultCode::KeyNotFoundError), 2);
+    }
+
+    #[test]
+    fn test_result_code_to_int_key_exists() {
+        assert_eq!(result_code_to_int(&ResultCode::KeyExistsError), 5);
+    }
+
+    #[test]
+    fn test_result_code_to_int_timeout() {
+        assert_eq!(result_code_to_int(&ResultCode::Timeout), 9);
+    }
+
+    #[test]
+    fn test_result_code_to_int_index_found() {
+        assert_eq!(result_code_to_int(&ResultCode::IndexFound), 200);
+    }
+
+    #[test]
+    fn test_result_code_to_int_index_not_found() {
+        assert_eq!(result_code_to_int(&ResultCode::IndexNotFound), 201);
+    }
+
+    #[test]
+    fn test_result_code_to_int_query_aborted() {
+        assert_eq!(result_code_to_int(&ResultCode::QueryAborted), 210);
+    }
+
+    #[test]
+    fn test_result_code_to_int_unknown() {
+        assert_eq!(result_code_to_int(&ResultCode::Unknown(250)), 250);
     }
 }
 

@@ -6,7 +6,7 @@ use crate::types::key::key_to_py;
 use crate::types::value::value_to_py;
 
 /// Convert Vec<BatchRecord> to Python list of (key, meta, bins) tuples.
-pub fn batch_records_to_py(py: Python<'_>, results: &[BatchRecord]) -> PyResult<PyObject> {
+pub fn batch_records_to_py(py: Python<'_>, results: &[BatchRecord]) -> PyResult<Py<PyAny>> {
     let py_list = PyList::empty(py);
     for br in results {
         let key_py = key_to_py(py, &br.key)?;
@@ -30,7 +30,7 @@ pub fn batch_records_to_py(py: Python<'_>, results: &[BatchRecord]) -> PyResult<
 }
 
 /// Extract meta dict from a Record.
-pub fn record_to_meta(py: Python<'_>, record: &aerospike_core::Record) -> PyResult<PyObject> {
+pub fn record_to_meta(py: Python<'_>, record: &aerospike_core::Record) -> PyResult<Py<PyAny>> {
     let meta = PyDict::new(py);
     meta.set_item("gen", record.generation)?;
     let ttl: u32 = record
@@ -42,9 +42,15 @@ pub fn record_to_meta(py: Python<'_>, record: &aerospike_core::Record) -> PyResu
 }
 
 /// Extract meta dict from a BatchRecord (for exists_many).
-pub fn batch_record_meta(py: Python<'_>, br: &BatchRecord) -> PyObject {
+pub fn batch_record_meta(py: Python<'_>, br: &BatchRecord) -> Py<PyAny> {
     match &br.record {
-        Some(record) => record_to_meta(py, record).unwrap_or_else(|_| py.None()),
+        Some(record) => record_to_meta(py, record).unwrap_or_else(|e| {
+            eprintln!(
+                "Warning: failed to extract metadata from batch record (key={:?}): {}",
+                br.key, e
+            );
+            py.None()
+        }),
         None => py.None(),
     }
 }

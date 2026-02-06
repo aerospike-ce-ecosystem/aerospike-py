@@ -8,33 +8,33 @@ pub fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     if obj.is_none() {
         return Ok(Value::Nil);
     }
-    if let Ok(b) = obj.downcast::<PyBool>() {
+    if let Ok(b) = obj.cast::<PyBool>() {
         return Ok(Value::Bool(b.is_true()));
     }
-    if let Ok(i) = obj.downcast::<PyInt>() {
+    if let Ok(i) = obj.cast::<PyInt>() {
         let val: i64 = i.extract()?;
         return Ok(Value::Int(val));
     }
-    if let Ok(f) = obj.downcast::<PyFloat>() {
+    if let Ok(f) = obj.cast::<PyFloat>() {
         let val: f64 = f.extract()?;
         return Ok(Value::Float(aerospike_core::FloatValue::from(val)));
     }
-    if let Ok(s) = obj.downcast::<PyString>() {
+    if let Ok(s) = obj.cast::<PyString>() {
         let val: String = s.extract()?;
         return Ok(Value::String(val));
     }
-    if let Ok(b) = obj.downcast::<PyBytes>() {
+    if let Ok(b) = obj.cast::<PyBytes>() {
         let val: Vec<u8> = b.extract()?;
         return Ok(Value::Blob(val));
     }
-    if let Ok(list) = obj.downcast::<PyList>() {
+    if let Ok(list) = obj.cast::<PyList>() {
         let mut values = Vec::with_capacity(list.len());
         for item in list.iter() {
             values.push(py_to_value(&item)?);
         }
         return Ok(Value::List(values));
     }
-    if let Ok(dict) = obj.downcast::<PyDict>() {
+    if let Ok(dict) = obj.cast::<PyDict>() {
         let mut map = HashMap::new();
         for (k, v) in dict.iter() {
             let key = py_to_value(&k)?;
@@ -51,7 +51,7 @@ pub fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
 }
 
 /// Convert an Aerospike Value to a Python object
-pub fn value_to_py(py: Python<'_>, val: &Value) -> PyResult<PyObject> {
+pub fn value_to_py(py: Python<'_>, val: &Value) -> PyResult<Py<PyAny>> {
     match val {
         Value::Nil => Ok(py.None()),
         Value::Bool(b) => Ok((*b).into_pyobject(py)?.to_owned().into_any().unbind()),

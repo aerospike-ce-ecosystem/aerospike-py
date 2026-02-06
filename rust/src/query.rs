@@ -173,11 +173,11 @@ fn execute_query(
     client: &Arc<AsClient>,
     statement: Statement,
     policy: Option<&Bound<'_, PyDict>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
 
-    let records = py.allow_threads(|| {
+    let records = py.detach(|| {
         RUNTIME.block_on(async {
             let rs = client
                 .query(&query_policy, PartitionFilter::all(), statement)
@@ -210,7 +210,7 @@ fn execute_foreach(
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
 
-    let records = py.allow_threads(|| {
+    let records = py.detach(|| {
         RUNTIME.block_on(async {
             let rs = client
                 .query(&query_policy, PartitionFilter::all(), statement)
@@ -280,7 +280,7 @@ impl PyQuery {
 
     /// Execute the query and return all results as a list of (key, meta, bins).
     #[pyo3(signature = (policy=None))]
-    fn results(&self, py: Python<'_>, policy: Option<&Bound<'_, PyDict>>) -> PyResult<PyObject> {
+    fn results(&self, py: Python<'_>, policy: Option<&Bound<'_, PyDict>>) -> PyResult<Py<PyAny>> {
         let stmt = build_statement(
             &self.namespace,
             &self.set_name,
@@ -342,7 +342,7 @@ impl PyScan {
 
     /// Execute the scan and return all results as a list of (key, meta, bins).
     #[pyo3(signature = (policy=None))]
-    fn results(&self, py: Python<'_>, policy: Option<&Bound<'_, PyDict>>) -> PyResult<PyObject> {
+    fn results(&self, py: Python<'_>, policy: Option<&Bound<'_, PyDict>>) -> PyResult<Py<PyAny>> {
         let stmt = build_statement(&self.namespace, &self.set_name, &self.bins, &[])?;
         execute_query(py, &self.client, stmt, policy)
     }

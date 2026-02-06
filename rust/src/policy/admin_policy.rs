@@ -56,7 +56,7 @@ fn privilege_code_to_int(code: &PrivilegeCode) -> u8 {
 pub fn parse_privileges(privileges: &Bound<'_, PyList>) -> PyResult<Vec<Privilege>> {
     let mut result = Vec::new();
     for item in privileges.iter() {
-        let dict = item.downcast::<PyDict>()?;
+        let dict = item.cast::<PyDict>()?;
         let code: u8 = dict
             .get_item("code")?
             .ok_or_else(|| {
@@ -71,7 +71,7 @@ pub fn parse_privileges(privileges: &Bound<'_, PyList>) -> PyResult<Vec<Privileg
 }
 
 /// Convert a Rust User to a Python dict.
-pub fn user_to_py(py: Python<'_>, user: &aerospike_core::User) -> PyResult<PyObject> {
+pub fn user_to_py(py: Python<'_>, user: &aerospike_core::User) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("user", &user.user)?;
     let roles = PyList::empty(py);
@@ -98,7 +98,7 @@ pub fn user_to_py(py: Python<'_>, user: &aerospike_core::User) -> PyResult<PyObj
 }
 
 /// Convert a Rust Role to a Python dict.
-pub fn role_to_py(py: Python<'_>, role: &aerospike_core::Role) -> PyResult<PyObject> {
+pub fn role_to_py(py: Python<'_>, role: &aerospike_core::Role) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("name", &role.name)?;
 

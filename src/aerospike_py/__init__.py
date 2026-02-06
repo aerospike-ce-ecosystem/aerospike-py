@@ -217,6 +217,9 @@ from aerospike_py._aerospike import (  # noqa: F401
 # Re-export exception subclasses from exception module for backward compat
 from aerospike_py import exception  # noqa: F401
 from aerospike_py import predicates  # noqa: F401
+from aerospike_py import list_operations  # noqa: F401
+from aerospike_py import map_operations  # noqa: F401
+from aerospike_py import exp  # noqa: F401
 
 try:
     from importlib.metadata import version as _get_version
@@ -237,6 +240,13 @@ class Client(_NativeClient):
         """
         super().connect(username, password)
         return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 
 
 def client(config: dict) -> Client:

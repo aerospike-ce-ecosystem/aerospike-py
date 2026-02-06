@@ -6,7 +6,7 @@ use super::value::{py_to_value, value_to_py};
 
 /// Convert a Python key tuple (namespace, set, key) to Rust Key
 pub fn py_to_key(key_tuple: &Bound<'_, PyAny>) -> PyResult<Key> {
-    let tuple = key_tuple.downcast::<PyTuple>()?;
+    let tuple = key_tuple.cast::<PyTuple>()?;
 
     if tuple.len() < 3 {
         return Err(pyo3::exceptions::PyValueError::new_err(
@@ -41,7 +41,7 @@ pub fn py_to_key(key_tuple: &Bound<'_, PyAny>) -> PyResult<Key> {
 }
 
 /// Convert Rust Key to Python tuple (namespace, set, key, digest)
-pub fn key_to_py(py: Python<'_>, key: &Key) -> PyResult<PyObject> {
+pub fn key_to_py(py: Python<'_>, key: &Key) -> PyResult<Py<PyAny>> {
     let ns = key.namespace.as_str().into_pyobject(py)?;
     let set = key.set_name.as_str().into_pyobject(py)?;
     let user_key = match &key.user_key {

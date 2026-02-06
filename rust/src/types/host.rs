@@ -9,11 +9,11 @@ pub fn parse_hosts_from_config(config: &Bound<'_, PyDict>) -> PyResult<String> {
         pyo3::exceptions::PyValueError::new_err("Config must contain 'hosts' key")
     })?;
 
-    let hosts_list = hosts_obj.downcast::<PyList>()?;
+    let hosts_list = hosts_obj.cast::<PyList>()?;
     let mut host_strings = Vec::with_capacity(hosts_list.len());
 
     for item in hosts_list.iter() {
-        if let Ok(tuple) = item.downcast::<PyTuple>() {
+        if let Ok(tuple) = item.cast::<PyTuple>() {
             let host: String = tuple.get_item(0)?.extract()?;
             let port: u16 = if tuple.len() > 1 {
                 tuple.get_item(1)?.extract()?

@@ -3,6 +3,8 @@
 from typing import Any, Callable, Optional, Union
 
 from aerospike_py import exception as exception
+from aerospike_py import list_operations as list_operations
+from aerospike_py import map_operations as map_operations
 from aerospike_py import predicates as predicates
 
 __version__: str
@@ -43,6 +45,8 @@ class Client:
     """
 
     def __init__(self, config: dict[str, Any]) -> None: ...
+    def __enter__(self) -> "Client": ...
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool: ...
 
     # -- Connection --
     def connect(
@@ -298,6 +302,8 @@ class AsyncClient:
     """Aerospike async client. All I/O methods return coroutines."""
 
     def __init__(self, config: dict[str, Any]) -> None: ...
+    async def __aenter__(self) -> "AsyncClient": ...
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool: ...
 
     # -- Connection --
     async def connect(
@@ -335,11 +341,36 @@ class AsyncClient:
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
     ) -> None: ...
+
+    # -- String / Numeric --
+    async def append(
+        self,
+        key: Key,
+        bin: str,
+        val: Any,
+        meta: Optional[Metadata] = None,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def prepend(
+        self,
+        key: Key,
+        bin: str,
+        val: Any,
+        meta: Optional[Metadata] = None,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
     async def increment(
         self,
         key: Key,
         bin: str,
         offset: Union[int, float],
+        meta: Optional[Metadata] = None,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def remove_bin(
+        self,
+        key: Key,
+        bin_names: list[str],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
     ) -> None: ...
@@ -352,6 +383,13 @@ class AsyncClient:
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
     ) -> Record: ...
+    async def operate_ordered(
+        self,
+        key: Key,
+        ops: list[OperationDict],
+        meta: Optional[Metadata] = None,
+        policy: Optional[PolicyDict] = None,
+    ) -> tuple[Any, Metadata, list[tuple[str, Any]]]: ...
 
     # -- Batch --
     async def get_many(
@@ -360,6 +398,18 @@ class AsyncClient:
     async def exists_many(
         self, keys: list[Key], policy: Optional[PolicyDict] = None
     ) -> list[ExistsResult]: ...
+    async def select_many(
+        self,
+        keys: list[Key],
+        bins: list[str],
+        policy: Optional[PolicyDict] = None,
+    ) -> list[Record]: ...
+    async def batch_operate(
+        self,
+        keys: list[Key],
+        ops: list[OperationDict],
+        policy: Optional[PolicyDict] = None,
+    ) -> list[Record]: ...
     async def batch_remove(
         self, keys: list[Key], policy: Optional[PolicyDict] = None
     ) -> list[Record]: ...
@@ -371,6 +421,38 @@ class AsyncClient:
         set_name: str,
         policy: Optional[PolicyDict] = None,
     ) -> list[Record]: ...
+
+    # -- Index --
+    async def index_integer_create(
+        self,
+        namespace: str,
+        set_name: str,
+        bin_name: str,
+        index_name: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def index_string_create(
+        self,
+        namespace: str,
+        set_name: str,
+        bin_name: str,
+        index_name: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def index_geo2dsphere_create(
+        self,
+        namespace: str,
+        set_name: str,
+        bin_name: str,
+        index_name: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def index_remove(
+        self,
+        namespace: str,
+        index_name: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
 
     # -- Truncate --
     async def truncate(
@@ -399,6 +481,87 @@ class AsyncClient:
         args: Optional[list[Any]] = None,
         policy: Optional[PolicyDict] = None,
     ) -> Any: ...
+
+    # -- Admin: User --
+    async def admin_create_user(
+        self,
+        username: str,
+        password: str,
+        roles: list[str],
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def admin_drop_user(
+        self, username: str, policy: Optional[PolicyDict] = None
+    ) -> None: ...
+    async def admin_change_password(
+        self,
+        username: str,
+        password: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def admin_grant_roles(
+        self,
+        username: str,
+        roles: list[str],
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def admin_revoke_roles(
+        self,
+        username: str,
+        roles: list[str],
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def admin_query_user(
+        self, username: str, policy: Optional[PolicyDict] = None
+    ) -> dict[str, Any]: ...
+    async def admin_query_users(
+        self, policy: Optional[PolicyDict] = None
+    ) -> list[dict[str, Any]]: ...
+
+    # -- Admin: Role --
+    async def admin_create_role(
+        self,
+        role: str,
+        privileges: list[PrivilegeDict],
+        policy: Optional[PolicyDict] = None,
+        whitelist: Optional[list[str]] = None,
+        read_quota: int = 0,
+        write_quota: int = 0,
+    ) -> None: ...
+    async def admin_drop_role(
+        self, role: str, policy: Optional[PolicyDict] = None
+    ) -> None: ...
+    async def admin_grant_privileges(
+        self,
+        role: str,
+        privileges: list[PrivilegeDict],
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def admin_revoke_privileges(
+        self,
+        role: str,
+        privileges: list[PrivilegeDict],
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def admin_query_role(
+        self, role: str, policy: Optional[PolicyDict] = None
+    ) -> dict[str, Any]: ...
+    async def admin_query_roles(
+        self, policy: Optional[PolicyDict] = None
+    ) -> list[dict[str, Any]]: ...
+    async def admin_set_whitelist(
+        self,
+        role: str,
+        whitelist: list[str],
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
+    async def admin_set_quotas(
+        self,
+        role: str,
+        read_quota: int = 0,
+        write_quota: int = 0,
+        policy: Optional[PolicyDict] = None,
+    ) -> None: ...
 
 class Query:
     """Secondary index query object."""

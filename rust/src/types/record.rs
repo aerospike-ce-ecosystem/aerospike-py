@@ -9,7 +9,7 @@ use super::value::value_to_py;
 /// key = (namespace, set, user_key, digest)
 /// meta = {"gen": generation, "ttl": ttl_seconds}
 /// bins = {"bin_name": value, ...}
-pub fn record_to_py(py: Python<'_>, record: &Record) -> PyResult<PyObject> {
+pub fn record_to_py(py: Python<'_>, record: &Record) -> PyResult<Py<PyAny>> {
     // Key tuple
     let key_py = match &record.key {
         Some(key) => key_to_py(py, key)?,

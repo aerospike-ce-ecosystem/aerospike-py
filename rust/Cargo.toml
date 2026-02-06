@@ -8,8 +8,8 @@ name = "_aerospike"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.23", features = ["extension-module"] }
-pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }
+pyo3 = { version = "0.28", features = ["extension-module"] }
+pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
 aerospike = { git = "https://github.com/aerospike/aerospike-client-rust.git", tag = "v2.0.0-alpha.9", features = ["async", "rt-tokio"] }
 aerospike-core = { git = "https://github.com/aerospike/aerospike-client-rust.git", tag = "v2.0.0-alpha.9" }
 tokio = { version = "1", features = ["full"] }

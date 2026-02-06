@@ -1,8 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use aerospike_core::{
-    BatchDeletePolicy, BatchOperation, BatchReadPolicy, Bin, Bins, Client as AsClient,
-    Error as AsError, PartitionFilter, ResultCode, Statement, Task, UDFLang, Value,
+    BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
+    Client as AsClient, Error as AsError, PartitionFilter, ResultCode, Statement, Task, UDFLang,
+    Value,
 };
 use futures::StreamExt;
 use pyo3::prelude::*;
@@ -11,7 +12,7 @@ use pyo3_async_runtimes::tokio::future_into_py;
 
 use crate::errors::as_to_pyerr;
 use crate::operations::py_ops_to_rust;
-use crate::policy::admin_policy::parse_admin_policy;
+use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_py, user_to_py};
 use crate::policy::batch_policy::parse_batch_policy;
 use crate::policy::client_policy::parse_client_policy;
 use crate::policy::query_policy::parse_query_policy;
@@ -27,13 +28,13 @@ use crate::types::value::{py_to_value, value_to_py};
 #[pyclass(name = "AsyncClient")]
 pub struct PyAsyncClient {
     inner: Arc<Mutex<Option<Arc<AsClient>>>>,
-    config: PyObject,
+    config: Py<PyAny>,
 }
 
 #[pymethods]
 impl PyAsyncClient {
     #[new]
-    fn new(config: PyObject) -> PyResult<Self> {
+    fn new(config: Py<PyAny>) -> PyResult<Self> {
         Ok(PyAsyncClient {
             inner: Arc::new(Mutex::new(None)),
             config,
@@ -54,7 +55,7 @@ impl PyAsyncClient {
             ));
         }
 
-        let config_dict = self.config.bind(py).downcast::<PyDict>()?;
+        let config_dict = self.config.bind(py).cast::<PyDict>()?;
 
         // Copy the config dict so we don't mutate the caller's original
         let effective_config = config_dict.copy()?;
@@ -113,6 +114,33 @@ impl PyAsyncClient {
         future_into_py(py, async move { Ok(client.node_names().await) })
     }
 
+    /// Async context manager entry: `async with client as c:`
+    fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        future_into_py(py, async move { Ok(slf) })
+    }
+
+    /// Async context manager exit: closes the client.
+    #[pyo3(signature = (_exc_type=None, _exc_val=None, _exc_tb=None))]
+    fn __aexit__<'py>(
+        &self,
+        py: Python<'py>,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_val: Option<&Bound<'_, PyAny>>,
+        _exc_tb: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self
+            .inner
+            .lock()
+            .map_err(|_| crate::errors::ClientError::new_err("Internal lock poisoned"))?
+            .take();
+        future_into_py(py, async move {
+            if let Some(c) = client {
+                c.close().await.map_err(as_to_pyerr)?;
+            }
+            Ok(false)
+        })
+    }
+
     // ── CRUD ──────────────────────────────────────────────────
 
     /// Write a record (async).
@@ -156,7 +184,7 @@ impl PyAsyncClient {
                 .await
                 .map_err(as_to_pyerr)?;
 
-            Python::with_gil(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record))
         })
     }
 
@@ -182,7 +210,7 @@ impl PyAsyncClient {
                 .await
                 .map_err(as_to_pyerr)?;
 
-            Python::with_gil(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record))
         })
     }
 
@@ -201,7 +229,7 @@ impl PyAsyncClient {
         future_into_py(py, async move {
             let result = client.get(&read_policy, &rust_key, Bins::None).await;
 
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let key_py = key_to_py(py, &rust_key)?;
                 match result {
                     Ok(record) => {
@@ -312,7 +340,132 @@ impl PyAsyncClient {
                 .await
                 .map_err(as_to_pyerr)?;
 
-            Python::with_gil(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record))
+        })
+    }
+
+    // ── String / Numeric ───────────────────────────────────────
+
+    /// Append a string to a bin (async).
+    #[pyo3(signature = (key, bin, val, meta=None, policy=None))]
+    fn append<'py>(
+        &self,
+        py: Python<'py>,
+        key: &Bound<'_, PyAny>,
+        bin: &str,
+        val: &Bound<'_, PyAny>,
+        meta: Option<&Bound<'_, PyDict>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let rust_key = py_to_key(key)?;
+        let write_policy = parse_write_policy(policy, meta)?;
+        let value = py_to_value(val)?;
+        let bins = vec![Bin::new(bin.to_string(), value)];
+
+        future_into_py(py, async move {
+            client
+                .append(&write_policy, &rust_key, &bins)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Prepend a string to a bin (async).
+    #[pyo3(signature = (key, bin, val, meta=None, policy=None))]
+    fn prepend<'py>(
+        &self,
+        py: Python<'py>,
+        key: &Bound<'_, PyAny>,
+        bin: &str,
+        val: &Bound<'_, PyAny>,
+        meta: Option<&Bound<'_, PyDict>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let rust_key = py_to_key(key)?;
+        let write_policy = parse_write_policy(policy, meta)?;
+        let value = py_to_value(val)?;
+        let bins = vec![Bin::new(bin.to_string(), value)];
+
+        future_into_py(py, async move {
+            client
+                .prepend(&write_policy, &rust_key, &bins)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Remove bins from a record by setting them to nil (async).
+    #[pyo3(signature = (key, bin_names, meta=None, policy=None))]
+    fn remove_bin<'py>(
+        &self,
+        py: Python<'py>,
+        key: &Bound<'_, PyAny>,
+        bin_names: &Bound<'_, PyList>,
+        meta: Option<&Bound<'_, PyDict>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let rust_key = py_to_key(key)?;
+        let write_policy = parse_write_policy(policy, meta)?;
+        let names: Vec<String> = bin_names.extract()?;
+        let bins: Vec<Bin> = names.into_iter().map(|n| Bin::new(n, Value::Nil)).collect();
+
+        future_into_py(py, async move {
+            client
+                .put(&write_policy, &rust_key, &bins)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    // ── Multi-operation (ordered) ────────────────────────────────
+
+    /// Perform multiple operations on a single record, returning ordered results (async).
+    #[pyo3(signature = (key, ops, meta=None, policy=None))]
+    fn operate_ordered<'py>(
+        &self,
+        py: Python<'py>,
+        key: &Bound<'_, PyAny>,
+        ops: &Bound<'_, PyList>,
+        meta: Option<&Bound<'_, PyDict>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let rust_key = py_to_key(key)?;
+        let write_policy = parse_write_policy(policy, meta)?;
+        let rust_ops = py_ops_to_rust(ops)?;
+
+        future_into_py(py, async move {
+            let record = client
+                .operate(&write_policy, &rust_key, &rust_ops)
+                .await
+                .map_err(as_to_pyerr)?;
+
+            Python::attach(|py| {
+                let key_py = match &record.key {
+                    Some(k) => key_to_py(py, k)?,
+                    None => py.None(),
+                };
+                let meta_dict_obj = record_to_meta(py, &record)?;
+                let ordered_bins = PyList::empty(py);
+                for (name, value) in &record.bins {
+                    let tuple = PyTuple::new(
+                        py,
+                        [
+                            name.into_pyobject(py)?.into_any().unbind(),
+                            value_to_py(py, value)?,
+                        ],
+                    )?;
+                    ordered_bins.append(tuple)?;
+                }
+                let result = PyTuple::new(
+                    py,
+                    [key_py, meta_dict_obj, ordered_bins.into_any().unbind()],
+                )?;
+                Ok(result.into_any().unbind())
+            })
         })
     }
 
@@ -457,7 +610,7 @@ impl PyAsyncClient {
                 .await
                 .map_err(as_to_pyerr)?;
 
-            Python::with_gil(|py| match result {
+            Python::attach(|py| match result {
                 Some(val) => value_to_py(py, &val),
                 None => Ok(py.None()),
             })
@@ -492,7 +645,7 @@ impl PyAsyncClient {
                 .batch(&batch_policy, &ops)
                 .await
                 .map_err(as_to_pyerr)?;
-            Python::with_gil(|py| batch_records_to_py(py, &results))
+            Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
 
@@ -523,7 +676,7 @@ impl PyAsyncClient {
                 .await
                 .map_err(as_to_pyerr)?;
 
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let py_list = PyList::empty(py);
                 for br in &results {
                     let key_py = key_to_py(py, &br.key)?;
@@ -533,6 +686,72 @@ impl PyAsyncClient {
                 }
                 Ok(py_list.into_any().unbind())
             })
+        })
+    }
+
+    /// Read specific bins from multiple records (async).
+    #[pyo3(signature = (keys, bins, policy=None))]
+    fn select_many<'py>(
+        &self,
+        py: Python<'py>,
+        keys: &Bound<'_, PyList>,
+        bins: &Bound<'_, PyList>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let batch_policy = parse_batch_policy(policy)?;
+        let read_policy = BatchReadPolicy::default();
+        let bin_names: Vec<String> = bins.extract()?;
+        let rust_keys: Vec<aerospike_core::Key> = keys
+            .iter()
+            .map(|k| py_to_key(&k))
+            .collect::<PyResult<_>>()?;
+
+        future_into_py(py, async move {
+            let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
+            let bins_selector = Bins::from(bin_refs.as_slice());
+            let ops: Vec<BatchOperation> = rust_keys
+                .iter()
+                .map(|k| BatchOperation::read(&read_policy, k.clone(), bins_selector.clone()))
+                .collect();
+
+            let results = client
+                .batch(&batch_policy, &ops)
+                .await
+                .map_err(as_to_pyerr)?;
+            Python::attach(|py| batch_records_to_py(py, &results))
+        })
+    }
+
+    /// Perform operations on multiple records (async).
+    #[pyo3(signature = (keys, ops, policy=None))]
+    fn batch_operate<'py>(
+        &self,
+        py: Python<'py>,
+        keys: &Bound<'_, PyList>,
+        ops: &Bound<'_, PyList>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let batch_policy = parse_batch_policy(policy)?;
+        let write_policy = BatchWritePolicy::default();
+        let rust_ops = py_ops_to_rust(ops)?;
+        let rust_keys: Vec<aerospike_core::Key> = keys
+            .iter()
+            .map(|k| py_to_key(&k))
+            .collect::<PyResult<_>>()?;
+
+        future_into_py(py, async move {
+            let batch_ops: Vec<BatchOperation> = rust_keys
+                .iter()
+                .map(|k| BatchOperation::write(&write_policy, k.clone(), rust_ops.clone()))
+                .collect();
+
+            let results = client
+                .batch(&batch_policy, &batch_ops)
+                .await
+                .map_err(as_to_pyerr)?;
+            Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
 
@@ -562,7 +781,7 @@ impl PyAsyncClient {
                 .batch(&batch_policy, &ops)
                 .await
                 .map_err(as_to_pyerr)?;
-            Python::with_gil(|py| batch_records_to_py(py, &results))
+            Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
 
@@ -592,13 +811,474 @@ impl PyAsyncClient {
                 records.push(result.map_err(as_to_pyerr)?);
             }
 
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let py_list = PyList::empty(py);
                 for record in &records {
                     py_list.append(record_to_py(py, record)?)?;
                 }
                 Ok(py_list.into_any().unbind())
             })
+        })
+    }
+    // ── Index ─────────────────────────────────────────────────
+
+    /// Create a secondary integer index (async).
+    #[pyo3(signature = (namespace, set_name, bin_name, index_name, policy=None))]
+    fn index_integer_create<'py>(
+        &self,
+        py: Python<'py>,
+        namespace: &str,
+        set_name: &str,
+        bin_name: &str,
+        index_name: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.create_index_async(
+            py,
+            namespace,
+            set_name,
+            bin_name,
+            index_name,
+            aerospike_core::IndexType::Numeric,
+            policy,
+        )
+    }
+
+    /// Create a secondary string index (async).
+    #[pyo3(signature = (namespace, set_name, bin_name, index_name, policy=None))]
+    fn index_string_create<'py>(
+        &self,
+        py: Python<'py>,
+        namespace: &str,
+        set_name: &str,
+        bin_name: &str,
+        index_name: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.create_index_async(
+            py,
+            namespace,
+            set_name,
+            bin_name,
+            index_name,
+            aerospike_core::IndexType::String,
+            policy,
+        )
+    }
+
+    /// Create a secondary geo2dsphere index (async).
+    #[pyo3(signature = (namespace, set_name, bin_name, index_name, policy=None))]
+    fn index_geo2dsphere_create<'py>(
+        &self,
+        py: Python<'py>,
+        namespace: &str,
+        set_name: &str,
+        bin_name: &str,
+        index_name: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.create_index_async(
+            py,
+            namespace,
+            set_name,
+            bin_name,
+            index_name,
+            aerospike_core::IndexType::Geo2DSphere,
+            policy,
+        )
+    }
+
+    /// Remove a secondary index (async).
+    #[pyo3(signature = (namespace, index_name, policy=None))]
+    fn index_remove<'py>(
+        &self,
+        py: Python<'py>,
+        namespace: &str,
+        index_name: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let namespace = namespace.to_string();
+        let index_name = index_name.to_string();
+
+        future_into_py(py, async move {
+            client
+                .drop_index(&admin_policy, &namespace, "", &index_name)
+                .await
+                .map_err(as_to_pyerr)?;
+            Ok(())
+        })
+    }
+
+    // ── Admin: User ──────────────────────────────────────────────
+
+    /// Create a new user with the given roles (async).
+    #[pyo3(signature = (username, password, roles, policy=None))]
+    fn admin_create_user<'py>(
+        &self,
+        py: Python<'py>,
+        username: &str,
+        password: &str,
+        roles: Vec<String>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let username = username.to_string();
+        let password = password.to_string();
+
+        future_into_py(py, async move {
+            let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
+            client
+                .create_user(&admin_policy, &username, &password, &role_refs)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Drop (delete) a user (async).
+    #[pyo3(signature = (username, policy=None))]
+    fn admin_drop_user<'py>(
+        &self,
+        py: Python<'py>,
+        username: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let username = username.to_string();
+
+        future_into_py(py, async move {
+            client
+                .drop_user(&admin_policy, &username)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Change user password (async).
+    #[pyo3(signature = (username, password, policy=None))]
+    fn admin_change_password<'py>(
+        &self,
+        py: Python<'py>,
+        username: &str,
+        password: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let username = username.to_string();
+        let password = password.to_string();
+
+        future_into_py(py, async move {
+            client
+                .change_password(&admin_policy, &username, &password)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Grant roles to a user (async).
+    #[pyo3(signature = (username, roles, policy=None))]
+    fn admin_grant_roles<'py>(
+        &self,
+        py: Python<'py>,
+        username: &str,
+        roles: Vec<String>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let username = username.to_string();
+
+        future_into_py(py, async move {
+            let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
+            client
+                .grant_roles(&admin_policy, &username, &role_refs)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Revoke roles from a user (async).
+    #[pyo3(signature = (username, roles, policy=None))]
+    fn admin_revoke_roles<'py>(
+        &self,
+        py: Python<'py>,
+        username: &str,
+        roles: Vec<String>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let username = username.to_string();
+
+        future_into_py(py, async move {
+            let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
+            client
+                .revoke_roles(&admin_policy, &username, &role_refs)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Query info about a specific user (async).
+    #[pyo3(signature = (username, policy=None))]
+    fn admin_query_user<'py>(
+        &self,
+        py: Python<'py>,
+        username: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let username = username.to_string();
+
+        future_into_py(py, async move {
+            let users = client
+                .query_users(&admin_policy, Some(&username))
+                .await
+                .map_err(as_to_pyerr)?;
+
+            Python::attach(|py| {
+                if let Some(user) = users.first() {
+                    user_to_py(py, user)
+                } else {
+                    Err(crate::errors::AdminError::new_err(format!(
+                        "User '{}' not found",
+                        username
+                    )))
+                }
+            })
+        })
+    }
+
+    /// Query info about all users (async).
+    #[pyo3(signature = (policy=None))]
+    fn admin_query_users<'py>(
+        &self,
+        py: Python<'py>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+
+        future_into_py(py, async move {
+            let users = client
+                .query_users(&admin_policy, None)
+                .await
+                .map_err(as_to_pyerr)?;
+
+            Python::attach(|py| {
+                let list = PyList::empty(py);
+                for user in &users {
+                    list.append(user_to_py(py, user)?)?;
+                }
+                Ok(list.into_any().unbind())
+            })
+        })
+    }
+
+    // ── Admin: Role ──────────────────────────────────────────────
+
+    /// Create a new role with the given privileges (async).
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (role, privileges, policy=None, whitelist=None, read_quota=0, write_quota=0))]
+    fn admin_create_role<'py>(
+        &self,
+        py: Python<'py>,
+        role: &str,
+        privileges: &Bound<'_, PyList>,
+        policy: Option<&Bound<'_, PyDict>>,
+        whitelist: Option<Vec<String>>,
+        read_quota: u32,
+        write_quota: u32,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let rust_privileges = parse_privileges(privileges)?;
+        let role = role.to_string();
+        let wl = whitelist.unwrap_or_default();
+
+        future_into_py(py, async move {
+            let wl_refs: Vec<&str> = wl.iter().map(|s| s.as_str()).collect();
+            client
+                .create_role(
+                    &admin_policy,
+                    &role,
+                    &rust_privileges,
+                    &wl_refs,
+                    read_quota,
+                    write_quota,
+                )
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Drop (delete) a role (async).
+    #[pyo3(signature = (role, policy=None))]
+    fn admin_drop_role<'py>(
+        &self,
+        py: Python<'py>,
+        role: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let role = role.to_string();
+
+        future_into_py(py, async move {
+            client
+                .drop_role(&admin_policy, &role)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Grant privileges to a role (async).
+    #[pyo3(signature = (role, privileges, policy=None))]
+    fn admin_grant_privileges<'py>(
+        &self,
+        py: Python<'py>,
+        role: &str,
+        privileges: &Bound<'_, PyList>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let rust_privileges = parse_privileges(privileges)?;
+        let role = role.to_string();
+
+        future_into_py(py, async move {
+            client
+                .grant_privileges(&admin_policy, &role, &rust_privileges)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Revoke privileges from a role (async).
+    #[pyo3(signature = (role, privileges, policy=None))]
+    fn admin_revoke_privileges<'py>(
+        &self,
+        py: Python<'py>,
+        role: &str,
+        privileges: &Bound<'_, PyList>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let rust_privileges = parse_privileges(privileges)?;
+        let role = role.to_string();
+
+        future_into_py(py, async move {
+            client
+                .revoke_privileges(&admin_policy, &role, &rust_privileges)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Query info about a specific role (async).
+    #[pyo3(signature = (role, policy=None))]
+    fn admin_query_role<'py>(
+        &self,
+        py: Python<'py>,
+        role: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let role_name = role.to_string();
+
+        future_into_py(py, async move {
+            let roles = client
+                .query_roles(&admin_policy, Some(&role_name))
+                .await
+                .map_err(as_to_pyerr)?;
+
+            Python::attach(|py| {
+                if let Some(r) = roles.first() {
+                    role_to_py(py, r)
+                } else {
+                    Err(crate::errors::AdminError::new_err(format!(
+                        "Role '{}' not found",
+                        role_name
+                    )))
+                }
+            })
+        })
+    }
+
+    /// Query info about all roles (async).
+    #[pyo3(signature = (policy=None))]
+    fn admin_query_roles<'py>(
+        &self,
+        py: Python<'py>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+
+        future_into_py(py, async move {
+            let roles = client
+                .query_roles(&admin_policy, None)
+                .await
+                .map_err(as_to_pyerr)?;
+
+            Python::attach(|py| {
+                let list = PyList::empty(py);
+                for r in &roles {
+                    list.append(role_to_py(py, r)?)?;
+                }
+                Ok(list.into_any().unbind())
+            })
+        })
+    }
+
+    /// Set allowlist (whitelist) for a role (async).
+    #[pyo3(signature = (role, whitelist, policy=None))]
+    fn admin_set_whitelist<'py>(
+        &self,
+        py: Python<'py>,
+        role: &str,
+        whitelist: Vec<String>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let role = role.to_string();
+
+        future_into_py(py, async move {
+            let wl_refs: Vec<&str> = whitelist.iter().map(|s| s.as_str()).collect();
+            client
+                .set_allowlist(&admin_policy, &role, &wl_refs)
+                .await
+                .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Set quotas for a role (async).
+    #[pyo3(signature = (role, read_quota=0, write_quota=0, policy=None))]
+    fn admin_set_quotas<'py>(
+        &self,
+        py: Python<'py>,
+        role: &str,
+        read_quota: u32,
+        write_quota: u32,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let role = role.to_string();
+
+        future_into_py(py, async move {
+            client
+                .set_quotas(&admin_policy, &role, read_quota, write_quota)
+                .await
+                .map_err(as_to_pyerr)
         })
     }
 }
@@ -615,5 +1295,45 @@ impl PyAsyncClient {
                     "Client is not connected. Call connect() first.",
                 )
             })
+    }
+
+    /// Internal helper for index creation (async).
+    #[allow(clippy::too_many_arguments)]
+    fn create_index_async<'py>(
+        &self,
+        py: Python<'py>,
+        namespace: &str,
+        set_name: &str,
+        bin_name: &str,
+        index_name: &str,
+        index_type: aerospike_core::IndexType,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let namespace = namespace.to_string();
+        let set_name = set_name.to_string();
+        let bin_name = bin_name.to_string();
+        let index_name = index_name.to_string();
+
+        future_into_py(py, async move {
+            let task = client
+                .create_index_on_bin(
+                    &admin_policy,
+                    &namespace,
+                    &set_name,
+                    &bin_name,
+                    &index_name,
+                    index_type,
+                    aerospike_core::CollectionIndexType::Default,
+                    None,
+                )
+                .await
+                .map_err(as_to_pyerr)?;
+            task.wait_till_complete(None::<std::time::Duration>)
+                .await
+                .map_err(as_to_pyerr)?;
+            Ok(())
+        })
     }
 }

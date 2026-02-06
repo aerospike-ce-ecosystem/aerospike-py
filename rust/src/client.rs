@@ -25,13 +25,13 @@ use crate::types::value::value_to_py;
 #[pyclass(name = "Client", subclass)]
 pub struct PyClient {
     inner: Option<Arc<AsClient>>,
-    config: PyObject,
+    config: Py<PyAny>,
 }
 
 #[pymethods]
 impl PyClient {
     #[new]
-    fn new(config: PyObject) -> PyResult<Self> {
+    fn new(config: Py<PyAny>) -> PyResult<Self> {
         Ok(PyClient {
             inner: None,
             config,
@@ -53,7 +53,7 @@ impl PyClient {
             ));
         }
 
-        let config_dict = self.config.bind(py).downcast::<PyDict>()?;
+        let config_dict = self.config.bind(py).cast::<PyDict>()?;
 
         // Copy the config dict so we don't mutate the caller's original
         let effective_config = config_dict.copy()?;
@@ -67,7 +67,7 @@ impl PyClient {
         let hosts_str = parse_hosts_from_config(&effective_config)?;
         let client_policy = parse_client_policy(&effective_config)?;
 
-        let client = py.allow_threads(|| {
+        let client = py.detach(|| {
             RUNTIME.block_on(async {
                 AsClient::new(
                     &client_policy,
@@ -87,7 +87,7 @@ impl PyClient {
         match &self.inner {
             Some(client) => {
                 let client = client.clone();
-                Ok(py.allow_threads(|| RUNTIME.block_on(async { client.is_connected().await })))
+                Ok(py.detach(|| RUNTIME.block_on(async { client.is_connected().await })))
             }
             None => Ok(false),
         }
@@ -96,9 +96,7 @@ impl PyClient {
     /// Close the connection to the cluster
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
         if let Some(client) = self.inner.take() {
-            py.allow_threads(|| {
-                RUNTIME.block_on(async { client.close().await.map_err(as_to_pyerr) })
-            })?;
+            py.detach(|| RUNTIME.block_on(async { client.close().await.map_err(as_to_pyerr) }))?;
         }
         Ok(())
     }
@@ -106,7 +104,7 @@ impl PyClient {
     /// Get node names in the cluster
     fn get_node_names(&self, py: Python<'_>) -> PyResult<Vec<String>> {
         let client = self.get_client()?;
-        py.allow_threads(|| RUNTIME.block_on(async { Ok(client.node_names().await) }))
+        py.detach(|| RUNTIME.block_on(async { Ok(client.node_names().await) }))
     }
 
     /// Write a record
@@ -124,7 +122,7 @@ impl PyClient {
         let rust_bins = py_dict_to_bins(bins)?;
         let write_policy = parse_write_policy(policy, meta)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .put(&write_policy, &rust_key, &rust_bins)
@@ -141,12 +139,12 @@ impl PyClient {
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         let read_policy = parse_read_policy(policy)?;
 
-        let record = py.allow_threads(|| {
+        let record = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .get(&read_policy, &rust_key, Bins::All)
@@ -166,7 +164,7 @@ impl PyClient {
         key: &Bound<'_, PyAny>,
         bins: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         let read_policy = parse_read_policy(policy)?;
@@ -175,7 +173,7 @@ impl PyClient {
         let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
         let bins_selector = Bins::from(bin_refs.as_slice());
 
-        let record = py.allow_threads(|| {
+        let record = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .get(&read_policy, &rust_key, bins_selector)
@@ -194,14 +192,14 @@ impl PyClient {
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let rust_key = py_to_key(key)?;
         let read_policy = parse_read_policy(policy)?;
         let key_py = key_to_py(py, &rust_key)?;
 
         // Single server call: get header only (Bins::None)
-        let result = py.allow_threads(|| {
+        let result = py.detach(|| {
             RUNTIME.block_on(async { client.get(&read_policy, &rust_key, Bins::None).await })
         });
 
@@ -232,7 +230,7 @@ impl PyClient {
         let rust_key = py_to_key(key)?;
         let write_policy = parse_write_policy(policy, meta)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .delete(&write_policy, &rust_key)
@@ -261,7 +259,7 @@ impl PyClient {
             write_policy.expiration = aerospike_core::Expiration::Seconds(val);
         }
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .touch(&write_policy, &rust_key)
@@ -288,7 +286,7 @@ impl PyClient {
         let value = crate::types::value::py_to_value(val)?;
         let bins = [Bin::new(bin.to_string(), value)];
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .append(&write_policy, &rust_key, &bins)
@@ -315,7 +313,7 @@ impl PyClient {
         let value = crate::types::value::py_to_value(val)?;
         let bins = [Bin::new(bin.to_string(), value)];
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .prepend(&write_policy, &rust_key, &bins)
@@ -342,7 +340,7 @@ impl PyClient {
         let value = crate::types::value::py_to_value(offset)?;
         let bins = [Bin::new(bin.to_string(), value)];
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .add(&write_policy, &rust_key, &bins)
@@ -369,7 +367,7 @@ impl PyClient {
         let names: Vec<String> = bin_names.extract()?;
         let bins: Vec<Bin> = names.into_iter().map(|n| Bin::new(n, Value::Nil)).collect();
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .put(&write_policy, &rust_key, &bins)
@@ -388,13 +386,13 @@ impl PyClient {
         ops: &Bound<'_, PyList>,
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         let write_policy = parse_write_policy(policy, meta)?;
         let rust_ops = py_ops_to_rust(ops)?;
 
-        let record = py.allow_threads(|| {
+        let record = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .operate(&write_policy, &rust_key, &rust_ops)
@@ -415,13 +413,13 @@ impl PyClient {
         ops: &Bound<'_, PyList>,
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         let write_policy = parse_write_policy(policy, meta)?;
         let rust_ops = py_ops_to_rust(ops)?;
 
-        let record = py.allow_threads(|| {
+        let record = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .operate(&write_policy, &rust_key, &rust_ops)
@@ -558,7 +556,7 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .drop_index(&admin_policy, namespace, "", index_name)
@@ -585,7 +583,7 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .truncate(&admin_policy, namespace, set_name, nanos)
@@ -633,7 +631,7 @@ impl PyClient {
             .unwrap_or(filename);
         let server_path = server_path.to_string();
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 let task = client
                     .register_udf(&admin_policy, &udf_body, &server_path, language)
@@ -664,7 +662,7 @@ impl PyClient {
             format!("{}.lua", module)
         };
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 let task = client
                     .remove_udf(&admin_policy, &server_path)
@@ -689,7 +687,7 @@ impl PyClient {
         function: &str,
         args: Option<&Bound<'_, PyList>>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let rust_key = py_to_key(key)?;
         let write_policy = parse_write_policy(policy, None)?;
@@ -709,7 +707,7 @@ impl PyClient {
         let module = module.to_string();
         let function = function.to_string();
 
-        let result = py.allow_threads(|| {
+        let result = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .execute_udf(
@@ -746,7 +744,7 @@ impl PyClient {
         let admin_policy = parse_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .create_user(&admin_policy, username, password, &role_refs)
@@ -767,7 +765,7 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .drop_user(&admin_policy, username)
@@ -789,7 +787,7 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .change_password(&admin_policy, username, password)
@@ -812,7 +810,7 @@ impl PyClient {
         let admin_policy = parse_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .grant_roles(&admin_policy, username, &role_refs)
@@ -835,7 +833,7 @@ impl PyClient {
         let admin_policy = parse_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .revoke_roles(&admin_policy, username, &role_refs)
@@ -852,12 +850,12 @@ impl PyClient {
         py: Python<'_>,
         username: &str,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
         let username = username.to_string();
 
-        let users = py.allow_threads(|| {
+        let users = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .query_users(&admin_policy, Some(&username))
@@ -882,11 +880,11 @@ impl PyClient {
         &self,
         py: Python<'_>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        let users = py.allow_threads(|| {
+        let users = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .query_users(&admin_policy, None)
@@ -921,7 +919,7 @@ impl PyClient {
         let wl = whitelist.unwrap_or_default();
         let wl_refs: Vec<&str> = wl.iter().map(|s| s.as_str()).collect();
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .create_role(
@@ -949,7 +947,7 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .drop_role(&admin_policy, role)
@@ -972,7 +970,7 @@ impl PyClient {
         let admin_policy = parse_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .grant_privileges(&admin_policy, role, &rust_privileges)
@@ -995,7 +993,7 @@ impl PyClient {
         let admin_policy = parse_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .revoke_privileges(&admin_policy, role, &rust_privileges)
@@ -1012,12 +1010,12 @@ impl PyClient {
         py: Python<'_>,
         role: &str,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
         let role_name = role.to_string();
 
-        let roles = py.allow_threads(|| {
+        let roles = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .query_roles(&admin_policy, Some(&role_name))
@@ -1042,11 +1040,11 @@ impl PyClient {
         &self,
         py: Python<'_>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        let roles = py.allow_threads(|| {
+        let roles = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .query_roles(&admin_policy, None)
@@ -1075,7 +1073,7 @@ impl PyClient {
         let admin_policy = parse_admin_policy(policy)?;
         let wl_refs: Vec<&str> = whitelist.iter().map(|s| s.as_str()).collect();
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .set_allowlist(&admin_policy, role, &wl_refs)
@@ -1098,7 +1096,7 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .set_quotas(&admin_policy, role, read_quota, write_quota)
@@ -1117,7 +1115,7 @@ impl PyClient {
         py: Python<'_>,
         keys: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         self.batch_get_internal(py, keys, Bins::All, policy)
     }
 
@@ -1128,7 +1126,7 @@ impl PyClient {
         py: Python<'_>,
         keys: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let read_policy = BatchReadPolicy::default();
@@ -1143,7 +1141,7 @@ impl PyClient {
             .map(|k| BatchOperation::read(&read_policy, k.clone(), Bins::None))
             .collect();
 
-        let results = py.allow_threads(|| {
+        let results = py.detach(|| {
             RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
         })?;
 
@@ -1165,7 +1163,7 @@ impl PyClient {
         keys: &Bound<'_, PyList>,
         bins: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let bin_names: Vec<String> = bins.extract()?;
         let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
         let bins_selector = Bins::from(bin_refs.as_slice());
@@ -1180,7 +1178,7 @@ impl PyClient {
         keys: &Bound<'_, PyList>,
         ops: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let write_policy = BatchWritePolicy::default();
@@ -1196,7 +1194,7 @@ impl PyClient {
             .map(|k| BatchOperation::write(&write_policy, k.clone(), rust_ops.clone()))
             .collect();
 
-        let results = py.allow_threads(|| {
+        let results = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .batch(&batch_policy, &batch_ops)
@@ -1215,7 +1213,7 @@ impl PyClient {
         py: Python<'_>,
         keys: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let delete_policy = BatchDeletePolicy::default();
@@ -1230,7 +1228,7 @@ impl PyClient {
             .map(|k| BatchOperation::delete(&delete_policy, k.clone()))
             .collect();
 
-        let results = py.allow_threads(|| {
+        let results = py.detach(|| {
             RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
         })?;
 
@@ -1252,7 +1250,7 @@ impl PyClient {
         keys: &Bound<'_, PyList>,
         bins: Bins,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let read_policy = BatchReadPolicy::default();
@@ -1267,7 +1265,7 @@ impl PyClient {
             .map(|k| BatchOperation::read(&read_policy, k.clone(), bins.clone()))
             .collect();
 
-        let results = py.allow_threads(|| {
+        let results = py.detach(|| {
             RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
         })?;
 
@@ -1289,7 +1287,7 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
-        py.allow_threads(|| {
+        py.detach(|| {
             RUNTIME.block_on(async {
                 let task = client
                     .create_index_on_bin(
