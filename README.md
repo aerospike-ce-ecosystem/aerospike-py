@@ -310,7 +310,10 @@ aerospike-py/
 │   └── py.typed            # PEP 561 marker
 └── tests/
     ├── unit/               # No server needed
-    └── integration/        # Requires Aerospike server
+    ├── integration/        # Requires Aerospike server
+    ├── concurrency/        # Thread/async concurrency tests
+    ├── compatibility/      # Official aerospike client cross-client tests
+    └── feasibility/        # FastAPI, Gunicorn integration tests
 ```
 
 ### Build Commands
@@ -328,33 +331,60 @@ maturin build --release
 
 ### Running Tests
 
-Tests require a running Aerospike server. Start one with Docker:
+Tests require a running Aerospike server (except unit tests). Start one with Docker:
 
 ```bash
 docker run -d --name aerospike \
-  -p 3000:3000 \
+  -p 3000:3000 -p 3001:3001 -p 3002:3002 \
+  --shm-size=1g \
   -e "NAMESPACE=test" \
   -e "CLUSTER_NAME=docker" \
+  -e "DEFAULT_TTL=2592000" \
   aerospike/aerospike-server
 ```
 
-Then run:
+#### tox (recommended)
 
 ```bash
-# All tests
-pytest tests/ -v
+# Unit tests (no server needed, all Python versions)
+uvx --with tox-uv tox -e py312
 
+# Integration tests (requires Aerospike server)
+uvx --with tox-uv tox -e integration
+
+# Concurrency tests
+uvx --with tox-uv tox -e concurrency
+
+# FastAPI feasibility test
+uvx --with tox-uv tox -e fastapi
+
+# Gunicorn feasibility test
+uvx --with tox-uv tox -e gunicorn
+
+# Official aerospike client compatibility tests (requires `aerospike` package)
+uvx --with tox-uv tox -e compat
+
+# All tests at once
+uvx --with tox-uv tox -e all
+```
+
+#### pytest (direct)
+
+```bash
 # Unit tests only (no server needed)
 pytest tests/unit/ -v
 
-# Integration tests only
+# Integration tests
 pytest tests/integration/ -v
+
+# Compatibility tests (requires `pip install aerospike`)
+pytest tests/compatibility/ -v
+
+# All tests
+pytest tests/ -v
 
 # Specific test file
 pytest tests/integration/test_scenarios.py -v
-
-# With output
-pytest tests/ -v -s
 ```
 
 ### Making Changes
