@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use aerospike_core::{
-    BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchRecord, Bin, Bins, Client as AsClient,
+    BatchDeletePolicy, BatchOperation, BatchReadPolicy, Bin, Bins, Client as AsClient,
     Error as AsError, PartitionFilter, ResultCode, Statement, Task, UDFLang, Value,
 };
 use futures::StreamExt;
@@ -17,6 +17,7 @@ use crate::policy::client_policy::parse_client_policy;
 use crate::policy::query_policy::parse_query_policy;
 use crate::policy::read_policy::parse_read_policy;
 use crate::policy::write_policy::parse_write_policy;
+use crate::record_helpers::{batch_record_meta, batch_records_to_py, record_to_meta};
 use crate::types::bin::py_dict_to_bins;
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::{key_to_py, py_to_key};
@@ -614,48 +615,5 @@ impl PyAsyncClient {
                     "Client is not connected. Call connect() first.",
                 )
             })
-    }
-}
-
-// ── Helpers ──────────────────────────────────────────────────
-
-fn batch_records_to_py(py: Python<'_>, results: &[BatchRecord]) -> PyResult<PyObject> {
-    let py_list = PyList::empty(py);
-    for br in results {
-        let key_py = key_to_py(py, &br.key)?;
-        match &br.record {
-            Some(record) => {
-                let meta = record_to_meta(py, record)?;
-                let bins = PyDict::new(py);
-                for (name, value) in &record.bins {
-                    bins.set_item(name, value_to_py(py, value)?)?;
-                }
-                let tuple = PyTuple::new(py, [key_py, meta, bins.into_any().unbind()])?;
-                py_list.append(tuple)?;
-            }
-            None => {
-                let tuple = PyTuple::new(py, [key_py, py.None(), py.None()])?;
-                py_list.append(tuple)?;
-            }
-        }
-    }
-    Ok(py_list.into_any().unbind())
-}
-
-fn record_to_meta(py: Python<'_>, record: &aerospike_core::Record) -> PyResult<PyObject> {
-    let meta = PyDict::new(py);
-    meta.set_item("gen", record.generation)?;
-    let ttl: u32 = record
-        .time_to_live()
-        .map(|d| d.as_secs() as u32)
-        .unwrap_or(0xFFFFFFFF_u32);
-    meta.set_item("ttl", ttl)?;
-    Ok(meta.into_any().unbind())
-}
-
-fn batch_record_meta(py: Python<'_>, br: &BatchRecord) -> PyObject {
-    match &br.record {
-        Some(record) => record_to_meta(py, record).unwrap_or_else(|_| py.None()),
-        None => py.None(),
     }
 }
