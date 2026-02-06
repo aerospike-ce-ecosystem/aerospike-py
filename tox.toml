@@ -4,7 +4,6 @@ env_list = ["py{310,311,312,313,314}", "py314t"]
 
 [env_run_base]
 package = "wheel"
-wheel_build_env = ".pkg"
 deps = [
     "pytest",
     "pytest-asyncio",
