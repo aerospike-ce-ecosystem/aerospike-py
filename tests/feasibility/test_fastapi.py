@@ -74,7 +74,7 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _wait_for_server(port: int, timeout: float = 10.0):
+def _wait_for_server(port: int, timeout: float = 30.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -91,7 +91,9 @@ def _wait_for_server(port: int, timeout: float = 10.0):
 @pytest.fixture(scope="module")
 def server_url():
     port = _free_port()
-    proc = multiprocessing.Process(target=_run_server, args=(port,), daemon=True)
+    # Use "spawn" to avoid fork() deadlocks in multi-threaded pytest-asyncio
+    ctx = multiprocessing.get_context("spawn")
+    proc = ctx.Process(target=_run_server, args=(port,), daemon=True)
     proc.start()
     try:
         _wait_for_server(port)
