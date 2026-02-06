@@ -72,6 +72,7 @@ def application(environ, start_response):
 
 def _free_port() -> int:
     with socket.socket() as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
@@ -93,45 +94,43 @@ def _wait_for_server(port: int, timeout: float = 15.0):
 @pytest.fixture(scope="module")
 def gunicorn_url():
     port = _free_port()
-    tmpdir = tempfile.mkdtemp()
-    app_path = os.path.join(tmpdir, "wsgi_app.py")
-    with open(app_path, "w") as f:
-        f.write(WSGI_APP_CODE)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        app_path = os.path.join(tmpdir, "wsgi_app.py")
+        with open(app_path, "w") as f:
+            f.write(WSGI_APP_CODE)
 
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "gunicorn",
-            "wsgi_app:application",
-            "-b",
-            f"127.0.0.1:{port}",
-            "-w",
-            "4",
-            "--timeout",
-            "30",
-        ],
-        cwd=tmpdir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    try:
-        _wait_for_server(port)
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        proc.send_signal(signal.SIGTERM)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "gunicorn",
+                "wsgi_app:application",
+                "-b",
+                f"127.0.0.1:{port}",
+                "-w",
+                "4",
+                "--timeout",
+                "30",
+            ],
+            cwd=tmpdir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+            _wait_for_server(port)
+            yield f"http://127.0.0.1:{port}"
+        finally:
+            proc.send_signal(signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=3)
 
 
 class TestGunicornFeasibility:
     def test_health_from_multiple_workers(self, gunicorn_url):
         """20 sequential /health requests — expect at least 2 distinct PIDs."""
-        import httpx
-
         pids = set()
         with httpx.Client(base_url=gunicorn_url) as c:
             for _ in range(20):
@@ -145,8 +144,6 @@ class TestGunicornFeasibility:
 
     def test_put_get_across_workers(self, gunicorn_url):
         """Put from one request, get from subsequent requests — data shared via server."""
-        import httpx
-
         with httpx.Client(base_url=gunicorn_url) as c:
             r = c.put("/kv/gtest1", content=json.dumps({"value": 999}))
             assert r.status_code == 200

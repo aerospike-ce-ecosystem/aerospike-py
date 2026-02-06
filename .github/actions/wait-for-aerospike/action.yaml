@@ -1,0 +1,32 @@
+name: Wait for Aerospike
+description: Poll until the Aerospike server is accepting connections
+
+inputs:
+  host:
+    description: Aerospike host
+    default: '127.0.0.1'
+  port:
+    description: Aerospike port
+    default: '3000'
+  max-attempts:
+    description: Maximum number of polling attempts
+    default: '30'
+  sleep-seconds:
+    description: Seconds to sleep between attempts
+    default: '2'
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        for i in $(seq 1 ${{ inputs.max-attempts }}); do
+          if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('${{ inputs.host }}',${{ inputs.port }})); s.close()" 2>/dev/null; then
+            echo "Aerospike is ready"
+            exit 0
+          fi
+          echo "Waiting for Aerospike... ($i/${{ inputs.max-attempts }})"
+          sleep ${{ inputs.sleep-seconds }}
+        done
+        echo "::error::Aerospike did not become ready in time"
+        exit 1
