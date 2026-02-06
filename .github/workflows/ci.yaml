@@ -3,10 +3,32 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - 'rust/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yaml'
   pull_request:
     branches: [main]
+    paths:
+      - 'rust/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yaml'
 
   workflow_dispatch:
+    inputs:
+      server_version:
+        description: 'Aerospike server version (Docker tag)'
+        required: false
+        default: ''
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -74,11 +96,15 @@ jobs:
         run: uv run --no-project pytest tests/unit/ -v
 
   integration:
-    name: Integration Tests
+    name: Integration Tests (AS ${{ matrix.server_version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        server_version: ${{ github.event.inputs.server_version && fromJSON(format('["{0}"]', github.event.inputs.server_version)) || fromJSON('["7.2", "latest"]') }}
     services:
       aerospike:
-        image: aerospike/aerospike-server
+        image: aerospike/aerospike-server:${{ matrix.server_version }}
         ports:
           - 3000:3000
           - 3001:3001
@@ -86,7 +112,9 @@ jobs:
         env:
           NAMESPACE: test
           CLUSTER_NAME: docker
+          DEFAULT_TTL: 2592000
         options: >-
+          --shm-size=1g
           --health-cmd "asinfo -v status"
           --health-interval 10s
           --health-timeout 5s
