@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use aerospike_core::{
-    BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchRecord, BatchWritePolicy, Bin, Bins,
+    BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
     Client as AsClient, Error as AsError, ResultCode, Task, UDFLang, Value,
 };
 use pyo3::prelude::*;
@@ -14,6 +14,7 @@ use crate::policy::batch_policy::parse_batch_policy;
 use crate::policy::client_policy::parse_client_policy;
 use crate::policy::read_policy::parse_read_policy;
 use crate::policy::write_policy::parse_write_policy;
+use crate::record_helpers::{batch_record_meta, batch_records_to_py, record_to_meta};
 use crate::runtime::RUNTIME;
 use crate::types::bin::py_dict_to_bins;
 use crate::types::host::parse_hosts_from_config;
@@ -206,14 +207,8 @@ impl PyClient {
 
         match result {
             Ok(record) => {
-                let meta = PyDict::new(py);
-                meta.set_item("gen", record.generation)?;
-                let ttl = match record.time_to_live() {
-                    Some(duration) => duration.as_secs() as u32,
-                    None => 0xFFFFFFFF_u32,
-                };
-                meta.set_item("ttl", ttl)?;
-                let tuple = PyTuple::new(py, [key_py, meta.into_any().unbind()])?;
+                let meta = record_to_meta(py, &record)?;
+                let tuple = PyTuple::new(py, [key_py, meta])?;
                 Ok(tuple.into_any().unbind())
             }
             Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => {
@@ -442,13 +437,7 @@ impl PyClient {
             None => py.None(),
         };
 
-        let meta_dict = PyDict::new(py);
-        meta_dict.set_item("gen", record.generation)?;
-        let ttl = match record.time_to_live() {
-            Some(duration) => duration.as_secs() as u32,
-            None => 0xFFFFFFFF_u32,
-        };
-        meta_dict.set_item("ttl", ttl)?;
+        let meta_dict_obj = record_to_meta(py, &record)?;
 
         let ordered_bins = PyList::empty(py);
         for (name, value) in &record.bins {
@@ -464,11 +453,7 @@ impl PyClient {
 
         let result = PyTuple::new(
             py,
-            [
-                key_py,
-                meta_dict.into_any().unbind(),
-                ordered_bins.into_any().unbind(),
-            ],
+            [key_py, meta_dict_obj, ordered_bins.into_any().unbind()],
         )?;
         Ok(result.into_any().unbind())
     }
@@ -1165,7 +1150,7 @@ impl PyClient {
         let py_list = PyList::empty(py);
         for br in &results {
             let key_py = key_to_py(py, &br.key)?;
-            let meta = Self::batch_record_meta(py, br);
+            let meta = batch_record_meta(py, br);
             let tuple = PyTuple::new(py, [key_py, meta])?;
             py_list.append(tuple)?;
         }
@@ -1220,7 +1205,7 @@ impl PyClient {
             })
         })?;
 
-        Self::batch_records_to_py(py, &results)
+        batch_records_to_py(py, &results)
     }
 
     /// Remove multiple records.
@@ -1249,7 +1234,7 @@ impl PyClient {
             RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
         })?;
 
-        Self::batch_records_to_py(py, &results)
+        batch_records_to_py(py, &results)
     }
 }
 
@@ -1286,51 +1271,7 @@ impl PyClient {
             RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
         })?;
 
-        Self::batch_records_to_py(py, &results)
-    }
-
-    /// Convert Vec<BatchRecord> to Python list of (key, meta, bins) tuples
-    fn batch_records_to_py(py: Python<'_>, results: &[BatchRecord]) -> PyResult<PyObject> {
-        let py_list = PyList::empty(py);
-        for br in results {
-            let key_py = key_to_py(py, &br.key)?;
-            match &br.record {
-                Some(record) => {
-                    let meta = Self::record_to_meta(py, record)?;
-                    let bins = PyDict::new(py);
-                    for (name, value) in &record.bins {
-                        bins.set_item(name, value_to_py(py, value)?)?;
-                    }
-                    let tuple = PyTuple::new(py, [key_py, meta, bins.into_any().unbind()])?;
-                    py_list.append(tuple)?;
-                }
-                None => {
-                    let tuple = PyTuple::new(py, [key_py, py.None(), py.None()])?;
-                    py_list.append(tuple)?;
-                }
-            }
-        }
-        Ok(py_list.into_any().unbind())
-    }
-
-    /// Extract meta dict from a Record
-    pub fn record_to_meta(py: Python<'_>, record: &aerospike_core::Record) -> PyResult<PyObject> {
-        let meta = PyDict::new(py);
-        meta.set_item("gen", record.generation)?;
-        let ttl: u32 = record
-            .time_to_live()
-            .map(|d| d.as_secs() as u32)
-            .unwrap_or(0xFFFFFFFF_u32);
-        meta.set_item("ttl", ttl)?;
-        Ok(meta.into_any().unbind())
-    }
-
-    /// Extract meta dict from a BatchRecord (for exists_many)
-    fn batch_record_meta(py: Python<'_>, br: &BatchRecord) -> PyObject {
-        match &br.record {
-            Some(record) => Self::record_to_meta(py, record).unwrap_or_else(|_| py.None()),
-            None => py.None(),
-        }
+        batch_records_to_py(py, &results)
     }
 
     /// Internal helper for index creation

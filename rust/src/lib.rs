@@ -7,6 +7,7 @@ mod errors;
 mod operations;
 mod policy;
 pub mod query;
+mod record_helpers;
 mod runtime;
 mod types;
 
