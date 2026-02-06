@@ -1,15 +1,20 @@
 """Cross-client batch operation compatibility tests.
 
-The official aerospike client deprecated get_many/exists_many/select_many
-in favour of batch_read.  These tests use the rust client's get_many for
-reading and the official client's individual get/exists for verification,
-ensuring cross-client data compatibility without relying on deprecated APIs.
+Only uses non-deprecated batch APIs: batch_operate, batch_remove.
+Verification is done via individual get/exists calls.
 """
 
+import pytest
 
-class TestBatchGet:
+import aerospike_py
+
+aerospike = pytest.importorskip("aerospike")
+
+
+class TestBatchCrossRead:
+    """Bulk put with one client, individual read with the other."""
+
     def test_rust_put_many_official_get(self, rust_client, official_client, cleanup):
-        """Rust client puts N records, official client reads them individually."""
         keys = [("test", "compat", f"batch_r2o_{i}") for i in range(10)]
         for k in keys:
             cleanup.append(k)
@@ -23,10 +28,7 @@ class TestBatchGet:
             assert bins["idx"] == i
             assert bins["val"] == f"item_{i}"
 
-    def test_official_put_many_rust_get_many(
-        self, rust_client, official_client, cleanup
-    ):
-        """Official client puts N records, rust client batch-reads via get_many."""
+    def test_official_put_many_rust_get(self, rust_client, official_client, cleanup):
         keys = [("test", "compat", f"batch_o2r_{i}") for i in range(10)]
         for k in keys:
             cleanup.append(k)
@@ -34,45 +36,11 @@ class TestBatchGet:
         for i, key in enumerate(keys):
             official_client.put(key, {"idx": i, "val": f"item_{i}"})
 
-        results = rust_client.get_many(keys)
-        assert len(results) == 10
-        for i, (_, meta, bins) in enumerate(results):
+        for i, key in enumerate(keys):
+            _, meta, bins = rust_client.get(key)
             assert meta is not None
             assert bins["idx"] == i
             assert bins["val"] == f"item_{i}"
-
-
-class TestBatchExists:
-    def test_rust_put_official_exists(self, rust_client, official_client, cleanup):
-        keys = [("test", "compat", f"bexist_{i}") for i in range(5)]
-        for k in keys:
-            cleanup.append(k)
-
-        for key in keys:
-            rust_client.put(key, {"val": 1})
-
-        for key in keys:
-            _, meta = official_client.exists(key)
-            assert meta is not None
-            assert meta["gen"] >= 1
-
-
-class TestBatchSelect:
-    def test_cross_select(self, rust_client, official_client, cleanup):
-        keys = [("test", "compat", f"bsel_{i}") for i in range(5)]
-        for k in keys:
-            cleanup.append(k)
-
-        for i, key in enumerate(keys):
-            official_client.put(key, {"a": i, "b": i * 10, "c": i * 100})
-
-        results = rust_client.select_many(keys, ["a", "c"])
-        assert len(results) == 5
-        for i, (_, meta, bins) in enumerate(results):
-            assert meta is not None
-            assert bins["a"] == i
-            assert bins["c"] == i * 100
-            assert "b" not in bins
 
 
 class TestBatchRemove:
@@ -86,8 +54,8 @@ class TestBatchRemove:
 
         official_client.batch_remove(keys)
 
-        results = rust_client.exists_many(keys)
-        for _, meta in results:
+        for key in keys:
+            _, meta = rust_client.exists(key)
             assert meta is None
 
     def test_rust_batch_remove_official_verify(
@@ -103,3 +71,39 @@ class TestBatchRemove:
         for key in keys:
             _, meta = official_client.exists(key)
             assert meta is None
+
+
+class TestBatchOperate:
+    def test_rust_put_official_batch_operate(
+        self, rust_client, official_client, cleanup
+    ):
+        """Rust puts records, official batch_operate increments them."""
+        keys = [("test", "compat", f"bop_r2o_{i}") for i in range(5)]
+        for k in keys:
+            cleanup.append(k)
+            rust_client.put(k, {"counter": 10})
+
+        from aerospike_helpers.operations import operations as op_helpers
+
+        ops = [op_helpers.increment("counter", 5)]
+        official_client.batch_operate(keys, ops)
+
+        for key in keys:
+            _, _, bins = rust_client.get(key)
+            assert bins["counter"] == 15
+
+    def test_official_put_rust_batch_operate(
+        self, rust_client, official_client, cleanup
+    ):
+        """Official puts records, rust batch_operate increments them."""
+        keys = [("test", "compat", f"bop_o2r_{i}") for i in range(5)]
+        for k in keys:
+            cleanup.append(k)
+            official_client.put(k, {"counter": 10})
+
+        ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 5}]
+        rust_client.batch_operate(keys, ops)
+
+        for key in keys:
+            _, _, bins = official_client.get(key)
+            assert bins["counter"] == 15
