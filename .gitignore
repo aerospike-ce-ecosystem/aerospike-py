@@ -18,6 +18,9 @@ rust/target/
 *.pyd
 *.dylib
 
+# Tox
+.tox/
+
 # IDE
 .idea/
 .vscode/
