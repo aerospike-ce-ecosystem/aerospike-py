@@ -15,7 +15,7 @@ class TestRecordNotFound:
 
     def test_get_nonexistent_official(self, official_client):
         key = ("test", "compat", "err_notfound_off_xyz")
-        with pytest.raises(aerospike.exception.RecordNotFoundError):
+        with pytest.raises(aerospike.exception.RecordNotFound):
             official_client.get(key)
 
 
@@ -43,7 +43,7 @@ class TestCreateOnlyDuplicate:
             official_client.put(
                 key,
                 {"val": 2},
-                policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY},
+                policy={"exists": aerospike.POLICY_EXISTS_CREATE},
             )
 
 

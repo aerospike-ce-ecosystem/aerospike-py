@@ -1,6 +1,8 @@
 """Cross-client CRUD tests: one client writes, the other reads."""
 
-import aerospike_py
+import pytest
+
+aerospike = pytest.importorskip("aerospike")
 
 
 class TestCrossWrite:
@@ -118,14 +120,15 @@ class TestCrossModify:
         assert bins == {"a": 1, "c": 3}
 
     def test_cross_operate(self, rust_client, official_client, cleanup):
+        """Rust puts data, official client operates (using official constants)."""
         key = ("test", "compat", "cross_operate")
         cleanup.append(key)
 
         rust_client.put(key, {"counter": 10, "name": "test"})
 
         ops = [
-            {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 5},
-            {"op": aerospike_py.OPERATOR_READ, "bin": "counter"},
+            {"op": aerospike.OPERATOR_INCR, "bin": "counter", "val": 5},
+            {"op": aerospike.OPERATOR_READ, "bin": "counter", "val": ""},
         ]
         _, _, bins = official_client.operate(key, ops)
 

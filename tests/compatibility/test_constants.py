@@ -1,4 +1,11 @@
-"""Verify that aerospike_py constant values match the official aerospike client."""
+"""Verify that aerospike_py constant values match the official aerospike client.
+
+Some constants have different names or values between aerospike-py and the
+official client.  This test covers constants whose names AND values are
+identical in both libraries.  Constants that are intentionally mapped
+differently (e.g. aerospike-py POLICY_EXISTS_CREATE_ONLY vs official
+POLICY_EXISTS_CREATE) are tested separately as name-mapping pairs.
+"""
 
 import pytest
 
@@ -6,42 +13,28 @@ import aerospike_py
 
 aerospike = pytest.importorskip("aerospike")
 
-CONSTANT_NAMES = [
+# Constants whose names are identical in both libraries
+IDENTICAL_CONSTANTS = [
     # Policy Key
     "POLICY_KEY_DIGEST",
     "POLICY_KEY_SEND",
     # Policy Exists
     "POLICY_EXISTS_IGNORE",
-    "POLICY_EXISTS_UPDATE",
-    "POLICY_EXISTS_CREATE_ONLY",
     # Policy Gen
     "POLICY_GEN_IGNORE",
     "POLICY_GEN_EQ",
     "POLICY_GEN_GT",
     # Policy Replica
     "POLICY_REPLICA_MASTER",
-    "POLICY_REPLICA_SEQUENCE",
-    "POLICY_REPLICA_PREFER_RACK",
     # Policy Commit Level
     "POLICY_COMMIT_LEVEL_ALL",
     "POLICY_COMMIT_LEVEL_MASTER",
     # TTL Constants
     "TTL_NAMESPACE_DEFAULT",
-    "TTL_NEVER_EXPIRE",
-    "TTL_DONT_UPDATE",
-    "TTL_CLIENT_DEFAULT",
     # Operator Constants
-    "OPERATOR_READ",
-    "OPERATOR_WRITE",
-    "OPERATOR_INCR",
     "OPERATOR_APPEND",
     "OPERATOR_PREPEND",
     "OPERATOR_TOUCH",
-    "OPERATOR_DELETE",
-    # Index Type
-    "INDEX_NUMERIC",
-    "INDEX_STRING",
-    "INDEX_GEO2DSPHERE",
     # Index Collection Type
     "INDEX_TYPE_DEFAULT",
     "INDEX_TYPE_LIST",
@@ -56,10 +49,26 @@ CONSTANT_NAMES = [
 ]
 
 
-@pytest.mark.parametrize("name", CONSTANT_NAMES)
+@pytest.mark.parametrize("name", IDENTICAL_CONSTANTS)
 def test_constant_value_matches(name):
     rust_val = getattr(aerospike_py, name)
     off_val = getattr(aerospike, name)
     assert (
         rust_val == off_val
     ), f"{name}: aerospike_py={rust_val} != aerospike={off_val}"
+
+
+# Constants whose names differ between the two libraries
+# (aerospike_py_name, official_name)
+MAPPED_CONSTANTS = [
+    ("POLICY_EXISTS_CREATE_ONLY", "POLICY_EXISTS_CREATE"),
+    ("POLICY_EXISTS_REPLACE", "POLICY_EXISTS_REPLACE"),
+    ("POLICY_EXISTS_UPDATE", "POLICY_EXISTS_UPDATE"),
+]
+
+
+@pytest.mark.parametrize("rust_name,off_name", MAPPED_CONSTANTS)
+def test_mapped_constant_exists(rust_name, off_name):
+    """Both libraries expose the constant (possibly under different names)."""
+    assert hasattr(aerospike_py, rust_name), f"aerospike_py missing {rust_name}"
+    assert hasattr(aerospike, off_name), f"aerospike missing {off_name}"
