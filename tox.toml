@@ -47,6 +47,15 @@ deps = [
 ]
 commands = [["pytest", "tests/feasibility/test_gunicorn.py", "-v"]]
 
+# --- Compatibility tests (requires Aerospike server + official aerospike client) ---
+[env.compat]
+deps = [
+    "pytest",
+    "pytest-asyncio",
+    "aerospike",
+]
+commands = [["pytest", "tests/compatibility/", "-v"]]
+
 # --- Run all tests (requires Aerospike server) ---
 [env.all]
 deps = [

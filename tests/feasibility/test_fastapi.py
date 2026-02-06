@@ -1,17 +1,15 @@
 """FastAPI + ASGI compatibility test (requires Aerospike server).
 
-Uses httpx.ASGITransport to test the FastAPI app in-process,
+Uses fastapi.testclient.TestClient to test the FastAPI app in-process,
 avoiding subprocess/fork issues entirely.
 """
 
-import asyncio
-
 import pytest
 
-httpx = pytest.importorskip("httpx")
 pytest.importorskip("fastapi")
 
 import aerospike_py  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 NS = "test"
@@ -63,47 +61,36 @@ def _create_app():
 
 
 @pytest.fixture(scope="module")
-def app():
-    return _create_app()
-
-
-@pytest.fixture
-async def client(app):
-    """In-process ASGI test client — no subprocess needed."""
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(
-        transport=transport, base_url="http://testserver"
-    ) as c:
+def client():
+    app = _create_app()
+    with TestClient(app) as c:
         yield c
 
 
 class TestFastAPIFeasibility:
-    async def test_health(self, client):
-        r = await client.get("/health")
+    def test_health(self, client):
+        r = client.get("/health")
         assert r.status_code == 200
         assert r.json()["status"] == "ok"
         assert r.json()["connected"] is True
 
-    async def test_put_get_delete(self, client):
-        r = await client.put("/kv/ftest1", params={"value": 42})
+    def test_put_get_delete(self, client):
+        r = client.put("/kv/ftest1", params={"value": 42})
         assert r.status_code == 200
 
-        r = await client.get("/kv/ftest1")
+        r = client.get("/kv/ftest1")
         assert r.status_code == 200
         assert r.json()["bins"]["v"] == 42
 
-        r = await client.delete("/kv/ftest1")
+        r = client.delete("/kv/ftest1")
         assert r.status_code == 200
         assert r.json()["deleted"] is True
 
-    async def test_concurrent_requests(self, client):
-        """50 concurrent requests via ASGI transport."""
-
-        async def do_request(i):
+    def test_concurrent_requests(self, client):
+        """50 sequential requests via TestClient."""
+        for i in range(50):
             key = f"fconcur_{i}"
-            await client.put(f"/kv/{key}", params={"value": i})
-            r = await client.get(f"/kv/{key}")
+            client.put(f"/kv/{key}", params={"value": i})
+            r = client.get(f"/kv/{key}")
             assert r.json()["bins"]["v"] == i
-            await client.delete(f"/kv/{key}")
-
-        await asyncio.gather(*(do_request(i) for i in range(50)))
+            client.delete(f"/kv/{key}")

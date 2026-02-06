@@ -326,3 +326,48 @@ jobs:
 
       - name: Run feasibility test
         run: uvx --with tox-uv tox -e ${{ matrix.test }}
+
+  compatibility:
+    name: Compatibility Tests
+    runs-on: ubuntu-latest
+    services:
+      aerospike:
+        image: aerospike/aerospike-server:latest
+        ports:
+          - 3000:3000
+          - 3001:3001
+          - 3002:3002
+        env:
+          NAMESPACE: test
+          CLUSTER_NAME: docker
+          DEFAULT_TTL: 2592000
+        options: >-
+          --shm-size=1g
+          --health-cmd "asinfo -v status"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "rust-build"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Wait for Aerospike
+        uses: ./.github/actions/wait-for-aerospike
+
+      - name: Run compatibility tests
+        run: uvx --with tox-uv tox -e compat
