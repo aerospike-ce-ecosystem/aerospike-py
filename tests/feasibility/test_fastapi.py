@@ -22,42 +22,41 @@ SET_NAME = "feasibility_fastapi"
 # FastAPI application
 # ---------------------------------------------------------------------------
 def _create_app():
+    from contextlib import asynccontextmanager
+
     from fastapi import FastAPI
 
-    app = FastAPI()
-    _client = None
+    @asynccontextmanager
+    async def lifespan(app):
+        client = aerospike_py.AsyncClient(CONFIG)
+        await client.connect()
+        app.state.client = client
+        yield
+        await client.close()
 
-    @app.on_event("startup")
-    async def startup():
-        nonlocal _client
-        _client = aerospike_py.AsyncClient(CONFIG)
-        await _client.connect()
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        if _client:
-            await _client.close()
+    app = FastAPI(lifespan=lifespan)
 
     @app.get("/health")
     async def health():
+        client = app.state.client
         return {
             "status": "ok",
-            "connected": _client.is_connected() if _client else False,
+            "connected": client.is_connected(),
         }
 
     @app.put("/kv/{key}")
     async def put_key(key: str, value: int = 0):
-        await _client.put((NS, SET_NAME, key), {"v": value})
+        await app.state.client.put((NS, SET_NAME, key), {"v": value})
         return {"key": key, "value": value}
 
     @app.get("/kv/{key}")
     async def get_key(key: str):
-        _, _, bins = await _client.get((NS, SET_NAME, key))
+        _, _, bins = await app.state.client.get((NS, SET_NAME, key))
         return {"key": key, "bins": bins}
 
     @app.delete("/kv/{key}")
     async def delete_key(key: str):
-        await _client.remove((NS, SET_NAME, key))
+        await app.state.client.remove((NS, SET_NAME, key))
         return {"key": key, "deleted": True}
 
     return app
@@ -70,6 +69,7 @@ def _run_server(port: int):
 
 def _free_port() -> int:
     with socket.socket() as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
@@ -99,6 +99,9 @@ def server_url():
     finally:
         proc.terminate()
         proc.join(timeout=5)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=3)
 
 
 class TestFastAPIFeasibility:

@@ -1,25 +1,13 @@
 """Free-threaded (3.14t / no-GIL) concurrency tests (requires Aerospike server)."""
 
+import queue
 import sys
 import threading
 
 import pytest
 
-import aerospike_py
-
-CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 NS = "test"
 SET_NAME = "conc_ft"
-
-
-@pytest.fixture(scope="module")
-def client():
-    try:
-        c = aerospike_py.client(CONFIG).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
-    yield c
-    c.close()
 
 
 class TestFreeThreading:
@@ -39,7 +27,7 @@ class TestFreeThreading:
         client.put(key, {"counter": 0})
 
         barrier = threading.Barrier(num_threads)
-        errors = []
+        errors = queue.SimpleQueue()
 
         def incrementer():
             try:
@@ -47,7 +35,7 @@ class TestFreeThreading:
                 for _ in range(increments_per_thread):
                     client.increment(key, "counter", 1)
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
 
         threads = [threading.Thread(target=incrementer) for _ in range(num_threads)]
         for t in threads:
@@ -55,7 +43,9 @@ class TestFreeThreading:
         for t in threads:
             t.join()
 
-        assert not errors, f"Errors during parallel increments: {errors}"
+        assert (
+            errors.empty()
+        ), f"Errors during parallel increments: {list(_drain(errors))}"
         _, _, bins = client.get(key)
         assert bins["counter"] == num_threads * increments_per_thread
         client.remove(key)
@@ -64,7 +54,7 @@ class TestFreeThreading:
         """20 threads each use unique keys — no cross-thread interference."""
         num_threads = 20
         ops_per_thread = 50
-        errors = []
+        errors = queue.SimpleQueue()
 
         def worker(tid):
             try:
@@ -76,7 +66,7 @@ class TestFreeThreading:
                     assert bins["idx"] == i
                     client.remove(key)
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
 
         threads = [
             threading.Thread(target=worker, args=(t,)) for t in range(num_threads)
@@ -86,13 +76,13 @@ class TestFreeThreading:
         for t in threads:
             t.join()
 
-        assert not errors, f"Errors during isolation test: {errors}"
+        assert errors.empty(), f"Errors during isolation test: {list(_drain(errors))}"
 
     def test_client_shared_across_threads_stress(self, client):
         """50 threads x 50 operations stress on a shared client."""
         num_threads = 50
         ops_per_thread = 50
-        errors = []
+        errors = queue.SimpleQueue()
 
         def stress(tid):
             try:
@@ -103,7 +93,7 @@ class TestFreeThreading:
                     assert bins["v"] == tid * 1000 + i
                     client.remove(key)
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
 
         threads = [
             threading.Thread(target=stress, args=(t,)) for t in range(num_threads)
@@ -113,7 +103,7 @@ class TestFreeThreading:
         for t in threads:
             t.join()
 
-        assert not errors, f"Errors during stress test: {errors}"
+        assert errors.empty(), f"Errors during stress test: {list(_drain(errors))}"
 
     def test_verify_no_gil(self):
         """Only runs on free-threaded builds; asserts GIL is disabled."""
@@ -122,3 +112,11 @@ class TestFreeThreading:
         if sys._is_gil_enabled():
             pytest.skip("GIL is enabled — not a free-threaded build")
         assert sys._is_gil_enabled() is False
+
+
+def _drain(q):
+    """Drain all items from a SimpleQueue for error reporting."""
+    items = []
+    while not q.empty():
+        items.append(q.get_nowait())
+    return items

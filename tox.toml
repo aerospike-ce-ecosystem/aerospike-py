@@ -9,27 +9,11 @@ deps = [
     "pytest",
     "pytest-asyncio",
 ]
-
-# --- Python version-specific unit test environments ---
-[env.py310]
-commands = [["pytest", "tests/unit/", "-v"]]
-
-[env.py311]
-commands = [["pytest", "tests/unit/", "-v"]]
-
-[env.py312]
-commands = [["pytest", "tests/unit/", "-v"]]
-
-[env.py313]
-commands = [["pytest", "tests/unit/", "-v"]]
-
-[env.py314]
 commands = [["pytest", "tests/unit/", "-v"]]
 
 # --- Free-threaded Python 3.14t unit tests ---
 [env.py314t]
 base_python = ["python3.14t"]
-commands = [["pytest", "tests/unit/", "-v"]]
 
 # --- Integration tests (requires Aerospike server) ---
 [env.integration]

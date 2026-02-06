@@ -1,5 +1,6 @@
 """Multi-threaded sync client safety tests (requires Aerospike server)."""
 
+import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -16,7 +17,7 @@ class TestThreadSafety:
         """10 threads x 50 puts each, then verify all records."""
         num_threads = 10
         ops_per_thread = 50
-        errors = []
+        errors = queue.SimpleQueue()
 
         def put_records(thread_id):
             try:
@@ -24,7 +25,7 @@ class TestThreadSafety:
                     key = (NS, SET_NAME, f"tput_{thread_id}_{i}")
                     client.put(key, {"tid": thread_id, "idx": i})
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
 
         threads = [
             threading.Thread(target=put_records, args=(t,)) for t in range(num_threads)
@@ -34,7 +35,7 @@ class TestThreadSafety:
         for t in threads:
             t.join()
 
-        assert not errors, f"Errors during concurrent puts: {errors}"
+        assert errors.empty(), f"Errors during concurrent puts: {list(_drain(errors))}"
 
         # Verify all records
         for tid in range(num_threads):
@@ -51,21 +52,21 @@ class TestThreadSafety:
         increments_per_writer = 20
         num_writers = 5
         client.put(key, {"counter": 0})
-        errors = []
+        errors = queue.SimpleQueue()
 
         def writer():
             try:
                 for _ in range(increments_per_writer):
                     client.increment(key, "counter", 1)
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
 
         def reader():
             try:
                 for _ in range(increments_per_writer):
                     client.get(key)
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
 
         threads = []
         for _ in range(num_writers):
@@ -78,14 +79,14 @@ class TestThreadSafety:
         for t in threads:
             t.join()
 
-        assert not errors, f"Errors during concurrent r/w: {errors}"
+        assert errors.empty(), f"Errors during concurrent r/w: {list(_drain(errors))}"
         _, _, bins = client.get(key)
         assert bins["counter"] == num_writers * increments_per_writer
         client.remove(key)
 
     def test_thread_pool_executor(self, client):
         """ThreadPoolExecutor(8) with 100 put/get/remove cycles."""
-        errors = []
+        errors = queue.SimpleQueue()
 
         def cycle(i):
             try:
@@ -95,17 +96,19 @@ class TestThreadSafety:
                 assert bins["v"] == i
                 client.remove(key)
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(cycle, range(100)))
 
-        assert not errors, f"Errors in ThreadPoolExecutor test: {errors}"
+        assert (
+            errors.empty()
+        ), f"Errors in ThreadPoolExecutor test: {list(_drain(errors))}"
 
     def test_multiple_clients_from_threads(self):
         """Each thread creates its own client, uses it, and closes it."""
         num_threads = 5
-        errors = []
+        errors = queue.SimpleQueue()
 
         def thread_fn(tid):
             try:
@@ -118,7 +121,7 @@ class TestThreadSafety:
                     c.remove(key)
                 c.close()
             except Exception as e:
-                errors.append(e)
+                errors.put(e)
 
         threads = [
             threading.Thread(target=thread_fn, args=(t,)) for t in range(num_threads)
@@ -128,4 +131,12 @@ class TestThreadSafety:
         for t in threads:
             t.join()
 
-        assert not errors, f"Errors with per-thread clients: {errors}"
+        assert errors.empty(), f"Errors with per-thread clients: {list(_drain(errors))}"
+
+
+def _drain(q):
+    """Drain all items from a SimpleQueue for error reporting."""
+    items = []
+    while not q.empty():
+        items.append(q.get_nowait())
+    return items

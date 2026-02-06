@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 import aerospike_py
 
 CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
@@ -57,9 +59,6 @@ class TestAsyncConcurrency:
             try:
                 await c.connect()
             except Exception:
-                # Server might not be available; skip rather than fail
-                import pytest
-
                 pytest.skip("Aerospike server not available")
             assert c.is_connected()
             await c.close()

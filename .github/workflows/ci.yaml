@@ -179,20 +179,12 @@ jobs:
           enable-cache: true
 
       - name: Wait for Aerospike
-        run: |
-          for i in $(seq 1 30); do
-            if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()" 2>/dev/null; then
-              echo "Aerospike is ready"
-              break
-            fi
-            echo "Waiting for Aerospike... ($i/30)"
-            sleep 2
-          done
+        uses: ./.github/actions/wait-for-aerospike
 
       - name: Run all tests
         run: uvx --with tox-uv tox -e all
 
-  concurrency:
+  test-concurrency:
     name: Concurrency Tests
     runs-on: ubuntu-latest
     services:
@@ -232,20 +224,12 @@ jobs:
           enable-cache: true
 
       - name: Wait for Aerospike
-        run: |
-          for i in $(seq 1 30); do
-            if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()" 2>/dev/null; then
-              echo "Aerospike is ready"
-              break
-            fi
-            echo "Waiting for Aerospike... ($i/30)"
-            sleep 2
-          done
+        uses: ./.github/actions/wait-for-aerospike
 
       - name: Run concurrency tests
         run: uvx --with tox-uv tox -e concurrency
 
-  concurrency-freethreaded:
+  test-concurrency-freethreaded:
     name: Concurrency Tests (Python 3.14t free-threaded)
     runs-on: ubuntu-latest
     services:
@@ -287,15 +271,7 @@ jobs:
         run: uv python install 3.14t
 
       - name: Wait for Aerospike
-        run: |
-          for i in $(seq 1 30); do
-            if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()" 2>/dev/null; then
-              echo "Aerospike is ready"
-              break
-            fi
-            echo "Waiting for Aerospike... ($i/30)"
-            sleep 2
-          done
+        uses: ./.github/actions/wait-for-aerospike
 
       - name: Run free-threaded concurrency tests
         run: uvx --with tox-uv tox -e freethreading
@@ -346,15 +322,7 @@ jobs:
           enable-cache: true
 
       - name: Wait for Aerospike
-        run: |
-          for i in $(seq 1 30); do
-            if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()" 2>/dev/null; then
-              echo "Aerospike is ready"
-              break
-            fi
-            echo "Waiting for Aerospike... ($i/30)"
-            sleep 2
-          done
+        uses: ./.github/actions/wait-for-aerospike
 
       - name: Run feasibility test
         run: uvx --with tox-uv tox -e ${{ matrix.test }}
