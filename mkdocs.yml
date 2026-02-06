@@ -57,6 +57,9 @@ nav:
       - CRUD: guides/crud.md
       - Batch: guides/batch.md
       - Query & Scan: guides/query-scan.md
+      - Expression Filters: guides/expression-filters.md
+      - List CDT Operations: guides/cdt-list.md
+      - Map CDT Operations: guides/cdt-map.md
       - UDF: guides/udf.md
       - Admin: guides/admin.md
   - Contributing: contributing.md

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Python 3.13+**
+- **Python 3.10+**
 - **Rust toolchain** - Install via [rustup](https://rustup.rs/)
 - **Aerospike server** - Local or Docker
 
@@ -40,40 +40,46 @@ python -c "import aerospike_py as aerospike; print(aerospike.__version__)"
 ```python
 import aerospike_py as aerospike
 
-# Create and connect
-client = aerospike.client({
+# Create and connect (with context manager)
+with aerospike.client({
     "hosts": [("127.0.0.1", 3000)],
     "cluster_name": "docker",
-}).connect()
+}).connect() as client:
 
-# Write a record
-key = ("test", "demo", "user1")
-client.put(key, {"name": "Alice", "age": 30})
+    # Write a record
+    key = ("test", "demo", "user1")
+    client.put(key, {"name": "Alice", "age": 30})
 
-# Read a record
-_, meta, bins = client.get(key)
-print(f"bins={bins}, gen={meta['gen']}, ttl={meta['ttl']}")
+    # Read a record
+    _, meta, bins = client.get(key)
+    print(f"bins={bins}, gen={meta['gen']}, ttl={meta['ttl']}")
 
-# Update with increment
-client.increment(key, "age", 1)
+    # Update with increment
+    client.increment(key, "age", 1)
 
-# Batch read
-keys = [("test", "demo", f"user{i}") for i in range(1, 4)]
-records = client.get_many(keys)
+    # Batch read
+    keys = [("test", "demo", f"user{i}") for i in range(1, 4)]
+    records = client.get_many(keys)
 
-# Atomic multi-operation
-ops = [
-    {"op": aerospike.OPERATOR_INCR, "bin": "age", "val": 1},
-    {"op": aerospike.OPERATOR_READ, "bin": "age", "val": None},
-]
-_, _, bins = client.operate(key, ops)
+    # Atomic multi-operation
+    ops = [
+        {"op": aerospike.OPERATOR_INCR, "bin": "age", "val": 1},
+        {"op": aerospike.OPERATOR_READ, "bin": "age", "val": None},
+    ]
+    _, _, bins = client.operate(key, ops)
 
-# Delete
-client.remove(key)
-
-# Disconnect
-client.close()
+    # Delete
+    client.remove(key)
+# client.close() is called automatically
 ```
+
+!!! tip "Without context manager"
+    You can also use `connect()` / `close()` manually:
+    ```python
+    client = aerospike.client({...}).connect()
+    # ... operations ...
+    client.close()
+    ```
 
 ## Async Client Example
 
@@ -142,4 +148,7 @@ client.put(key, {"val": bins["val"] + 1},
 - [CRUD Guide](guides/crud.md) - Detailed CRUD operations
 - [Batch Guide](guides/batch.md) - Batch operations
 - [Query & Scan Guide](guides/query-scan.md) - Secondary index queries and scans
+- [Expression Filters Guide](guides/expression-filters.md) - Server-side filtering
+- [List CDT Operations Guide](guides/cdt-list.md) - Atomic list operations
+- [Map CDT Operations Guide](guides/cdt-map.md) - Atomic map operations
 - [API Reference](api/client.md) - Full API documentation

@@ -13,6 +13,21 @@ client = aerospike.client({
 }).connect()
 ```
 
+## Context Manager
+
+`Client` supports the context manager protocol (`with` statement):
+
+### `__enter__()` / `__exit__()`
+
+```python
+with aerospike.client({
+    "hosts": [("127.0.0.1", 3000)],
+    "cluster_name": "docker",
+}).connect() as client:
+    client.put(key, bins)
+# close() is called automatically on exit
+```
+
 ## Connection
 
 ### `connect(username=None, password=None)`
@@ -351,3 +366,35 @@ client.admin_create_role("custom_role", [
     {"code": aerospike.PRIV_READ, "ns": "test", "set": "demo"}
 ])
 ```
+
+## Expression Filters
+
+All read/write/batch operations that accept a `policy` parameter support the `filter_expression` key for server-side filtering (requires Server 5.2+):
+
+```python
+from aerospike_py import exp
+
+expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
+
+# Get with filter
+_, _, bins = client.get(key, policy={"filter_expression": expr})
+
+# Put with filter (only update if filter matches)
+expr = exp.eq(exp.string_bin("status"), exp.string_val("active"))
+client.put(key, {"visits": 1}, policy={"filter_expression": expr})
+
+# Query with filter
+query = client.query("test", "demo")
+records = query.results(policy={"filter_expression": expr})
+
+# Scan with filter
+scan = client.scan("test", "demo")
+records = scan.results(policy={"filter_expression": expr})
+
+# Batch with filter
+records = client.get_many(keys, policy={"filter_expression": expr})
+```
+
+!!! tip
+    If a record does not match the filter expression, the operation raises `FilteredOut`.
+    See the [Expression Filters Guide](../guides/expression-filters.md) for detailed documentation.
