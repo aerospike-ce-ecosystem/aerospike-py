@@ -10,6 +10,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'pyproject.toml'
+      - 'tox.toml'
       - '.github/workflows/ci.yaml'
   pull_request:
     branches: [main]
@@ -20,6 +21,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'pyproject.toml'
+      - 'tox.toml'
       - '.github/workflows/ci.yaml'
 
   workflow_dispatch:
@@ -70,7 +72,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - python-version: "3.10"
+            tox-env: py310
+          - python-version: "3.11"
+            tox-env: py311
+          - python-version: "3.12"
+            tox-env: py312
+          - python-version: "3.13"
+            tox-env: py313
+          - python-version: "3.14"
+            tox-env: py314
     steps:
       - uses: actions/checkout@v4
 
@@ -90,14 +103,37 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
-      - name: Install dependencies
-        run: uv sync --dev --no-install-project
+      - name: Run unit tests
+        run: uvx --with tox-uv tox -e ${{ matrix.tox-env }}
 
-      - name: Build
-        run: uv run --no-project maturin develop --uv
+  build-freethreaded:
+    name: Build & Unit Tests (Python 3.14t free-threaded)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Unit tests
-        run: uv run --no-project pytest tests/unit/ -v
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "rust-build"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install free-threaded Python
+        run: uv python install 3.14t
+
+      - name: Run unit tests
+        run: uvx --with tox-uv tox -e py314t
+        env:
+          UV_PYTHON: 3.14t
 
   integration:
     name: Integration Tests (AS ${{ matrix.server_version }})
@@ -142,16 +178,10 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
-      - name: Install dependencies
-        run: uv sync --dev --no-install-project
-
-      - name: Build
-        run: uv run --no-project maturin develop --uv
-
       - name: Wait for Aerospike
         run: |
           for i in $(seq 1 30); do
-            if uv run --no-project python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()"; then
+            if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()" 2>/dev/null; then
               echo "Aerospike is ready"
               break
             fi
@@ -160,4 +190,171 @@ jobs:
           done
 
       - name: Run all tests
-        run: uv run --no-project pytest tests/ -v
+        run: uvx --with tox-uv tox -e all
+
+  concurrency:
+    name: Concurrency Tests
+    runs-on: ubuntu-latest
+    services:
+      aerospike:
+        image: aerospike/aerospike-server:latest
+        ports:
+          - 3000:3000
+          - 3001:3001
+          - 3002:3002
+        env:
+          NAMESPACE: test
+          CLUSTER_NAME: docker
+          DEFAULT_TTL: 2592000
+        options: >-
+          --shm-size=1g
+          --health-cmd "asinfo -v status"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "rust-build"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Wait for Aerospike
+        run: |
+          for i in $(seq 1 30); do
+            if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()" 2>/dev/null; then
+              echo "Aerospike is ready"
+              break
+            fi
+            echo "Waiting for Aerospike... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run concurrency tests
+        run: uvx --with tox-uv tox -e concurrency
+
+  concurrency-freethreaded:
+    name: Concurrency Tests (Python 3.14t free-threaded)
+    runs-on: ubuntu-latest
+    services:
+      aerospike:
+        image: aerospike/aerospike-server:latest
+        ports:
+          - 3000:3000
+          - 3001:3001
+          - 3002:3002
+        env:
+          NAMESPACE: test
+          CLUSTER_NAME: docker
+          DEFAULT_TTL: 2592000
+        options: >-
+          --shm-size=1g
+          --health-cmd "asinfo -v status"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "rust-build"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install free-threaded Python
+        run: uv python install 3.14t
+
+      - name: Wait for Aerospike
+        run: |
+          for i in $(seq 1 30); do
+            if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()" 2>/dev/null; then
+              echo "Aerospike is ready"
+              break
+            fi
+            echo "Waiting for Aerospike... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run free-threaded concurrency tests
+        run: uvx --with tox-uv tox -e freethreading
+        env:
+          UV_PYTHON: 3.14t
+
+  feasibility:
+    name: Feasibility (${{ matrix.test }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [fastapi, gunicorn]
+    services:
+      aerospike:
+        image: aerospike/aerospike-server:latest
+        ports:
+          - 3000:3000
+          - 3001:3001
+          - 3002:3002
+        env:
+          NAMESPACE: test
+          CLUSTER_NAME: docker
+          DEFAULT_TTL: 2592000
+        options: >-
+          --shm-size=1g
+          --health-cmd "asinfo -v status"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "rust-build"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Wait for Aerospike
+        run: |
+          for i in $(seq 1 30); do
+            if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1',3000)); s.close()" 2>/dev/null; then
+              echo "Aerospike is ready"
+              break
+            fi
+            echo "Waiting for Aerospike... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run feasibility test
+        run: uvx --with tox-uv tox -e ${{ matrix.test }}

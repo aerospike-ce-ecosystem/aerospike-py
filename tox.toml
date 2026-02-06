@@ -1,0 +1,78 @@
+[tox]
+requires = ["tox-uv>=1.25"]
+env_list = ["py{310,311,312,313,314}", "py314t"]
+
+[env_run_base]
+package = "wheel"
+wheel_build_env = ".pkg"
+deps = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+# --- Python version-specific unit test environments ---
+[env.py310]
+commands = [["pytest", "tests/unit/", "-v"]]
+
+[env.py311]
+commands = [["pytest", "tests/unit/", "-v"]]
+
+[env.py312]
+commands = [["pytest", "tests/unit/", "-v"]]
+
+[env.py313]
+commands = [["pytest", "tests/unit/", "-v"]]
+
+[env.py314]
+commands = [["pytest", "tests/unit/", "-v"]]
+
+# --- Free-threaded Python 3.14t unit tests ---
+[env.py314t]
+base_python = ["python3.14t"]
+commands = [["pytest", "tests/unit/", "-v"]]
+
+# --- Integration tests (requires Aerospike server) ---
+[env.integration]
+commands = [["pytest", "tests/integration/", "-v"]]
+
+# --- Concurrency tests (requires Aerospike server) ---
+[env.concurrency]
+commands = [["pytest", "tests/concurrency/", "-v", "--ignore=tests/concurrency/test_freethreading.py"]]
+
+# --- Free-threaded concurrency tests (requires 3.14t + Aerospike server) ---
+[env.freethreading]
+base_python = ["python3.14t"]
+commands = [["pytest", "tests/concurrency/", "-v"]]
+
+# --- FastAPI feasibility test (requires Aerospike server) ---
+[env.fastapi]
+deps = [
+    "pytest",
+    "pytest-asyncio",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+]
+commands = [["pytest", "tests/feasibility/test_fastapi.py", "-v"]]
+
+# --- Gunicorn feasibility test (requires Aerospike server) ---
+[env.gunicorn]
+deps = [
+    "pytest",
+    "pytest-asyncio",
+    "gunicorn",
+    "httpx",
+]
+commands = [["pytest", "tests/feasibility/test_gunicorn.py", "-v"]]
+
+# --- Run all tests (requires Aerospike server) ---
+[env.all]
+deps = [
+    "pytest",
+    "pytest-asyncio",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "gunicorn",
+]
+commands = [["pytest", "tests/", "-v"]]
