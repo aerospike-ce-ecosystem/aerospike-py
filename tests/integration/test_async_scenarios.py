@@ -1,379 +1,279 @@
 """End-to-end async scenario tests."""
 
 import asyncio
+
 import pytest
 
 import aerospike_py
 from aerospike_py import AsyncClient
 
-
-def _run(coro):
-    """Run async test, skip if server unavailable."""
-    try:
-        return asyncio.run(coro)
-    except Exception as e:
-        if "connect" in str(e).lower() or "cluster" in str(e).lower():
-            pytest.skip("Aerospike server not available")
-        raise
-
-
-async def _make_client():
-    c = AsyncClient({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"})
-    await c.connect()
-    return c
+CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 
 
 class TestAsyncCRUDWorkflow:
     """Async multi-step CRUD scenarios."""
 
-    def test_full_lifecycle(self):
-        async def _test():
-            c = await _make_client()
-            key = ("test", "async_scen", "lifecycle")
+    async def test_full_lifecycle(self, async_client):
+        key = ("test", "async_scen", "lifecycle")
+        try:
+            await async_client.put(key, {"name": "Alice", "age": 25})
+            _, meta1, bins = await async_client.get(key)
+            assert bins["name"] == "Alice"
+            assert bins["age"] == 25
+            gen1 = meta1["gen"]
+
+            await async_client.put(key, {"age": 26})
+            _, meta2, bins = await async_client.get(key)
+            assert bins["name"] == "Alice"
+            assert bins["age"] == 26
+            assert meta2["gen"] == gen1 + 1
+
+            await async_client.remove(key)
+            _, meta = await async_client.exists(key)
+            assert meta is None
+        finally:
             try:
-                await c.put(key, {"name": "Alice", "age": 25})
-                _, meta1, bins = await c.get(key)
-                assert bins["name"] == "Alice"
-                assert bins["age"] == 25
-                gen1 = meta1["gen"]
+                await async_client.remove(key)
+            except Exception:
+                pass
 
-                await c.put(key, {"age": 26})
-                _, meta2, bins = await c.get(key)
-                assert bins["name"] == "Alice"
-                assert bins["age"] == 26
-                assert meta2["gen"] == gen1 + 1
+    async def test_increment_sequence(self, async_client):
+        key = ("test", "async_scen", "incr_seq")
+        try:
+            await async_client.put(key, {"counter": 0})
+            for _ in range(5):
+                await async_client.increment(key, "counter", 3)
 
-                await c.remove(key)
-                _, meta = await c.exists(key)
-                assert meta is None
-            finally:
-                try:
-                    await c.remove(key)
-                except Exception:
-                    pass
-                await c.close()
-
-        _run(_test())
-
-    def test_increment_sequence(self):
-        async def _test():
-            c = await _make_client()
-            key = ("test", "async_scen", "incr_seq")
+            _, _, bins = await async_client.get(key)
+            assert bins["counter"] == 15
+        finally:
             try:
-                await c.put(key, {"counter": 0})
-                for _ in range(5):
-                    await c.increment(key, "counter", 3)
+                await async_client.remove(key)
+            except Exception:
+                pass
 
-                _, _, bins = await c.get(key)
-                assert bins["counter"] == 15
-            finally:
-                try:
-                    await c.remove(key)
-                except Exception:
-                    pass
-                await c.close()
-
-        _run(_test())
-
-    def test_operate_atomic(self):
-        async def _test():
-            c = await _make_client()
-            key = ("test", "async_scen", "operate_atomic")
+    async def test_operate_atomic(self, async_client):
+        key = ("test", "async_scen", "operate_atomic")
+        try:
+            await async_client.put(key, {"a": 10, "b": "hello"})
+            ops = [
+                {"op": aerospike_py.OPERATOR_INCR, "bin": "a", "val": 5},
+                {"op": aerospike_py.OPERATOR_READ, "bin": "a", "val": None},
+                {"op": aerospike_py.OPERATOR_READ, "bin": "b", "val": None},
+            ]
+            _, _, bins = await async_client.operate(key, ops)
+            assert bins["a"] == 15
+            assert bins["b"] == "hello"
+        finally:
             try:
-                await c.put(key, {"a": 10, "b": "hello"})
-                ops = [
-                    {"op": aerospike_py.OPERATOR_INCR, "bin": "a", "val": 5},
-                    {"op": aerospike_py.OPERATOR_READ, "bin": "a", "val": None},
-                    {"op": aerospike_py.OPERATOR_READ, "bin": "b", "val": None},
-                ]
-                _, _, bins = await c.operate(key, ops)
-                assert bins["a"] == 15
-                assert bins["b"] == "hello"
-            finally:
-                try:
-                    await c.remove(key)
-                except Exception:
-                    pass
-                await c.close()
-
-        _run(_test())
+                await async_client.remove(key)
+            except Exception:
+                pass
 
 
 class TestAsyncBatchWorkflow:
     """Async batch operation scenarios."""
 
-    def test_bulk_write_batch_read(self):
-        async def _test():
-            c = await _make_client()
-            keys = [("test", "async_scen", f"batch_{i}") for i in range(5)]
-            try:
-                for i, key in enumerate(keys):
-                    await c.put(key, {"idx": i})
+    async def test_bulk_write_batch_read(self, async_client):
+        keys = [("test", "async_scen", f"batch_{i}") for i in range(5)]
+        try:
+            for i, key in enumerate(keys):
+                await async_client.put(key, {"idx": i})
 
-                results = await c.get_many(keys)
-                assert len(results) == 5
-                for i, (_, meta, bins) in enumerate(results):
-                    assert meta is not None
-                    assert bins["idx"] == i
-            finally:
-                for key in keys:
-                    try:
-                        await c.remove(key)
-                    except Exception:
-                        pass
-                await c.close()
+            results = await async_client.get_many(keys)
+            assert len(results) == 5
+            for i, (_, meta, bins) in enumerate(results):
+                assert meta is not None
+                assert bins["idx"] == i
+        finally:
+            for key in keys:
+                try:
+                    await async_client.remove(key)
+                except Exception:
+                    pass
 
-        _run(_test())
+    async def test_batch_remove_verify(self, async_client):
+        keys = [("test", "async_scen", f"brem_{i}") for i in range(3)]
+        for key in keys:
+            await async_client.put(key, {"val": 1})
 
-    def test_batch_remove_verify(self):
-        async def _test():
-            c = await _make_client()
-            keys = [("test", "async_scen", f"brem_{i}") for i in range(3)]
-            try:
-                for key in keys:
-                    await c.put(key, {"val": 1})
+        await async_client.batch_remove(keys)
 
-                await c.batch_remove(keys)
-
-                results = await c.exists_many(keys)
-                for _, meta in results:
-                    assert meta is None
-            finally:
-                await c.close()
-
-        _run(_test())
+        results = await async_client.exists_many(keys)
+        for _, meta in results:
+            assert meta is None
 
 
 class TestAsyncDataTypes:
     """Async data type edge case scenarios."""
 
-    def test_various_types(self):
-        async def _test():
-            c = await _make_client()
-            key = ("test", "async_scen", "types")
+    async def test_various_types(self, async_client):
+        key = ("test", "async_scen", "types")
+        try:
+            data = {
+                "int": 42,
+                "float": 3.14,
+                "str": "hello 한글",
+                "bytes": b"\x00\x01\x02",
+                "list": [1, "two", 3.0],
+                "map": {"nested": {"deep": True}},
+                "bool": False,
+            }
+            await async_client.put(key, data)
+            _, _, bins = await async_client.get(key)
+
+            assert bins["int"] == 42
+            assert abs(bins["float"] - 3.14) < 0.001
+            assert bins["str"] == "hello 한글"
+            assert bins["bytes"] == b"\x00\x01\x02"
+            assert bins["list"] == [1, "two", 3.0]
+            assert bins["map"]["nested"]["deep"] is True
+            assert bins["bool"] is False
+        finally:
             try:
-                data = {
-                    "int": 42,
-                    "float": 3.14,
-                    "str": "hello 한글",
-                    "bytes": b"\x00\x01\x02",
-                    "list": [1, "two", 3.0],
-                    "map": {"nested": {"deep": True}},
-                    "bool": False,
-                }
-                await c.put(key, data)
-                _, _, bins = await c.get(key)
+                await async_client.remove(key)
+            except Exception:
+                pass
 
-                assert bins["int"] == 42
-                assert abs(bins["float"] - 3.14) < 0.001
-                assert bins["str"] == "hello 한글"
-                assert bins["bytes"] == b"\x00\x01\x02"
-                assert bins["list"] == [1, "two", 3.0]
-                assert bins["map"]["nested"]["deep"] is True
-                assert bins["bool"] is False
-            finally:
-                try:
-                    await c.remove(key)
-                except Exception:
-                    pass
-                await c.close()
-
-        _run(_test())
-
-    def test_large_record(self):
-        async def _test():
-            c = await _make_client()
-            key = ("test", "async_scen", "large")
+    async def test_large_record(self, async_client):
+        key = ("test", "async_scen", "large")
+        try:
+            large_str = "x" * 50_000
+            large_list = list(range(1000))
+            await async_client.put(key, {"str": large_str, "list": large_list})
+            _, _, bins = await async_client.get(key)
+            assert len(bins["str"]) == 50_000
+            assert len(bins["list"]) == 1000
+        finally:
             try:
-                large_str = "x" * 50_000
-                large_list = list(range(1000))
-                await c.put(key, {"str": large_str, "list": large_list})
-                _, _, bins = await c.get(key)
-                assert len(bins["str"]) == 50_000
-                assert len(bins["list"]) == 1000
-            finally:
-                try:
-                    await c.remove(key)
-                except Exception:
-                    pass
-                await c.close()
-
-        _run(_test())
+                await async_client.remove(key)
+            except Exception:
+                pass
 
 
 class TestAsyncErrorHandling:
     """Async error handling scenarios."""
 
-    def test_get_nonexistent(self):
-        async def _test():
-            c = await _make_client()
-            try:
-                with pytest.raises(aerospike_py.RecordNotFound):
-                    await c.get(("test", "async_scen", "nonexistent_xyz"))
-            finally:
-                await c.close()
+    async def test_get_nonexistent(self, async_client):
+        with pytest.raises(aerospike_py.RecordNotFound):
+            await async_client.get(("test", "async_scen", "nonexistent_xyz"))
 
-        _run(_test())
+    async def test_double_close(self, async_client):
+        await async_client.close()
+        await async_client.close()  # Should not raise
 
-    def test_double_close(self):
-        async def _test():
-            c = await _make_client()
-            await c.close()
-            await c.close()  # Should not raise
+    async def test_operations_after_close(self, async_client):
+        await async_client.close()
+        with pytest.raises(aerospike_py.AerospikeError):
+            await async_client.get(("test", "demo", "key"))
 
-        _run(_test())
-
-    def test_operations_after_close(self):
-        async def _test():
-            c = await _make_client()
-            await c.close()
-            with pytest.raises(aerospike_py.AerospikeError):
-                await c.get(("test", "demo", "key"))
-
-        _run(_test())
-
-    def test_connect_bad_host(self):
-        async def _test():
-            c = AsyncClient({"hosts": [("192.0.2.1", 9999)]})
-            with pytest.raises(aerospike_py.AerospikeError):
-                await c.connect()
-
-        _run(_test())
+    async def test_connect_bad_host(self):
+        c = AsyncClient({"hosts": [("192.0.2.1", 9999)]})
+        with pytest.raises(aerospike_py.AerospikeError):
+            await c.connect()
 
 
 class TestAsyncScanWorkflow:
     """Async scan scenario tests."""
 
-    def test_scan_after_writes(self):
-        async def _test():
-            c = await _make_client()
-            ns = "test"
-            set_name = "async_scan_scen"
-            keys = [(ns, set_name, f"s_{i}") for i in range(5)]
-            try:
-                for i, key in enumerate(keys):
-                    await c.put(key, {"idx": i, "val": i * 10})
+    async def test_scan_after_writes(self, async_client):
+        ns = "test"
+        set_name = "async_scan_scen"
+        keys = [(ns, set_name, f"s_{i}") for i in range(5)]
+        try:
+            for i, key in enumerate(keys):
+                await async_client.put(key, {"idx": i, "val": i * 10})
 
-                results = await c.scan(ns, set_name)
-                assert len(results) >= 5
+            results = await async_client.scan(ns, set_name)
+            assert len(results) >= 5
 
-                idxs = [bins["idx"] for _, _, bins in results]
-                for i in range(5):
-                    assert i in idxs
-            finally:
-                for key in keys:
-                    try:
-                        await c.remove(key)
-                    except Exception:
-                        pass
-                await c.close()
-
-        _run(_test())
+            idxs = [bins["idx"] for _, _, bins in results]
+            for i in range(5):
+                assert i in idxs
+        finally:
+            for key in keys:
+                try:
+                    await async_client.remove(key)
+                except Exception:
+                    pass
 
 
 class TestAsyncTruncate:
     """Async truncate scenario tests."""
 
-    def test_truncate_set(self):
-        async def _test():
-            c = await _make_client()
-            ns = "test"
-            set_name = "async_trunc"
-            keys = [(ns, set_name, f"t_{i}") for i in range(3)]
-            try:
-                for key in keys:
-                    await c.put(key, {"v": 1})
+    async def test_truncate_set(self, async_client):
+        ns = "test"
+        set_name = "async_trunc"
+        keys = [(ns, set_name, f"t_{i}") for i in range(3)]
+        for key in keys:
+            await async_client.put(key, {"v": 1})
 
-                await c.truncate(ns, set_name)
-                # Truncate is async on server side, so just verify no error
-            finally:
-                await c.close()
-
-        _run(_test())
+        await async_client.truncate(ns, set_name)
+        # Truncate is async on server side, so just verify no error
 
 
 class TestAsyncUDF:
     """Async UDF scenario tests."""
 
-    def test_apply_udf(self):
-        async def _test():
-            c = await _make_client()
-            key = ("test", "async_scen", "udf_test")
+    async def test_apply_udf(self, async_client):
+        key = ("test", "async_scen", "udf_test")
+        try:
+            await async_client.udf_put("tests/test_udf.lua")
+
+            await async_client.put(key, {"val": 42})
+
+            result = await async_client.apply(key, "test_udf", "echo", [100])
+            assert result == 100
+
+            result = await async_client.apply(key, "test_udf", "get_bin", ["val"])
+            assert result == 42
+        except aerospike_py.AerospikeError as e:
+            if "udf" in str(e).lower():
+                pytest.skip("UDF not available")
+            raise
+        finally:
             try:
-                # Register UDF
-                await c.udf_put("tests/test_udf.lua")
-
-                await c.put(key, {"val": 42})
-
-                # Apply UDF
-                result = await c.apply(key, "test_udf", "echo", [100])
-                assert result == 100
-
-                result = await c.apply(key, "test_udf", "get_bin", ["val"])
-                assert result == 42
-            except aerospike_py.AerospikeError as e:
-                if "udf" in str(e).lower():
-                    pytest.skip("UDF not available")
-                raise
-            finally:
-                try:
-                    await c.remove(key)
-                except Exception:
-                    pass
-                try:
-                    await c.udf_remove("test_udf")
-                except Exception:
-                    pass
-                await c.close()
-
-        _run(_test())
+                await async_client.remove(key)
+            except Exception:
+                pass
+            try:
+                await async_client.udf_remove("test_udf")
+            except Exception:
+                pass
 
 
 class TestAsyncConcurrentOps:
     """Test concurrent async operations."""
 
-    def test_concurrent_puts(self):
-        async def _test():
-            c = await _make_client()
-            keys = [("test", "async_scen", f"conc_{i}") for i in range(10)]
-            try:
-                # Concurrent puts
-                tasks = [c.put(key, {"idx": i}) for i, key in enumerate(keys)]
-                await asyncio.gather(*tasks)
+    async def test_concurrent_puts(self, async_client):
+        keys = [("test", "async_scen", f"conc_{i}") for i in range(10)]
+        try:
+            tasks = [async_client.put(key, {"idx": i}) for i, key in enumerate(keys)]
+            await asyncio.gather(*tasks)
 
-                # Verify all written
-                results = await c.get_many(keys)
-                assert len(results) == 10
-                idxs = sorted([bins["idx"] for _, _, bins in results if bins])
-                assert idxs == list(range(10))
-            finally:
-                for key in keys:
-                    try:
-                        await c.remove(key)
-                    except Exception:
-                        pass
-                await c.close()
-
-        _run(_test())
-
-    def test_concurrent_reads_writes(self):
-        async def _test():
-            c = await _make_client()
-            key = ("test", "async_scen", "conc_rw")
-            try:
-                await c.put(key, {"counter": 0})
-
-                # Concurrent increments
-                tasks = [c.increment(key, "counter", 1) for _ in range(10)]
-                await asyncio.gather(*tasks)
-
-                _, _, bins = await c.get(key)
-                assert bins["counter"] == 10
-            finally:
+            results = await async_client.get_many(keys)
+            assert len(results) == 10
+            idxs = sorted([bins["idx"] for _, _, bins in results if bins])
+            assert idxs == list(range(10))
+        finally:
+            for key in keys:
                 try:
-                    await c.remove(key)
+                    await async_client.remove(key)
                 except Exception:
                     pass
-                await c.close()
 
-        _run(_test())
+    async def test_concurrent_reads_writes(self, async_client):
+        key = ("test", "async_scen", "conc_rw")
+        try:
+            await async_client.put(key, {"counter": 0})
+
+            tasks = [async_client.increment(key, "counter", 1) for _ in range(10)]
+            await asyncio.gather(*tasks)
+
+            _, _, bins = await async_client.get(key)
+            assert bins["counter"] == 10
+        finally:
+            try:
+                await async_client.remove(key)
+            except Exception:
+                pass
