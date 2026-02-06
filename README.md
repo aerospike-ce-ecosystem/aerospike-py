@@ -25,7 +25,7 @@ Aerospike Python Client built with PyO3 + Rust. Drop-in replacement for [aerospi
 
 - Python 3.10+
 - Rust toolchain (rustup)
-- Running Aerospike server (or Docker)
+- Running Aerospike server (or Podman/Docker)
 
 ### Install (from source)
 
@@ -40,15 +40,21 @@ pip install maturin
 maturin develop
 ```
 
-### Start Aerospike Server (Docker)
+### Start Aerospike Server (Podman)
 
 ```bash
-docker run -d --name aerospike \
+podman run -d --name aerospike \
   -p 3000:3000 -p 3001:3001 -p 3002:3002 \
+  --shm-size=1g \
   -e "NAMESPACE=test" \
-  -e "CLUSTER_NAME=docker" \
-  aerospike/aerospike-server
+  -e "DEFAULT_TTL=2592000" \
+  -v ./scripts/aerospike.template.conf:/etc/aerospike/aerospike.template.conf \
+  aerospike:ce-8.1.0.3_1
 ```
+
+> **Note**: 커스텀 template(`scripts/aerospike.template.conf`)에 `access-address 127.0.0.1`이 설정되어 있습니다.
+> Aerospike 컨테이너는 기본적으로 컨테이너 내부 IP(예: `172.17.0.2`)를 클라이언트에게 알려주는데,
+> Rust 기반 client는 이 주소로 재연결을 시도하여 실패합니다. 이 설정이 이를 방지합니다.
 
 ### Basic Usage (Sync)
 
@@ -308,6 +314,8 @@ aerospike-py/
 │   ├── exception.py        # Exception hierarchy re-exports
 │   ├── predicates.py       # Query predicate helpers
 │   └── py.typed            # PEP 561 marker
+├── scripts/
+│   └── aerospike.template.conf  # Aerospike Podman/Docker config template (access-address 포함)
 └── tests/
     ├── unit/               # No server needed
     ├── integration/        # Requires Aerospike server
@@ -331,17 +339,7 @@ maturin build --release
 
 ### Running Tests
 
-Tests require a running Aerospike server (except unit tests). Start one with Docker:
-
-```bash
-docker run -d --name aerospike \
-  -p 3000:3000 -p 3001:3001 -p 3002:3002 \
-  --shm-size=1g \
-  -e "NAMESPACE=test" \
-  -e "CLUSTER_NAME=docker" \
-  -e "DEFAULT_TTL=2592000" \
-  aerospike/aerospike-server
-```
+Tests require a running Aerospike server (except unit tests). 위의 [Start Aerospike Server (Podman)](#start-aerospike-server-podman) 섹션을 참고하여 서버를 실행하세요.
 
 #### tox (recommended)
 
