@@ -1,15 +1,15 @@
-"""FastAPI + uvicorn ASGI compatibility test (requires Aerospike server)."""
+"""FastAPI + ASGI compatibility test (requires Aerospike server).
+
+Uses httpx.ASGITransport to test the FastAPI app in-process,
+avoiding subprocess/fork issues entirely.
+"""
 
 import asyncio
-import multiprocessing
-import socket
-import time
 
 import pytest
 
 httpx = pytest.importorskip("httpx")
-fastapi = pytest.importorskip("fastapi")
-uvicorn = pytest.importorskip("uvicorn")
+pytest.importorskip("fastapi")
 
 import aerospike_py  # noqa: E402
 
@@ -62,80 +62,48 @@ def _create_app():
     return app
 
 
-def _run_server(port: int):
-    app = _create_app()
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="error")
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _wait_for_server(port: int, timeout: float = 30.0):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            s = socket.socket()
-            s.settimeout(0.5)
-            s.connect(("127.0.0.1", port))
-            s.close()
-            return
-        except OSError:
-            time.sleep(0.2)
-    raise RuntimeError(f"Server on port {port} did not start within {timeout}s")
-
-
 @pytest.fixture(scope="module")
-def server_url():
-    port = _free_port()
-    # Use "spawn" to avoid fork() deadlocks in multi-threaded pytest-asyncio
-    ctx = multiprocessing.get_context("spawn")
-    proc = ctx.Process(target=_run_server, args=(port,), daemon=True)
-    proc.start()
-    try:
-        _wait_for_server(port)
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        proc.terminate()
-        proc.join(timeout=5)
-        if proc.is_alive():
-            proc.kill()
-            proc.join(timeout=3)
+def app():
+    return _create_app()
+
+
+@pytest.fixture
+async def client(app):
+    """In-process ASGI test client — no subprocess needed."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as c:
+        yield c
 
 
 class TestFastAPIFeasibility:
-    async def test_health(self, server_url):
-        async with httpx.AsyncClient(base_url=server_url) as c:
-            r = await c.get("/health")
-            assert r.status_code == 200
-            assert r.json()["status"] == "ok"
-            assert r.json()["connected"] is True
+    async def test_health(self, client):
+        r = await client.get("/health")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+        assert r.json()["connected"] is True
 
-    async def test_put_get_delete(self, server_url):
-        async with httpx.AsyncClient(base_url=server_url) as c:
-            r = await c.put("/kv/ftest1", params={"value": 42})
-            assert r.status_code == 200
+    async def test_put_get_delete(self, client):
+        r = await client.put("/kv/ftest1", params={"value": 42})
+        assert r.status_code == 200
 
-            r = await c.get("/kv/ftest1")
-            assert r.status_code == 200
-            assert r.json()["bins"]["v"] == 42
+        r = await client.get("/kv/ftest1")
+        assert r.status_code == 200
+        assert r.json()["bins"]["v"] == 42
 
-            r = await c.delete("/kv/ftest1")
-            assert r.status_code == 200
-            assert r.json()["deleted"] is True
+        r = await client.delete("/kv/ftest1")
+        assert r.status_code == 200
+        assert r.json()["deleted"] is True
 
-    async def test_concurrent_requests(self, server_url):
-        """50 concurrent HTTP requests."""
+    async def test_concurrent_requests(self, client):
+        """50 concurrent requests via ASGI transport."""
 
-        async def do_request(c, i):
+        async def do_request(i):
             key = f"fconcur_{i}"
-            await c.put(f"/kv/{key}", params={"value": i})
-            r = await c.get(f"/kv/{key}")
+            await client.put(f"/kv/{key}", params={"value": i})
+            r = await client.get(f"/kv/{key}")
             assert r.json()["bins"]["v"] == i
-            await c.delete(f"/kv/{key}")
+            await client.delete(f"/kv/{key}")
 
-        async with httpx.AsyncClient(base_url=server_url) as c:
-            await asyncio.gather(*(do_request(c, i) for i in range(50)))
+        await asyncio.gather(*(do_request(i) for i in range(50)))

@@ -33,7 +33,6 @@ deps = [
     "pytest",
     "pytest-asyncio",
     "fastapi",
-    "uvicorn",
     "httpx",
 ]
 commands = [["pytest", "tests/feasibility/test_fastapi.py", "-v"]]
@@ -54,7 +53,6 @@ deps = [
     "pytest",
     "pytest-asyncio",
     "fastapi",
-    "uvicorn",
     "httpx",
     "gunicorn",
 ]

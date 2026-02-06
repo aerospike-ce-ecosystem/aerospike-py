@@ -130,26 +130,29 @@ def gunicorn_url():
 
 class TestGunicornFeasibility:
     def test_health_from_multiple_workers(self, gunicorn_url):
-        """20 sequential /health requests — expect at least 2 distinct PIDs."""
+        """Send requests over separate connections to distribute across workers."""
         pids = set()
-        with httpx.Client(base_url=gunicorn_url) as c:
-            for _ in range(20):
-                r = c.get("/health")
-                assert r.status_code == 200
-                body = r.json()
-                assert body["status"] == "ok"
-                pids.add(body["pid"])
+        for _ in range(20):
+            # Each request uses a fresh connection (no keep-alive)
+            # so gunicorn can round-robin across workers
+            r = httpx.get(f"{gunicorn_url}/health")
+            assert r.status_code == 200
+            body = r.json()
+            assert body["status"] == "ok"
+            pids.add(body["pid"])
 
         assert len(pids) >= 2, f"Expected >= 2 worker PIDs, got {pids}"
 
     def test_put_get_across_workers(self, gunicorn_url):
         """Put from one request, get from subsequent requests — data shared via server."""
-        with httpx.Client(base_url=gunicorn_url) as c:
-            r = c.put("/kv/gtest1", content=json.dumps({"value": 999}))
-            assert r.status_code == 200
+        r = httpx.put(
+            f"{gunicorn_url}/kv/gtest1",
+            content=json.dumps({"value": 999}),
+        )
+        assert r.status_code == 200
 
-            # Multiple gets to potentially hit different workers
-            for _ in range(10):
-                r = c.get("/kv/gtest1")
-                assert r.status_code == 200
-                assert r.json()["bins"]["v"] == 999
+        # Multiple gets over separate connections to hit different workers
+        for _ in range(10):
+            r = httpx.get(f"{gunicorn_url}/kv/gtest1")
+            assert r.status_code == 200
+            assert r.json()["bins"]["v"] == 999
