@@ -255,7 +255,7 @@ def bench_c_sync(
     batch_rounds = []
     for _ in range(rounds):
         gc.disable()
-        elapsed = _measure_bulk(lambda: client.get_many(keys))
+        elapsed = _measure_bulk(lambda: client.batch_read(keys))
         gc.enable()
         batch_rounds.append(elapsed)
     results["batch_get"] = _bulk_median(batch_rounds, count)
