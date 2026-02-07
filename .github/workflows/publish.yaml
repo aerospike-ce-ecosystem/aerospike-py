@@ -55,6 +55,7 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
+        shell: bash
 
       - name: Update Cargo.toml version
         run: |
@@ -124,12 +125,17 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
-  publish:
-    name: Publish to PyPI
+  publish-testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'testpypi'
     needs: [build, sdist]
     runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/aerospike-py
     permissions:
       id-token: write
+      attestations: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -141,11 +147,33 @@ jobs:
         run: ls -la dist/
 
       - name: Publish to TestPyPI
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'testpypi'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          attestations: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'pypi')
+    needs: [build, sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/aerospike-py
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List dist contents
+        run: ls -la dist/
 
       - name: Publish to PyPI
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'pypi')
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
