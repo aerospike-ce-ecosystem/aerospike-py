@@ -170,7 +170,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
     batch_rounds = []
     for _ in range(rounds):
         gc.disable()
-        elapsed = _measure_bulk(lambda: client.get_many(keys))
+        elapsed = _measure_bulk(lambda: client.batch_read(keys))
         gc.enable()
         batch_rounds.append(elapsed)
     results["batch_get"] = _bulk_median(batch_rounds, count)
@@ -351,7 +351,7 @@ async def bench_rust_async(
     for _ in range(rounds):
         gc.disable()
         t0 = time.perf_counter()
-        await client.get_many(keys)
+        await client.batch_read(keys)
         elapsed = time.perf_counter() - t0
         gc.enable()
         batch_rounds.append(elapsed)
