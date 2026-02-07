@@ -73,7 +73,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
-          manylinux: auto
+          manylinux: 2_28
 
       - name: Build wheels (macOS)
         if: runner.os == 'macOS'
