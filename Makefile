@@ -7,7 +7,7 @@ PIP := $(VENV)/bin/pip
 AEROSPIKE_HOST ?= 127.0.0.1
 AEROSPIKE_PORT ?= 3000
 
-CONTAINER_RT ?= docker
+RUNTIME ?= docker
 BENCH_COUNT ?= 1000
 BENCH_ROUNDS ?= 5
 BENCH_CONCURRENCY ?= 50
@@ -29,11 +29,11 @@ install: $(VENV)/bin/activate ## Install dependencies
 # ---------------------------------------------------------------------------
 
 .PHONY: run-aerospike-ce
-run-aerospike-ce: ## Start Aerospike CE container (CONTAINER_RT=docker|podman)
-	@if $(CONTAINER_RT) ps --format '{{.Names}}' | grep -q '^aerospike$$'; then \
-		echo "aerospike container is already running ($(CONTAINER_RT))"; \
+run-aerospike-ce: ## Start Aerospike CE container (RUNTIME=docker|podman)
+	@if $(RUNTIME) ps --format '{{.Names}}' | grep -q '^aerospike$$'; then \
+		echo "aerospike container is already running ($(RUNTIME))"; \
 	else \
-		$(CONTAINER_RT) run -d --name aerospike \
+		$(RUNTIME) run -d --name aerospike \
 			-p 3000:3000 -p 3001:3001 -p 3002:3002 \
 			--shm-size=1g \
 			-e "NAMESPACE=test" \
@@ -46,7 +46,7 @@ run-aerospike-ce: ## Start Aerospike CE container (CONTAINER_RT=docker|podman)
 
 .PHONY: stop-aerospike-ce
 stop-aerospike-ce: ## Stop and remove Aerospike CE container
-	$(CONTAINER_RT) rm -f aerospike 2>/dev/null || true
+	$(RUNTIME) rm -f aerospike 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Benchmark
