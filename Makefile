@@ -14,7 +14,7 @@ BENCH_CONCURRENCY ?= 50
 
 .PHONY: install
 install: ## Install project dependencies via uv
-	uv sync --group dev --extra bench
+	uv sync --group dev --group bench
 
 .PHONY: build
 build: install ## Build Rust extension locally (maturin develop)
