@@ -3,7 +3,6 @@ SHELL := /bin/bash
 VENV := .venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
-MATURIN := $(VENV)/bin/maturin
 
 AEROSPIKE_HOST ?= 127.0.0.1
 AEROSPIKE_PORT ?= 3000
@@ -20,10 +19,9 @@ $(VENV)/bin/activate:
 	python3 -m venv $(VENV)
 
 .PHONY: install
-install: $(VENV)/bin/activate ## Install dev dependencies and build Rust extension
+install: $(VENV)/bin/activate ## Install dependencies
 	$(PIP) install --upgrade pip
-	$(PIP) install maturin pytest pytest-asyncio aerospike
-	$(MATURIN) develop
+	$(PIP) install aerospike-py aerospike pytest pytest-asyncio
 
 # ---------------------------------------------------------------------------
 # Docker
