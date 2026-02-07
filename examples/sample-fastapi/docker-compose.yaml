@@ -1,0 +1,14 @@
+services:
+  aerospike:
+    image: aerospike:ce-8.1.0.3_1
+    container_name: aerospike
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "3002:3002"
+    shm_size: 1g
+    environment:
+      NAMESPACE: test
+      DEFAULT_TTL: "2592000"
+    volumes:
+      - ../../scripts/aerospike.template.conf:/etc/aerospike/aerospike.template.conf

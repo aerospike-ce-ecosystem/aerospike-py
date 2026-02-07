@@ -1,0 +1,23 @@
+[project]
+name = "sample-fastapi"
+version = "0.1.0"
+description = "FastAPI + aerospike-py async client example"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic-settings>=2.0.0",
+    "aerospike-py",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.27.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "testcontainers>=4.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
