@@ -60,6 +60,8 @@ jobs:
           else
             VERSION="0.0.0-dev0"
           fi
+          # Convert PEP 440 .devN to Cargo semver -devN
+          VERSION=$(echo "$VERSION" | sed 's/\.dev/-dev/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
         shell: bash
@@ -115,6 +117,8 @@ jobs:
           else
             VERSION="0.0.0-dev0"
           fi
+          # Convert PEP 440 .devN to Cargo semver -devN
+          VERSION=$(echo "$VERSION" | sed 's/\.dev/-dev/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
 
