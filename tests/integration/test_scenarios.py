@@ -526,7 +526,7 @@ class TestErrorHandling:
 
     def test_connect_bad_host(self):
         """Connecting to a bad host should raise."""
-        c = aerospike_py.client({"hosts": [("192.0.2.1", 9999)]})
+        c = aerospike_py.client({"hosts": [("192.0.2.1", 9999)], "timeout": 1000})
         with pytest.raises(aerospike_py.AerospikeError):
             c.connect()
 

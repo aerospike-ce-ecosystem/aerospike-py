@@ -170,7 +170,7 @@ class TestAsyncErrorHandling:
             await async_client.get(("test", "demo", "key"))
 
     async def test_connect_bad_host(self):
-        c = AsyncClient({"hosts": [("192.0.2.1", 9999)]})
+        c = AsyncClient({"hosts": [("192.0.2.1", 9999)], "timeout": 1000})
         with pytest.raises(aerospike_py.AerospikeError):
             await c.connect()
 
