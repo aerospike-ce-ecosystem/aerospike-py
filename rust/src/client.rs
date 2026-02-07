@@ -14,7 +14,9 @@ use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_
 use crate::policy::batch_policy::parse_batch_policy;
 use crate::policy::client_policy::parse_client_policy;
 use crate::policy::read_policy::parse_read_policy;
+use crate::policy::read_policy::DEFAULT_READ_POLICY;
 use crate::policy::write_policy::parse_write_policy;
+use crate::policy::write_policy::DEFAULT_WRITE_POLICY;
 use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::runtime::RUNTIME;
 use crate::types::bin::py_dict_to_bins;
@@ -121,8 +123,20 @@ impl PyClient {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         let rust_bins = py_dict_to_bins(bins)?;
-        let write_policy = parse_write_policy(policy, meta)?;
 
+        if policy.is_none() && meta.is_none() {
+            let wp = &*DEFAULT_WRITE_POLICY;
+            return py.detach(|| {
+                RUNTIME.block_on(async {
+                    client
+                        .put(wp, &rust_key, &rust_bins)
+                        .await
+                        .map_err(as_to_pyerr)
+                })
+            });
+        }
+
+        let write_policy = parse_write_policy(policy, meta)?;
         py.detach(|| {
             RUNTIME.block_on(async {
                 client
@@ -143,8 +157,21 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
-        let read_policy = parse_read_policy(policy)?;
 
+        if policy.is_none() {
+            let rp = &*DEFAULT_READ_POLICY;
+            let record = py.detach(|| {
+                RUNTIME.block_on(async {
+                    client
+                        .get(rp, &rust_key, Bins::All)
+                        .await
+                        .map_err(as_to_pyerr)
+                })
+            })?;
+            return record_to_py(py, &record);
+        }
+
+        let read_policy = parse_read_policy(policy)?;
         let record = py.detach(|| {
             RUNTIME.block_on(async {
                 client
