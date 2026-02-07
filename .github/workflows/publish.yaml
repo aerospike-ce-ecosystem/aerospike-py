@@ -20,6 +20,7 @@ env:
 jobs:
   build:
     name: Build wheels (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -101,6 +102,7 @@ jobs:
 
   sdist:
     name: Build source distribution
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
