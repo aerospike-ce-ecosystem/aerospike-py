@@ -6,8 +6,8 @@ AEROSPIKE_PORT ?= 3000
 RUNTIME ?= docker
 AEROSPIKE_CPUS ?= 2
 AEROSPIKE_MEMORY ?= 2g
-BENCH_COUNT ?= 1000
-BENCH_ROUNDS ?= 10
+BENCH_COUNT ?= 5000
+BENCH_ROUNDS ?= 20
 BENCH_CONCURRENCY ?= 50
 
 # ---------------------------------------------------------------------------
@@ -20,7 +20,7 @@ install: ## Install project dependencies via uv
 
 .PHONY: build
 build: install ## Build Rust extension locally (maturin develop)
-	uv run maturin develop
+	uv run maturin develop --release
 
 # ---------------------------------------------------------------------------
 # Aerospike Server
@@ -60,7 +60,8 @@ run-benchmark: build run-aerospike-ce ## Run benchmark with local build (COUNT, 
 		--rounds $(BENCH_ROUNDS) \
 		--concurrency $(BENCH_CONCURRENCY) \
 		--host $(AEROSPIKE_HOST) \
-		--port $(AEROSPIKE_PORT)
+		--port $(AEROSPIKE_PORT); \
+	$(MAKE) stop-aerospike-ce
 
 # ---------------------------------------------------------------------------
 # Tests
