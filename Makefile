@@ -7,6 +7,7 @@ PIP := $(VENV)/bin/pip
 AEROSPIKE_HOST ?= 127.0.0.1
 AEROSPIKE_PORT ?= 3000
 
+CONTAINER_RT ?= docker
 BENCH_COUNT ?= 1000
 BENCH_ROUNDS ?= 5
 BENCH_CONCURRENCY ?= 50
@@ -24,15 +25,15 @@ install: $(VENV)/bin/activate ## Install dependencies
 	$(PIP) install aerospike-py aerospike pytest pytest-asyncio
 
 # ---------------------------------------------------------------------------
-# Docker
+# Aerospike Server
 # ---------------------------------------------------------------------------
 
-.PHONY: docker-up
-docker-up: ## Start Aerospike server in Docker
-	@if docker ps --format '{{.Names}}' | grep -q '^aerospike$$'; then \
-		echo "aerospike container is already running"; \
+.PHONY: run-aerospike-ce
+run-aerospike-ce: ## Start Aerospike CE container (CONTAINER_RT=docker|podman)
+	@if $(CONTAINER_RT) ps --format '{{.Names}}' | grep -q '^aerospike$$'; then \
+		echo "aerospike container is already running ($(CONTAINER_RT))"; \
 	else \
-		docker run -d --name aerospike \
+		$(CONTAINER_RT) run -d --name aerospike \
 			-p 3000:3000 -p 3001:3001 -p 3002:3002 \
 			--shm-size=1g \
 			-e "NAMESPACE=test" \
@@ -43,16 +44,16 @@ docker-up: ## Start Aerospike server in Docker
 		sleep 3; \
 	fi
 
-.PHONY: docker-down
-docker-down: ## Stop and remove Aerospike container
-	docker rm -f aerospike 2>/dev/null || true
+.PHONY: stop-aerospike-ce
+stop-aerospike-ce: ## Stop and remove Aerospike CE container
+	$(CONTAINER_RT) rm -f aerospike 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Benchmark
 # ---------------------------------------------------------------------------
 
 .PHONY: run-benchmark
-run-benchmark: install docker-up ## Run benchmark (COUNT, ROUNDS, CONCURRENCY configurable)
+run-benchmark: install run-aerospike-ce ## Run benchmark (COUNT, ROUNDS, CONCURRENCY configurable)
 	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
 	$(PYTHON) benchmark/bench_compare.py \
 		--count $(BENCH_COUNT) \
@@ -70,11 +71,11 @@ test-unit: install ## Run unit tests (no server needed)
 	uvx --with tox-uv tox -e py312
 
 .PHONY: test-integration
-test-integration: install docker-up ## Run integration tests
+test-integration: install run-aerospike-ce ## Run integration tests
 	uvx --with tox-uv tox -e integration
 
 .PHONY: test-all
-test-all: install docker-up ## Run all tests
+test-all: install run-aerospike-ce ## Run all tests
 	uvx --with tox-uv tox -e all
 
 # ---------------------------------------------------------------------------
