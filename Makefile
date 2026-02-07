@@ -4,6 +4,8 @@ AEROSPIKE_HOST ?= 127.0.0.1
 AEROSPIKE_PORT ?= 3000
 
 RUNTIME ?= docker
+AEROSPIKE_CPUS ?= 2
+AEROSPIKE_MEMORY ?= 2g
 BENCH_COUNT ?= 1000
 BENCH_ROUNDS ?= 5
 BENCH_CONCURRENCY ?= 50
@@ -31,6 +33,8 @@ run-aerospike-ce: ## Start Aerospike CE container (RUNTIME=docker|podman)
 	else \
 		$(RUNTIME) run -d --name aerospike \
 			-p 3000:3000 -p 3001:3001 -p 3002:3002 \
+			--cpus=$(AEROSPIKE_CPUS) \
+			--memory=$(AEROSPIKE_MEMORY) \
 			--shm-size=1g \
 			-e "NAMESPACE=test" \
 			-e "DEFAULT_TTL=2592000" \
