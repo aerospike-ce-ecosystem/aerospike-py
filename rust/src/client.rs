@@ -7,6 +7,7 @@ use aerospike_core::{
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
+use crate::batch_types::{batch_to_batch_records_py, PyBatchRecords};
 use crate::errors::as_to_pyerr;
 use crate::operations::py_ops_to_rust;
 use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_py, user_to_py};
@@ -14,7 +15,7 @@ use crate::policy::batch_policy::parse_batch_policy;
 use crate::policy::client_policy::parse_client_policy;
 use crate::policy::read_policy::parse_read_policy;
 use crate::policy::write_policy::parse_write_policy;
-use crate::record_helpers::{batch_record_meta, batch_records_to_py, record_to_meta};
+use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::runtime::RUNTIME;
 use crate::types::bin::py_dict_to_bins;
 use crate::types::host::parse_hosts_from_config;
@@ -845,7 +846,7 @@ impl PyClient {
 
     /// Query info about a specific user.
     #[pyo3(signature = (username, policy=None))]
-    fn admin_query_user(
+    fn admin_query_user_info(
         &self,
         py: Python<'_>,
         username: &str,
@@ -876,7 +877,7 @@ impl PyClient {
 
     /// Query info about all users.
     #[pyo3(signature = (policy=None))]
-    fn admin_query_users(
+    fn admin_query_users_info(
         &self,
         py: Python<'_>,
         policy: Option<&Bound<'_, PyDict>>,
@@ -1108,28 +1109,28 @@ impl PyClient {
 
     // ── Batch operations ──────────────────────────────────────────
 
-    /// Read multiple records. Returns list of (key, meta, bins) tuples.
-    #[pyo3(signature = (keys, policy=None))]
-    fn get_many(
+    /// Read multiple records. Returns BatchRecords.
+    /// bins=None → read all bins; bins=["a","b"] → specific bins; bins=[] → existence check.
+    #[pyo3(signature = (keys, bins=None, policy=None))]
+    fn batch_read(
         &self,
         py: Python<'_>,
         keys: &Bound<'_, PyList>,
+        bins: Option<Vec<String>>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Py<PyAny>> {
-        self.batch_get_internal(py, keys, Bins::All, policy)
-    }
-
-    /// Check if multiple records exist. Returns list of (key, meta) tuples.
-    #[pyo3(signature = (keys, policy=None))]
-    fn exists_many(
-        &self,
-        py: Python<'_>,
-        keys: &Bound<'_, PyList>,
-        policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Py<PyAny>> {
+    ) -> PyResult<PyBatchRecords> {
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let read_policy = BatchReadPolicy::default();
+
+        let bins_selector = match &bins {
+            None => Bins::All,
+            Some(b) if b.is_empty() => Bins::None,
+            Some(b) => {
+                let refs: Vec<&str> = b.iter().map(|s| s.as_str()).collect();
+                Bins::from(refs.as_slice())
+            }
+        };
 
         let rust_keys: Vec<aerospike_core::Key> = keys
             .iter()
@@ -1138,36 +1139,14 @@ impl PyClient {
 
         let ops: Vec<BatchOperation> = rust_keys
             .iter()
-            .map(|k| BatchOperation::read(&read_policy, k.clone(), Bins::None))
+            .map(|k| BatchOperation::read(&read_policy, k.clone(), bins_selector.clone()))
             .collect();
 
         let results = py.detach(|| {
             RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
         })?;
 
-        let py_list = PyList::empty(py);
-        for br in &results {
-            let key_py = key_to_py(py, &br.key)?;
-            let meta = batch_record_meta(py, br);
-            let tuple = PyTuple::new(py, [key_py, meta])?;
-            py_list.append(tuple)?;
-        }
-        Ok(py_list.into_any().unbind())
-    }
-
-    /// Read specific bins from multiple records. Returns list of (key, meta, bins) tuples.
-    #[pyo3(signature = (keys, bins, policy=None))]
-    fn select_many(
-        &self,
-        py: Python<'_>,
-        keys: &Bound<'_, PyList>,
-        bins: &Bound<'_, PyList>,
-        policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Py<PyAny>> {
-        let bin_names: Vec<String> = bins.extract()?;
-        let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
-        let bins_selector = Bins::from(bin_refs.as_slice());
-        self.batch_get_internal(py, keys, bins_selector, policy)
+        batch_to_batch_records_py(py, &results)
     }
 
     /// Perform operations on multiple records. Returns list of (key, meta, bins) tuples.
@@ -1241,35 +1220,6 @@ impl PyClient {
         self.inner.as_ref().ok_or_else(|| {
             crate::errors::ClientError::new_err("Client is not connected. Call connect() first.")
         })
-    }
-
-    /// Internal helper for get_many / select_many
-    fn batch_get_internal(
-        &self,
-        py: Python<'_>,
-        keys: &Bound<'_, PyList>,
-        bins: Bins,
-        policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Py<PyAny>> {
-        let client = self.get_client()?.clone();
-        let batch_policy = parse_batch_policy(policy)?;
-        let read_policy = BatchReadPolicy::default();
-
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        let ops: Vec<BatchOperation> = rust_keys
-            .iter()
-            .map(|k| BatchOperation::read(&read_policy, k.clone(), bins.clone()))
-            .collect();
-
-        let results = py.detach(|| {
-            RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
-        })?;
-
-        batch_records_to_py(py, &results)
     }
 
     /// Internal helper for index creation

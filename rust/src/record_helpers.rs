@@ -40,17 +40,3 @@ pub fn record_to_meta(py: Python<'_>, record: &aerospike_core::Record) -> PyResu
     meta.set_item("ttl", ttl)?;
     Ok(meta.into_any().unbind())
 }
-
-/// Extract meta dict from a BatchRecord (for exists_many).
-pub fn batch_record_meta(py: Python<'_>, br: &BatchRecord) -> Py<PyAny> {
-    match &br.record {
-        Some(record) => record_to_meta(py, record).unwrap_or_else(|e| {
-            eprintln!(
-                "Warning: failed to extract metadata from batch record (key={:?}): {}",
-                br.key, e
-            );
-            py.None()
-        }),
-        None => py.None(),
-    }
-}

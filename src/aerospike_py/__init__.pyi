@@ -26,6 +26,18 @@ Record = tuple[Optional[Key], Optional[Metadata], Optional[Bins]]
 ExistsResult = tuple[Optional[Key], Optional[Metadata]]
 """Exists result tuple: (key, meta) where meta is None if not found."""
 
+class BatchRecord:
+    """Single record result from a batch read operation."""
+
+    key: Key
+    result: int
+    record: Optional[Record]
+
+class BatchRecords:
+    """Container for batch read results."""
+
+    batch_records: list[BatchRecord]
+
 PolicyDict = dict[str, Any]
 """Policy dictionary with keys like 'timeout', 'key', 'exists', 'gen', etc."""
 
@@ -133,18 +145,12 @@ class Client:
     ) -> tuple[Any, Metadata, list[tuple[str, Any]]]: ...
 
     # -- Batch --
-    def get_many(
-        self, keys: list[Key], policy: Optional[PolicyDict] = None
-    ) -> list[Record]: ...
-    def exists_many(
-        self, keys: list[Key], policy: Optional[PolicyDict] = None
-    ) -> list[ExistsResult]: ...
-    def select_many(
+    def batch_read(
         self,
         keys: list[Key],
-        bins: list[str],
+        bins: Optional[list[str]] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> list[Record]: ...
+    ) -> BatchRecords: ...
     def batch_operate(
         self,
         keys: list[Key],
@@ -246,10 +252,10 @@ class Client:
         roles: list[str],
         policy: Optional[PolicyDict] = None,
     ) -> None: ...
-    def admin_query_user(
+    def admin_query_user_info(
         self, username: str, policy: Optional[PolicyDict] = None
     ) -> dict[str, Any]: ...
-    def admin_query_users(
+    def admin_query_users_info(
         self, policy: Optional[PolicyDict] = None
     ) -> list[dict[str, Any]]: ...
 
@@ -392,18 +398,12 @@ class AsyncClient:
     ) -> tuple[Any, Metadata, list[tuple[str, Any]]]: ...
 
     # -- Batch --
-    async def get_many(
-        self, keys: list[Key], policy: Optional[PolicyDict] = None
-    ) -> list[Record]: ...
-    async def exists_many(
-        self, keys: list[Key], policy: Optional[PolicyDict] = None
-    ) -> list[ExistsResult]: ...
-    async def select_many(
+    async def batch_read(
         self,
         keys: list[Key],
-        bins: list[str],
+        bins: Optional[list[str]] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> list[Record]: ...
+    ) -> BatchRecords: ...
     async def batch_operate(
         self,
         keys: list[Key],
@@ -511,10 +511,10 @@ class AsyncClient:
         roles: list[str],
         policy: Optional[PolicyDict] = None,
     ) -> None: ...
-    async def admin_query_user(
+    async def admin_query_user_info(
         self, username: str, policy: Optional[PolicyDict] = None
     ) -> dict[str, Any]: ...
-    async def admin_query_users(
+    async def admin_query_users_info(
         self, policy: Optional[PolicyDict] = None
     ) -> list[dict[str, Any]]: ...
 

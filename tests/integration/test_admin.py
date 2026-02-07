@@ -41,7 +41,7 @@ class TestAdminUser:
             raise
 
         try:
-            user_info = client.admin_query_user("test_user_1")
+            user_info = client.admin_query_user_info("test_user_1")
             assert user_info["user"] == "test_user_1"
             assert "read-write" in user_info["roles"]
         finally:
@@ -58,11 +58,11 @@ class TestAdminUser:
 
         try:
             client.admin_grant_roles("test_user_2", ["read-write"])
-            user_info = client.admin_query_user("test_user_2")
+            user_info = client.admin_query_user_info("test_user_2")
             assert "read-write" in user_info["roles"]
 
             client.admin_revoke_roles("test_user_2", ["read"])
-            user_info = client.admin_query_user("test_user_2")
+            user_info = client.admin_query_user_info("test_user_2")
             assert "read" not in user_info["roles"]
         finally:
             client.admin_drop_user("test_user_2")
@@ -70,7 +70,7 @@ class TestAdminUser:
     def test_query_users(self, client):
         """Test querying all users."""
         try:
-            users = client.admin_query_users()
+            users = client.admin_query_users_info()
             assert isinstance(users, list)
             # At least the admin user should exist
             assert len(users) >= 1

@@ -35,7 +35,7 @@ pyo3::create_exception!(aerospike, QueryAbortedError, QueryError);
 pyo3::create_exception!(aerospike, AdminError, ServerError);
 pyo3::create_exception!(aerospike, UDFError, ServerError);
 
-fn result_code_to_int(rc: &ResultCode) -> i32 {
+pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
     match rc {
         ResultCode::Ok => 0,
         ResultCode::ServerError => 1,
