@@ -7,7 +7,7 @@ RUNTIME ?= docker
 AEROSPIKE_CPUS ?= 2
 AEROSPIKE_MEMORY ?= 2g
 BENCH_COUNT ?= 1000
-BENCH_ROUNDS ?= 5
+BENCH_ROUNDS ?= 10
 BENCH_CONCURRENCY ?= 50
 
 # ---------------------------------------------------------------------------

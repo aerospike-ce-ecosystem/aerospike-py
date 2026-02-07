@@ -23,7 +23,8 @@ import time
 
 NAMESPACE = "test"
 SET_NAME = "bench_cmp"
-WARMUP_COUNT = 200
+WARMUP_COUNT = 500
+SETTLE_SECS = 0.5  # pause between phases to let I/O settle
 
 
 # ── timing helpers ───────────────────────────────────────────
@@ -46,11 +47,24 @@ def _measure_bulk(fn) -> float:
     return time.perf_counter() - t0
 
 
+def _trim_iqr(values: list[float]) -> list[float]:
+    """Remove outliers outside 1.5x IQR. Returns original if too few samples."""
+    if len(values) < 5:
+        return values
+    s = sorted(values)
+    q1 = s[len(s) // 4]
+    q3 = s[3 * len(s) // 4]
+    iqr = q3 - q1
+    lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    trimmed = [v for v in values if lo <= v <= hi]
+    return trimmed if len(trimmed) >= 3 else values
+
+
 def _median_of_medians(rounds: list[list[float]]) -> dict:
     """Given multiple rounds of per-op times, return stable metrics."""
-    round_medians = [statistics.median(r) * 1000 for r in rounds]
-    round_means = [statistics.mean(r) * 1000 for r in rounds]
-    round_throughputs = [len(r) / sum(r) for r in rounds if sum(r) > 0]
+    round_medians = _trim_iqr([statistics.median(r) * 1000 for r in rounds])
+    round_means = _trim_iqr([statistics.mean(r) * 1000 for r in rounds])
+    round_throughputs = _trim_iqr([len(r) / sum(r) for r in rounds if sum(r) > 0])
 
     # Combine all times for p99
     all_ms = [t * 1000 for r in rounds for t in r]
@@ -67,8 +81,8 @@ def _median_of_medians(rounds: list[list[float]]) -> dict:
 
 def _bulk_median(round_times: list[float], count: int) -> dict:
     """Given multiple round elapsed times for a bulk op, return metrics."""
-    ops_per_sec = [count / t for t in round_times if t > 0]
-    avg_ms = [(t / count) * 1000 for t in round_times]
+    avg_ms = _trim_iqr([(t / count) * 1000 for t in round_times])
+    ops_per_sec = _trim_iqr([count / t for t in round_times if t > 0])
     return {
         "avg_ms": statistics.median(avg_ms),
         "p50_ms": None,
@@ -76,6 +90,12 @@ def _bulk_median(round_times: list[float], count: int) -> dict:
         "ops_per_sec": statistics.median(ops_per_sec) if ops_per_sec else 0,
         "stdev_ms": statistics.stdev(avg_ms) if len(avg_ms) > 1 else 0,
     }
+
+
+def _settle():
+    """GC collect + short sleep to stabilize between phases."""
+    gc.collect()
+    time.sleep(SETTLE_SECS)
 
 
 # ── seed / cleanup ───────────────────────────────────────────
@@ -150,8 +170,11 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
             client.remove((NAMESPACE, SET_NAME, f"{prefix}p{r}_{i}"))
     results["put"] = _median_of_medians(put_rounds)
 
+    _settle()
+
     # --- seed data for GET/BATCH/SCAN ---
     _seed_sync(client.put, prefix, count)
+    _settle()
 
     # --- GET ---
     get_rounds = []
@@ -164,6 +187,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
         gc.enable()
         get_rounds.append(times)
     results["get"] = _median_of_medians(get_rounds)
+    _settle()
 
     # --- BATCH GET ---
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
@@ -174,6 +198,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
         gc.enable()
         batch_rounds.append(elapsed)
     results["batch_get"] = _bulk_median(batch_rounds, count)
+    _settle()
 
     # --- SCAN ---
     scan_rounds = []
@@ -234,9 +259,11 @@ def bench_c_sync(
         for i in range(count):
             client.remove((NAMESPACE, SET_NAME, f"{prefix}p{r}_{i}"))
     results["put"] = _median_of_medians(put_rounds)
+    _settle()
 
     # --- seed ---
     _seed_sync(client.put, prefix, count)
+    _settle()
 
     # --- GET ---
     get_rounds = []
@@ -249,6 +276,7 @@ def bench_c_sync(
         gc.enable()
         get_rounds.append(times)
     results["get"] = _median_of_medians(get_rounds)
+    _settle()
 
     # --- BATCH GET ---
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
@@ -259,6 +287,7 @@ def bench_c_sync(
         gc.enable()
         batch_rounds.append(elapsed)
     results["batch_get"] = _bulk_median(batch_rounds, count)
+    _settle()
 
     # --- SCAN ---
     scan_rounds = []
@@ -325,9 +354,11 @@ async def bench_rust_async(
             [(NAMESPACE, SET_NAME, f"{prefix}p{r}_{i}") for i in range(count)]
         )
     results["put"] = _bulk_median(put_rounds, count)
+    _settle()
 
     # --- seed ---
     await _seed_async(client, prefix, count, concurrency)
+    _settle()
 
     # --- GET (concurrent) ---
     get_rounds = []
@@ -344,6 +375,7 @@ async def bench_rust_async(
         gc.enable()
         get_rounds.append(elapsed)
     results["get"] = _bulk_median(get_rounds, count)
+    _settle()
 
     # --- BATCH GET ---
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
@@ -356,6 +388,7 @@ async def bench_rust_async(
         gc.enable()
         batch_rounds.append(elapsed)
     results["batch_get"] = _bulk_median(batch_rounds, count)
+    _settle()
 
     # --- SCAN ---
     scan_rounds = []
@@ -554,7 +587,7 @@ def main():
         description="Benchmark: aerospike-py (Rust) vs official aerospike (C)"
     )
     parser.add_argument("--count", type=int, default=1000, help="Ops per round")
-    parser.add_argument("--rounds", type=int, default=5, help="Rounds per operation")
+    parser.add_argument("--rounds", type=int, default=10, help="Rounds per operation")
     parser.add_argument("--warmup", type=int, default=WARMUP_COUNT, help="Warmup ops")
     parser.add_argument("--concurrency", type=int, default=50, help="Async concurrency")
     parser.add_argument("--host", default="127.0.0.1")
