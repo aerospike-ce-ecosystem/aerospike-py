@@ -1,10 +1,10 @@
 # Query & Scan Guide
 
-## Secondary Index Queries
+## Secondary Index Query
 
-Queries require a secondary index on the bin being queried.
+쿼리를 수행하려면 조회 대상 bin에 Secondary Index가 필요합니다.
 
-### Step 1: Create a Secondary Index
+### Step 1: Create Secondary Index
 
 ```python
 import aerospike_py as aerospike
@@ -14,13 +14,13 @@ client = aerospike.client({
     "cluster_name": "docker",
 }).connect()
 
-# Integer index
+# 정수 인덱스
 client.index_integer_create("test", "users", "age", "users_age_idx")
 
-# String index
+# 문자열 인덱스
 client.index_string_create("test", "users", "city", "users_city_idx")
 
-# Geospatial index
+# 지리공간 인덱스
 client.index_geo2dsphere_create("test", "locations", "coords", "geo_idx")
 ```
 
@@ -35,17 +35,17 @@ for i in range(100):
     })
 ```
 
-### Step 3: Query with Predicates
+### Step 3: Query with Predicate
 
 ```python
 from aerospike_py import predicates
 
-# Equality query
+# 동등 쿼리
 query = client.query("test", "users")
 query.where(predicates.equals("city", "Seoul"))
 records = query.results()
 
-# Range query
+# 범위 쿼리
 query = client.query("test", "users")
 query.where(predicates.between("age", 25, 35))
 records = query.results()
@@ -73,7 +73,7 @@ def process(record):
 query.foreach(process)
 ```
 
-### Stop Early
+### Early Termination
 
 ```python
 count = 0
@@ -84,7 +84,7 @@ def limited(record):
     _, _, bins = record
     print(bins)
     if count >= 5:
-        return False  # stop iteration
+        return False  # 반복 중단
 
 query.foreach(limited)
 ```
@@ -98,9 +98,9 @@ client.index_remove("test", "users_city_idx")
 
 ## Full Namespace Scan
 
-Scans read all records in a namespace/set without requiring a secondary index.
+스캔은 Secondary Index 없이 namespace/set의 모든 record를 읽습니다.
 
-### Basic Scan
+### 기본 스캔
 
 ```python
 scan = client.scan("test", "users")
@@ -160,26 +160,26 @@ asyncio.run(main())
 
 ## Predicate Reference
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `equals(bin, val)` | Equality | `equals("name", "Alice")` |
-| `between(bin, min, max)` | Range (inclusive) | `between("age", 20, 30)` |
-| `contains(bin, idx_type, val)` | List/map contains | `contains("tags", INDEX_TYPE_LIST, "py")` |
-| `geo_within_geojson_region(bin, geojson)` | Points in region | See below |
-| `geo_within_radius(bin, lat, lng, radius)` | Points in circle | See below |
-| `geo_contains_geojson_point(bin, geojson)` | Regions containing point | See below |
+| 함수 | 설명 | 예시 |
+|------|------|------|
+| `equals(bin, val)` | 동등 조건 | `equals("name", "Alice")` |
+| `between(bin, min, max)` | 범위 조건 (양 끝 포함) | `between("age", 20, 30)` |
+| `contains(bin, idx_type, val)` | list/map 포함 여부 | `contains("tags", INDEX_TYPE_LIST, "py")` |
+| `geo_within_geojson_region(bin, geojson)` | 영역 내 포인트 | 아래 참조 |
+| `geo_within_radius(bin, lat, lng, radius)` | 원형 범위 내 포인트 | 아래 참조 |
+| `geo_contains_geojson_point(bin, geojson)` | 포인트를 포함하는 영역 | 아래 참조 |
 
-### Geospatial Examples
+### 지리공간 예시
 
 ```python
-# Points within a polygon
+# 다각형 내의 포인트
 region = '{"type":"Polygon","coordinates":[[[126.9,37.5],[126.9,37.6],[127.0,37.6],[127.0,37.5],[126.9,37.5]]]}'
 query.where(predicates.geo_within_geojson_region("location", region))
 
-# Points within radius (meters)
+# 반경 내의 포인트 (미터 단위)
 query.where(predicates.geo_within_radius("location", 37.5665, 126.978, 5000.0))
 
-# Regions containing a point
+# 포인트를 포함하는 영역
 point = '{"type":"Point","coordinates":[126.978, 37.5665]}'
 query.where(predicates.geo_contains_geojson_point("coverage", point))
 ```

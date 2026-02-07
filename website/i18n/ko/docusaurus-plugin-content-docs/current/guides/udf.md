@@ -1,30 +1,30 @@
-# UDF Guide
+# UDF (User-Defined Functions) Guide
 
-User Defined Functions (UDFs) are Lua scripts that execute on the Aerospike server.
+UDF (User Defined Functions)는 Aerospike 서버에서 실행되는 Lua 스크립트입니다.
 
-## Register a UDF
+## Register UDF
 
 ```python
 client.udf_put("my_udf.lua")
 ```
 
-The file must be accessible from the Python process. The UDF is registered on all cluster nodes.
+파일은 Python 프로세스에서 접근 가능해야 합니다. UDF는 모든 클러스터 노드에 등록됩니다.
 
-## Execute a UDF on a Record
+## Execute UDF on Record
 
 ```python
 key = ("test", "demo", "user1")
 result = client.apply(key, "my_udf", "my_function", [1, "hello"])
 ```
 
-| Parameter | Description |
-|-----------|-------------|
-| `key` | Record key to execute on |
-| `module` | UDF module name (without `.lua`) |
-| `function` | Function name within the module |
-| `args` | Optional list of arguments |
+| 매개변수 | 설명 |
+|----------|------|
+| `key` | 실행 대상 record 키 |
+| `module` | UDF 모듈 이름 (`.lua` 제외) |
+| `function` | 모듈 내 함수 이름 |
+| `args` | 선택적 인수 리스트 |
 
-## Remove a UDF
+## Remove UDF
 
 ```python
 client.udf_remove("my_udf")
@@ -32,7 +32,7 @@ client.udf_remove("my_udf")
 
 ## Example: Counter UDF
 
-### Lua Script (`counter.lua`)
+### Lua Script (counter.lua)
 
 ```lua
 function increment(rec, bin_name, amount)
@@ -50,10 +50,10 @@ end
 ### Python Usage
 
 ```python
-# Register
+# 등록
 client.udf_put("counter.lua")
 
-# Execute
+# 실행
 key = ("test", "demo", "counter1")
 result = client.apply(key, "counter", "increment", ["count", 5])
 print(result)  # 5
@@ -61,7 +61,7 @@ print(result)  # 5
 result = client.apply(key, "counter", "increment", ["count", 3])
 print(result)  # 8
 
-# Cleanup
+# 정리
 client.udf_remove("counter")
 ```
 
@@ -92,7 +92,7 @@ asyncio.run(main())
 
 ## Notes
 
-- UDFs execute on the server node that owns the record
-- Lua is the only supported UDF language
-- UDF changes take a few seconds to propagate to all nodes
-- Keep UDFs simple for best performance
+- UDF는 해당 record를 소유한 서버 노드에서 실행됩니다
+- Lua만 UDF 언어로 지원됩니다
+- UDF 변경 사항이 모든 노드에 전파되는 데 몇 초가 걸립니다
+- 최적의 성능을 위해 UDF를 간결하게 유지하세요

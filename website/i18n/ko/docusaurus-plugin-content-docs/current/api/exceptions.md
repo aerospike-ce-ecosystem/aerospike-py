@@ -1,6 +1,6 @@
 # Exceptions
 
-All exceptions are available from `aerospike` and `aerospike.exception`.
+모든 예외는 `aerospike` 및 `aerospike.exception`에서 사용할 수 있습니다.
 
 ```python
 import aerospike_py as aerospike
@@ -38,41 +38,41 @@ Exception
 
 ## Base Exceptions
 
-| Exception | Description |
+| Exception | 설명 |
 |-----------|-------------|
-| `AerospikeError` | Base for all Aerospike exceptions |
-| `ClientError` | Client-side errors (connection, config) |
-| `ClusterError` | Cluster connection/discovery errors |
-| `InvalidArgError` | Invalid argument passed to a method |
-| `TimeoutError` | Operation timed out |
-| `ServerError` | Server-side errors |
-| `RecordError` | Record-level operation errors |
+| `AerospikeError` | 모든 Aerospike 예외의 기본 클래스 |
+| `ClientError` | 클라이언트 측 오류 (연결, 설정) |
+| `ClusterError` | 클러스터 연결/탐색 오류 |
+| `InvalidArgError` | 메서드에 잘못된 인수가 전달됨 |
+| `TimeoutError` | 작업 시간 초과 |
+| `ServerError` | 서버 측 오류 |
+| `RecordError` | 레코드 수준 작업 오류 |
 
 ## Record Exceptions
 
-| Exception | Description |
+| Exception | 설명 |
 |-----------|-------------|
-| `RecordNotFound` | Record does not exist |
-| `RecordExistsError` | Record already exists (CREATE_ONLY policy) |
-| `RecordGenerationError` | Generation mismatch (optimistic locking) |
-| `RecordTooBig` | Record exceeds size limit |
-| `BinNameError` | Invalid bin name (too long, invalid chars) |
-| `BinExistsError` | Bin already exists |
-| `BinNotFound` | Bin does not exist |
-| `BinTypeError` | Bin type mismatch |
-| `FilteredOut` | Record filtered by expression |
+| `RecordNotFound` | 레코드가 존재하지 않음 |
+| `RecordExistsError` | 레코드가 이미 존재함 (CREATE_ONLY 정책) |
+| `RecordGenerationError` | 세대 불일치 (Optimistic Locking) |
+| `RecordTooBig` | 레코드가 크기 제한을 초과함 |
+| `BinNameError` | 잘못된 빈 이름 (너무 길거나 유효하지 않은 문자) |
+| `BinExistsError` | 빈이 이미 존재함 |
+| `BinNotFound` | 빈이 존재하지 않음 |
+| `BinTypeError` | 빈 타입 불일치 |
+| `FilteredOut` | Expression에 의해 레코드가 필터링됨 |
 
 ## Server Exceptions
 
-| Exception | Description |
+| Exception | 설명 |
 |-----------|-------------|
-| `IndexError` | Secondary index operation error |
-| `IndexNotFound` | Index does not exist |
-| `IndexFoundError` | Index already exists |
-| `QueryError` | Query execution error |
-| `QueryAbortedError` | Query was aborted |
-| `AdminError` | Admin operation error |
-| `UDFError` | UDF registration/execution error |
+| `IndexError` | Secondary Index 작업 오류 |
+| `IndexNotFound` | 인덱스가 존재하지 않음 |
+| `IndexFoundError` | 인덱스가 이미 존재함 |
+| `QueryError` | 쿼리 실행 오류 |
+| `QueryAbortedError` | 쿼리가 중단됨 |
+| `AdminError` | 관리 작업 오류 |
+| `UDFError` | UDF 등록/실행 오류 |
 
 ## Error Handling Examples
 
@@ -104,7 +104,7 @@ except RecordGenerationError:
     print("Record was modified by another client")
 ```
 
-### Create-Only
+### Create Only
 
 ```python
 from aerospike_py.exception import RecordExistsError

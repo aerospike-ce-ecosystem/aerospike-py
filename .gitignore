@@ -26,3 +26,9 @@ rust/target/
 .vscode/
 *.swp
 *.swo
+
+# Docusaurus
+website/node_modules/
+website/build/
+website/.docusaurus/
+website/src/pages/releases.mdx
