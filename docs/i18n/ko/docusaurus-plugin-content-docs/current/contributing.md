@@ -1,4 +1,9 @@
-# Contributing
+---
+title: Contributing
+sidebar_label: 기여하기
+sidebar_position: 100
+description: 개발 환경 설정, 빌드, 테스트, 코드 스타일 가이드
+---
 
 aerospike-py에 기여해 주셔서 감사합니다!
 

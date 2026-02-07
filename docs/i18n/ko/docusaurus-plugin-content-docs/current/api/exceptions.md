@@ -1,4 +1,9 @@
-# Exceptions
+---
+title: Exceptions
+sidebar_label: Exceptions
+sidebar_position: 3
+description: 예외 계층 구조 및 에러 처리 패턴
+---
 
 모든 예외는 `aerospike` 및 `aerospike.exception`에서 사용할 수 있습니다.
 

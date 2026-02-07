@@ -1,4 +1,9 @@
-# Map CDT Operations
+---
+title: Map CDT Operations
+sidebar_label: Map Operations
+sidebar_position: 5
+description: Map bin에 대한 27가지 원자적 작업 가이드
+---
 
 Map CDT (Collection Data Type) 작업은 map bin에 대해 27가지 원자적 작업을 제공합니다. 이 작업들은 `client.operate()`의 일부로 서버 측에서 실행되며, map 데이터에 대한 원자적 다중 작업 트랜잭션을 가능하게 합니다.
 

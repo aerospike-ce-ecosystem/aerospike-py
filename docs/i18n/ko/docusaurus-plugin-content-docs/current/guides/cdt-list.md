@@ -1,4 +1,9 @@
-# List CDT Operations
+---
+title: List CDT Operations
+sidebar_label: List Operations
+sidebar_position: 4
+description: List bin에 대한 31가지 원자적 작업 가이드
+---
 
 List CDT (Collection Data Type) 작업은 list bin에 대해 31가지 원자적 작업을 제공합니다. 이 작업들은 `client.operate()`의 일부로 서버 측에서 실행되며, list 데이터에 대한 원자적 다중 작업 트랜잭션을 가능하게 합니다.
 

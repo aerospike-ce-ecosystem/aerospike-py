@@ -1,4 +1,9 @@
-# Administration Guide
+---
+title: Admin Guide
+sidebar_label: Admin
+sidebar_position: 7
+description: 보안 활성화 Aerospike 클러스터 사용자 및 역할 관리
+---
 
 관리 작업에는 보안이 활성화된 Aerospike 서버가 필요합니다.
 

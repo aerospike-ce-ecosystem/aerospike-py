@@ -1,7 +1,12 @@
+---
+title: CRUD & Batch Operations Guide
+sidebar_label: CRUD & Batch
+sidebar_position: 1
+description: put, get, remove, batch 작업 및 낙관적 잠금 가이드
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
-
-# CRUD & Batch Operations Guide
 
 ## Keys
 

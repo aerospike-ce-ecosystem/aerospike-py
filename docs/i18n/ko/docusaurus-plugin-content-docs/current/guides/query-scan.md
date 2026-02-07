@@ -1,4 +1,9 @@
-# Query & Scan Guide
+---
+title: Query & Scan Guide
+sidebar_label: Query & Scan
+sidebar_position: 2
+description: 보조 인덱스 쿼리, 전체 네임스페이스 스캔 가이드
+---
 
 ## Secondary Index Query
 

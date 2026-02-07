@@ -1,4 +1,9 @@
-# Expression Filters
+---
+title: Expression Filters
+sidebar_label: Expression Filters
+sidebar_position: 3
+description: 서버 측 레코드 필터링을 위한 Expression 필터 가이드
+---
 
 Expression 필터를 사용하면 읽기, 쓰기, 쿼리, 스캔 작업 중에 서버 측에서 record를 필터링할 수 있습니다. 서버가 expression을 평가하고 일치하는 record만 반환(또는 수정)합니다.
 

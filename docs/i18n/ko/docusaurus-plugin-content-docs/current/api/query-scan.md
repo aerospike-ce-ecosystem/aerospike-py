@@ -1,4 +1,9 @@
-# Query & Scan
+---
+title: Query & Scan
+sidebar_label: Query & Scan
+sidebar_position: 2
+description: Query 및 Scan 클래스 API 레퍼런스
+---
 
 ## Query
 

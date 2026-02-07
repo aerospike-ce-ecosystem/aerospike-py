@@ -1,4 +1,9 @@
-# UDF (User-Defined Functions) Guide
+---
+title: UDF Guide
+sidebar_label: UDF (Lua)
+sidebar_position: 6
+description: Aerospike 서버에서 Lua UDF 등록, 실행, 제거 가이드
+---
 
 UDF (User Defined Functions)는 Aerospike 서버에서 실행되는 Lua 스크립트입니다.
 

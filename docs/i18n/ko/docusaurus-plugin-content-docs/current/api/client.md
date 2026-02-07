@@ -1,7 +1,12 @@
+---
+title: Client
+sidebar_label: Client (Sync & Async)
+sidebar_position: 1
+description: Client 및 AsyncClient 클래스 API 레퍼런스
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
-
-# Client
 
 aerospike-py는 동일한 기능을 가진 동기(`Client`)와 비동기(`AsyncClient`) API를 제공합니다.
 

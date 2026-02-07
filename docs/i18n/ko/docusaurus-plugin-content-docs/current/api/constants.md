@@ -1,4 +1,9 @@
-# Constants
+---
+title: Constants
+sidebar_label: Constants
+sidebar_position: 4
+description: aerospike-py API에서 사용되는 상수 레퍼런스
+---
 
 모든 상수는 `aerospike` 모듈에서 직접 사용할 수 있습니다.
 

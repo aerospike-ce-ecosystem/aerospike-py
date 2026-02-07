@@ -1,7 +1,12 @@
+---
+title: Getting Started
+sidebar_label: 시작하기
+sidebar_position: 1
+description: aerospike-py 설치 및 Aerospike 클러스터 연결 가이드
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
-
-# Getting Started
 
 ## Prerequisites
 
