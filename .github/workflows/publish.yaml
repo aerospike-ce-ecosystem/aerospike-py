@@ -41,7 +41,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10 3.11 3.12 3.13"
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
           allow-prereleases: true
 
       - name: Extract version from git tag
@@ -51,7 +55,7 @@ jobs:
             VERSION="${{ github.event.release.tag_name }}"
             VERSION="${VERSION#v}"  # Remove 'v' prefix if present
           else
-            VERSION="0.0.0.dev0"
+            VERSION="0.0.0-dev0"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
@@ -103,7 +107,7 @@ jobs:
             VERSION="${{ github.event.release.tag_name }}"
             VERSION="${VERSION#v}"  # Remove 'v' prefix if present
           else
-            VERSION="0.0.0.dev0"
+            VERSION="0.0.0-dev0"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
