@@ -92,8 +92,13 @@ def _bulk_median(round_times: list[float], count: int) -> dict:
     }
 
 
+def _log(msg: str):
+    print(f"      [{time.strftime('%H:%M:%S')}] {msg}")
+
+
 def _settle():
     """GC collect + short sleep to stabilize between phases."""
+    _log(f"gc.collect() + sleep {SETTLE_SECS}s ...")
     gc.collect()
     time.sleep(SETTLE_SECS)
 
@@ -143,6 +148,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
     results = {}
 
     # --- warmup (discarded) ---
+    _log(f"warmup {warmup} ops ...")
     for i in range(warmup):
         key = (NAMESPACE, SET_NAME, f"_warm_rs_{i}")
         try:
@@ -153,6 +159,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
             pass
 
     # --- PUT ---
+    _log(f"PUT  {count} ops x {rounds} rounds  (gc disabled)")
     put_rounds = []
     for r in range(rounds):
         gc.disable()
@@ -165,18 +172,18 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
         )
         gc.enable()
         put_rounds.append(times)
-        # cleanup this round's puts
         for i in range(count):
             client.remove((NAMESPACE, SET_NAME, f"{prefix}p{r}_{i}"))
     results["put"] = _median_of_medians(put_rounds)
-
     _settle()
 
     # --- seed data for GET/BATCH/SCAN ---
+    _log(f"seeding {count} records ...")
     _seed_sync(client.put, prefix, count)
     _settle()
 
     # --- GET ---
+    _log(f"GET  {count} ops x {rounds} rounds  (gc disabled)")
     get_rounds = []
     for _ in range(rounds):
         gc.disable()
@@ -190,6 +197,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
     _settle()
 
     # --- BATCH GET ---
+    _log(f"BATCH_GET  {count} keys x {rounds} rounds  (gc disabled)")
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
     batch_rounds = []
     for _ in range(rounds):
@@ -201,6 +209,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
     _settle()
 
     # --- SCAN ---
+    _log(f"SCAN  x {rounds} rounds  (gc disabled)")
     scan_rounds = []
     for _ in range(rounds):
         scan = client.scan(NAMESPACE, SET_NAME)
@@ -211,6 +220,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
     results["scan"] = _bulk_median(scan_rounds, count)
 
     # cleanup
+    _log("cleanup ...")
     _cleanup_sync(client.remove, prefix, count)
     client.close()
 
@@ -234,6 +244,7 @@ def bench_c_sync(
     results = {}
 
     # --- warmup (discarded) ---
+    _log(f"warmup {warmup} ops ...")
     for i in range(warmup):
         key = (NAMESPACE, SET_NAME, f"_warm_cc_{i}")
         try:
@@ -244,6 +255,7 @@ def bench_c_sync(
             pass
 
     # --- PUT ---
+    _log(f"PUT  {count} ops x {rounds} rounds  (gc disabled)")
     put_rounds = []
     for r in range(rounds):
         gc.disable()
@@ -262,10 +274,12 @@ def bench_c_sync(
     _settle()
 
     # --- seed ---
+    _log(f"seeding {count} records ...")
     _seed_sync(client.put, prefix, count)
     _settle()
 
     # --- GET ---
+    _log(f"GET  {count} ops x {rounds} rounds  (gc disabled)")
     get_rounds = []
     for _ in range(rounds):
         gc.disable()
@@ -279,6 +293,7 @@ def bench_c_sync(
     _settle()
 
     # --- BATCH GET ---
+    _log(f"BATCH_GET  {count} keys x {rounds} rounds  (gc disabled)")
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
     batch_rounds = []
     for _ in range(rounds):
@@ -290,6 +305,7 @@ def bench_c_sync(
     _settle()
 
     # --- SCAN ---
+    _log(f"SCAN  x {rounds} rounds  (gc disabled)")
     scan_rounds = []
     for _ in range(rounds):
         scan = client.scan(NAMESPACE, SET_NAME)
@@ -300,6 +316,7 @@ def bench_c_sync(
     results["scan"] = _bulk_median(scan_rounds, count)
 
     # cleanup
+    _log("cleanup ...")
     _cleanup_sync(client.remove, prefix, count)
     client.close()
 
@@ -322,6 +339,7 @@ async def bench_rust_async(
     sem = asyncio.Semaphore(concurrency)
 
     # --- warmup (discarded) ---
+    _log(f"warmup {warmup} ops ...")
     for i in range(warmup):
         key = (NAMESPACE, SET_NAME, f"_warm_ra_{i}")
         try:
@@ -332,6 +350,9 @@ async def bench_rust_async(
             pass
 
     # --- PUT (concurrent) ---
+    _log(
+        f"PUT  {count} ops x {rounds} rounds, concurrency={concurrency}  (gc disabled)"
+    )
     put_rounds = []
     for r in range(rounds):
 
@@ -357,10 +378,14 @@ async def bench_rust_async(
     _settle()
 
     # --- seed ---
+    _log(f"seeding {count} records ...")
     await _seed_async(client, prefix, count, concurrency)
     _settle()
 
     # --- GET (concurrent) ---
+    _log(
+        f"GET  {count} ops x {rounds} rounds, concurrency={concurrency}  (gc disabled)"
+    )
     get_rounds = []
     for _ in range(rounds):
 
@@ -378,6 +403,7 @@ async def bench_rust_async(
     _settle()
 
     # --- BATCH GET ---
+    _log(f"BATCH_GET  {count} keys x {rounds} rounds  (gc disabled)")
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
     batch_rounds = []
     for _ in range(rounds):
@@ -391,6 +417,7 @@ async def bench_rust_async(
     _settle()
 
     # --- SCAN ---
+    _log(f"SCAN  x {rounds} rounds  (gc disabled)")
     scan_rounds = []
     for _ in range(rounds):
         gc.disable()
@@ -402,6 +429,7 @@ async def bench_rust_async(
     results["scan"] = _bulk_median(scan_rounds, count)
 
     # cleanup
+    _log("cleanup ...")
     await client.batch_remove(
         [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
     )
