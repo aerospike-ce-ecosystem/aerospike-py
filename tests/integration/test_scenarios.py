@@ -130,9 +130,11 @@ class TestBatchWorkflow:
         for i, key in enumerate(keys):
             client.put(key, {"idx": i, "val": f"item_{i}"})
 
-        results = client.get_many(keys)
-        assert len(results) == 5
-        for i, (_, meta, bins) in enumerate(results):
+        result = client.batch_read(keys)
+        assert len(result.batch_records) == 5
+        for i, br in enumerate(result.batch_records):
+            assert br.result == 0
+            _, meta, bins = br.record
             assert meta is not None
             assert bins["idx"] == i
             assert bins["val"] == f"item_{i}"
@@ -147,19 +149,22 @@ class TestBatchWorkflow:
         for i, key in enumerate(existing):
             client.put(key, {"val": i})
 
-        results = client.get_many(existing + missing)
-        assert len(results) == 5
+        result = client.batch_read(existing + missing)
+        assert len(result.batch_records) == 5
 
         # First 3 should have data
         for i in range(3):
-            _, meta, bins = results[i]
+            br = result.batch_records[i]
+            assert br.result == 0
+            _, meta, bins = br.record
             assert meta is not None
             assert bins["val"] == i
 
-        # Last 2 should be None
+        # Last 2 should be missing
         for i in range(3, 5):
-            _, meta, bins = results[i]
-            assert meta is None
+            br = result.batch_records[i]
+            assert br.result == 2  # KEY_NOT_FOUND
+            assert br.record is None
 
     def test_batch_operate_then_verify(self, client, cleanup):
         """Batch operate on multiple records, then verify individually."""
@@ -177,17 +182,17 @@ class TestBatchWorkflow:
             _, _, bins = client.get(key)
             assert bins["counter"] == 15
 
-    def test_batch_remove_then_exists_many(self, client, cleanup):
-        """Create records, batch remove, verify with exists_many."""
+    def test_batch_remove_then_batch_read_exists(self, client, cleanup):
+        """Create records, batch remove, verify with batch_read existence check."""
         keys = [("test", "scenario", f"brem_{i}") for i in range(4)]
         for key in keys:
             client.put(key, {"val": 1})
 
         client.batch_remove(keys)
 
-        results = client.exists_many(keys)
-        for _, meta in results:
-            assert meta is None
+        result = client.batch_read(keys, bins=[])
+        for br in result.batch_records:
+            assert br.result == 2  # KEY_NOT_FOUND
 
 
 class TestQueryScanWorkflow:

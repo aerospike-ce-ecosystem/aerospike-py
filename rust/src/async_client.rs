@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use pyo3_async_runtimes::tokio::future_into_py;
 
+use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::operations::py_ops_to_rust;
 use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_py, user_to_py};
@@ -18,7 +19,7 @@ use crate::policy::client_policy::parse_client_policy;
 use crate::policy::query_policy::parse_query_policy;
 use crate::policy::read_policy::parse_read_policy;
 use crate::policy::write_policy::parse_write_policy;
-use crate::record_helpers::{batch_record_meta, batch_records_to_py, record_to_meta};
+use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::types::bin::py_dict_to_bins;
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::{key_to_py, py_to_key};
@@ -619,97 +620,35 @@ impl PyAsyncClient {
 
     // ── Batch ─────────────────────────────────────────────────
 
-    /// Read multiple records (async).
-    #[pyo3(signature = (keys, policy=None))]
-    fn get_many<'py>(
+    /// Read multiple records (async). Returns BatchRecords.
+    /// bins=None → read all bins; bins=["a","b"] → specific bins; bins=[] → existence check.
+    #[pyo3(signature = (keys, bins=None, policy=None))]
+    fn batch_read<'py>(
         &self,
         py: Python<'py>,
         keys: &Bound<'_, PyList>,
+        bins: Option<Vec<String>>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let batch_policy = parse_batch_policy(policy)?;
         let read_policy = BatchReadPolicy::default();
+
+        let bins_selector = match &bins {
+            None => Bins::All,
+            Some(b) if b.is_empty() => Bins::None,
+            Some(b) => {
+                let refs: Vec<&str> = b.iter().map(|s| s.as_str()).collect();
+                Bins::from(refs.as_slice())
+            }
+        };
+
         let rust_keys: Vec<aerospike_core::Key> = keys
             .iter()
             .map(|k| py_to_key(&k))
             .collect::<PyResult<_>>()?;
 
         future_into_py(py, async move {
-            let ops: Vec<BatchOperation> = rust_keys
-                .iter()
-                .map(|k| BatchOperation::read(&read_policy, k.clone(), Bins::All))
-                .collect();
-
-            let results = client
-                .batch(&batch_policy, &ops)
-                .await
-                .map_err(as_to_pyerr)?;
-            Python::attach(|py| batch_records_to_py(py, &results))
-        })
-    }
-
-    /// Check if multiple records exist (async).
-    #[pyo3(signature = (keys, policy=None))]
-    fn exists_many<'py>(
-        &self,
-        py: Python<'py>,
-        keys: &Bound<'_, PyList>,
-        policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let client = self.get_client()?;
-        let batch_policy = parse_batch_policy(policy)?;
-        let read_policy = BatchReadPolicy::default();
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        future_into_py(py, async move {
-            let ops: Vec<BatchOperation> = rust_keys
-                .iter()
-                .map(|k| BatchOperation::read(&read_policy, k.clone(), Bins::None))
-                .collect();
-
-            let results = client
-                .batch(&batch_policy, &ops)
-                .await
-                .map_err(as_to_pyerr)?;
-
-            Python::attach(|py| {
-                let py_list = PyList::empty(py);
-                for br in &results {
-                    let key_py = key_to_py(py, &br.key)?;
-                    let meta = batch_record_meta(py, br);
-                    let tuple = PyTuple::new(py, [key_py, meta])?;
-                    py_list.append(tuple)?;
-                }
-                Ok(py_list.into_any().unbind())
-            })
-        })
-    }
-
-    /// Read specific bins from multiple records (async).
-    #[pyo3(signature = (keys, bins, policy=None))]
-    fn select_many<'py>(
-        &self,
-        py: Python<'py>,
-        keys: &Bound<'_, PyList>,
-        bins: &Bound<'_, PyList>,
-        policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let client = self.get_client()?;
-        let batch_policy = parse_batch_policy(policy)?;
-        let read_policy = BatchReadPolicy::default();
-        let bin_names: Vec<String> = bins.extract()?;
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        future_into_py(py, async move {
-            let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
-            let bins_selector = Bins::from(bin_refs.as_slice());
             let ops: Vec<BatchOperation> = rust_keys
                 .iter()
                 .map(|k| BatchOperation::read(&read_policy, k.clone(), bins_selector.clone()))
@@ -719,7 +658,11 @@ impl PyAsyncClient {
                 .batch(&batch_policy, &ops)
                 .await
                 .map_err(as_to_pyerr)?;
-            Python::attach(|py| batch_records_to_py(py, &results))
+
+            Python::attach(|py| {
+                let batch_records = batch_to_batch_records_py(py, &results)?;
+                Ok(Py::new(py, batch_records)?.into_any())
+            })
         })
     }
 
@@ -1025,7 +968,7 @@ impl PyAsyncClient {
 
     /// Query info about a specific user (async).
     #[pyo3(signature = (username, policy=None))]
-    fn admin_query_user<'py>(
+    fn admin_query_user_info<'py>(
         &self,
         py: Python<'py>,
         username: &str,
@@ -1056,7 +999,7 @@ impl PyAsyncClient {
 
     /// Query info about all users (async).
     #[pyo3(signature = (policy=None))]
-    fn admin_query_users<'py>(
+    fn admin_query_users_info<'py>(
         &self,
         py: Python<'py>,
         policy: Option<&Bound<'_, PyDict>>,

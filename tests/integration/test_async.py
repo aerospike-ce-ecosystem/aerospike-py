@@ -59,32 +59,33 @@ class TestAsyncCRUD:
 
 
 class TestAsyncBatch:
-    async def test_get_many(self, async_client):
+    async def test_batch_read(self, async_client):
         keys = [
             ("test", "demo", "async_batch_1"),
             ("test", "demo", "async_batch_2"),
         ]
         await async_client.put(keys[0], {"v": 1})
         await async_client.put(keys[1], {"v": 2})
-        results = await async_client.get_many(keys)
-        assert len(results) == 2
-        for _, meta, bins in results:
+        result = await async_client.batch_read(keys)
+        assert len(result.batch_records) == 2
+        for br in result.batch_records:
+            assert br.result == 0
+            assert br.record is not None
+            _, meta, bins = br.record
             assert meta is not None
             assert "v" in bins
         await async_client.batch_remove(keys)
 
-    async def test_exists_many(self, async_client):
+    async def test_batch_read_exists(self, async_client):
         keys = [
             ("test", "demo", "async_em_1"),
             ("test", "demo", "async_em_missing"),
         ]
         await async_client.put(keys[0], {"v": 1})
-        results = await async_client.exists_many(keys)
-        assert len(results) == 2
-        _, meta0 = results[0]
-        _, meta1 = results[1]
-        assert meta0 is not None
-        assert meta1 is None
+        result = await async_client.batch_read(keys, bins=[])
+        assert len(result.batch_records) == 2
+        assert result.batch_records[0].result == 0
+        assert result.batch_records[1].result == 2  # KEY_NOT_FOUND
         await async_client.remove(keys[0])
 
 

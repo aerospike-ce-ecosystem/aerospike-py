@@ -30,8 +30,8 @@ def cleanup(client):
             pass
 
 
-class TestGetMany:
-    def test_get_many(self, client, cleanup):
+class TestBatchRead:
+    def test_batch_read_all_bins(self, client, cleanup):
         keys = [
             ("test", "demo", "batch_get_1"),
             ("test", "demo", "batch_get_2"),
@@ -44,36 +44,37 @@ class TestGetMany:
         client.put(keys[1], {"a": 2})
         client.put(keys[2], {"a": 3})
 
-        results = client.get_many(keys)
-        assert len(results) == 3
-        for key_tuple, meta, bins in results:
+        result = client.batch_read(keys)
+        assert len(result.batch_records) == 3
+        for br in result.batch_records:
+            assert br.result == 0
+            assert br.record is not None
+            _, meta, bins = br.record
             assert meta is not None
             assert meta["gen"] >= 1
             assert "a" in bins
 
-    def test_get_many_with_missing(self, client, cleanup):
+    def test_batch_read_specific_bins(self, client, cleanup):
         keys = [
-            ("test", "demo", "batch_get_exists"),
-            ("test", "demo", "batch_get_missing"),
+            ("test", "demo", "batch_select_1"),
+            ("test", "demo", "batch_select_2"),
         ]
-        cleanup.append(keys[0])
+        for k in keys:
+            cleanup.append(k)
 
-        client.put(keys[0], {"val": 1})
+        client.put(keys[0], {"a": 1, "b": 2, "c": 3})
+        client.put(keys[1], {"a": 10, "b": 20, "c": 30})
 
-        results = client.get_many(keys)
-        assert len(results) == 2
-        # First key exists
-        _, meta0, bins0 = results[0]
-        assert meta0 is not None
-        assert bins0["val"] == 1
-        # Second key missing
-        _, meta1, bins1 = results[1]
-        assert meta1 is None
-        assert bins1 is None
+        result = client.batch_read(keys, bins=["a", "c"])
+        assert len(result.batch_records) == 2
+        for br in result.batch_records:
+            assert br.result == 0
+            _, meta, bins = br.record
+            assert meta is not None
+            assert "a" in bins
+            assert "c" in bins
 
-
-class TestExistsMany:
-    def test_exists_many(self, client, cleanup):
+    def test_batch_read_exists(self, client, cleanup):
         keys = [
             ("test", "demo", "batch_exists_1"),
             ("test", "demo", "batch_exists_2"),
@@ -85,34 +86,34 @@ class TestExistsMany:
         client.put(keys[0], {"val": 1})
         client.put(keys[1], {"val": 2})
 
-        results = client.exists_many(keys)
-        assert len(results) == 3
-        _, meta0 = results[0]
-        assert meta0 is not None
-        _, meta1 = results[1]
-        assert meta1 is not None
-        _, meta2 = results[2]
-        assert meta2 is None
+        result = client.batch_read(keys, bins=[])
+        assert len(result.batch_records) == 3
+        assert result.batch_records[0].result == 0
+        assert result.batch_records[1].result == 0
+        assert result.batch_records[2].result == 2  # KEY_NOT_FOUND
 
-
-class TestSelectMany:
-    def test_select_many(self, client, cleanup):
+    def test_batch_read_with_missing(self, client, cleanup):
         keys = [
-            ("test", "demo", "batch_select_1"),
-            ("test", "demo", "batch_select_2"),
+            ("test", "demo", "batch_get_exists"),
+            ("test", "demo", "batch_get_missing"),
         ]
-        for k in keys:
-            cleanup.append(k)
+        cleanup.append(keys[0])
 
-        client.put(keys[0], {"a": 1, "b": 2, "c": 3})
-        client.put(keys[1], {"a": 10, "b": 20, "c": 30})
+        client.put(keys[0], {"val": 1})
 
-        results = client.select_many(keys, ["a", "c"])
-        assert len(results) == 2
-        for _, meta, bins in results:
-            assert meta is not None
-            assert "a" in bins
-            assert "c" in bins
+        result = client.batch_read(keys)
+        assert len(result.batch_records) == 2
+        # First key exists
+        br0 = result.batch_records[0]
+        assert br0.result == 0
+        assert br0.record is not None
+        _, meta0, bins0 = br0.record
+        assert meta0 is not None
+        assert bins0["val"] == 1
+        # Second key missing
+        br1 = result.batch_records[1]
+        assert br1.result == 2  # KEY_NOT_FOUND
+        assert br1.record is None
 
 
 class TestBatchOperate:

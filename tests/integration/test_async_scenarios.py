@@ -80,9 +80,11 @@ class TestAsyncBatchWorkflow:
             for i, key in enumerate(keys):
                 await async_client.put(key, {"idx": i})
 
-            results = await async_client.get_many(keys)
-            assert len(results) == 5
-            for i, (_, meta, bins) in enumerate(results):
+            result = await async_client.batch_read(keys)
+            assert len(result.batch_records) == 5
+            for i, br in enumerate(result.batch_records):
+                assert br.result == 0
+                _, meta, bins = br.record
                 assert meta is not None
                 assert bins["idx"] == i
         finally:
@@ -99,9 +101,9 @@ class TestAsyncBatchWorkflow:
 
         await async_client.batch_remove(keys)
 
-        results = await async_client.exists_many(keys)
-        for _, meta in results:
-            assert meta is None
+        result = await async_client.batch_read(keys, bins=[])
+        for br in result.batch_records:
+            assert br.result == 2  # KEY_NOT_FOUND
 
 
 class TestAsyncDataTypes:
@@ -251,9 +253,15 @@ class TestAsyncConcurrentOps:
             tasks = [async_client.put(key, {"idx": i}) for i, key in enumerate(keys)]
             await asyncio.gather(*tasks)
 
-            results = await async_client.get_many(keys)
-            assert len(results) == 10
-            idxs = sorted([bins["idx"] for _, _, bins in results if bins])
+            result = await async_client.batch_read(keys)
+            assert len(result.batch_records) == 10
+            idxs = sorted(
+                [
+                    br.record[2]["idx"]
+                    for br in result.batch_records
+                    if br.record is not None
+                ]
+            )
             assert idxs == list(range(10))
         finally:
             for key in keys:
