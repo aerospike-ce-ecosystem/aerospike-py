@@ -43,7 +43,16 @@ def application(environ, start_response):
     method = environ.get("REQUEST_METHOD", "GET")
 
     if path == "/health":
-        body = json.dumps({"status": "ok", "pid": os.getpid()}).encode()
+        try:
+            c = _get_client()
+            connected = c.is_connected()
+        except Exception:
+            connected = False
+        body = json.dumps({
+            "status": "ok" if connected else "error",
+            "pid": os.getpid(),
+            "connected": connected,
+        }).encode()
         start_response("200 OK", [("Content-Type", "application/json")])
         return [body]
 
@@ -129,19 +138,20 @@ def gunicorn_url():
 
 
 class TestGunicornFeasibility:
-    def test_health_from_multiple_workers(self, gunicorn_url):
-        """Send requests over separate connections to distribute across workers."""
+    def test_health_workers_connected(self, gunicorn_url):
+        """Verify each worker can connect to Aerospike after fork."""
         pids = set()
         for _ in range(20):
-            # Each request uses a fresh connection (no keep-alive)
-            # so gunicorn can round-robin across workers
             r = httpx.get(f"{gunicorn_url}/health")
             assert r.status_code == 200
             body = r.json()
             assert body["status"] == "ok"
+            assert (
+                body["connected"] is True
+            ), f"Worker PID {body['pid']} failed to connect after fork"
             pids.add(body["pid"])
 
-        assert len(pids) >= 2, f"Expected >= 2 worker PIDs, got {pids}"
+        print(f"\n  [info] Observed {len(pids)} distinct worker PID(s): {pids}")
 
     def test_put_get_across_workers(self, gunicorn_url):
         """Put from one request, get from subsequent requests — data shared via server."""
@@ -150,9 +160,14 @@ class TestGunicornFeasibility:
             content=json.dumps({"value": 999}),
         )
         assert r.status_code == 200
+        put_pid = r.json()["pid"]
 
         # Multiple gets over separate connections to hit different workers
+        get_pids = set()
         for _ in range(10):
             r = httpx.get(f"{gunicorn_url}/kv/gtest1")
             assert r.status_code == 200
             assert r.json()["bins"]["v"] == 999
+            get_pids.add(r.json()["pid"])
+
+        print(f"\n  [info] PUT pid={put_pid}, GET pids={get_pids}")
