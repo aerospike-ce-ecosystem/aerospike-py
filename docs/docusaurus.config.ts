@@ -36,13 +36,13 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           editUrl:
-            'https://github.com/KimSoungRyoul/aerospike-py/tree/main/website/',
+            'https://github.com/KimSoungRyoul/aerospike-py/tree/main/docs/',
           showLastUpdateTime: true,
         },
         blog: {
           showReadingTime: true,
           editUrl:
-            'https://github.com/KimSoungRyoul/aerospike-py/tree/main/website/',
+            'https://github.com/KimSoungRyoul/aerospike-py/tree/main/docs/',
         },
         theme: {
           customCss: './src/css/custom.css',
