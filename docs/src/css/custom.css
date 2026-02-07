@@ -1,0 +1,160 @@
+/* ============================================================
+   Color Theme
+   ============================================================ */
+:root {
+  --ifm-color-primary: #673ab7;
+  --ifm-color-primary-dark: #5c34a4;
+  --ifm-color-primary-darker: #57319b;
+  --ifm-color-primary-darkest: #472880;
+  --ifm-color-primary-light: #7344c4;
+  --ifm-color-primary-lighter: #7a4ec8;
+  --ifm-color-primary-lightest: #9170d3;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #b39ddb;
+  --ifm-color-primary-dark: #9e82d0;
+  --ifm-color-primary-darker: #9375cb;
+  --ifm-color-primary-darkest: #744dbb;
+  --ifm-color-primary-light: #c8b8e6;
+  --ifm-color-primary-lighter: #d3c5eb;
+  --ifm-color-primary-lightest: #ede7f6;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+.hero--primary {
+  --ifm-hero-background-color: var(--ifm-color-primary);
+  --ifm-hero-text-color: #ffffff;
+}
+
+/* ============================================================
+   Typography
+   ============================================================ */
+.markdown {
+  line-height: 1.75;
+}
+
+.markdown p {
+  margin-bottom: 1.25rem;
+}
+
+.markdown h2 {
+  margin-top: 2.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+.markdown h3 {
+  margin-top: 2rem;
+}
+
+/* ============================================================
+   Code Blocks
+   ============================================================ */
+.prism-code {
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  font-size: 0.9rem;
+}
+
+[data-theme='dark'] .prism-code {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Inline code */
+:not(pre) > code {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+[data-theme='dark'] :not(pre) > code {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* ============================================================
+   Tables
+   ============================================================ */
+table {
+  display: table;
+  width: 100%;
+}
+
+table th {
+  background-color: var(--ifm-color-emphasis-100);
+  font-weight: 600;
+}
+
+[data-theme='dark'] table th {
+  background-color: var(--ifm-color-emphasis-200);
+}
+
+table td code {
+  white-space: nowrap;
+}
+
+/* ============================================================
+   Sidebar
+   ============================================================ */
+.menu__link--active:not(.menu__link--sublist) {
+  border-left: 3px solid var(--ifm-color-primary);
+  padding-left: calc(var(--ifm-menu-link-padding-horizontal) - 3px);
+}
+
+.menu__link {
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* ============================================================
+   Admonitions
+   ============================================================ */
+.admonition {
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+/* ============================================================
+   Tabs (Sync / Async)
+   ============================================================ */
+.tabs__item {
+  font-size: 0.95rem;
+  padding: 0.6rem 1.2rem;
+}
+
+/* ============================================================
+   Table of Contents
+   ============================================================ */
+.table-of-contents__link--active {
+  font-weight: 600;
+  color: var(--ifm-color-primary);
+}
+
+.table-of-contents {
+  font-size: 0.85rem;
+}
+
+/* ============================================================
+   Feature Cards (Homepage)
+   ============================================================ */
+.feature-card {
+  padding: 1.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  margin-bottom: 1rem;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.feature-card:hover {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 2px 12px rgba(103, 58, 183, 0.1);
+}
+
+[data-theme='dark'] .feature-card:hover {
+  box-shadow: 0 2px 12px rgba(179, 157, 219, 0.15);
+}
+
+.feature-card h3 {
+  margin-bottom: 0.5rem;
+}
