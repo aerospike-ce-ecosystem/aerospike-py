@@ -278,8 +278,13 @@ class AsyncClient:
         self._inner = _NativeAsyncClient(config)
 
     # -- Delegate all native methods via __getattr__ --
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
+    def __getattr__(self, name: str):
+        try:
+            return getattr(self._inner, name)
+        except AttributeError:
+            raise AttributeError(
+                f"'{type(self).__name__}' has no attribute '{name}'"
+            ) from None
 
     async def connect(self, username=None, password=None):
         return await self._inner.connect(username, password)
