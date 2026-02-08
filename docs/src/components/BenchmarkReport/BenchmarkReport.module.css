@@ -1,0 +1,60 @@
+.container {
+  padding: 1rem 0;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0 2rem;
+  font-size: 0.9rem;
+}
+
+.table th,
+.table td {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  text-align: left;
+}
+
+.table th {
+  background: var(--ifm-color-emphasis-100);
+  font-weight: 600;
+}
+
+.table tbody tr:hover {
+  background: var(--ifm-color-emphasis-50);
+}
+
+.numCell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.faster {
+  color: var(--ifm-color-success-darkest, #2e7d32);
+  font-weight: 700;
+}
+
+.slower {
+  color: var(--ifm-color-danger-darkest, #c62828);
+  font-style: italic;
+}
+
+.chart {
+  display: block;
+  max-width: 100%;
+  margin: 1rem 0;
+}
+
+.errorBox {
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-danger);
+  background: var(--ifm-color-danger-contrast-background);
+  margin: 1rem 0;
+}
+
+.errorBox pre {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}

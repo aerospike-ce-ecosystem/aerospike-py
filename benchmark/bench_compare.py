@@ -11,21 +11,71 @@ Usage:
     python benchmark/bench_compare.py [--count N] [--rounds R] [--warmup W]
                                       [--concurrency C] [--batch-groups G]
                                       [--host HOST] [--port PORT]
+                                      [--report] [--report-dir DIR]
+                                      [--no-color]
 
 Requirements:
     pip install aerospike   # official C client (comparison target)
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import gc
+import os
+import platform
 import statistics
+import sys
 import time
+from dataclasses import dataclass, field
+from datetime import datetime
 
 NAMESPACE = "test"
 SET_NAME = "bench_cmp"
 WARMUP_COUNT = 500
 SETTLE_SECS = 0.5  # pause between phases to let I/O settle
+
+
+# ── color helpers ────────────────────────────────────────────
+
+
+class Color:
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    BOLD_CYAN = "\033[1m\033[36m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+
+
+_use_color = True
+
+
+def _c(code: str, text: str) -> str:
+    """Wrap text with ANSI color code if color is enabled."""
+    if not _use_color:
+        return text
+    return f"{code}{text}{Color.RESET}"
+
+
+# ── BenchmarkResults dataclass ───────────────────────────────
+
+
+@dataclass
+class BenchmarkResults:
+    rust_sync: dict = field(default_factory=dict)
+    c_sync: dict | None = None
+    rust_async: dict = field(default_factory=dict)
+    count: int = 0
+    rounds: int = 0
+    warmup: int = 0
+    concurrency: int = 0
+    batch_groups: int = 0
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    python_version: str = field(default_factory=platform.python_version)
+    platform_info: str = field(
+        default_factory=lambda: f"{platform.system()} {platform.machine()}"
+    )
 
 
 # ── timing helpers ───────────────────────────────────────────
@@ -94,7 +144,8 @@ def _bulk_median(round_times: list[float], count: int) -> dict:
 
 
 def _log(msg: str):
-    print(f"      [{time.strftime('%H:%M:%S')}] {msg}")
+    ts = _c(Color.DIM, f"[{time.strftime('%H:%M:%S')}]")
+    print(f"      {ts} {msg}")
 
 
 def _settle():
@@ -212,6 +263,31 @@ def bench_rust_sync(
     results["batch_read"] = _bulk_median(multi_batch_rounds, count)
     _settle()
 
+    # --- BATCH WRITE (batch_operate with OPERATOR_WRITE) ---
+    _log(f"BATCH_WRITE  {batch_groups} groups x {rounds} rounds  (gc disabled)")
+    write_ops = [
+        {"op": aerospike_py.OPERATOR_WRITE, "bin": "n", "val": "batch_val"},
+        {"op": aerospike_py.OPERATOR_WRITE, "bin": "a", "val": 999},
+    ]
+    bw_keys = [(NAMESPACE, SET_NAME, f"{prefix}bw_{i}") for i in range(count)]
+    bw_groups = [bw_keys[i::batch_groups] for i in range(batch_groups)]
+    batch_write_rounds = []
+    for _ in range(rounds):
+        gc.disable()
+        elapsed = _measure_bulk(
+            lambda: [client.batch_operate(g, write_ops) for g in bw_groups]
+        )
+        gc.enable()
+        batch_write_rounds.append(elapsed)
+    results["batch_write"] = _bulk_median(batch_write_rounds, count)
+    # cleanup batch_write keys
+    for k in bw_keys:
+        try:
+            client.remove(k)
+        except Exception:
+            pass
+    _settle()
+
     # --- SCAN ---
     _log(f"SCAN  x {rounds} rounds  (gc disabled)")
     scan_rounds = []
@@ -307,6 +383,33 @@ def bench_c_sync(
         gc.enable()
         multi_batch_rounds.append(elapsed)
     results["batch_read"] = _bulk_median(multi_batch_rounds, count)
+    _settle()
+
+    # --- BATCH WRITE (batch_operate with write ops) ---
+    from aerospike_helpers.operations import operations as as_ops
+
+    _log(f"BATCH_WRITE  {batch_groups} groups x {rounds} rounds  (gc disabled)")
+    c_write_ops = [
+        as_ops.write("n", "batch_val"),
+        as_ops.write("a", 999),
+    ]
+    bw_keys = [(NAMESPACE, SET_NAME, f"{prefix}bw_{i}") for i in range(count)]
+    bw_groups = [bw_keys[i::batch_groups] for i in range(batch_groups)]
+    batch_write_rounds = []
+    for _ in range(rounds):
+        gc.disable()
+        elapsed = _measure_bulk(
+            lambda: [client.batch_operate(g, c_write_ops) for g in bw_groups]
+        )
+        gc.enable()
+        batch_write_rounds.append(elapsed)
+    results["batch_write"] = _bulk_median(batch_write_rounds, count)
+    # cleanup batch_write keys
+    for k in bw_keys:
+        try:
+            client.remove(k)
+        except Exception:
+            pass
     _settle()
 
     # --- SCAN ---
@@ -428,6 +531,29 @@ async def bench_rust_async(
     results["batch_read"] = _bulk_median(multi_batch_rounds, count)
     _settle()
 
+    # --- BATCH WRITE (batch_operate with OPERATOR_WRITE, concurrent) ---
+    from aerospike_py import OPERATOR_WRITE as ASYNC_OP_WRITE
+
+    _log(f"BATCH_WRITE  {batch_groups} groups x {rounds} rounds  (gc disabled)")
+    write_ops = [
+        {"op": ASYNC_OP_WRITE, "bin": "n", "val": "batch_val"},
+        {"op": ASYNC_OP_WRITE, "bin": "a", "val": 999},
+    ]
+    bw_keys = [(NAMESPACE, SET_NAME, f"{prefix}bw_{i}") for i in range(count)]
+    bw_groups = [bw_keys[i::batch_groups] for i in range(batch_groups)]
+    batch_write_rounds = []
+    for _ in range(rounds):
+        gc.disable()
+        t0 = time.perf_counter()
+        await asyncio.gather(*[client.batch_operate(g, write_ops) for g in bw_groups])
+        elapsed = time.perf_counter() - t0
+        gc.enable()
+        batch_write_rounds.append(elapsed)
+    results["batch_write"] = _bulk_median(batch_write_rounds, count)
+    # cleanup batch_write keys
+    await client.batch_remove(bw_keys)
+    _settle()
+
     # --- SCAN ---
     _log(f"SCAN  x {rounds} rounds  (gc disabled)")
     scan_rounds = []
@@ -457,22 +583,26 @@ COL_VAL = 22
 COL_SP = 16
 
 
-def _speedup_latency(target: float, baseline: float) -> str:
+def _speedup_latency(target: float, baseline: float, color: bool = True) -> str:
     if target <= 0 or baseline <= 0:
         return "-"
     ratio = baseline / target
     if ratio >= 1.0:
-        return f"{ratio:.1f}x faster"
-    return f"{1 / ratio:.1f}x slower"
+        text = f"{ratio:.1f}x faster"
+        return _c(Color.GREEN, text) if color else text
+    text = f"{1 / ratio:.1f}x slower"
+    return _c(Color.RED, text) if color else text
 
 
-def _speedup_throughput(target: float, baseline: float) -> str:
+def _speedup_throughput(target: float, baseline: float, color: bool = True) -> str:
     if target <= 0 or baseline <= 0:
         return "-"
     ratio = target / baseline
     if ratio >= 1.0:
-        return f"{ratio:.1f}x faster"
-    return f"{1 / ratio:.1f}x slower"
+        text = f"{ratio:.1f}x faster"
+        return _c(Color.GREEN, text) if color else text
+    text = f"{1 / ratio:.1f}x slower"
+    return _c(Color.RED, text) if color else text
 
 
 def _fmt_ms(val: float | None) -> str:
@@ -487,6 +617,25 @@ def _fmt_ops(val: float | None) -> str:
     return f"{val:,.0f}/s"
 
 
+def _visible_len(s: str) -> int:
+    """Return display width of string, ignoring ANSI escape codes."""
+    import re
+
+    return len(re.sub(r"\033\[[0-9;]*m", "", s))
+
+
+def _rpad(s: str, width: int) -> str:
+    """Right-pad string to width, accounting for ANSI codes."""
+    pad = width - _visible_len(s)
+    return s + " " * max(0, pad)
+
+
+def _lpad(s: str, width: int) -> str:
+    """Left-pad string to width, accounting for ANSI codes."""
+    pad = width - _visible_len(s)
+    return " " * max(0, pad) + s
+
+
 def _print_table(
     title: str,
     ops: list[str],
@@ -496,12 +645,13 @@ def _print_table(
     metric: str,
     formatter,
     speedup_fn,
+    color: bool = True,
 ):
     has_c = c is not None
     w = COL_OP + 2 + COL_VAL * 3 + (COL_SP * 2 if has_c else 0) + 12
 
-    print(f"\n  {title}")
-    print(f"  {'':─<{w}}")
+    print(f"\n  {_c(Color.BOLD_CYAN, title) if color else title}")
+    print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
 
     h = f"  {'Operation':<{COL_OP}}"
     h += f" | {'aerospike-py (Rust)':>{COL_VAL}}"
@@ -512,7 +662,7 @@ def _print_table(
         h += f" | {'Rust vs C':>{COL_SP}}"
         h += f" | {'Async vs C':>{COL_SP}}"
     print(h)
-    print(f"  {'':─<{w}}")
+    print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
 
     for op in ops:
         rv = rust[op].get(metric)
@@ -526,8 +676,10 @@ def _print_table(
         line += f" | {formatter(av):>{COL_VAL}}"
 
         if has_c and cv is not None:
-            line += f" | {speedup_fn(rv, cv) if rv else '-':>{COL_SP}}"
-            line += f" | {speedup_fn(av, cv) if av else '-':>{COL_SP}}"
+            sp1 = speedup_fn(rv, cv, color=color) if rv else "-"
+            sp2 = speedup_fn(av, cv, color=color) if av else "-"
+            line += f" | {_lpad(sp1, COL_SP)}"
+            line += f" | {_lpad(sp2, COL_SP)}"
 
         print(line)
 
@@ -540,17 +692,24 @@ def print_comparison(
     rounds: int,
     concurrency: int,
     batch_groups: int,
+    color: bool = True,
 ):
-    ops = ["put", "get", "batch_read", "scan"]
+    ops = ["put", "get", "batch_read", "batch_write", "scan"]
 
     print()
-    print("=" * 100)
-    print(
+    banner = (
         f"  aerospike-py Benchmark  "
         f"({count:,} ops x {rounds} rounds, warmup={WARMUP_COUNT}, "
         f"async concurrency={concurrency}, batch_groups={batch_groups})"
     )
-    print("=" * 100)
+    if color:
+        print(_c(Color.BOLD_CYAN, "=" * 100))
+        print(_c(Color.BOLD_CYAN, banner))
+        print(_c(Color.BOLD_CYAN, "=" * 100))
+    else:
+        print("=" * 100)
+        print(banner)
+        print("=" * 100)
 
     if c is None:
         print("\n  [!] official aerospike (C) not installed. pip install aerospike")
@@ -564,6 +723,7 @@ def print_comparison(
         metric="avg_ms",
         formatter=_fmt_ms,
         speedup_fn=_speedup_latency,
+        color=color,
     )
 
     _print_table(
@@ -575,19 +735,21 @@ def print_comparison(
         metric="ops_per_sec",
         formatter=_fmt_ops,
         speedup_fn=_speedup_throughput,
+        color=color,
     )
 
     # Stability indicator (stdev)
-    print("\n  Stability (stdev of round median latency, ms)  —  lower = more stable")
+    stab_title = "Stability (stdev of round median latency, ms)  —  lower = more stable"
+    print(f"\n  {_c(Color.BOLD_CYAN, stab_title) if color else stab_title}")
     w = COL_OP + 2 + COL_VAL * 3 + 6
-    print(f"  {'':─<{w}}")
+    print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
     h = f"  {'Operation':<{COL_OP}}"
     h += f" | {'Rust stdev':>{COL_VAL}}"
     if c is not None:
         h += f" | {'C stdev':>{COL_VAL}}"
     h += f" | {'Async stdev':>{COL_VAL}}"
     print(h)
-    print(f"  {'':─<{w}}")
+    print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
     for op in ops:
         line = f"  {op:<{COL_OP}}"
         line += f" | {_fmt_ms(rust[op].get('stdev_ms')):>{COL_VAL}}"
@@ -599,15 +761,16 @@ def print_comparison(
     # P50/P99
     pct_ops = [op for op in ops if rust[op].get("p50_ms") is not None]
     if pct_ops:
-        print("\n  Tail Latency (ms)  [aggregated across all rounds]")
+        tail_title = "Tail Latency (ms)  [aggregated across all rounds]"
+        print(f"\n  {_c(Color.BOLD_CYAN, tail_title) if color else tail_title}")
         w2 = COL_OP + 2 + 18 * 4 + 10
-        print(f"  {'':─<{w2}}")
+        print(_c(Color.DIM, f"  {'':─<{w2}}") if color else f"  {'':─<{w2}}")
         h = f"  {'Operation':<{COL_OP}}"
         h += f" | {'Rust p50':>16} | {'Rust p99':>16}"
         if c is not None:
             h += f" | {'C p50':>16} | {'C p99':>16}"
         print(h)
-        print(f"  {'':─<{w2}}")
+        print(_c(Color.DIM, f"  {'':─<{w2}}") if color else f"  {'':─<{w2}}")
         for op in pct_ops:
             line = f"  {op:<{COL_OP}}"
             line += f" | {_fmt_ms(rust[op]['p50_ms']):>16}"
@@ -624,6 +787,8 @@ def print_comparison(
 
 
 def main():
+    global _use_color
+
     parser = argparse.ArgumentParser(
         description="Benchmark: aerospike-py (Rust) vs official aerospike (C)"
     )
@@ -639,7 +804,24 @@ def main():
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=3000)
+    parser.add_argument(
+        "--no-color", action="store_true", help="Disable colored output"
+    )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Generate benchmark report (JSON + charts)",
+    )
+    parser.add_argument(
+        "--report-dir",
+        default=None,
+        help="Report JSON output directory (default: docs/static/benchmark/results/)",
+    )
     args = parser.parse_args()
+
+    # Auto-detect color support
+    if args.no_color or not sys.stdout.isatty():
+        _use_color = False
 
     print("Benchmark config:")
     print(f"  ops/round    = {args.count:,}")
@@ -650,13 +832,13 @@ def main():
     print(f"  server       = {args.host}:{args.port}")
     print()
 
-    print("[1/3] aerospike-py sync (Rust) ...")
+    print(_c(Color.BOLD_CYAN, "[1/3]") + " aerospike-py sync (Rust) ...")
     rust = bench_rust_sync(
         args.host, args.port, args.count, args.rounds, args.warmup, args.batch_groups
     )
     print("      done")
 
-    print("[2/3] official aerospike sync (C) ...")
+    print(_c(Color.BOLD_CYAN, "[2/3]") + " official aerospike sync (C) ...")
     c = bench_c_sync(
         args.host, args.port, args.count, args.rounds, args.warmup, args.batch_groups
     )
@@ -665,7 +847,7 @@ def main():
     else:
         print("      done")
 
-    print("[3/3] aerospike-py async (Rust) ...")
+    print(_c(Color.BOLD_CYAN, "[3/3]") + " aerospike-py async (Rust) ...")
     async_r = asyncio.run(
         bench_rust_async(
             args.host,
@@ -680,8 +862,49 @@ def main():
     print("      done")
 
     print_comparison(
-        rust, c, async_r, args.count, args.rounds, args.concurrency, args.batch_groups
+        rust,
+        c,
+        async_r,
+        args.count,
+        args.rounds,
+        args.concurrency,
+        args.batch_groups,
+        color=_use_color,
     )
+
+    if args.report:
+        from datetime import datetime as _dt
+
+        # Determine project root (benchmark/ is one level down)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        date_slug = _dt.now().strftime("%Y-%m-%d-%H-%M")
+        json_dir = args.report_dir or os.path.join(
+            project_root, "docs", "static", "benchmark", "results"
+        )
+        img_dir = os.path.join(
+            project_root, "docs", "static", "img", "benchmark", date_slug
+        )
+
+        results = BenchmarkResults(
+            rust_sync=rust,
+            c_sync=c,
+            rust_async=async_r,
+            count=args.count,
+            rounds=args.rounds,
+            warmup=args.warmup,
+            concurrency=args.concurrency,
+            batch_groups=args.batch_groups,
+        )
+
+        # Import from same directory (script is run as `python benchmark/bench_compare.py`)
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from report_generator import generate_report
+
+        generate_report(results, json_dir, img_dir)
+        print(
+            _c(Color.BOLD_CYAN, "[report]") + f" Generated: {json_dir}/{date_slug}.json"
+        )
+        print(_c(Color.BOLD_CYAN, "[report]") + f" Charts: {img_dir}/*.svg")
 
 
 if __name__ == "__main__":
