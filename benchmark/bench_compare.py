@@ -9,7 +9,8 @@ Methodology for consistent results:
 
 Usage:
     python benchmark/bench_compare.py [--count N] [--rounds R] [--warmup W]
-                                      [--concurrency C] [--host HOST] [--port PORT]
+                                      [--concurrency C] [--batch-groups G]
+                                      [--host HOST] [--port PORT]
 
 Requirements:
     pip install aerospike   # official C client (comparison target)
@@ -137,7 +138,9 @@ async def _seed_async(client, prefix: str, count: int, concurrency: int):
 # ── 1) aerospike-py sync (Rust) ─────────────────────────────
 
 
-def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) -> dict:
+def bench_rust_sync(
+    host: str, port: int, count: int, rounds: int, warmup: int, batch_groups: int
+) -> dict:
     import aerospike_py
 
     client = aerospike_py.client(
@@ -196,16 +199,17 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
     results["get"] = _median_of_medians(get_rounds)
     _settle()
 
-    # --- BATCH GET ---
-    _log(f"BATCH_GET  {count} keys x {rounds} rounds  (gc disabled)")
+    # --- BATCH READ MULTI (sequential) ---
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
-    batch_rounds = []
+    _log(f"BATCH_READ  {batch_groups} groups x {rounds} rounds  (gc disabled)")
+    groups = [keys[i::batch_groups] for i in range(batch_groups)]
+    multi_batch_rounds = []
     for _ in range(rounds):
         gc.disable()
-        elapsed = _measure_bulk(lambda: client.batch_read(keys))
+        elapsed = _measure_bulk(lambda: [client.batch_read(g) for g in groups])
         gc.enable()
-        batch_rounds.append(elapsed)
-    results["batch_get"] = _bulk_median(batch_rounds, count)
+        multi_batch_rounds.append(elapsed)
+    results["batch_read"] = _bulk_median(multi_batch_rounds, count)
     _settle()
 
     # --- SCAN ---
@@ -231,7 +235,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int) 
 
 
 def bench_c_sync(
-    host: str, port: int, count: int, rounds: int, warmup: int
+    host: str, port: int, count: int, rounds: int, warmup: int, batch_groups: int
 ) -> dict | None:
     try:
         import aerospike as aerospike_c  # noqa: F811
@@ -292,16 +296,17 @@ def bench_c_sync(
     results["get"] = _median_of_medians(get_rounds)
     _settle()
 
-    # --- BATCH GET ---
-    _log(f"BATCH_GET  {count} keys x {rounds} rounds  (gc disabled)")
+    # --- BATCH READ MULTI (sequential) ---
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
-    batch_rounds = []
+    _log(f"BATCH_READ  {batch_groups} groups x {rounds} rounds  (gc disabled)")
+    groups = [keys[i::batch_groups] for i in range(batch_groups)]
+    multi_batch_rounds = []
     for _ in range(rounds):
         gc.disable()
-        elapsed = _measure_bulk(lambda: client.batch_read(keys))
+        elapsed = _measure_bulk(lambda: [client.batch_read(g) for g in groups])
         gc.enable()
-        batch_rounds.append(elapsed)
-    results["batch_get"] = _bulk_median(batch_rounds, count)
+        multi_batch_rounds.append(elapsed)
+    results["batch_read"] = _bulk_median(multi_batch_rounds, count)
     _settle()
 
     # --- SCAN ---
@@ -327,7 +332,13 @@ def bench_c_sync(
 
 
 async def bench_rust_async(
-    host: str, port: int, count: int, rounds: int, warmup: int, concurrency: int
+    host: str,
+    port: int,
+    count: int,
+    rounds: int,
+    warmup: int,
+    concurrency: int,
+    batch_groups: int,
 ) -> dict:
     from aerospike_py import AsyncClient
 
@@ -402,18 +413,19 @@ async def bench_rust_async(
     results["get"] = _bulk_median(get_rounds, count)
     _settle()
 
-    # --- BATCH GET ---
-    _log(f"BATCH_GET  {count} keys x {rounds} rounds  (gc disabled)")
+    # --- BATCH READ MULTI (concurrent) ---
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
-    batch_rounds = []
+    _log(f"BATCH_READ  {batch_groups} groups x {rounds} rounds  (gc disabled)")
+    groups = [keys[i::batch_groups] for i in range(batch_groups)]
+    multi_batch_rounds = []
     for _ in range(rounds):
         gc.disable()
         t0 = time.perf_counter()
-        await client.batch_read(keys)
+        await asyncio.gather(*[client.batch_read(g) for g in groups])
         elapsed = time.perf_counter() - t0
         gc.enable()
-        batch_rounds.append(elapsed)
-    results["batch_get"] = _bulk_median(batch_rounds, count)
+        multi_batch_rounds.append(elapsed)
+    results["batch_read"] = _bulk_median(multi_batch_rounds, count)
     _settle()
 
     # --- SCAN ---
@@ -440,7 +452,7 @@ async def bench_rust_async(
 
 # ── comparison output ────────────────────────────────────────
 
-COL_OP = 12
+COL_OP = 18
 COL_VAL = 22
 COL_SP = 16
 
@@ -527,15 +539,16 @@ def print_comparison(
     count: int,
     rounds: int,
     concurrency: int,
+    batch_groups: int,
 ):
-    ops = ["put", "get", "batch_get", "scan"]
+    ops = ["put", "get", "batch_read", "scan"]
 
     print()
     print("=" * 100)
     print(
         f"  aerospike-py Benchmark  "
         f"({count:,} ops x {rounds} rounds, warmup={WARMUP_COUNT}, "
-        f"async concurrency={concurrency})"
+        f"async concurrency={concurrency}, batch_groups={batch_groups})"
     )
     print("=" * 100)
 
@@ -618,24 +631,35 @@ def main():
     parser.add_argument("--rounds", type=int, default=10, help="Rounds per operation")
     parser.add_argument("--warmup", type=int, default=WARMUP_COUNT, help="Warmup ops")
     parser.add_argument("--concurrency", type=int, default=50, help="Async concurrency")
+    parser.add_argument(
+        "--batch-groups",
+        type=int,
+        default=10,
+        help="Number of groups for concurrent batch_read benchmark",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=3000)
     args = parser.parse_args()
 
     print("Benchmark config:")
-    print(f"  ops/round  = {args.count:,}")
-    print(f"  rounds     = {args.rounds}")
-    print(f"  warmup     = {args.warmup}")
-    print(f"  concurrency= {args.concurrency}")
-    print(f"  server     = {args.host}:{args.port}")
+    print(f"  ops/round    = {args.count:,}")
+    print(f"  rounds       = {args.rounds}")
+    print(f"  warmup       = {args.warmup}")
+    print(f"  concurrency  = {args.concurrency}")
+    print(f"  batch_groups = {args.batch_groups}")
+    print(f"  server       = {args.host}:{args.port}")
     print()
 
     print("[1/3] aerospike-py sync (Rust) ...")
-    rust = bench_rust_sync(args.host, args.port, args.count, args.rounds, args.warmup)
+    rust = bench_rust_sync(
+        args.host, args.port, args.count, args.rounds, args.warmup, args.batch_groups
+    )
     print("      done")
 
     print("[2/3] official aerospike sync (C) ...")
-    c = bench_c_sync(args.host, args.port, args.count, args.rounds, args.warmup)
+    c = bench_c_sync(
+        args.host, args.port, args.count, args.rounds, args.warmup, args.batch_groups
+    )
     if c is None:
         print("      not installed, skipping")
     else:
@@ -644,12 +668,20 @@ def main():
     print("[3/3] aerospike-py async (Rust) ...")
     async_r = asyncio.run(
         bench_rust_async(
-            args.host, args.port, args.count, args.rounds, args.warmup, args.concurrency
+            args.host,
+            args.port,
+            args.count,
+            args.rounds,
+            args.warmup,
+            args.concurrency,
+            args.batch_groups,
         )
     )
     print("      done")
 
-    print_comparison(rust, c, async_r, args.count, args.rounds, args.concurrency)
+    print_comparison(
+        rust, c, async_r, args.count, args.rounds, args.concurrency, args.batch_groups
+    )
 
 
 if __name__ == "__main__":

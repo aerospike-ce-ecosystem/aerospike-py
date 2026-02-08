@@ -1,8 +1,12 @@
+use std::sync::LazyLock;
+
 use aerospike_core::{CommitLevel, Expiration, GenerationPolicy, RecordExistsAction, WritePolicy};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::expressions::{is_expression, py_to_expression};
+
+pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePolicy::default);
 
 /// Convert a TTL integer value to an Expiration enum
 fn parse_ttl(ttl_val: i64) -> Expiration {

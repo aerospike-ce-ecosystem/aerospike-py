@@ -1,8 +1,12 @@
+use std::sync::LazyLock;
+
 use aerospike_core::ReadPolicy;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::expressions::{is_expression, py_to_expression};
+
+pub static DEFAULT_READ_POLICY: LazyLock<ReadPolicy> = LazyLock::new(ReadPolicy::default);
 
 /// Parse a Python policy dict into a ReadPolicy
 pub fn parse_read_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<ReadPolicy> {
