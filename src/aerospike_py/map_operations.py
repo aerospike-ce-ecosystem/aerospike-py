@@ -6,6 +6,9 @@ and ``client.operate_ordered()``.
 
 from typing import Any, Optional
 
+# Type alias for operation dicts passed to client.operate()
+Operation = dict[str, Any]
+
 # Map operation codes (must match rust/src/operations.rs CDT codes)
 _OP_MAP_SET_ORDER = 2001
 _OP_MAP_PUT = 2002
@@ -36,14 +39,14 @@ _OP_MAP_GET_BY_KEY_LIST = 2026
 _OP_MAP_GET_BY_VALUE_LIST = 2027
 
 
-def map_set_order(bin: str, map_order: int) -> dict[str, Any]:
+def map_set_order(bin: str, map_order: int) -> Operation:
     """Set the map ordering."""
     return {"op": _OP_MAP_SET_ORDER, "bin": bin, "val": map_order}
 
 
 def map_put(
-    bin: str, key: Any, val: Any, policy: Optional[dict[str, Any]] = None
-) -> dict[str, Any]:
+    bin: str, key: Any, val: Any, policy: Optional[Operation] = None
+) -> Operation:
     """Put a key/value pair into a map bin."""
     op = {"op": _OP_MAP_PUT, "bin": bin, "map_key": key, "val": val}
     if policy:
@@ -52,8 +55,8 @@ def map_put(
 
 
 def map_put_items(
-    bin: str, items: dict[str, Any], policy: Optional[dict[str, Any]] = None
-) -> dict[str, Any]:
+    bin: str, items: dict[str, Any], policy: Optional[Operation] = None
+) -> Operation:
     """Put multiple key/value pairs into a map bin."""
     op = {"op": _OP_MAP_PUT_ITEMS, "bin": bin, "val": items}
     if policy:
@@ -62,8 +65,8 @@ def map_put_items(
 
 
 def map_increment(
-    bin: str, key: Any, incr: Any, policy: Optional[dict[str, Any]] = None
-) -> dict[str, Any]:
+    bin: str, key: Any, incr: Any, policy: Optional[Operation] = None
+) -> Operation:
     """Increment a value in a map by key."""
     op = {"op": _OP_MAP_INCREMENT, "bin": bin, "map_key": key, "val": incr}
     if policy:
@@ -72,8 +75,8 @@ def map_increment(
 
 
 def map_decrement(
-    bin: str, key: Any, decr: Any, policy: Optional[dict[str, Any]] = None
-) -> dict[str, Any]:
+    bin: str, key: Any, decr: Any, policy: Optional[Operation] = None
+) -> Operation:
     """Decrement a value in a map by key."""
     op = {"op": _OP_MAP_DECREMENT, "bin": bin, "map_key": key, "val": decr}
     if policy:
@@ -81,12 +84,12 @@ def map_decrement(
     return op
 
 
-def map_clear(bin: str) -> dict[str, Any]:
+def map_clear(bin: str) -> Operation:
     """Remove all items from a map bin."""
     return {"op": _OP_MAP_CLEAR, "bin": bin}
 
 
-def map_remove_by_key(bin: str, key: Any, return_type: int) -> dict[str, Any]:
+def map_remove_by_key(bin: str, key: Any, return_type: int) -> Operation:
     """Remove item by key."""
     return {
         "op": _OP_MAP_REMOVE_BY_KEY,
@@ -96,9 +99,7 @@ def map_remove_by_key(bin: str, key: Any, return_type: int) -> dict[str, Any]:
     }
 
 
-def map_remove_by_key_list(
-    bin: str, keys: list[Any], return_type: int
-) -> dict[str, Any]:
+def map_remove_by_key_list(bin: str, keys: list[Any], return_type: int) -> Operation:
     """Remove items by key list."""
     return {
         "op": _OP_MAP_REMOVE_BY_KEY_LIST,
@@ -110,7 +111,7 @@ def map_remove_by_key_list(
 
 def map_remove_by_key_range(
     bin: str, begin: Any, end: Any, return_type: int
-) -> dict[str, Any]:
+) -> Operation:
     """Remove items with keys in the range [begin, end)."""
     return {
         "op": _OP_MAP_REMOVE_BY_KEY_RANGE,
@@ -121,7 +122,7 @@ def map_remove_by_key_range(
     }
 
 
-def map_remove_by_value(bin: str, val: Any, return_type: int) -> dict[str, Any]:
+def map_remove_by_value(bin: str, val: Any, return_type: int) -> Operation:
     """Remove items by value."""
     return {
         "op": _OP_MAP_REMOVE_BY_VALUE,
@@ -133,7 +134,7 @@ def map_remove_by_value(bin: str, val: Any, return_type: int) -> dict[str, Any]:
 
 def map_remove_by_value_list(
     bin: str, values: list[Any], return_type: int
-) -> dict[str, Any]:
+) -> Operation:
     """Remove items matching any of the given values."""
     return {
         "op": _OP_MAP_REMOVE_BY_VALUE_LIST,
@@ -145,7 +146,7 @@ def map_remove_by_value_list(
 
 def map_remove_by_value_range(
     bin: str, begin: Any, end: Any, return_type: int
-) -> dict[str, Any]:
+) -> Operation:
     """Remove items with values in the range [begin, end)."""
     return {
         "op": _OP_MAP_REMOVE_BY_VALUE_RANGE,
@@ -156,7 +157,7 @@ def map_remove_by_value_range(
     }
 
 
-def map_remove_by_index(bin: str, index: int, return_type: int) -> dict[str, Any]:
+def map_remove_by_index(bin: str, index: int, return_type: int) -> Operation:
     """Remove item by index."""
     return {
         "op": _OP_MAP_REMOVE_BY_INDEX,
@@ -168,7 +169,7 @@ def map_remove_by_index(bin: str, index: int, return_type: int) -> dict[str, Any
 
 def map_remove_by_index_range(
     bin: str, index: int, return_type: int, count: Optional[int] = None
-) -> dict[str, Any]:
+) -> Operation:
     """Remove items by index range."""
     op = {
         "op": _OP_MAP_REMOVE_BY_INDEX_RANGE,
@@ -181,7 +182,7 @@ def map_remove_by_index_range(
     return op
 
 
-def map_remove_by_rank(bin: str, rank: int, return_type: int) -> dict[str, Any]:
+def map_remove_by_rank(bin: str, rank: int, return_type: int) -> Operation:
     """Remove item by rank."""
     return {
         "op": _OP_MAP_REMOVE_BY_RANK,
@@ -193,7 +194,7 @@ def map_remove_by_rank(bin: str, rank: int, return_type: int) -> dict[str, Any]:
 
 def map_remove_by_rank_range(
     bin: str, rank: int, return_type: int, count: Optional[int] = None
-) -> dict[str, Any]:
+) -> Operation:
     """Remove items by rank range."""
     op = {
         "op": _OP_MAP_REMOVE_BY_RANK_RANGE,
@@ -206,12 +207,12 @@ def map_remove_by_rank_range(
     return op
 
 
-def map_size(bin: str) -> dict[str, Any]:
+def map_size(bin: str) -> Operation:
     """Return the number of items in a map bin."""
     return {"op": _OP_MAP_SIZE, "bin": bin}
 
 
-def map_get_by_key(bin: str, key: Any, return_type: int) -> dict[str, Any]:
+def map_get_by_key(bin: str, key: Any, return_type: int) -> Operation:
     """Get item by key."""
     return {
         "op": _OP_MAP_GET_BY_KEY,
@@ -221,9 +222,7 @@ def map_get_by_key(bin: str, key: Any, return_type: int) -> dict[str, Any]:
     }
 
 
-def map_get_by_key_range(
-    bin: str, begin: Any, end: Any, return_type: int
-) -> dict[str, Any]:
+def map_get_by_key_range(bin: str, begin: Any, end: Any, return_type: int) -> Operation:
     """Get items with keys in the range [begin, end)."""
     return {
         "op": _OP_MAP_GET_BY_KEY_RANGE,
@@ -234,7 +233,7 @@ def map_get_by_key_range(
     }
 
 
-def map_get_by_value(bin: str, val: Any, return_type: int) -> dict[str, Any]:
+def map_get_by_value(bin: str, val: Any, return_type: int) -> Operation:
     """Get items by value."""
     return {
         "op": _OP_MAP_GET_BY_VALUE,
@@ -246,7 +245,7 @@ def map_get_by_value(bin: str, val: Any, return_type: int) -> dict[str, Any]:
 
 def map_get_by_value_range(
     bin: str, begin: Any, end: Any, return_type: int
-) -> dict[str, Any]:
+) -> Operation:
     """Get items with values in the range [begin, end)."""
     return {
         "op": _OP_MAP_GET_BY_VALUE_RANGE,
@@ -257,7 +256,7 @@ def map_get_by_value_range(
     }
 
 
-def map_get_by_index(bin: str, index: int, return_type: int) -> dict[str, Any]:
+def map_get_by_index(bin: str, index: int, return_type: int) -> Operation:
     """Get item by index."""
     return {
         "op": _OP_MAP_GET_BY_INDEX,
@@ -269,7 +268,7 @@ def map_get_by_index(bin: str, index: int, return_type: int) -> dict[str, Any]:
 
 def map_get_by_index_range(
     bin: str, index: int, return_type: int, count: Optional[int] = None
-) -> dict[str, Any]:
+) -> Operation:
     """Get items by index range."""
     op = {
         "op": _OP_MAP_GET_BY_INDEX_RANGE,
@@ -282,7 +281,7 @@ def map_get_by_index_range(
     return op
 
 
-def map_get_by_rank(bin: str, rank: int, return_type: int) -> dict[str, Any]:
+def map_get_by_rank(bin: str, rank: int, return_type: int) -> Operation:
     """Get item by rank."""
     return {
         "op": _OP_MAP_GET_BY_RANK,
@@ -294,7 +293,7 @@ def map_get_by_rank(bin: str, rank: int, return_type: int) -> dict[str, Any]:
 
 def map_get_by_rank_range(
     bin: str, rank: int, return_type: int, count: Optional[int] = None
-) -> dict[str, Any]:
+) -> Operation:
     """Get items by rank range."""
     op = {
         "op": _OP_MAP_GET_BY_RANK_RANGE,
@@ -307,7 +306,7 @@ def map_get_by_rank_range(
     return op
 
 
-def map_get_by_key_list(bin: str, keys: list[Any], return_type: int) -> dict[str, Any]:
+def map_get_by_key_list(bin: str, keys: list[Any], return_type: int) -> Operation:
     """Get items matching any of the given keys."""
     return {
         "op": _OP_MAP_GET_BY_KEY_LIST,
@@ -317,9 +316,7 @@ def map_get_by_key_list(bin: str, keys: list[Any], return_type: int) -> dict[str
     }
 
 
-def map_get_by_value_list(
-    bin: str, values: list[Any], return_type: int
-) -> dict[str, Any]:
+def map_get_by_value_list(bin: str, values: list[Any], return_type: int) -> Operation:
     """Get items matching any of the given values."""
     return {
         "op": _OP_MAP_GET_BY_VALUE_LIST,
