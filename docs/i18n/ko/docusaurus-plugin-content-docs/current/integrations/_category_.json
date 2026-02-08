@@ -1,0 +1,10 @@
+{
+  "label": "통합 가이드",
+  "position": 4,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "통합 가이드",
+    "description": "aerospike-py 프레임워크 통합 가이드"
+  }
+}
