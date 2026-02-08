@@ -4,7 +4,7 @@ Drop-in compatible replacement for the aerospike-client-python package.
 """
 
 from aerospike_py._aerospike import Client as _NativeClient
-from aerospike_py._aerospike import AsyncClient  # noqa: F401
+from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query, Scan  # noqa: F401
 from aerospike_py._aerospike import BatchRecord, BatchRecords  # noqa: F401
 
@@ -218,6 +218,7 @@ from aerospike_py._aerospike import (  # noqa: F401
 # Re-export exception subclasses from exception module for backward compat
 from aerospike_py import exception  # noqa: F401
 from aerospike_py import predicates  # noqa: F401
+from aerospike_py.numpy_batch import NumpyBatchRecords  # noqa: F401
 from aerospike_py import list_operations  # noqa: F401
 from aerospike_py import map_operations  # noqa: F401
 from aerospike_py import exp  # noqa: F401
@@ -245,12 +246,56 @@ class Client(_NativeClient):
         super().connect(username, password)
         return self
 
+    def batch_read(self, keys, bins=None, policy=None, _dtype=None):
+        """Batch read records.
+
+        Args:
+            keys: List of (namespace, set, primary_key) tuples.
+            bins: Optional list of bin names to read.
+            policy: Optional batch policy dict.
+            _dtype: Optional numpy dtype. When provided, returns
+                NumpyBatchRecords instead of BatchRecords.
+        """
+        return super().batch_read(keys, bins, policy, _dtype)
+
     def __enter__(self) -> "Client":
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         self.close()
         return False
+
+
+class AsyncClient:
+    """Aerospike async client wrapper with numpy batch_read support.
+
+    Delegates to _NativeAsyncClient (PyO3 type that cannot be subclassed).
+    """
+
+    def __init__(self, config: dict):
+        self._inner = _NativeAsyncClient(config)
+
+    # -- Delegate all native methods via __getattr__ --
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def connect(self, username=None, password=None):
+        return await self._inner.connect(username, password)
+
+    async def close(self):
+        return await self._inner.close()
+
+    async def batch_read(self, keys, bins=None, policy=None, _dtype=None):
+        """Batch read records asynchronously.
+
+        Args:
+            keys: List of (namespace, set, primary_key) tuples.
+            bins: Optional list of bin names to read.
+            policy: Optional batch policy dict.
+            _dtype: Optional numpy dtype. When provided, returns
+                NumpyBatchRecords instead of BatchRecords.
+        """
+        return await self._inner.batch_read(keys, bins, policy, _dtype)
 
 
 def client(config: dict) -> Client:
@@ -278,6 +323,7 @@ __all__ = [
     "Scan",
     "BatchRecord",
     "BatchRecords",
+    "NumpyBatchRecords",
     "client",
     "__version__",
     # Submodules

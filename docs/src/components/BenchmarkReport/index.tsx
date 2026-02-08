@@ -43,13 +43,19 @@ interface IndexData {
 
 // ── Constants ───────────────────────────────────────────────
 
-const OPERATIONS = ['put', 'get', 'batch_read', 'batch_write', 'scan'] as const;
+const OPERATIONS = ['put', 'get', 'batch_read', 'batch_read_numpy', 'batch_write', 'scan'] as const;
 const OP_LABELS: Record<string, string> = {
   put: 'PUT',
   get: 'GET',
   batch_read: 'BATCH_READ',
+  batch_read_numpy: 'BATCH_READ_NUMPY',
   batch_write: 'BATCH_WRITE',
   scan: 'SCAN',
+};
+
+// batch_read_numpy has no official equivalent; compare against official batch_read
+const CROSS_OP_BASELINE: Record<string, string> = {
+  batch_read_numpy: 'batch_read',
 };
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -147,15 +153,20 @@ function ComparisonTable({
       <tbody>
         {OPERATIONS.map((op) => {
           const rv = data.rust_sync[op]?.[metric] ?? null;
-          const cv = hasC ? (data.c_sync![op]?.[metric] ?? null) : null;
           const av = data.rust_async[op]?.[metric] ?? null;
+
+          // cross-op baseline: use another operation's official value
+          const officialOp = CROSS_OP_BASELINE[op] ?? op;
+          const isCrossOp = officialOp !== op;
+          const cv = hasC ? (data.c_sync![officialOp]?.[metric] ?? null) : null;
+
           const rustVsC = hasC ? calcSpeedup(rv, cv, latency) : null;
           const asyncVsC = hasC ? calcSpeedup(av, cv, latency) : null;
           return (
             <tr key={op}>
-              <td>{OP_LABELS[op]}</td>
+              <td>{OP_LABELS[op]}{isCrossOp ? ' *' : ''}</td>
               <td className={styles.numCell}>{formatter(rv)}</td>
-              {hasC && <td className={styles.numCell}>{formatter(cv)}</td>}
+              {hasC && <td className={styles.numCell}>{isCrossOp ? `${formatter(cv)} †` : formatter(cv)}</td>}
               <td className={styles.numCell}>{formatter(av)}</td>
               {hasC && (
                 <td className={`${styles.numCell} ${rustVsC!.className}`}>
@@ -172,6 +183,11 @@ function ComparisonTable({
         })}
       </tbody>
     </table>
+    {hasC && (
+      <p style={{fontSize: '0.85em', color: 'var(--ifm-color-emphasis-600)', marginTop: 4}}>
+        * BATCH_READ_NUMPY is compared against Official's BATCH_READ († same data, different return format: numpy structured array vs Python dict)
+      </p>
+    )}
     </div>
   );
 }

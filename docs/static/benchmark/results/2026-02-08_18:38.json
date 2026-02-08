@@ -1,0 +1,149 @@
+{
+  "timestamp": "2026-02-08T18:38:56.425943",
+  "date": "2026-02-08_18:38",
+  "environment": {
+    "platform": "Darwin arm64",
+    "python_version": "3.13.11",
+    "count": 5000,
+    "rounds": 20,
+    "warmup": 500,
+    "concurrency": 50,
+    "batch_groups": 10
+  },
+  "rust_sync": {
+    "put": {
+      "avg_ms": 0.1615444947849028,
+      "p50_ms": 0.1590727479197085,
+      "p99_ms": 0.22029096726328135,
+      "ops_per_sec": 6190.252986249785,
+      "stdev_ms": 0.001085195611544638
+    },
+    "get": {
+      "avg_ms": 0.16178753316635267,
+      "p50_ms": 0.15899998834356666,
+      "p99_ms": 0.2245830255560577,
+      "ops_per_sec": 6180.946226760278,
+      "stdev_ms": 0.0009622468559142657
+    },
+    "batch_read": {
+      "avg_ms": 0.008135841600596905,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 118983.64262895798,
+      "stdev_ms": 0.00114696852734653
+    },
+    "batch_read_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null,
+      "stdev_ms": null
+    },
+    "batch_write": {
+      "avg_ms": 0.0079439167981036,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 124570.85299817068,
+      "stdev_ms": 0.0008737731040115172
+    },
+    "scan": {
+      "avg_ms": 0.0019413916044868527,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 515094.4290110491,
+      "stdev_ms": 0.00017582220397177413
+    }
+  },
+  "c_sync": {
+    "put": {
+      "avg_ms": 0.1463272281398531,
+      "p50_ms": 0.14320798800326884,
+      "p99_ms": 0.20725000649690628,
+      "ops_per_sec": 6833.998187185563,
+      "stdev_ms": 0.000945802178218254
+    },
+    "get": {
+      "avg_ms": 0.1442562744836323,
+      "p50_ms": 0.1415414735674858,
+      "p99_ms": 0.21129200467839837,
+      "ops_per_sec": 6932.107484263796,
+      "stdev_ms": 0.0009766091146172922
+    },
+    "batch_read": {
+      "avg_ms": 0.007165500102564693,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 134336.84611786762,
+      "stdev_ms": 0.0010919584311122202
+    },
+    "batch_read_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null,
+      "stdev_ms": null
+    },
+    "batch_write": {
+      "avg_ms": 0.007022516801953316,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 142093.62548089022,
+      "stdev_ms": 0.0006383479754540322
+    },
+    "scan": {
+      "avg_ms": 0.001407100004144013,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 710681.5415073034,
+      "stdev_ms": 0.0003423456155499918
+    }
+  },
+  "rust_async": {
+    "put": {
+      "avg_ms": 0.038926791603444144,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 25689.267473602267,
+      "stdev_ms": 0.0006390855566717035
+    },
+    "get": {
+      "avg_ms": 0.04630919999908656,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 21593.98132595089,
+      "stdev_ms": 0.0005257360646693444
+    },
+    "batch_read": {
+      "avg_ms": 0.0014236832037568094,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 694905.3784478757,
+      "stdev_ms": 0.0004470339954224271
+    },
+    "batch_read_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null,
+      "stdev_ms": null
+    },
+    "batch_write": {
+      "avg_ms": 0.0015878165955655278,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 629795.6595193748,
+      "stdev_ms": 0.00017045790485866713
+    },
+    "scan": {
+      "avg_ms": 0.002040899993153289,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 489983.0324472915,
+      "stdev_ms": 0.0001434068540369385
+    }
+  },
+  "takeaways": [
+    "AsyncClient shows **5.0x** faster latency than the official client in BATCH_READ operations",
+    "AsyncClient shows **5.8x** higher throughput than SyncClient in BATCH_READ operations (concurrency=50)"
+  ]
+}

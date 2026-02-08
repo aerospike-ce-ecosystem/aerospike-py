@@ -11,6 +11,7 @@ from app.routers import (
     batch,
     cluster,
     indexes,
+    numpy_batch,
     operations,
     records,
     truncate,
@@ -45,6 +46,7 @@ app.include_router(users.router)
 app.include_router(records.router)
 app.include_router(operations.router)
 app.include_router(batch.router)
+app.include_router(numpy_batch.router)
 app.include_router(indexes.router)
 app.include_router(truncate.router)
 app.include_router(udf.router)

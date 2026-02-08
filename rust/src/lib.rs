@@ -6,6 +6,7 @@ mod client;
 mod constants;
 mod errors;
 pub mod expressions;
+mod numpy_support;
 mod operations;
 mod policy;
 pub mod query;

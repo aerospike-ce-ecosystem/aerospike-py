@@ -620,15 +620,16 @@ impl PyAsyncClient {
 
     // ── Batch ─────────────────────────────────────────────────
 
-    /// Read multiple records (async). Returns BatchRecords.
+    /// Read multiple records (async). Returns BatchRecords, or NumpyBatchRecords when dtype is provided.
     /// bins=None → read all bins; bins=["a","b"] → specific bins; bins=[] → existence check.
-    #[pyo3(signature = (keys, bins=None, policy=None))]
+    #[pyo3(signature = (keys, bins=None, policy=None, _dtype=None))]
     fn batch_read<'py>(
         &self,
         py: Python<'py>,
         keys: &Bound<'_, PyList>,
         bins: Option<Vec<String>>,
         policy: Option<&Bound<'_, PyDict>>,
+        _dtype: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let batch_policy = parse_batch_policy(policy)?;
@@ -648,6 +649,9 @@ impl PyAsyncClient {
             .map(|k| py_to_key(&k))
             .collect::<PyResult<_>>()?;
 
+        let use_numpy = _dtype.is_some();
+        let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
+
         future_into_py(py, async move {
             let ops: Vec<BatchOperation> = rust_keys
                 .iter()
@@ -660,8 +664,16 @@ impl PyAsyncClient {
                 .map_err(as_to_pyerr)?;
 
             Python::attach(|py| {
-                let batch_records = batch_to_batch_records_py(py, &results)?;
-                Ok(Py::new(py, batch_records)?.into_any())
+                if use_numpy {
+                    crate::numpy_support::batch_to_numpy_py(
+                        py,
+                        &results,
+                        &dtype_py.unwrap().into_bound(py),
+                    )
+                } else {
+                    let batch_records = batch_to_batch_records_py(py, &results)?;
+                    Ok(Py::new(py, batch_records)?.into_any())
+                }
             })
         })
     }
