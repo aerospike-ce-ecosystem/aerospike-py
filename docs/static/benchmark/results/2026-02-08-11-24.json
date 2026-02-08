@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-02-08T11:24:00",
+  "date": "2026-02-08-11-24",
+  "environment": {
+    "platform": "Darwin arm64",
+    "python_version": "3.13.11",
+    "count": 5000,
+    "rounds": 20,
+    "warmup": 500,
+    "concurrency": 50,
+    "batch_groups": 10
+  },
+  "rust_sync": {
+    "put": {"avg_ms": 0.128, "p50_ms": 0.125, "p99_ms": 0.192, "ops_per_sec": 7827, "stdev_ms": 0.004},
+    "get": {"avg_ms": 0.127, "p50_ms": 0.125, "p99_ms": 0.183, "ops_per_sec": 7858, "stdev_ms": 0.001},
+    "batch_read": {"avg_ms": 0.013, "p50_ms": null, "p99_ms": null, "ops_per_sec": 78185, "stdev_ms": 0.001},
+    "batch_write": {"avg_ms": 0.012, "p50_ms": null, "p99_ms": null, "ops_per_sec": 82208, "stdev_ms": 0.002},
+    "scan": {"avg_ms": 0.002, "p50_ms": null, "p99_ms": null, "ops_per_sec": 506336, "stdev_ms": 0.000}
+  },
+  "c_sync": {
+    "put": {"avg_ms": 0.114, "p50_ms": 0.111, "p99_ms": 0.173, "ops_per_sec": 8734, "stdev_ms": 0.003},
+    "get": {"avg_ms": 0.113, "p50_ms": 0.110, "p99_ms": 0.182, "ops_per_sec": 8821, "stdev_ms": 0.004},
+    "batch_read": {"avg_ms": 0.006, "p50_ms": null, "p99_ms": null, "ops_per_sec": 166128, "stdev_ms": 0.001},
+    "batch_write": {"avg_ms": 0.009, "p50_ms": null, "p99_ms": null, "ops_per_sec": 107793, "stdev_ms": 0.002},
+    "scan": {"avg_ms": 0.002, "p50_ms": null, "p99_ms": null, "ops_per_sec": 465195, "stdev_ms": 0.001}
+  },
+  "rust_async": {
+    "put": {"avg_ms": 0.035, "p50_ms": null, "p99_ms": null, "ops_per_sec": 28930, "stdev_ms": 0.001},
+    "get": {"avg_ms": 0.042, "p50_ms": null, "p99_ms": null, "ops_per_sec": 23625, "stdev_ms": 0.001},
+    "batch_read": {"avg_ms": 0.003, "p50_ms": null, "p99_ms": null, "ops_per_sec": 379116, "stdev_ms": 0.005},
+    "batch_write": {"avg_ms": 0.003, "p50_ms": null, "p99_ms": null, "ops_per_sec": 366143, "stdev_ms": 0.001},
+    "scan": {"avg_ms": 0.002, "p50_ms": null, "p99_ms": null, "ops_per_sec": 505094, "stdev_ms": 0.000}
+  },
+  "charts": {
+    "latency": "/img/benchmark/2026-02-08-11-24/latency_comparison.svg",
+    "throughput": "/img/benchmark/2026-02-08-11-24/throughput_comparison.svg",
+    "tail_latency": "/img/benchmark/2026-02-08-11-24/tail_latency.svg"
+  },
+  "takeaways": [
+    "aerospike-py (Rust sync)는 SCAN 연산에서 C client 대비 **1.1x** 빠른 레이턴시를 보임",
+    "async 클라이언트는 BATCH_WRITE 연산에서 C client 대비 **3.6x** 빠른 레이턴시를 보임",
+    "async 클라이언트는 BATCH_READ 연산에서 sync 대비 **4.8x** 높은 throughput (concurrency=50)"
+  ]
+}
