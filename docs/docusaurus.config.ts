@@ -102,6 +102,10 @@ const config: Config = {
               label: 'Guides',
               to: '/docs/guides/crud',
             },
+            {
+              label: 'Performance',
+              to: '/docs/category/performance',
+            },
           ],
         },
         {

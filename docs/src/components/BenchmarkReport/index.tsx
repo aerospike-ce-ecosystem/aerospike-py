@@ -95,11 +95,12 @@ function calcSpeedup(
 
 function EnvironmentTable({env}: {env: BenchmarkData['environment']}) {
   return (
+    <div className={styles.tableWrap}>
     <table className={styles.table}>
       <thead>
         <tr>
-          <th>항목</th>
-          <th>값</th>
+          <th>Item</th>
+          <th>Value</th>
         </tr>
       </thead>
       <tbody>
@@ -112,6 +113,7 @@ function EnvironmentTable({env}: {env: BenchmarkData['environment']}) {
         <tr><td>Batch groups</td><td>{env.batch_groups}</td></tr>
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -128,15 +130,16 @@ function ComparisonTable({
 }) {
   const hasC = data.c_sync != null;
   return (
+    <div className={styles.tableWrap}>
     <table className={styles.table}>
       <thead>
         <tr>
           <th>Operation</th>
-          <th>aerospike-py (Rust)</th>
-          {hasC && <th>official aerospike (C)</th>}
-          <th>aerospike-py async</th>
-          {hasC && <th>Rust vs C</th>}
-          {hasC && <th>Async vs C</th>}
+          <th>aerospike-py (SyncClient)</th>
+          {hasC && <th>aerospike (official)</th>}
+          <th>aerospike-py (AsyncClient)</th>
+          {hasC && <th>Sync vs Official</th>}
+          {hasC && <th>Async vs Official</th>}
         </tr>
       </thead>
       <tbody>
@@ -167,18 +170,20 @@ function ComparisonTable({
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 
 function StabilityTable({data}: {data: BenchmarkData}) {
   const hasC = data.c_sync != null;
   return (
+    <div className={styles.tableWrap}>
     <table className={styles.table}>
       <thead>
         <tr>
           <th>Operation</th>
-          <th>Rust stdev</th>
-          {hasC && <th>C stdev</th>}
+          <th>Sync stdev</th>
+          {hasC && <th>Official stdev</th>}
           <th>Async stdev</th>
         </tr>
       </thead>
@@ -195,6 +200,7 @@ function StabilityTable({data}: {data: BenchmarkData}) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -203,14 +209,15 @@ function TailLatencyTable({data}: {data: BenchmarkData}) {
   const ops = OPERATIONS.filter((op) => data.rust_sync[op]?.p50_ms != null);
   if (ops.length === 0) return null;
   return (
+    <div className={styles.tableWrap}>
     <table className={styles.table}>
       <thead>
         <tr>
           <th>Operation</th>
-          <th>Rust p50</th>
-          <th>Rust p99</th>
-          {hasC && <th>C p50</th>}
-          {hasC && <th>C p99</th>}
+          <th>Sync p50</th>
+          <th>Sync p99</th>
+          {hasC && <th>Official p50</th>}
+          {hasC && <th>Official p99</th>}
         </tr>
       </thead>
       <tbody>
@@ -229,6 +236,7 @@ function TailLatencyTable({data}: {data: BenchmarkData}) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -349,8 +357,8 @@ export default function BenchmarkReport(): React.ReactElement {
     return (
       <div className={styles.container}>
         <div className={styles.errorBox}>
-          <strong>벤치마크 데이터를 불러올 수 없습니다.</strong>
-          <p><code>make run-benchmark-report</code>를 실행하여 벤치마크 데이터를 생성하세요.</p>
+          <strong>Failed to load benchmark data.</strong>
+          <p>Run <code>make run-benchmark-report</code> to generate benchmark data.</p>
           <details><summary>Error details</summary><pre>{error}</pre></details>
         </div>
       </div>
@@ -364,7 +372,7 @@ export default function BenchmarkReport(): React.ReactElement {
   if (index.reports.length === 0) {
     return (
       <div className={styles.container}>
-        <p>벤치마크 결과가 없습니다. <code>make run-benchmark-report</code>를 실행하세요.</p>
+        <p>No benchmark results available. Run <code>make run-benchmark-report</code> to generate results.</p>
       </div>
     );
   }

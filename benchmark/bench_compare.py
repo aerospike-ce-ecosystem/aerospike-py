@@ -579,8 +579,8 @@ async def bench_rust_async(
 # ── comparison output ────────────────────────────────────────
 
 COL_OP = 18
-COL_VAL = 22
-COL_SP = 16
+COL_VAL = 27
+COL_SP = 18
 
 
 def _speedup_latency(target: float, baseline: float, color: bool = True) -> str:
@@ -654,13 +654,13 @@ def _print_table(
     print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
 
     h = f"  {'Operation':<{COL_OP}}"
-    h += f" | {'aerospike-py (Rust)':>{COL_VAL}}"
+    h += f" | {'aerospike-py (SyncClient)':>{COL_VAL}}"
     if has_c:
-        h += f" | {'official aerospike (C)':>{COL_VAL}}"
-    h += f" | {'aerospike-py async':>{COL_VAL}}"
+        h += f" | {'aerospike (official)':>{COL_VAL}}"
+    h += f" | {'aerospike-py (AsyncClient)':>{COL_VAL}}"
     if has_c:
-        h += f" | {'Rust vs C':>{COL_SP}}"
-        h += f" | {'Async vs C':>{COL_SP}}"
+        h += f" | {'Sync vs Official':>{COL_SP}}"
+        h += f" | {'Async vs Official':>{COL_SP}}"
     print(h)
     print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
 
@@ -712,7 +712,7 @@ def print_comparison(
         print("=" * 100)
 
     if c is None:
-        print("\n  [!] official aerospike (C) not installed. pip install aerospike")
+        print("\n  [!] aerospike (official) not installed. pip install aerospike")
 
     _print_table(
         "Avg Latency (ms)  —  lower is better  [median of round means]",
@@ -744,9 +744,9 @@ def print_comparison(
     w = COL_OP + 2 + COL_VAL * 3 + 6
     print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
     h = f"  {'Operation':<{COL_OP}}"
-    h += f" | {'Rust stdev':>{COL_VAL}}"
+    h += f" | {'Sync stdev':>{COL_VAL}}"
     if c is not None:
-        h += f" | {'C stdev':>{COL_VAL}}"
+        h += f" | {'Official stdev':>{COL_VAL}}"
     h += f" | {'Async stdev':>{COL_VAL}}"
     print(h)
     print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
@@ -766,9 +766,9 @@ def print_comparison(
         w2 = COL_OP + 2 + 18 * 4 + 10
         print(_c(Color.DIM, f"  {'':─<{w2}}") if color else f"  {'':─<{w2}}")
         h = f"  {'Operation':<{COL_OP}}"
-        h += f" | {'Rust p50':>16} | {'Rust p99':>16}"
+        h += f" | {'Sync p50':>16} | {'Sync p99':>16}"
         if c is not None:
-            h += f" | {'C p50':>16} | {'C p99':>16}"
+            h += f" | {'Official p50':>16} | {'Official p99':>16}"
         print(h)
         print(_c(Color.DIM, f"  {'':─<{w2}}") if color else f"  {'':─<{w2}}")
         for op in pct_ops:
@@ -877,7 +877,7 @@ def main():
 
         # Determine project root (benchmark/ is one level down)
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        date_slug = _dt.now().strftime("%Y-%m-%d-%H-%M")
+        date_slug = _dt.now().strftime("%Y-%m-%d_%H:%M")
         json_dir = args.report_dir or os.path.join(
             project_root, "docs", "static", "benchmark", "results"
         )

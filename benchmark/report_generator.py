@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 
 # ── chart colors ─────────────────────────────────────────────
 
-COLOR_RUST = "#673ab7"  # purple
-COLOR_C = "#78909c"  # grey
+COLOR_SYNC = "#673ab7"  # purple
+COLOR_OFFICIAL = "#78909c"  # grey
 COLOR_ASYNC = "#4caf50"  # green
 
 OPERATIONS = ["put", "get", "batch_read", "batch_write", "scan"]
@@ -122,17 +122,21 @@ def _generate_bar_chart(
             x + offsets[0],
             rust_vals,
             width,
-            label="aerospike-py (Rust)",
-            color=COLOR_RUST,
+            label="aerospike-py (SyncClient)",
+            color=COLOR_SYNC,
         )
         ax.bar(
-            x + offsets[1], c_vals, width, label="official aerospike (C)", color=COLOR_C
+            x + offsets[1],
+            c_vals,
+            width,
+            label="aerospike (official)",
+            color=COLOR_OFFICIAL,
         )
         bars_async = ax.bar(
             x + offsets[2],
             async_vals,
             width,
-            label="aerospike-py async",
+            label="aerospike-py (AsyncClient)",
             color=COLOR_ASYNC,
         )
     else:
@@ -141,14 +145,14 @@ def _generate_bar_chart(
             x + offsets[0],
             rust_vals,
             width,
-            label="aerospike-py (Rust)",
-            color=COLOR_RUST,
+            label="aerospike-py (SyncClient)",
+            color=COLOR_SYNC,
         )
         bars_async = ax.bar(
             x + offsets[1],
             async_vals,
             width,
-            label="aerospike-py async",
+            label="aerospike-py (AsyncClient)",
             color=COLOR_ASYNC,
         )
 
@@ -223,8 +227,8 @@ def _generate_tail_latency_chart(
             x + offset * width,
             rust_p50,
             width,
-            label="Rust p50",
-            color=COLOR_RUST,
+            label="Sync p50",
+            color=COLOR_SYNC,
             alpha=0.7,
         )
     )
@@ -234,8 +238,8 @@ def _generate_tail_latency_chart(
             x + offset * width,
             rust_p99,
             width,
-            label="Rust p99",
-            color=COLOR_RUST,
+            label="Sync p99",
+            color=COLOR_SYNC,
             alpha=1.0,
         )
     )
@@ -249,8 +253,8 @@ def _generate_tail_latency_chart(
                 x + offset * width,
                 c_p50,
                 width,
-                label="C p50",
-                color=COLOR_C,
+                label="Official p50",
+                color=COLOR_OFFICIAL,
                 alpha=0.7,
             )
         )
@@ -260,8 +264,8 @@ def _generate_tail_latency_chart(
                 x + offset * width,
                 c_p99,
                 width,
-                label="C p99",
-                color=COLOR_C,
+                label="Official p99",
+                color=COLOR_OFFICIAL,
                 alpha=1.0,
             )
         )
@@ -309,8 +313,8 @@ def _generate_takeaways(results: BenchmarkResults) -> list[str]:
                     best_op = op
         if best_op and best_ratio > 1:
             takeaways.append(
-                f"aerospike-py (Rust sync)는 {OP_LABELS[best_op]} 연산에서 "
-                f"C client 대비 **{best_ratio:.1f}x** 빠른 레이턴시를 보임"
+                f"aerospike-py (SyncClient) shows **{best_ratio:.1f}x** faster latency "
+                f"than the official client in {OP_LABELS[best_op]} operations"
             )
 
         # Find biggest async win vs C
@@ -326,8 +330,8 @@ def _generate_takeaways(results: BenchmarkResults) -> list[str]:
                     best_async_op = op
         if best_async_op and best_async_ratio > 1:
             takeaways.append(
-                f"async 클라이언트는 {OP_LABELS[best_async_op]} 연산에서 "
-                f"C client 대비 **{best_async_ratio:.1f}x** 빠른 레이턴시를 보임"
+                f"AsyncClient shows **{best_async_ratio:.1f}x** faster latency "
+                f"than the official client in {OP_LABELS[best_async_op]} operations"
             )
 
     # Async vs sync advantage
@@ -343,12 +347,12 @@ def _generate_takeaways(results: BenchmarkResults) -> list[str]:
                 best_async_sync_op = op
     if best_async_sync_op and best_async_sync_ratio > 1:
         takeaways.append(
-            f"async 클라이언트는 {OP_LABELS[best_async_sync_op]} 연산에서 "
-            f"sync 대비 **{best_async_sync_ratio:.1f}x** 높은 throughput (concurrency={results.concurrency})"
+            f"AsyncClient shows **{best_async_sync_ratio:.1f}x** higher throughput "
+            f"than SyncClient in {OP_LABELS[best_async_sync_op]} operations (concurrency={results.concurrency})"
         )
 
     if not takeaways:
-        takeaways.append("벤치마크 결과가 정상적으로 수집됨")
+        takeaways.append("Benchmark results collected successfully")
 
     return takeaways
 

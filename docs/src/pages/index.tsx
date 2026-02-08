@@ -1,4 +1,4 @@
-import type {ReactNode} from 'react';
+import {type ReactNode, useState, useCallback} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
@@ -6,6 +6,28 @@ import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import styles from './index.module.css';
+
+function CopyBlock({text}: {text: string}) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [text]);
+  return (
+    <div className={styles.installCommand}>
+      <code>{text}</code>
+      <button
+        className={styles.copyButton}
+        onClick={handleCopy}
+        aria-label="Copy to clipboard"
+        title="Copy to clipboard">
+        {copied ? '✓' : '⧉'}
+      </button>
+    </div>
+  );
+}
 
 function HomepageHeader() {
   const {siteConfig} = useDocusaurusContext();
@@ -28,9 +50,7 @@ function HomepageHeader() {
             Blog
           </Link>
         </div>
-        <div className={styles.installCommand}>
-          <code>pip install aerospike-py</code>
-        </div>
+        <CopyBlock text="pip install aerospike-py" />
       </div>
     </header>
   );

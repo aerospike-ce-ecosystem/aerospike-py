@@ -16,9 +16,9 @@ For consistent, reproducible results:
 
 | Column | Client | Description |
 | ------ | ------ | ----------- |
-| aerospike-py (Rust) | `aerospike.Client` | Rust-based sync client |
-| official aerospike (C) | `aerospike.client` (PyPI) | Official C extension sync client |
-| aerospike-py async (Rust) | `aerospike.AsyncClient` | Rust-based async client + `asyncio.gather` |
+| aerospike-py (SyncClient) | `aerospike.Client` | Rust-based sync client |
+| aerospike (official) | `aerospike.client` (PyPI) | Official C extension sync client |
+| aerospike-py (AsyncClient) | `aerospike.AsyncClient` | Rust-based async client + `asyncio.gather` |
 
 ## Prerequisites
 
@@ -64,7 +64,7 @@ Benchmark config:
 
   Avg Latency (ms)  —  lower is better  [median of round means]
   ──────────────────────────────────────────────────────────────────────────────────────
-  Operation          |   aerospike-py (Rust) | official aerospike (C) |   aerospike-py async |     Rust vs C |    Async vs C
+  Operation          | aerospike-py (SyncClient) | aerospike (official) | aerospike-py (AsyncClient) | Sync vs Official | Async vs Official
   put                |              0.310ms  |               0.580ms  |              0.041ms | 1.9x faster   | 14.1x faster
   get                |              0.195ms  |               0.398ms  |              0.028ms | 2.0x faster   | 14.2x faster
   batch_read   |              0.XXXms  |               0.XXXms  |              0.XXXms | X.Xx faster   |  ~Mx faster
@@ -72,7 +72,7 @@ Benchmark config:
 
   Stability (stdev of round median latency, ms)  —  lower = more stable
   ──────────────────────────────────────────────────────────────────────────────────────
-  Operation          |            Rust stdev |              C stdev  |         Async stdev
+  Operation          |            Sync stdev |        Official stdev |         Async stdev
   put                |              0.008ms  |              0.015ms  |              0.003ms
   get                |              0.005ms  |              0.012ms  |              0.002ms
 ```
@@ -86,8 +86,8 @@ Benchmark config:
 | p99_ms | Aggregated 99th percentile |
 | ops_per_sec | Median of round throughputs (higher is better) |
 | stdev_ms | Stdev of round medians (lower = more stable) |
-| Rust vs C | Speedup of aerospike-py sync vs C client |
-| Async vs C | Speedup of aerospike-py async vs C client |
+| Sync vs Official | Speedup of aerospike-py sync vs official client |
+| Async vs Official | Speedup of aerospike-py async vs official client |
 
 ## Environment Variables
 

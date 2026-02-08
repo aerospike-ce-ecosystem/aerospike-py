@@ -1,6 +1,6 @@
 {
   "timestamp": "2026-02-08T11:24:00",
-  "date": "2026-02-08-11-24",
+  "date": "2026-02-08_11:24",
   "environment": {
     "platform": "Darwin arm64",
     "python_version": "3.13.11",
@@ -32,13 +32,13 @@
     "scan": {"avg_ms": 0.002, "p50_ms": null, "p99_ms": null, "ops_per_sec": 505094, "stdev_ms": 0.000}
   },
   "charts": {
-    "latency": "/img/benchmark/2026-02-08-11-24/latency_comparison.svg",
-    "throughput": "/img/benchmark/2026-02-08-11-24/throughput_comparison.svg",
-    "tail_latency": "/img/benchmark/2026-02-08-11-24/tail_latency.svg"
+    "latency": "/img/benchmark/2026-02-08_11:24/latency_comparison.svg",
+    "throughput": "/img/benchmark/2026-02-08_11:24/throughput_comparison.svg",
+    "tail_latency": "/img/benchmark/2026-02-08_11:24/tail_latency.svg"
   },
   "takeaways": [
-    "aerospike-py (Rust sync)는 SCAN 연산에서 C client 대비 **1.1x** 빠른 레이턴시를 보임",
-    "async 클라이언트는 BATCH_WRITE 연산에서 C client 대비 **3.6x** 빠른 레이턴시를 보임",
-    "async 클라이언트는 BATCH_READ 연산에서 sync 대비 **4.8x** 높은 throughput (concurrency=50)"
+    "aerospike-py (SyncClient) shows **1.1x** faster latency than the official client in SCAN operations",
+    "AsyncClient shows **3.6x** faster latency than the official client in BATCH_WRITE operations",
+    "AsyncClient shows **4.8x** higher throughput than SyncClient in BATCH_READ operations (concurrency=50)"
   ]
 }
