@@ -38,42 +38,43 @@ pip install aerospike        # official C client
 ## Run
 
 ```bash
-# Default (1000 ops x 5 rounds, concurrency 50)
-bash benchmark/run_all.sh
+# Default (5000 ops x 20 rounds, concurrency 50, batch_groups 10)
+make run-benchmark
 
-# Custom: count rounds concurrency
-bash benchmark/run_all.sh 2000 7 100
+# Custom parameters
+make run-benchmark BENCH_COUNT=2000 BENCH_ROUNDS=7 BENCH_CONCURRENCY=100 BENCH_BATCH_GROUPS=20
 
 # Direct execution
-python benchmark/bench_compare.py --count 1000 --rounds 5 --warmup 200 --concurrency 50
+python benchmark/bench_compare.py --count 1000 --rounds 5 --warmup 200 --concurrency 50 --batch-groups 10
 ```
 
 ## Output
 
 ```text
 Benchmark config:
-  ops/round  = 1,000
-  rounds     = 5
-  warmup     = 200
-  concurrency= 50
+  ops/round    = 1,000
+  rounds       = 5
+  warmup       = 200
+  concurrency  = 50
+  batch_groups = 10
 
 ====================================================================================================
-  aerospike-py Benchmark  (1,000 ops x 5 rounds, warmup=200, async concurrency=50)
+  aerospike-py Benchmark  (1,000 ops x 5 rounds, warmup=200, async concurrency=50, batch_groups=10)
 ====================================================================================================
 
   Avg Latency (ms)  —  lower is better  [median of round means]
-  ──────────────────────────────────────────────────────────────────────────────
-  Operation    |   aerospike-py (Rust) | official aerospike (C) |   aerospike-py async |     Rust vs C |    Async vs C
-  put          |              0.310ms  |               0.580ms  |              0.041ms | 1.9x faster   | 14.1x faster
-  get          |              0.195ms  |               0.398ms  |              0.028ms | 2.0x faster   | 14.2x faster
-  batch_get    |              0.044ms  |               0.088ms  |              0.031ms | 2.0x faster   |  2.8x faster
-  scan         |              0.011ms  |               0.030ms  |              0.009ms | 2.7x faster   |  3.3x faster
+  ──────────────────────────────────────────────────────────────────────────────────────
+  Operation          |   aerospike-py (Rust) | official aerospike (C) |   aerospike-py async |     Rust vs C |    Async vs C
+  put                |              0.310ms  |               0.580ms  |              0.041ms | 1.9x faster   | 14.1x faster
+  get                |              0.195ms  |               0.398ms  |              0.028ms | 2.0x faster   | 14.2x faster
+  batch_read   |              0.XXXms  |               0.XXXms  |              0.XXXms | X.Xx faster   |  ~Mx faster
+  scan               |              0.011ms  |               0.030ms  |              0.009ms | 2.7x faster   |  3.3x faster
 
   Stability (stdev of round median latency, ms)  —  lower = more stable
-  ──────────────────────────────────────────────────────────────────────────────
-  Operation    |            Rust stdev |              C stdev  |         Async stdev
-  put          |              0.008ms  |              0.015ms  |              0.003ms
-  get          |              0.005ms  |              0.012ms  |              0.002ms
+  ──────────────────────────────────────────────────────────────────────────────────────
+  Operation          |            Rust stdev |              C stdev  |         Async stdev
+  put                |              0.008ms  |              0.015ms  |              0.003ms
+  get                |              0.005ms  |              0.012ms  |              0.002ms
 ```
 
 ## Metrics

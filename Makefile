@@ -9,6 +9,7 @@ AEROSPIKE_MEMORY ?= 2g
 BENCH_COUNT ?= 5000
 BENCH_ROUNDS ?= 20
 BENCH_CONCURRENCY ?= 50
+BENCH_BATCH_GROUPS ?= 10
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -59,6 +60,7 @@ run-benchmark: build run-aerospike-ce ## Run benchmark with local build (COUNT, 
 		--count $(BENCH_COUNT) \
 		--rounds $(BENCH_ROUNDS) \
 		--concurrency $(BENCH_CONCURRENCY) \
+		--batch-groups $(BENCH_BATCH_GROUPS) \
 		--host $(AEROSPIKE_HOST) \
 		--port $(AEROSPIKE_PORT); \
 	$(MAKE) stop-aerospike-ce

@@ -86,7 +86,7 @@ The official C client supports async I/O internally (libev/libuv/libevent), but 
 
 aerospike-py provides **native `async/await`** via Tokio + PyO3, enabling `asyncio.gather()` for true concurrent I/O — critical for modern Python web frameworks (FastAPI, Starlette, etc).
 
-> Full benchmark details: [benchmark/](benchmark/) | Run: `bash benchmark/run_all.sh 5000 100`
+> Full benchmark details: [benchmark/](benchmark/) | Run: `make run-benchmark`
 
 ## Contributing
 
