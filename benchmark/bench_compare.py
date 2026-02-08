@@ -294,7 +294,7 @@ def bench_rust_sync(
     for _ in range(rounds):
         scan = client.scan(NAMESPACE, SET_NAME)
         gc.disable()
-        elapsed = _measure_bulk(lambda: scan.results())
+        elapsed = _measure_bulk(lambda s=scan: s.results())
         gc.enable()
         scan_rounds.append(elapsed)
     results["scan"] = _bulk_median(scan_rounds, count)
@@ -418,7 +418,7 @@ def bench_c_sync(
     for _ in range(rounds):
         scan = client.scan(NAMESPACE, SET_NAME)
         gc.disable()
-        elapsed = _measure_bulk(lambda: scan.results())
+        elapsed = _measure_bulk(lambda s=scan: s.results())
         gc.enable()
         scan_rounds.append(elapsed)
     results["scan"] = _bulk_median(scan_rounds, count)
@@ -900,7 +900,7 @@ def main():
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from report_generator import generate_report
 
-        generate_report(results, json_dir, img_dir)
+        generate_report(results, json_dir, img_dir, date_slug)
         print(
             _c(Color.BOLD_CYAN, "[report]") + f" Generated: {json_dir}/{date_slug}.json"
         )

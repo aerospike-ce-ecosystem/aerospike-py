@@ -413,10 +413,11 @@ def _update_index(json_dir: str, date_slug: str, json_filename: str) -> None:
 # ── main entry point ─────────────────────────────────────────
 
 
-def generate_report(results: BenchmarkResults, json_dir: str, img_dir: str) -> None:
+def generate_report(
+    results: BenchmarkResults, json_dir: str, img_dir: str, date_slug: str
+) -> None:
     """Generate full benchmark report: charts + JSON."""
-    now = datetime.now()
-    date_slug = now.strftime("%Y-%m-%d-%H-%M")
+    now = datetime.fromisoformat(results.timestamp)
     json_filename = f"{date_slug}.json"
 
     # img_dir already includes the date folder from caller

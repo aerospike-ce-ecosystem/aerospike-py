@@ -280,6 +280,40 @@ function ReportView({data}: {data: BenchmarkData}) {
   );
 }
 
+// ── Lazy-loading wrapper ────────────────────────────────────
+
+function LazyReportView({
+  date,
+  file,
+  baseUrl,
+  reports,
+  onLoad,
+  onError,
+}: {
+  date: string;
+  file: string;
+  baseUrl: string;
+  reports: Record<string, BenchmarkData>;
+  onLoad: (date: string, data: BenchmarkData) => void;
+  onError: (msg: string) => void;
+}) {
+  useEffect(() => {
+    if (reports[date]) return;
+    fetch(`${baseUrl}${file}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load ${file}`);
+        return res.json();
+      })
+      .then((data: BenchmarkData) => onLoad(date, data))
+      .catch((err) => onError(err.message));
+  }, [date, file, baseUrl, reports, onLoad, onError]);
+
+  if (!reports[date]) {
+    return <p>Loading {date}...</p>;
+  }
+  return <ReportView data={reports[date]} />;
+}
+
 // ── Main Component ──────────────────────────────────────────
 
 export default function BenchmarkReport(): React.ReactElement {
@@ -299,27 +333,17 @@ export default function BenchmarkReport(): React.ReactElement {
       .catch((err) => setError(err.message));
   }, [baseUrl]);
 
-  // Load individual report when a tab is selected
-  const loadReport = (date: string, file: string) => {
-    if (reports[date]) return;
-    fetch(`${baseUrl}${file}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load ${file}`);
-        return res.json();
-      })
-      .then((data: BenchmarkData) =>
-        setReports((prev) => ({...prev, [date]: data})),
-      )
-      .catch((err) => setError(err.message));
-  };
+  const handleLoad = React.useCallback(
+    (date: string, data: BenchmarkData) => {
+      setReports((prev) => ({...prev, [date]: data}));
+    },
+    [],
+  );
 
-  // Auto-load the first report
-  useEffect(() => {
-    if (index && index.reports.length > 0) {
-      const first = index.reports[0];
-      loadReport(first.date, first.file);
-    }
-  }, [index]);
+  const handleError = React.useCallback(
+    (msg: string) => setError(msg),
+    [],
+  );
 
   if (error) {
     return (
@@ -355,14 +379,14 @@ export default function BenchmarkReport(): React.ReactElement {
             label={entry.date}
             default={entry.date === index.reports[0].date}
           >
-            {(() => {
-              // Trigger load on render
-              if (!reports[entry.date]) {
-                loadReport(entry.date, entry.file);
-                return <p>Loading {entry.date}...</p>;
-              }
-              return <ReportView data={reports[entry.date]} />;
-            })()}
+            <LazyReportView
+              date={entry.date}
+              file={entry.file}
+              baseUrl={baseUrl}
+              reports={reports}
+              onLoad={handleLoad}
+              onError={handleError}
+            />
           </TabItem>
         ))}
       </Tabs>
