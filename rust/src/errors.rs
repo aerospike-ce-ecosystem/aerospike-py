@@ -3,37 +3,147 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 
 // Base exceptions
-pyo3::create_exception!(aerospike, AerospikeError, PyException);
-pyo3::create_exception!(aerospike, ClientError, AerospikeError);
-pyo3::create_exception!(aerospike, ServerError, AerospikeError);
-pyo3::create_exception!(aerospike, RecordError, AerospikeError);
-pyo3::create_exception!(aerospike, ClusterError, AerospikeError);
-pyo3::create_exception!(aerospike, AerospikeTimeoutError, AerospikeError);
-pyo3::create_exception!(aerospike, InvalidArgError, AerospikeError);
+pyo3::create_exception!(
+    aerospike,
+    AerospikeError,
+    PyException,
+    "Base exception for all Aerospike errors."
+);
+pyo3::create_exception!(
+    aerospike,
+    ClientError,
+    AerospikeError,
+    "Client-side error (connection, configuration, internal)."
+);
+pyo3::create_exception!(
+    aerospike,
+    ServerError,
+    AerospikeError,
+    "Server-side error returned by the Aerospike cluster."
+);
+pyo3::create_exception!(
+    aerospike,
+    RecordError,
+    AerospikeError,
+    "Record-level error (not found, exists, generation mismatch, etc.)."
+);
+pyo3::create_exception!(
+    aerospike,
+    ClusterError,
+    AerospikeError,
+    "Cluster connectivity or node error."
+);
+pyo3::create_exception!(
+    aerospike,
+    AerospikeTimeoutError,
+    AerospikeError,
+    "Operation timed out."
+);
+pyo3::create_exception!(
+    aerospike,
+    InvalidArgError,
+    AerospikeError,
+    "Invalid argument passed to an operation."
+);
 
 // Record-level exceptions
-pyo3::create_exception!(aerospike, RecordNotFound, RecordError);
-pyo3::create_exception!(aerospike, RecordExistsError, RecordError);
-pyo3::create_exception!(aerospike, RecordGenerationError, RecordError);
-pyo3::create_exception!(aerospike, RecordTooBig, RecordError);
-pyo3::create_exception!(aerospike, BinNameError, RecordError);
-pyo3::create_exception!(aerospike, BinExistsError, RecordError);
-pyo3::create_exception!(aerospike, BinNotFound, RecordError);
-pyo3::create_exception!(aerospike, BinTypeError, RecordError);
-pyo3::create_exception!(aerospike, FilteredOut, RecordError);
+pyo3::create_exception!(
+    aerospike,
+    RecordNotFound,
+    RecordError,
+    "Record does not exist (result code 2)."
+);
+pyo3::create_exception!(
+    aerospike,
+    RecordExistsError,
+    RecordError,
+    "Record already exists (result code 5)."
+);
+pyo3::create_exception!(
+    aerospike,
+    RecordGenerationError,
+    RecordError,
+    "Record generation mismatch (result code 3)."
+);
+pyo3::create_exception!(
+    aerospike,
+    RecordTooBig,
+    RecordError,
+    "Record size exceeds server limit (result code 13)."
+);
+pyo3::create_exception!(
+    aerospike,
+    BinNameError,
+    RecordError,
+    "Bin name too long (result code 21)."
+);
+pyo3::create_exception!(
+    aerospike,
+    BinExistsError,
+    RecordError,
+    "Bin already exists (result code 6)."
+);
+pyo3::create_exception!(
+    aerospike,
+    BinNotFound,
+    RecordError,
+    "Bin does not exist (result code 17)."
+);
+pyo3::create_exception!(
+    aerospike,
+    BinTypeError,
+    RecordError,
+    "Bin type mismatch for the operation (result code 12)."
+);
+pyo3::create_exception!(
+    aerospike,
+    FilteredOut,
+    RecordError,
+    "Record filtered out by expression filter (result code 27)."
+);
 
 // Index exceptions
-pyo3::create_exception!(aerospike, AerospikeIndexError, ServerError);
-pyo3::create_exception!(aerospike, IndexNotFound, AerospikeIndexError);
-pyo3::create_exception!(aerospike, IndexFoundError, AerospikeIndexError);
+pyo3::create_exception!(
+    aerospike,
+    AerospikeIndexError,
+    ServerError,
+    "Secondary index error."
+);
+pyo3::create_exception!(
+    aerospike,
+    IndexNotFound,
+    AerospikeIndexError,
+    "Secondary index does not exist (result code 201)."
+);
+pyo3::create_exception!(
+    aerospike,
+    IndexFoundError,
+    AerospikeIndexError,
+    "Secondary index already exists (result code 200)."
+);
 
 // Query exceptions
-pyo3::create_exception!(aerospike, QueryError, ServerError);
-pyo3::create_exception!(aerospike, QueryAbortedError, QueryError);
+pyo3::create_exception!(aerospike, QueryError, ServerError, "Query execution error.");
+pyo3::create_exception!(
+    aerospike,
+    QueryAbortedError,
+    QueryError,
+    "Query was aborted by the server (result code 210)."
+);
 
 // Admin / UDF exceptions
-pyo3::create_exception!(aerospike, AdminError, ServerError);
-pyo3::create_exception!(aerospike, UDFError, ServerError);
+pyo3::create_exception!(
+    aerospike,
+    AdminError,
+    ServerError,
+    "Admin or security operation error."
+);
+pyo3::create_exception!(
+    aerospike,
+    UDFError,
+    ServerError,
+    "User-Defined Function (UDF) execution error."
+);
 
 pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
     match rc {
