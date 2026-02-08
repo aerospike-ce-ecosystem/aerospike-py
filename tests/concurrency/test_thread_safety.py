@@ -101,9 +101,9 @@ class TestThreadSafety:
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(cycle, range(100)))
 
-        assert (
-            errors.empty()
-        ), f"Errors in ThreadPoolExecutor test: {list(_drain(errors))}"
+        assert errors.empty(), (
+            f"Errors in ThreadPoolExecutor test: {list(_drain(errors))}"
+        )
 
     def test_multiple_clients_from_threads(self):
         """Each thread creates its own client, uses it, and closes it."""

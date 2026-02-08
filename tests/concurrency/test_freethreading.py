@@ -43,9 +43,9 @@ class TestFreeThreading:
         for t in threads:
             t.join()
 
-        assert (
-            errors.empty()
-        ), f"Errors during parallel increments: {list(_drain(errors))}"
+        assert errors.empty(), (
+            f"Errors during parallel increments: {list(_drain(errors))}"
+        )
         _, _, bins = client.get(key)
         assert bins["counter"] == num_threads * increments_per_thread
         client.remove(key)
