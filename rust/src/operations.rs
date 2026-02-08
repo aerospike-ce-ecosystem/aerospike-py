@@ -97,6 +97,18 @@ fn get_index(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
         .extract()
 }
 
+fn get_rank(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
+    // Try "rank" key first, fall back to "index" for backward compatibility
+    if let Some(v) = dict.get_item("rank")? {
+        return v.extract();
+    }
+    dict.get_item("index")?
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("Operation requires 'rank' or 'index'")
+        })?
+        .extract()
+}
+
 fn get_count(dict: &Bound<'_, PyDict>) -> PyResult<Option<i64>> {
     dict.get_item("count")?
         .and_then(|v| if v.is_none() { None } else { Some(v) })
@@ -389,13 +401,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_LIST_GET_BY_RANK => {
                 let name = require_bin(&bin_name, "list_get_by_rank")?;
-                let rank = get_index(dict)?;
+                let rank = get_rank(dict)?;
                 let rt = int_to_list_return_type(get_return_type(dict)?);
                 list_ops::get_by_rank(&name, rank, rt)
             }
             OP_LIST_GET_BY_RANK_RANGE => {
                 let name = require_bin(&bin_name, "list_get_by_rank_range")?;
-                let rank = get_index(dict)?;
+                let rank = get_rank(dict)?;
                 let rt = int_to_list_return_type(get_return_type(dict)?);
                 match get_count(dict)? {
                     Some(count) => list_ops::get_by_rank_range_count(&name, rank, count, rt),
@@ -451,13 +463,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_LIST_REMOVE_BY_RANK => {
                 let name = require_bin(&bin_name, "list_remove_by_rank")?;
-                let rank = get_index(dict)?;
+                let rank = get_rank(dict)?;
                 let rt = int_to_list_return_type(get_return_type(dict)?);
                 list_ops::remove_by_rank(&name, rank, rt)
             }
             OP_LIST_REMOVE_BY_RANK_RANGE => {
                 let name = require_bin(&bin_name, "list_remove_by_rank_range")?;
-                let rank = get_index(dict)?;
+                let rank = get_rank(dict)?;
                 let rt = int_to_list_return_type(get_return_type(dict)?);
                 match get_count(dict)? {
                     Some(count) => list_ops::remove_by_rank_range_count(&name, rank, count, rt),
@@ -605,13 +617,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_MAP_REMOVE_BY_RANK => {
                 let name = require_bin(&bin_name, "map_remove_by_rank")?;
-                let rank = get_index(dict)?;
+                let rank = get_rank(dict)?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 map_ops::remove_by_rank(&name, rank, rt)
             }
             OP_MAP_REMOVE_BY_RANK_RANGE => {
                 let name = require_bin(&bin_name, "map_remove_by_rank_range")?;
-                let rank = get_index(dict)?;
+                let rank = get_rank(dict)?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 let count = get_count(dict)?.unwrap_or(1);
                 map_ops::remove_by_rank_range(&name, rank, count, rt)
@@ -661,13 +673,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_MAP_GET_BY_RANK => {
                 let name = require_bin(&bin_name, "map_get_by_rank")?;
-                let rank = get_index(dict)?;
+                let rank = get_rank(dict)?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 map_ops::get_by_rank(&name, rank, rt)
             }
             OP_MAP_GET_BY_RANK_RANGE => {
                 let name = require_bin(&bin_name, "map_get_by_rank_range")?;
-                let rank = get_index(dict)?;
+                let rank = get_rank(dict)?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 let count = get_count(dict)?.unwrap_or(1);
                 map_ops::get_by_rank_range(&name, rank, count, rt)
