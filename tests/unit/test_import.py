@@ -130,6 +130,35 @@ def test_client_not_connected_operations():
             pass
 
 
+def test_sync_async_method_parity():
+    """Verify Client and AsyncClient expose the same public API methods."""
+    from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
+
+    sync_methods = {
+        m
+        for m in dir(aerospike_py.Client)
+        if not m.startswith("_") and callable(getattr(aerospike_py.Client, m))
+    }
+    async_methods = {
+        m
+        for m in dir(_NativeAsyncClient)
+        if not m.startswith("_") and callable(getattr(_NativeAsyncClient, m))
+    }
+
+    # query() is sync-only (returns PyQuery object)
+    sync_only_expected = {"query"}
+
+    sync_extra = sync_methods - async_methods - sync_only_expected
+    async_extra = async_methods - sync_methods
+
+    assert not sync_extra, (
+        f"Methods in Client but missing from AsyncClient: {sync_extra}"
+    )
+    assert not async_extra, (
+        f"Methods in AsyncClient but missing from Client: {async_extra}"
+    )
+
+
 def test_connect_username_without_password():
     """Test that connect() with username but no password raises ClientError."""
     c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
