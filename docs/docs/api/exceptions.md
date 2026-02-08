@@ -20,9 +20,9 @@ Exception
     ├── ClientError
     ├── ClusterError
     ├── InvalidArgError
-    ├── TimeoutError
+    ├── AerospikeTimeoutError
     ├── ServerError
-    │   ├── IndexError
+    │   ├── AerospikeIndexError
     │   │   ├── IndexNotFound
     │   │   └── IndexFoundError
     │   ├── QueryError
@@ -49,7 +49,7 @@ Exception
 | `ClientError` | Client-side errors (connection, config) |
 | `ClusterError` | Cluster connection/discovery errors |
 | `InvalidArgError` | Invalid argument passed to a method |
-| `TimeoutError` | Operation timed out |
+| `AerospikeTimeoutError` | Operation timed out (alias: `TimeoutError`, deprecated) |
 | `ServerError` | Server-side errors |
 | `RecordError` | Record-level operation errors |
 
@@ -71,7 +71,7 @@ Exception
 
 | Exception | Description |
 |-----------|-------------|
-| `IndexError` | Secondary index operation error |
+| `AerospikeIndexError` | Secondary index operation error (alias: `IndexError`, deprecated) |
 | `IndexNotFound` | Index does not exist |
 | `IndexFoundError` | Index already exists |
 | `QueryError` | Query execution error |
@@ -123,13 +123,13 @@ except RecordExistsError:
 ### Connection Errors
 
 ```python
-from aerospike_py.exception import ClientError, ClusterError, TimeoutError
+from aerospike_py.exception import ClientError, ClusterError, AerospikeTimeoutError
 
 try:
     client = aerospike.client(config).connect()
 except ClusterError:
     print("Cannot connect to cluster")
-except TimeoutError:
+except AerospikeTimeoutError:
     print("Connection timed out")
 except ClientError as e:
     print(f"Client error: {e}")

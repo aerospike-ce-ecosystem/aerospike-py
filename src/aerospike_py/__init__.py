@@ -16,7 +16,8 @@ from aerospike_py._aerospike import (  # noqa: F401
     InvalidArgError,
     RecordError,
     ServerError,
-    TimeoutError,
+    AerospikeTimeoutError,
+    TimeoutError,  # deprecated alias for AerospikeTimeoutError
     RecordNotFound,
     RecordExistsError,
     RecordGenerationError,
@@ -26,7 +27,8 @@ from aerospike_py._aerospike import (  # noqa: F401
     BinNotFound,
     BinTypeError,
     FilteredOut,
-    IndexError,
+    AerospikeIndexError,
+    IndexError,  # deprecated alias for AerospikeIndexError
     IndexNotFound,
     IndexFoundError,
     QueryError,
@@ -339,7 +341,8 @@ __all__ = [
     "InvalidArgError",
     "RecordError",
     "ServerError",
-    "TimeoutError",
+    "AerospikeTimeoutError",
+    "TimeoutError",  # deprecated alias
     "RecordNotFound",
     "RecordExistsError",
     "RecordGenerationError",
@@ -349,7 +352,8 @@ __all__ = [
     "BinNotFound",
     "BinTypeError",
     "FilteredOut",
-    "IndexError",
+    "AerospikeIndexError",
+    "IndexError",  # deprecated alias
     "IndexNotFound",
     "IndexFoundError",
     "QueryError",

@@ -67,7 +67,7 @@ Benchmark config:
   Operation          | aerospike-py (SyncClient) | aerospike (official) | aerospike-py (AsyncClient) | Sync vs Official | Async vs Official
   put                |              0.310ms  |               0.580ms  |              0.041ms | 1.9x faster   | 14.1x faster
   get                |              0.195ms  |               0.398ms  |              0.028ms | 2.0x faster   | 14.2x faster
-  batch_read   |              0.XXXms  |               0.XXXms  |              0.XXXms | X.Xx faster   |  ~Mx faster
+  batch_read   |           [TBD - run benchmark to measure]
   scan               |              0.011ms  |               0.030ms  |              0.009ms | 2.7x faster   |  3.3x faster
 
   Stability (stdev of round median latency, ms)  —  lower = more stable

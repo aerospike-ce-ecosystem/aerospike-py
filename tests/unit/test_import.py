@@ -75,7 +75,9 @@ def test_exception_hierarchy():
     assert issubclass(aerospike_py.ServerError, aerospike_py.AerospikeError)
     assert issubclass(aerospike_py.RecordError, aerospike_py.AerospikeError)
     assert issubclass(aerospike_py.ClusterError, aerospike_py.AerospikeError)
+    assert issubclass(aerospike_py.AerospikeTimeoutError, aerospike_py.AerospikeError)
     assert issubclass(aerospike_py.TimeoutError, aerospike_py.AerospikeError)
+    assert aerospike_py.AerospikeTimeoutError is aerospike_py.TimeoutError
     assert issubclass(aerospike_py.InvalidArgError, aerospike_py.AerospikeError)
 
     # Record-level subclasses
@@ -93,6 +95,9 @@ def test_exception_hierarchy():
     assert issubclass(exception.RecordNotFound, aerospike_py.RecordError)
     assert issubclass(exception.RecordExistsError, aerospike_py.RecordError)
     assert issubclass(exception.BinNameError, aerospike_py.RecordError)
+    assert issubclass(exception.AerospikeIndexError, aerospike_py.ServerError)
+    assert exception.AerospikeIndexError is exception.IndexError
+    assert issubclass(exception.IndexNotFound, exception.AerospikeIndexError)
     assert issubclass(exception.IndexNotFound, exception.IndexError)
     assert issubclass(exception.QueryAbortedError, exception.QueryError)
     assert issubclass(exception.AdminError, aerospike_py.ServerError)

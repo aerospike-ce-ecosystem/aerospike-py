@@ -8,7 +8,7 @@ pyo3::create_exception!(aerospike, ClientError, AerospikeError);
 pyo3::create_exception!(aerospike, ServerError, AerospikeError);
 pyo3::create_exception!(aerospike, RecordError, AerospikeError);
 pyo3::create_exception!(aerospike, ClusterError, AerospikeError);
-pyo3::create_exception!(aerospike, TimeoutError, AerospikeError);
+pyo3::create_exception!(aerospike, AerospikeTimeoutError, AerospikeError);
 pyo3::create_exception!(aerospike, InvalidArgError, AerospikeError);
 
 // Record-level exceptions
@@ -23,9 +23,9 @@ pyo3::create_exception!(aerospike, BinTypeError, RecordError);
 pyo3::create_exception!(aerospike, FilteredOut, RecordError);
 
 // Index exceptions
-pyo3::create_exception!(aerospike, IndexError, ServerError);
-pyo3::create_exception!(aerospike, IndexNotFound, IndexError);
-pyo3::create_exception!(aerospike, IndexFoundError, IndexError);
+pyo3::create_exception!(aerospike, AerospikeIndexError, ServerError);
+pyo3::create_exception!(aerospike, IndexNotFound, AerospikeIndexError);
+pyo3::create_exception!(aerospike, IndexFoundError, AerospikeIndexError);
 
 // Query exceptions
 pyo3::create_exception!(aerospike, QueryError, ServerError);
@@ -87,7 +87,7 @@ pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
 pub fn as_to_pyerr(err: AsError) -> PyErr {
     match &err {
         AsError::Connection(msg) => ClusterError::new_err(format!("Connection error: {msg}")),
-        AsError::Timeout(msg) => TimeoutError::new_err(format!("Timeout: {msg}")),
+        AsError::Timeout(msg) => AerospikeTimeoutError::new_err(format!("Timeout: {msg}")),
         AsError::InvalidArgument(msg) => {
             InvalidArgError::new_err(format!("Invalid argument: {msg}"))
         }
@@ -185,7 +185,11 @@ pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ServerError", py.get_type::<ServerError>())?;
     m.add("RecordError", py.get_type::<RecordError>())?;
     m.add("ClusterError", py.get_type::<ClusterError>())?;
-    m.add("TimeoutError", py.get_type::<TimeoutError>())?;
+    m.add(
+        "AerospikeTimeoutError",
+        py.get_type::<AerospikeTimeoutError>(),
+    )?;
+    m.add("TimeoutError", py.get_type::<AerospikeTimeoutError>())?; // backward compat
     m.add("InvalidArgError", py.get_type::<InvalidArgError>())?;
     // Record-level exceptions
     m.add("RecordNotFound", py.get_type::<RecordNotFound>())?;
@@ -201,7 +205,8 @@ pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("BinTypeError", py.get_type::<BinTypeError>())?;
     m.add("FilteredOut", py.get_type::<FilteredOut>())?;
     // Index exceptions
-    m.add("IndexError", py.get_type::<IndexError>())?;
+    m.add("AerospikeIndexError", py.get_type::<AerospikeIndexError>())?;
+    m.add("IndexError", py.get_type::<AerospikeIndexError>())?; // backward compat
     m.add("IndexNotFound", py.get_type::<IndexNotFound>())?;
     m.add("IndexFoundError", py.get_type::<IndexFoundError>())?;
     // Query exceptions
