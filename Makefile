@@ -11,6 +11,10 @@ BENCH_ROUNDS ?= 20
 BENCH_CONCURRENCY ?= 50
 BENCH_BATCH_GROUPS ?= 10
 
+NUMPY_BENCH_ROUNDS ?= 10
+NUMPY_BENCH_CONCURRENCY ?= 50
+NUMPY_BENCH_BATCH_GROUPS ?= 10
+
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
@@ -76,6 +80,24 @@ run-benchmark-report: build run-aerospike-ce ## Run benchmark and generate docs 
 		--host $(AEROSPIKE_HOST) \
 		--port $(AEROSPIKE_PORT) \
 		--report; \
+	$(MAKE) stop-aerospike-ce
+
+.PHONY: run-numpy-benchmark
+run-numpy-benchmark: build run-aerospike-ce ## Run numpy batch benchmark (dict vs numpy comparison)
+	uv run python benchmark/bench_batch_numpy.py \
+		--scenario all --rounds $(NUMPY_BENCH_ROUNDS) \
+		--concurrency $(NUMPY_BENCH_CONCURRENCY) \
+		--batch-groups $(NUMPY_BENCH_BATCH_GROUPS) \
+		--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT); \
+	$(MAKE) stop-aerospike-ce
+
+.PHONY: run-numpy-benchmark-report
+run-numpy-benchmark-report: build run-aerospike-ce ## Run numpy batch benchmark and generate report
+	uv run python benchmark/bench_batch_numpy.py \
+		--scenario all --rounds $(NUMPY_BENCH_ROUNDS) \
+		--concurrency $(NUMPY_BENCH_CONCURRENCY) \
+		--batch-groups $(NUMPY_BENCH_BATCH_GROUPS) \
+		--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT) --report; \
 	$(MAKE) stop-aerospike-ce
 
 # ---------------------------------------------------------------------------

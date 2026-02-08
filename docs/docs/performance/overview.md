@@ -74,3 +74,5 @@ make run-benchmark BENCH_COUNT=10000 BENCH_ROUNDS=30 BENCH_CONCURRENCY=100
 ## Latest Results
 
 See the [Benchmark Results](./benchmark-results) page for the latest benchmark results.
+
+See the [NumPy Batch Benchmark](./numpy-benchmark-results) page for dict vs numpy batch_read comparison.
