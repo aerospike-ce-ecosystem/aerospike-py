@@ -1,0 +1,10 @@
+{
+  "label": "Performance",
+  "position": 4,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Performance",
+    "description": "aerospike-py benchmark results and performance analysis"
+  }
+}

@@ -1,23 +1,64 @@
-.features {
+.section {
+  padding: 3rem 0;
+}
+
+.section + .section {
+  padding-top: 0;
+}
+
+.sectionHeader {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.sectionTitle {
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.sectionSubtitle {
+  color: var(--ifm-color-emphasis-600);
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+/* Drop-in Replacement: side-by-side code comparison */
+.codeCompare {
   display: flex;
-  align-items: center;
-  padding: 2rem 0;
-  width: 100%;
+  gap: 1.5rem;
+  align-items: stretch;
 }
 
-.featureCard {
-  padding: 1.5rem;
-  border-radius: 8px;
+@media (max-width: 768px) {
+  .codeCompare {
+    flex-direction: column;
+  }
+}
+
+.codeBlock {
+  flex: 1;
   border: 1px solid var(--ifm-color-emphasis-200);
-  height: 100%;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.featureCard:hover {
-  border-color: var(--ifm-color-primary);
-  box-shadow: 0 2px 12px rgba(103, 58, 183, 0.1);
+/* Remove CodeBlock's own margin and border-radius inside our wrapper */
+.codeBlock > div {
+  margin: 0 !important;
+  border-radius: 0 !important;
 }
 
-[data-theme='dark'] .featureCard:hover {
-  box-shadow: 0 2px 12px rgba(179, 157, 219, 0.15);
+.codeBlockHeader {
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  background: var(--ifm-color-emphasis-100);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+  color: var(--ifm-color-emphasis-700);
+}
+
+/* Sync & Async: tabs section */
+.tabsSection {
+  max-width: 720px;
+  margin: 0 auto;
 }

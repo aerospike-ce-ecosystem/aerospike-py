@@ -1,91 +1,123 @@
 import type {ReactNode} from 'react';
-import clsx from 'clsx';
 import Heading from '@theme/Heading';
+import CodeBlock from '@theme/CodeBlock';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 import styles from './HomepageFeatures.module.css';
 
-type FeatureItem = {
-  title: string;
-  description: ReactNode;
-};
+const CODE_OFFICIAL = `import aerospike
 
-const FeatureList: FeatureItem[] = [
-  {
-    title: 'Sync & Async',
-    description: (
-      <>
-        Both <code>Client</code> and <code>AsyncClient</code> are available.
-        The async client uses Tokio runtime for native async I/O.
-      </>
-    ),
-  },
-  {
-    title: 'Full CRUD + Batch',
-    description: (
-      <>
-        put, get, select, exists, remove, touch, increment, append, prepend
-        — plus batch operations for bulk reads and writes.
-      </>
-    ),
-  },
-  {
-    title: 'Query/Scan & Expressions',
-    description: (
-      <>
-        Secondary index queries, full namespace scans, and 104+ composable
-        expression filter functions for server-side filtering.
-      </>
-    ),
-  },
-  {
-    title: 'CDT Operations',
-    description: (
-      <>
-        45+ atomic List operations and 27+ atomic Map operations
-        for complex data type manipulation.
-      </>
-    ),
-  },
-  {
-    title: 'Type Safety',
-    description: (
-      <>
-        Complete <code>.pyi</code> type stubs for full IDE autocompletion
-        and type checking support.
-      </>
-    ),
-  },
-  {
-    title: 'Drop-in Replacement',
-    description: (
-      <>
-        API-compatible with the official aerospike-client-python.
-        Migrate by changing the import.
-      </>
-    ),
-  },
-];
+config = {'hosts': [('localhost', 3000)]}
+client = aerospike.client(config).connect()
 
-function Feature({title, description}: FeatureItem) {
+key = ('test', 'demo', 'key1')
+client.put(key, {'name': 'Alice', 'age': 30})
+_, _, bins = client.get(key)
+client.close()`;
+
+const CODE_AEROSPIKE_PY = `import aerospike_py as aerospike
+
+config = {'hosts': [('localhost', 3000)]}
+client = aerospike.client(config).connect()
+
+key = ('test', 'demo', 'key1')
+client.put(key, {'name': 'Alice', 'age': 30})
+_, _, bins = client.get(key)
+client.close()`;
+
+const CODE_SYNC = `from aerospike_py import Client
+
+client = Client({'hosts': [('localhost', 3000)]})
+client.connect()
+
+client.put(('test','demo','key1'), {'name': 'Alice', 'age': 30})
+_, _, bins = client.get(('test','demo','key1'))
+print(bins)  # {'name': 'Alice', 'age': 30}
+
+client.close()`;
+
+const CODE_ASYNC = `import asyncio
+from aerospike_py import AsyncClient
+
+async def main():
+    client = AsyncClient({'hosts': [('localhost', 3000)]})
+    await client.connect()
+
+    await client.put(('test','demo','key1'), {'name': 'Alice', 'age': 30})
+    _, _, bins = await client.get(('test','demo','key1'))
+    print(bins)  # {'name': 'Alice', 'age': 30}
+
+    await client.close()
+
+asyncio.run(main())`;
+
+function DropInReplacementSection() {
   return (
-    <div className={clsx('col col--4')}>
-      <div className={clsx('text--center padding-horiz--md padding-vert--md', styles.featureCard)}>
-        <Heading as="h3">{title}</Heading>
-        <p>{description}</p>
+    <section className={styles.section}>
+      <div className="container">
+        <div className={styles.sectionHeader}>
+          <Heading as="h2" className={styles.sectionTitle}>
+            Drop-in Replacement for Official Client
+          </Heading>
+          <p className={styles.sectionSubtitle}>
+            Just change the import — your existing code works as-is
+          </p>
+        </div>
+        <div className={styles.codeCompare}>
+          <div className={styles.codeBlock}>
+            <div className={styles.codeBlockHeader}>Official Client</div>
+            <CodeBlock language="python" metastring="{1}">
+              {CODE_OFFICIAL}
+            </CodeBlock>
+          </div>
+          <div className={styles.codeBlock}>
+            <div className={styles.codeBlockHeader}>aerospike-py</div>
+            <CodeBlock language="python" metastring="{1}">
+              {CODE_AEROSPIKE_PY}
+            </CodeBlock>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
+  );
+}
+
+function SyncAsyncSection() {
+  return (
+    <section className={styles.section}>
+      <div className="container">
+        <div className={styles.sectionHeader}>
+          <Heading as="h2" className={styles.sectionTitle}>
+            Sync & Async Support
+          </Heading>
+          <p className={styles.sectionSubtitle}>
+            Both Client and AsyncClient are supported
+          </p>
+        </div>
+        <div className={styles.tabsSection}>
+          <Tabs>
+            <TabItem value="sync" label="SyncClient" default>
+              <CodeBlock language="python">
+                {CODE_SYNC}
+              </CodeBlock>
+            </TabItem>
+            <TabItem value="async" label="AsyncClient">
+              <CodeBlock language="python">
+                {CODE_ASYNC}
+              </CodeBlock>
+            </TabItem>
+          </Tabs>
+        </div>
+      </div>
+    </section>
   );
 }
 
 export default function HomepageFeatures(): ReactNode {
   return (
-    <section className={styles.features}>
-      <div className="container">
-        <div className="row">
-          {FeatureList.map((props, idx) => (
-            <Feature key={idx} {...props} />
-          ))}
-        </div>
-      </div>
-    </section>
+    <>
+      <DropInReplacementSection />
+      <SyncAsyncSection />
+    </>
   );
 }

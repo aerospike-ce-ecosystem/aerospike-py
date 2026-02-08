@@ -147,6 +147,140 @@ class TestBatchOperate:
             assert counter1 == 25
 
 
+class TestBatchWrite:
+    """Test batch_operate used as batch write (OPERATOR_WRITE)."""
+
+    def test_batch_write_new_records(self, client, cleanup):
+        """batch_operate with OPERATOR_WRITE creates new records."""
+        keys = [
+            ("test", "demo", "batch_write_1"),
+            ("test", "demo", "batch_write_2"),
+            ("test", "demo", "batch_write_3"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        ops = [
+            {"op": aerospike_py.OPERATOR_WRITE, "bin": "name", "val": "test"},
+            {"op": aerospike_py.OPERATOR_WRITE, "bin": "score", "val": 100},
+        ]
+        results = client.batch_operate(keys, ops)
+        assert len(results) == 3
+
+        # Verify records were written
+        for k in keys:
+            _, meta, bins = client.get(k)
+            assert meta is not None
+            assert bins["name"] == "test"
+            assert bins["score"] == 100
+
+    def test_batch_write_overwrite_existing(self, client, cleanup):
+        """batch_operate with OPERATOR_WRITE overwrites existing records."""
+        keys = [
+            ("test", "demo", "batch_write_ow_1"),
+            ("test", "demo", "batch_write_ow_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        # Write initial data
+        client.put(keys[0], {"name": "old1", "score": 1})
+        client.put(keys[1], {"name": "old2", "score": 2})
+
+        # Overwrite with batch_operate
+        ops = [
+            {"op": aerospike_py.OPERATOR_WRITE, "bin": "name", "val": "new"},
+            {"op": aerospike_py.OPERATOR_WRITE, "bin": "score", "val": 999},
+        ]
+        results = client.batch_operate(keys, ops)
+        assert len(results) == 2
+
+        # Verify overwritten
+        for k in keys:
+            _, meta, bins = client.get(k)
+            assert bins["name"] == "new"
+            assert bins["score"] == 999
+            assert meta["gen"] == 2  # generation incremented
+
+    def test_batch_write_partial_failure_mixed_types(self, client, cleanup):
+        """batch_operate returns per-record results when some ops fail.
+
+        OPERATOR_INCR on a string bin causes per-record failure while
+        other records succeed.
+        """
+        keys = [
+            ("test", "demo", "batch_wf_ok"),
+            ("test", "demo", "batch_wf_fail"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        # Setup: first record has int bin, second has string bin
+        client.put(keys[0], {"counter": 10})
+        client.put(keys[1], {"counter": "not_a_number"})
+
+        # INCR should succeed on int bin but fail on string bin
+        ops = [
+            {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 5},
+        ]
+        results = client.batch_operate(keys, ops)
+        assert len(results) == 2
+
+        # First record should succeed
+        _, meta0, bins0 = results[0]
+        assert meta0 is not None
+
+        # Second record should fail (None meta/bins due to type mismatch)
+        _, meta1, bins1 = results[1]
+        assert meta1 is None
+        assert bins1 is None
+
+    def test_batch_write_with_read_back(self, client, cleanup):
+        """batch_operate with WRITE + READ returns written values."""
+        keys = [
+            ("test", "demo", "batch_wr_1"),
+            ("test", "demo", "batch_wr_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        ops = [
+            {"op": aerospike_py.OPERATOR_WRITE, "bin": "val", "val": 42},
+            {"op": aerospike_py.OPERATOR_READ, "bin": "val", "val": None},
+        ]
+        results = client.batch_operate(keys, ops)
+        assert len(results) == 2
+        for rec in results:
+            _, meta, bins = rec
+            assert meta is not None
+            val = bins["val"]
+            # batch_operate may return list (multi-op) or scalar
+            if isinstance(val, list):
+                assert val[-1] == 42
+            else:
+                assert val == 42
+
+    def test_batch_write_large_batch(self, client, cleanup):
+        """batch_operate handles large batches correctly."""
+        n = 200
+        keys = [("test", "demo", f"batch_wl_{i}") for i in range(n)]
+        for k in keys:
+            cleanup.append(k)
+
+        ops = [
+            {"op": aerospike_py.OPERATOR_WRITE, "bin": "idx", "val": 0},
+        ]
+        results = client.batch_operate(keys, ops)
+        assert len(results) == n
+
+        # Verify all written
+        read_result = client.batch_read(keys)
+        assert len(read_result.batch_records) == n
+        for br in read_result.batch_records:
+            assert br.result == 0
+            assert br.record is not None
+
+
 class TestBatchRemove:
     def test_batch_remove(self, client):
         keys = [
