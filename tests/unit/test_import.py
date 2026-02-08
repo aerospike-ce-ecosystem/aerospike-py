@@ -175,6 +175,35 @@ def test_exp_invalid_op_rejected():
     assert result["val"] == 42
 
 
+def test_list_map_op_codes_contiguous():
+    """Verify list/map operation code constants are contiguous and match expected ranges."""
+    from aerospike_py import list_operations, map_operations
+
+    # Collect all _OP_LIST_* constants
+    list_ops = {
+        name: getattr(list_operations, name)
+        for name in dir(list_operations)
+        if name.startswith("_OP_LIST_")
+    }
+    list_codes = sorted(list_ops.values())
+    assert list_codes[0] == 1001, f"List ops should start at 1001, got {list_codes[0]}"
+    assert list_codes == list(range(1001, 1001 + len(list_codes))), (
+        f"List op codes are not contiguous: {list_codes}"
+    )
+
+    # Collect all _OP_MAP_* constants
+    map_ops = {
+        name: getattr(map_operations, name)
+        for name in dir(map_operations)
+        if name.startswith("_OP_MAP_")
+    }
+    map_codes = sorted(map_ops.values())
+    assert map_codes[0] == 2001, f"Map ops should start at 2001, got {map_codes[0]}"
+    assert map_codes == list(range(2001, 2001 + len(map_codes))), (
+        f"Map op codes are not contiguous: {map_codes}"
+    )
+
+
 def test_connect_username_without_password():
     """Test that connect() with username but no password raises ClientError."""
     c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
