@@ -72,13 +72,21 @@ asyncio.run(main())
 
 Benchmark: **5,000 ops x 100 rounds**, Aerospike CE (Docker), Apple M4 Pro
 
-| Operation | aerospike-py (Rust) | official (C) | async (Rust) | Async vs C |
-| --------- | ------------------: | -----------: | -----------: | ---------: |
-| put       |               0.140 |        0.139 |        0.058 | 2.4x faster |
-| get       |               0.141 |        0.141 |        0.063 | 2.2x faster |
+| Operation | aerospike-py sync | official C client | aerospike-py async | Async vs C |
+| --------- | ----------------: | ----------------: | -----------------: | ---------: |
+| put (ms)  |             0.140 |             0.139 |              0.058 | **2.4x faster** |
+| get (ms)  |             0.141 |             0.141 |              0.063 | **2.2x faster** |
 
-> Sync performance is on par with the official C client. `AsyncClient` + `asyncio.gather` improves throughput by **2.2-2.4x**.
-> Full results: `bash benchmark/run_all.sh 5000 100`
+> **Sync** performance is on par with the official C client.
+> **Async** throughput is **2.2-2.4x faster** — the official C client has no Python async/await support ([attempted and removed](https://github.com/aerospike/aerospike-client-python/pull/462)).
+
+### Why async matters
+
+The official C client supports async I/O internally (libev/libuv/libevent), but its Python bindings **cannot expose `async/await`** — the attempt was abandoned and removed in [PR #462](https://github.com/aerospike/aerospike-client-python/pull/462). The only concurrency option with the C client is `asyncio.run_in_executor()` (thread pool, not true async).
+
+aerospike-py provides **native `async/await`** via Tokio + PyO3, enabling `asyncio.gather()` for true concurrent I/O — critical for modern Python web frameworks (FastAPI, Starlette, etc).
+
+> Full benchmark details: [benchmark/](benchmark/) | Run: `bash benchmark/run_all.sh 5000 100`
 
 ## Contributing
 
