@@ -881,9 +881,6 @@ def main():
         json_dir = args.report_dir or os.path.join(
             project_root, "docs", "static", "benchmark", "results"
         )
-        img_dir = os.path.join(
-            project_root, "docs", "static", "img", "benchmark", date_slug
-        )
 
         results = BenchmarkResults(
             rust_sync=rust,
@@ -900,11 +897,10 @@ def main():
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from report_generator import generate_report
 
-        generate_report(results, json_dir, img_dir, date_slug)
+        generate_report(results, json_dir, date_slug)
         print(
             _c(Color.BOLD_CYAN, "[report]") + f" Generated: {json_dir}/{date_slug}.json"
         )
-        print(_c(Color.BOLD_CYAN, "[report]") + f" Charts: {img_dir}/*.svg")
 
 
 if __name__ == "__main__":
