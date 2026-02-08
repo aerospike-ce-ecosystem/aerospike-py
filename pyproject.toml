@@ -12,7 +12,7 @@ dependencies = []
 
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio", "ruff", "maturin>=1.9,<2"]
-bench = ["aerospike>=17.0.0", "matplotlib>=3.8"]
+bench = ["aerospike>=17.0.0"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

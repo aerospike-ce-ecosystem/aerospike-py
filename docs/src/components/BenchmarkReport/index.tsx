@@ -1,6 +1,8 @@
 import React, {useEffect, useState} from 'react';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+import BrowserOnly from '@docusaurus/BrowserOnly';
+import {useColorMode} from '@docusaurus/theme-common';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import styles from './BenchmarkReport.module.css';
 
@@ -31,7 +33,7 @@ interface BenchmarkData {
   rust_sync: ClientSection;
   c_sync: ClientSection | null;
   rust_async: ClientSection;
-  charts: Record<string, string>;
+  charts?: Record<string, string>;
   takeaways: string[];
 }
 
@@ -240,13 +242,9 @@ function TailLatencyTable({data}: {data: BenchmarkData}) {
   );
 }
 
-function ChartImg({src, alt}: {src: string; alt: string}) {
-  const url = useBaseUrl(src);
-  return <img className={styles.chart} src={url} alt={alt} />;
-}
-
 function ReportView({data}: {data: BenchmarkData}) {
   const hasTail = OPERATIONS.some((op) => data.rust_sync[op]?.p50_ms != null);
+  const {colorMode} = useColorMode();
 
   return (
     <div>
@@ -254,15 +252,21 @@ function ReportView({data}: {data: BenchmarkData}) {
       <EnvironmentTable env={data.environment} />
 
       <h2>Latency Comparison</h2>
-      {data.charts.latency && (
-        <ChartImg src={data.charts.latency} alt="Latency Comparison" />
-      )}
+      <BrowserOnly fallback={<div style={{height: 400}}>Loading chart...</div>}>
+        {() => {
+          const {LatencyChart} = require('./charts');
+          return <LatencyChart data={data} colorMode={colorMode} />;
+        }}
+      </BrowserOnly>
       <ComparisonTable data={data} metric="avg_ms" formatter={fmtMs} latency={true} />
 
       <h2>Throughput Comparison</h2>
-      {data.charts.throughput && (
-        <ChartImg src={data.charts.throughput} alt="Throughput Comparison" />
-      )}
+      <BrowserOnly fallback={<div style={{height: 400}}>Loading chart...</div>}>
+        {() => {
+          const {ThroughputChart} = require('./charts');
+          return <ThroughputChart data={data} colorMode={colorMode} />;
+        }}
+      </BrowserOnly>
       <ComparisonTable data={data} metric="ops_per_sec" formatter={fmtOps} latency={false} />
 
       <h2>Stability (stdev)</h2>
@@ -271,9 +275,12 @@ function ReportView({data}: {data: BenchmarkData}) {
       {hasTail && (
         <>
           <h2>Tail Latency (p50/p99)</h2>
-          {data.charts.tail_latency && (
-            <ChartImg src={data.charts.tail_latency} alt="Tail Latency" />
-          )}
+          <BrowserOnly fallback={<div style={{height: 400}}>Loading chart...</div>}>
+            {() => {
+              const {TailLatencyChart} = require('./charts');
+              return <TailLatencyChart data={data} colorMode={colorMode} />;
+            }}
+          </BrowserOnly>
           <TailLatencyTable data={data} />
         </>
       )}

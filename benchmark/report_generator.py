@@ -1,7 +1,8 @@
-"""Generate benchmark report: JSON + SVG charts for Docusaurus docs.
+"""Generate benchmark report: JSON data for Docusaurus React charts.
 
 Called from bench_compare.py with --report flag.
 Outputs date-stamped JSON files and maintains an index.json for the React UI.
+Charts are rendered client-side by Recharts components.
 """
 
 from __future__ import annotations
@@ -14,12 +15,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bench_compare import BenchmarkResults
 
-# ── chart colors ─────────────────────────────────────────────
-
-COLOR_SYNC = "#673ab7"  # purple
-COLOR_OFFICIAL = "#78909c"  # grey
-COLOR_ASYNC = "#4caf50"  # green
-
 OPERATIONS = ["put", "get", "batch_read", "batch_write", "scan"]
 OP_LABELS = {
     "put": "PUT",
@@ -28,267 +23,6 @@ OP_LABELS = {
     "batch_write": "BATCH_WRITE",
     "scan": "SCAN",
 }
-
-
-# ── chart generation ─────────────────────────────────────────
-
-
-def generate_charts(results: BenchmarkResults, img_dir: str) -> dict[str, str]:
-    """Generate SVG charts and return mapping of chart_name -> file_path."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    os.makedirs(img_dir, exist_ok=True)
-
-    chart_paths = {}
-    has_c = results.c_sync is not None
-
-    # Common style for all charts
-    plt.rcParams.update(
-        {
-            "figure.facecolor": "none",
-            "axes.facecolor": "none",
-            "savefig.facecolor": "none",
-            "text.color": "#333333",
-            "axes.labelcolor": "#333333",
-            "xtick.color": "#333333",
-            "ytick.color": "#333333",
-            "axes.edgecolor": "#cccccc",
-            "font.family": "sans-serif",
-            "font.size": 11,
-        }
-    )
-
-    # --- 1. Latency comparison chart ---
-    chart_paths["latency"] = _generate_bar_chart(
-        results,
-        metric="avg_ms",
-        ylabel="Latency (ms)",
-        title="Avg Latency Comparison (lower is better)",
-        filename="latency_comparison.svg",
-        img_dir=img_dir,
-        has_c=has_c,
-        lower_is_better=True,
-    )
-
-    # --- 2. Throughput comparison chart ---
-    chart_paths["throughput"] = _generate_bar_chart(
-        results,
-        metric="ops_per_sec",
-        ylabel="Throughput (ops/sec)",
-        title="Throughput Comparison (higher is better)",
-        filename="throughput_comparison.svg",
-        img_dir=img_dir,
-        has_c=has_c,
-        lower_is_better=False,
-    )
-
-    # --- 3. Tail latency chart ---
-    chart_paths["tail_latency"] = _generate_tail_latency_chart(results, img_dir, has_c)
-
-    return chart_paths
-
-
-def _generate_bar_chart(
-    results: BenchmarkResults,
-    metric: str,
-    ylabel: str,
-    title: str,
-    filename: str,
-    img_dir: str,
-    has_c: bool,
-    lower_is_better: bool,
-) -> str:
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    ops = OPERATIONS
-    labels = [OP_LABELS[op] for op in ops]
-
-    rust_vals = [results.rust_sync[op].get(metric, 0) or 0 for op in ops]
-    async_vals = [results.rust_async[op].get(metric, 0) or 0 for op in ops]
-    c_vals = [results.c_sync[op].get(metric, 0) or 0 for op in ops] if has_c else None
-
-    x = np.arange(len(ops))
-    width = 0.25
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    if has_c:
-        offsets = [-width, 0, width]
-        bars_rust = ax.bar(
-            x + offsets[0],
-            rust_vals,
-            width,
-            label="aerospike-py (SyncClient)",
-            color=COLOR_SYNC,
-        )
-        ax.bar(
-            x + offsets[1],
-            c_vals,
-            width,
-            label="aerospike (official)",
-            color=COLOR_OFFICIAL,
-        )
-        bars_async = ax.bar(
-            x + offsets[2],
-            async_vals,
-            width,
-            label="aerospike-py (AsyncClient)",
-            color=COLOR_ASYNC,
-        )
-    else:
-        offsets = [-width / 2, width / 2]
-        bars_rust = ax.bar(
-            x + offsets[0],
-            rust_vals,
-            width,
-            label="aerospike-py (SyncClient)",
-            color=COLOR_SYNC,
-        )
-        bars_async = ax.bar(
-            x + offsets[1],
-            async_vals,
-            width,
-            label="aerospike-py (AsyncClient)",
-            color=COLOR_ASYNC,
-        )
-
-    # Add percentage difference labels on bars (vs C client)
-    if has_c:
-        for bars, vals in [(bars_rust, rust_vals), (bars_async, async_vals)]:
-            for i, (bar, val) in enumerate(zip(bars, vals)):
-                c_val = c_vals[i]
-                if c_val > 0 and val > 0:
-                    if lower_is_better:
-                        pct = ((c_val - val) / c_val) * 100
-                    else:
-                        pct = ((val - c_val) / c_val) * 100
-                    if pct > 0:
-                        label = f"{pct:.0f}% faster"
-                        color = COLOR_ASYNC
-                    else:
-                        label = f"{abs(pct):.0f}% slower"
-                        color = "#e53935"
-                    ax.text(
-                        bar.get_x() + bar.get_width() / 2,
-                        bar.get_height(),
-                        label,
-                        ha="center",
-                        va="bottom",
-                        fontsize=8,
-                        color=color,
-                        fontweight="bold",
-                    )
-
-    ax.set_ylabel(ylabel)
-    ax.set_title(title, fontweight="bold", pad=15)
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.legend(loc="upper right", framealpha=0.8)
-    ax.grid(axis="y", alpha=0.3)
-    ax.set_axisbelow(True)
-
-    fig.tight_layout()
-    path = os.path.join(img_dir, filename)
-    fig.savefig(path, format="svg", transparent=True, bbox_inches="tight")
-    plt.close(fig)
-    return path
-
-
-def _generate_tail_latency_chart(
-    results: BenchmarkResults, img_dir: str, has_c: bool
-) -> str:
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    # Only operations with per-op timing (p50/p99)
-    ops = [op for op in OPERATIONS if results.rust_sync[op].get("p50_ms") is not None]
-    if not ops:
-        return ""
-
-    labels = [OP_LABELS[op] for op in ops]
-    n_ops = len(ops)
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    x = np.arange(n_ops)
-    width = 0.15
-    bar_groups = []
-
-    # Rust p50/p99
-    rust_p50 = [results.rust_sync[op]["p50_ms"] for op in ops]
-    rust_p99 = [results.rust_sync[op]["p99_ms"] for op in ops]
-    offset = 0
-    bar_groups.append(
-        ax.bar(
-            x + offset * width,
-            rust_p50,
-            width,
-            label="Sync p50",
-            color=COLOR_SYNC,
-            alpha=0.7,
-        )
-    )
-    offset += 1
-    bar_groups.append(
-        ax.bar(
-            x + offset * width,
-            rust_p99,
-            width,
-            label="Sync p99",
-            color=COLOR_SYNC,
-            alpha=1.0,
-        )
-    )
-    offset += 1
-
-    if has_c:
-        c_p50 = [results.c_sync[op].get("p50_ms") or 0 for op in ops]
-        c_p99 = [results.c_sync[op].get("p99_ms") or 0 for op in ops]
-        bar_groups.append(
-            ax.bar(
-                x + offset * width,
-                c_p50,
-                width,
-                label="Official p50",
-                color=COLOR_OFFICIAL,
-                alpha=0.7,
-            )
-        )
-        offset += 1
-        bar_groups.append(
-            ax.bar(
-                x + offset * width,
-                c_p99,
-                width,
-                label="Official p99",
-                color=COLOR_OFFICIAL,
-                alpha=1.0,
-            )
-        )
-        offset += 1
-
-    # Center the bar groups
-    center_offset = (offset - 1) * width / 2
-    ax.set_xticks(x + center_offset)
-    ax.set_xticklabels(labels)
-
-    ax.set_ylabel("Latency (ms)")
-    ax.set_title(
-        "Tail Latency: p50 vs p99 (lower is better)", fontweight="bold", pad=15
-    )
-    ax.legend(loc="upper right", framealpha=0.8)
-    ax.grid(axis="y", alpha=0.3)
-    ax.set_axisbelow(True)
-
-    fig.tight_layout()
-    path = os.path.join(img_dir, "tail_latency.svg")
-    fig.savefig(path, format="svg", transparent=True, bbox_inches="tight")
-    plt.close(fig)
-    return path
 
 
 # ── takeaways ────────────────────────────────────────────────
@@ -377,16 +111,6 @@ def _build_client_section(data: dict) -> dict:
     return {op: _op_dict(data, op) for op in OPERATIONS}
 
 
-def _chart_paths_to_web(chart_paths: dict[str, str], date_slug: str) -> dict[str, str]:
-    """Convert absolute chart file paths to web-relative paths."""
-    result = {}
-    for name, path in chart_paths.items():
-        if path:
-            filename = os.path.basename(path)
-            result[name] = f"/img/benchmark/{date_slug}/{filename}"
-    return result
-
-
 def _update_index(json_dir: str, date_slug: str, json_filename: str) -> None:
     """Add/update entry in index.json, keeping newest-first order."""
     index_path = os.path.join(json_dir, "index.json")
@@ -417,26 +141,15 @@ def _update_index(json_dir: str, date_slug: str, json_filename: str) -> None:
 # ── main entry point ─────────────────────────────────────────
 
 
-def generate_report(
-    results: BenchmarkResults, json_dir: str, img_dir: str, date_slug: str
-) -> None:
-    """Generate full benchmark report: charts + JSON."""
+def generate_report(results: BenchmarkResults, json_dir: str, date_slug: str) -> None:
+    """Generate benchmark report JSON (charts rendered client-side by Recharts)."""
     now = datetime.fromisoformat(results.timestamp)
     json_filename = f"{date_slug}.json"
 
-    # img_dir already includes the date folder from caller
     os.makedirs(json_dir, exist_ok=True)
-    os.makedirs(img_dir, exist_ok=True)
 
     print("\n  Generating benchmark report...")
     print(f"    JSON dir: {json_dir}")
-    print(f"    Image dir: {img_dir}")
-
-    # Generate charts
-    chart_paths = generate_charts(results, img_dir)
-    for name, path in chart_paths.items():
-        if path:
-            print(f"    Chart: {os.path.basename(path)}")
 
     # Build JSON report
     report = {
@@ -454,7 +167,6 @@ def generate_report(
         "rust_sync": _build_client_section(results.rust_sync),
         "c_sync": _build_client_section(results.c_sync) if results.c_sync else None,
         "rust_async": _build_client_section(results.rust_async),
-        "charts": _chart_paths_to_web(chart_paths, date_slug),
         "takeaways": _generate_takeaways(results),
     }
 
