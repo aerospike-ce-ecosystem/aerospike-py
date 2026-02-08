@@ -263,6 +263,34 @@ def bench_rust_sync(
     results["batch_read"] = _bulk_median(multi_batch_rounds, count)
     _settle()
 
+    # --- BATCH READ NUMPY (sequential) ---
+    try:
+        import numpy as np
+
+        numpy_dtype = np.dtype([("n", "S32"), ("a", "i8"), ("s", "f8")])
+        _log(
+            f"BATCH_READ_NUMPY  {batch_groups} groups x {rounds} rounds  (gc disabled)"
+        )
+        numpy_batch_rounds = []
+        for _ in range(rounds):
+            gc.disable()
+            elapsed = _measure_bulk(
+                lambda: [client.batch_read(g, _dtype=numpy_dtype) for g in groups]
+            )
+            gc.enable()
+            numpy_batch_rounds.append(elapsed)
+        results["batch_read_numpy"] = _bulk_median(numpy_batch_rounds, count)
+    except ImportError:
+        _log("numpy not installed, skipping BATCH_READ_NUMPY")
+        results["batch_read_numpy"] = {
+            "avg_ms": None,
+            "p50_ms": None,
+            "p99_ms": None,
+            "ops_per_sec": None,
+            "stdev_ms": None,
+        }
+    _settle()
+
     # --- BATCH WRITE (batch_operate with OPERATOR_WRITE) ---
     _log(f"BATCH_WRITE  {batch_groups} groups x {rounds} rounds  (gc disabled)")
     write_ops = [
@@ -383,6 +411,14 @@ def bench_c_sync(
         gc.enable()
         multi_batch_rounds.append(elapsed)
     results["batch_read"] = _bulk_median(multi_batch_rounds, count)
+    # C client does not support NumpyBatchRecords
+    results["batch_read_numpy"] = {
+        "avg_ms": None,
+        "p50_ms": None,
+        "p99_ms": None,
+        "ops_per_sec": None,
+        "stdev_ms": None,
+    }
     _settle()
 
     # --- BATCH WRITE (batch_operate with write ops) ---
@@ -531,6 +567,36 @@ async def bench_rust_async(
     results["batch_read"] = _bulk_median(multi_batch_rounds, count)
     _settle()
 
+    # --- BATCH READ NUMPY (concurrent) ---
+    try:
+        import numpy as np
+
+        numpy_dtype = np.dtype([("n", "S32"), ("a", "i8"), ("s", "f8")])
+        _log(
+            f"BATCH_READ_NUMPY  {batch_groups} groups x {rounds} rounds  (gc disabled)"
+        )
+        numpy_batch_rounds = []
+        for _ in range(rounds):
+            gc.disable()
+            t0 = time.perf_counter()
+            await asyncio.gather(
+                *[client.batch_read(g, _dtype=numpy_dtype) for g in groups]
+            )
+            elapsed = time.perf_counter() - t0
+            gc.enable()
+            numpy_batch_rounds.append(elapsed)
+        results["batch_read_numpy"] = _bulk_median(numpy_batch_rounds, count)
+    except ImportError:
+        _log("numpy not installed, skipping BATCH_READ_NUMPY")
+        results["batch_read_numpy"] = {
+            "avg_ms": None,
+            "p50_ms": None,
+            "p99_ms": None,
+            "ops_per_sec": None,
+            "stdev_ms": None,
+        }
+    _settle()
+
     # --- BATCH WRITE (batch_operate with OPERATOR_WRITE, concurrent) ---
     from aerospike_py import OPERATOR_WRITE as ASYNC_OP_WRITE
 
@@ -646,6 +712,7 @@ def _print_table(
     formatter,
     speedup_fn,
     color: bool = True,
+    cross_op_baseline: dict[str, str] | None = None,
 ):
     has_c = c is not None
     w = COL_OP + 2 + COL_VAL * 3 + (COL_SP * 2 if has_c else 0) + 12
@@ -664,10 +731,16 @@ def _print_table(
     print(h)
     print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
 
+    cross_ops_used = []
     for op in ops:
         rv = rust[op].get(metric)
         cv = c[op].get(metric) if has_c else None
         av = async_r[op].get(metric)
+
+        # cross-op baseline: use another operation's official value
+        baseline_op = cross_op_baseline.get(op) if cross_op_baseline else None
+        if has_c and baseline_op and cv is None:
+            cv = c[baseline_op].get(metric) if c[baseline_op] else None
 
         line = f"  {op:<{COL_OP}}"
         line += f" | {formatter(rv):>{COL_VAL}}"
@@ -676,12 +749,19 @@ def _print_table(
         line += f" | {formatter(av):>{COL_VAL}}"
 
         if has_c and cv is not None:
-            sp1 = speedup_fn(rv, cv, color=color) if rv else "-"
-            sp2 = speedup_fn(av, cv, color=color) if av else "-"
+            suffix = f" (vs {baseline_op.upper()})" if baseline_op else ""
+            sp1 = (speedup_fn(rv, cv, color=color) + suffix) if rv else "-"
+            sp2 = (speedup_fn(av, cv, color=color) + suffix) if av else "-"
             line += f" | {_lpad(sp1, COL_SP)}"
             line += f" | {_lpad(sp2, COL_SP)}"
+            if baseline_op:
+                cross_ops_used.append((op, baseline_op))
 
         print(line)
+
+    for op, baseline_op in cross_ops_used:
+        note = f"  * {op} compared against official {baseline_op.upper()}"
+        print(_c(Color.DIM, note) if color else note)
 
 
 def print_comparison(
@@ -694,7 +774,7 @@ def print_comparison(
     batch_groups: int,
     color: bool = True,
 ):
-    ops = ["put", "get", "batch_read", "batch_write", "scan"]
+    ops = ["put", "get", "batch_read", "batch_read_numpy", "batch_write", "scan"]
 
     print()
     banner = (
@@ -714,6 +794,8 @@ def print_comparison(
     if c is None:
         print("\n  [!] aerospike (official) not installed. pip install aerospike")
 
+    cross_op = {"batch_read_numpy": "batch_read"}
+
     _print_table(
         "Avg Latency (ms)  —  lower is better  [median of round means]",
         ops,
@@ -724,6 +806,7 @@ def print_comparison(
         formatter=_fmt_ms,
         speedup_fn=_speedup_latency,
         color=color,
+        cross_op_baseline=cross_op,
     )
 
     _print_table(
@@ -736,6 +819,7 @@ def print_comparison(
         formatter=_fmt_ops,
         speedup_fn=_speedup_throughput,
         color=color,
+        cross_op_baseline=cross_op,
     )
 
     # Stability indicator (stdev)

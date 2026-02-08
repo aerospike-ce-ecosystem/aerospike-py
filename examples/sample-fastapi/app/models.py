@@ -252,3 +252,74 @@ class WhitelistRequest(BaseModel):
 class QuotasRequest(BaseModel):
     read_quota: int = 0
     write_quota: int = 0
+
+
+# ── Numpy batch router models ───────────────────────────────
+
+
+class DtypeField(BaseModel):
+    name: str = Field(..., examples=["temperature"])
+    dtype: str = Field(
+        ...,
+        description="NumPy dtype string: 'f8' (float64), 'i4' (int32), 'S<n>' (bytes), etc.",
+        examples=["f8"],
+    )
+    shape: list[int] | None = Field(
+        None,
+        description="Sub-array shape for vector fields, e.g. [768] for 768-dim embedding",
+        examples=[[768]],
+    )
+
+
+class NumpyBatchReadRequest(BaseModel):
+    keys: list[AerospikeKey]
+    bins: list[str] | None = None
+    dtype: list[DtypeField] = Field(
+        ...,
+        description="Structured array dtype specification",
+        examples=[
+            [
+                {"name": "temperature", "dtype": "f8"},
+                {"name": "humidity", "dtype": "f4"},
+            ]
+        ],
+    )
+
+
+class NumpyBatchReadResponse(BaseModel):
+    columns: dict[str, list[Any]] = Field(
+        description="Columnar data: field name → list of values"
+    )
+    meta: dict[str, list[int]] = Field(
+        description="Record metadata: gen and ttl arrays"
+    )
+    result_codes: list[int]
+    keys: list[str | int]
+    count: int
+
+
+class VectorSearchRequest(BaseModel):
+    keys: list[AerospikeKey]
+    query_vector: list[float] = Field(
+        ..., description="Query vector for similarity search"
+    )
+    embedding_bin: str = Field(
+        "embedding", description="Bin name storing the vector blob"
+    )
+    embedding_dim: int = Field(..., description="Vector dimensionality", examples=[768])
+    extra_bins: list[str] | None = Field(
+        None,
+        description="Additional bins to return alongside similarity scores",
+    )
+    top_k: int = Field(10, ge=1, le=1000, description="Number of top results to return")
+
+
+class VectorSearchResult(BaseModel):
+    key: str | int
+    score: float = Field(description="Cosine similarity score")
+    bins: dict[str, Any] | None = None
+
+
+class VectorSearchResponse(BaseModel):
+    results: list[VectorSearchResult]
+    total_found: int = Field(description="Total records successfully read")

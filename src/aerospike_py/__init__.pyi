@@ -1,11 +1,14 @@
 """Type stubs for the aerospike_py package."""
 
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Union, overload
+
+import numpy as np
 
 from aerospike_py import exception as exception
 from aerospike_py import list_operations as list_operations
 from aerospike_py import map_operations as map_operations
 from aerospike_py import predicates as predicates
+from aerospike_py.numpy_batch import NumpyBatchRecords as NumpyBatchRecords
 
 __version__: str
 
@@ -145,12 +148,30 @@ class Client:
     ) -> tuple[Any, Metadata, list[tuple[str, Any]]]: ...
 
     # -- Batch --
+    @overload
     def batch_read(
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
         policy: Optional[PolicyDict] = None,
+        _dtype: None = None,
     ) -> BatchRecords: ...
+    @overload
+    def batch_read(
+        self,
+        keys: list[Key],
+        bins: Optional[list[str]] = None,
+        policy: Optional[PolicyDict] = None,
+        *,
+        _dtype: np.dtype,
+    ) -> NumpyBatchRecords: ...
+    def batch_read(
+        self,
+        keys: list[Key],
+        bins: Optional[list[str]] = None,
+        policy: Optional[PolicyDict] = None,
+        _dtype: Optional[np.dtype] = None,
+    ) -> Union[BatchRecords, NumpyBatchRecords]: ...
     def batch_operate(
         self,
         keys: list[Key],
@@ -398,12 +419,30 @@ class AsyncClient:
     ) -> tuple[Any, Metadata, list[tuple[str, Any]]]: ...
 
     # -- Batch --
+    @overload
     async def batch_read(
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
         policy: Optional[PolicyDict] = None,
+        _dtype: None = None,
     ) -> BatchRecords: ...
+    @overload
+    async def batch_read(
+        self,
+        keys: list[Key],
+        bins: Optional[list[str]] = None,
+        policy: Optional[PolicyDict] = None,
+        *,
+        _dtype: np.dtype,
+    ) -> NumpyBatchRecords: ...
+    async def batch_read(
+        self,
+        keys: list[Key],
+        bins: Optional[list[str]] = None,
+        policy: Optional[PolicyDict] = None,
+        _dtype: Optional[np.dtype] = None,
+    ) -> Union[BatchRecords, NumpyBatchRecords]: ...
     async def batch_operate(
         self,
         keys: list[Key],

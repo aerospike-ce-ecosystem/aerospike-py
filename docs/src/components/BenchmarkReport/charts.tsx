@@ -44,13 +44,19 @@ const COLOR_SYNC = '#673ab7';
 const COLOR_OFFICIAL = '#78909c';
 const COLOR_ASYNC = '#4caf50';
 
-const OPERATIONS = ['put', 'get', 'batch_read', 'batch_write', 'scan'] as const;
+const OPERATIONS = ['put', 'get', 'batch_read', 'batch_read_numpy', 'batch_write', 'scan'] as const;
 const OP_LABELS: Record<string, string> = {
   put: 'PUT',
   get: 'GET',
   batch_read: 'BATCH_READ',
+  batch_read_numpy: 'BATCH_READ_NUMPY',
   batch_write: 'BATCH_WRITE',
   scan: 'SCAN',
+};
+
+// batch_read_numpy has no official equivalent; compare against official batch_read
+const CROSS_OP_BASELINE: Record<string, string> = {
+  batch_read_numpy: 'batch_read',
 };
 
 function themeColors(colorMode: ColorMode) {
@@ -121,7 +127,8 @@ export function LatencyChart({data, colorMode}: ChartProps) {
   const chartData = OPERATIONS.map((op) => {
     const syncVal = data.rust_sync[op]?.avg_ms ?? 0;
     const asyncVal = data.rust_async[op]?.avg_ms ?? 0;
-    const officialVal = hasC ? (data.c_sync![op]?.avg_ms ?? 0) : 0;
+    const officialOp = CROSS_OP_BASELINE[op] ?? op;
+    const officialVal = hasC ? (data.c_sync![officialOp]?.avg_ms ?? 0) : 0;
 
     const entry: Record<string, unknown> = {
       operation: OP_LABELS[op],
@@ -172,7 +179,8 @@ export function ThroughputChart({data, colorMode}: ChartProps) {
   const chartData = OPERATIONS.map((op) => {
     const syncVal = data.rust_sync[op]?.ops_per_sec ?? 0;
     const asyncVal = data.rust_async[op]?.ops_per_sec ?? 0;
-    const officialVal = hasC ? (data.c_sync![op]?.ops_per_sec ?? 0) : 0;
+    const officialOp = CROSS_OP_BASELINE[op] ?? op;
+    const officialVal = hasC ? (data.c_sync![officialOp]?.ops_per_sec ?? 0) : 0;
 
     const entry: Record<string, unknown> = {
       operation: OP_LABELS[op],

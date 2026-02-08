@@ -7,7 +7,7 @@ use aerospike_core::{
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
-use crate::batch_types::{batch_to_batch_records_py, PyBatchRecords};
+use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::operations::py_ops_to_rust;
 use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_py, user_to_py};
@@ -1136,16 +1136,17 @@ impl PyClient {
 
     // ── Batch operations ──────────────────────────────────────────
 
-    /// Read multiple records. Returns BatchRecords.
+    /// Read multiple records. Returns BatchRecords, or NumpyBatchRecords when dtype is provided.
     /// bins=None → read all bins; bins=["a","b"] → specific bins; bins=[] → existence check.
-    #[pyo3(signature = (keys, bins=None, policy=None))]
+    #[pyo3(signature = (keys, bins=None, policy=None, _dtype=None))]
     fn batch_read(
         &self,
         py: Python<'_>,
         keys: &Bound<'_, PyList>,
         bins: Option<Vec<String>>,
         policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyBatchRecords> {
+        _dtype: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let read_policy = BatchReadPolicy::default();
@@ -1173,7 +1174,13 @@ impl PyClient {
             RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
         })?;
 
-        batch_to_batch_records_py(py, &results)
+        match _dtype {
+            Some(d) => crate::numpy_support::batch_to_numpy_py(py, &results, d),
+            None => {
+                let br = batch_to_batch_records_py(py, &results)?;
+                Ok(Py::new(py, br)?.into_any())
+            }
+        }
     }
 
     /// Perform operations on multiple records. Returns list of (key, meta, bins) tuples.

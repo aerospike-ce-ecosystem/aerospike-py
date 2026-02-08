@@ -1,0 +1,149 @@
+{
+  "timestamp": "2026-02-08T18:58:52.148753",
+  "date": "2026-02-08_18:58",
+  "environment": {
+    "platform": "Darwin arm64",
+    "python_version": "3.13.11",
+    "count": 5000,
+    "rounds": 20,
+    "warmup": 500,
+    "concurrency": 50,
+    "batch_groups": 10
+  },
+  "rust_sync": {
+    "put": {
+      "avg_ms": 0.16204438596614634,
+      "p50_ms": 0.1592187472851947,
+      "p99_ms": 0.22124999668449163,
+      "ops_per_sec": 6171.149595740342,
+      "stdev_ms": 0.0008176480954039336
+    },
+    "get": {
+      "avg_ms": 0.16167792207561435,
+      "p50_ms": 0.1585420104674995,
+      "p99_ms": 0.22445799550041556,
+      "ops_per_sec": 6185.136394394746,
+      "stdev_ms": 0.0014121603161690922
+    },
+    "batch_read": {
+      "avg_ms": 0.007845174899557605,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 127487.88567753174,
+      "stdev_ms": 0.0020630207566356947
+    },
+    "batch_read_numpy": {
+      "avg_ms": 0.007496070803608744,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 133403.22299284185,
+      "stdev_ms": 0.0010529251535470665
+    },
+    "batch_write": {
+      "avg_ms": 0.008904308296041562,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 112341.59117335232,
+      "stdev_ms": 0.0018567895235611553
+    },
+    "scan": {
+      "avg_ms": 0.0019252750033047048,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 519406.7030765725,
+      "stdev_ms": 0.0001423101436805973
+    }
+  },
+  "c_sync": {
+    "put": {
+      "avg_ms": 0.14541720882989465,
+      "p50_ms": 0.14245801139622927,
+      "p99_ms": 0.2057909732684493,
+      "ops_per_sec": 6876.7651920054,
+      "stdev_ms": 0.0009177705774017202
+    },
+    "get": {
+      "avg_ms": 0.1442687135655433,
+      "p50_ms": 0.14124996960163116,
+      "p99_ms": 0.21245802054181695,
+      "ops_per_sec": 6933.5170962350985,
+      "stdev_ms": 0.0007694950977976245
+    },
+    "batch_read": {
+      "avg_ms": 0.0069285001023672525,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 144331.74598358193,
+      "stdev_ms": 0.0007568322023976317
+    },
+    "batch_read_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null,
+      "stdev_ms": null
+    },
+    "batch_write": {
+      "avg_ms": 0.0072421584045514464,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 138080.38213739352,
+      "stdev_ms": 0.0006759200607202296
+    },
+    "scan": {
+      "avg_ms": 0.001277679204940796,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 779772.6940749869,
+      "stdev_ms": 0.00019663371961734508
+    }
+  },
+  "rust_async": {
+    "put": {
+      "avg_ms": 0.038671141606755555,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 25849.164896380807,
+      "stdev_ms": 0.00034241078741269177
+    },
+    "get": {
+      "avg_ms": 0.046326883404981346,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 21585.738700749163,
+      "stdev_ms": 0.0003957221221619622
+    },
+    "batch_read": {
+      "avg_ms": 0.0016241958015598356,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 615750.3513682408,
+      "stdev_ms": 0.0006698338543268555
+    },
+    "batch_read_numpy": {
+      "avg_ms": 0.001302125002257526,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 799606.6707578842,
+      "stdev_ms": 0.0003183586501964918
+    },
+    "batch_write": {
+      "avg_ms": 0.0015851415926590561,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 621590.7358967048,
+      "stdev_ms": 0.00015250764688854799
+    },
+    "scan": {
+      "avg_ms": 0.002023916598409414,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 494091.5059374951,
+      "stdev_ms": 8.111800834852495e-05
+    }
+  },
+  "takeaways": [
+    "AsyncClient shows **4.6x** faster latency than the official client in BATCH_WRITE operations",
+    "AsyncClient shows **6.0x** higher throughput than SyncClient in BATCH_READ_NUMPY operations (concurrency=50)"
+  ]
+}
