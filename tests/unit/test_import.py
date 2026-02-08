@@ -159,6 +159,22 @@ def test_sync_async_method_parity():
     )
 
 
+def test_exp_invalid_op_rejected():
+    """Test that constructing an expression with invalid op raises ValueError."""
+    from aerospike_py import exp
+
+    try:
+        exp._cmd("nonexistent_op", val=42)
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "nonexistent_op" in str(e)
+
+    # Valid ops should work fine
+    result = exp.int_val(42)
+    assert result["__expr__"] == "int_val"
+    assert result["val"] == 42
+
+
 def test_connect_username_without_password():
     """Test that connect() with username but no password raises ClientError."""
     c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})

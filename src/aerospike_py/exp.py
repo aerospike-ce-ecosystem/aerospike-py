@@ -36,8 +36,41 @@ EXP_TYPE_GEO = 8
 EXP_TYPE_HLL = 9
 
 
+_VALID_OPS: frozenset[str] = frozenset({
+    # Value constructors
+    "int_val", "float_val", "string_val", "bool_val", "blob_val",
+    "list_val", "map_val", "geo_val", "nil", "infinity", "wildcard",
+    # Bin accessors
+    "int_bin", "float_bin", "string_bin", "bool_bin", "blob_bin",
+    "list_bin", "map_bin", "geo_bin", "hll_bin", "bin_exists", "bin_type",
+    # Record metadata
+    "key", "key_exists", "set_name", "record_size", "last_update",
+    "since_update", "void_time", "ttl", "is_tombstone", "digest_modulo",
+    # Comparison
+    "eq", "ne", "gt", "ge", "lt", "le",
+    # Logical
+    "and", "or", "not", "xor",
+    # Numeric
+    "num_add", "num_sub", "num_mul", "num_div", "num_mod", "num_pow",
+    "num_log", "num_abs", "num_floor", "num_ceil", "to_int", "to_float",
+    "min", "max",
+    # Integer bitwise
+    "int_and", "int_or", "int_xor", "int_not", "int_lshift", "int_rshift",
+    "int_arshift", "int_count", "int_lscan", "int_rscan",
+    # Pattern matching
+    "regex_compare", "geo_compare",
+    # Control flow
+    "cond", "var", "def", "let",
+})  # fmt: skip
+
+
 def _cmd(op: str, **kwargs: Any) -> Expr:
     """Build an expression node dict."""
+    if op not in _VALID_OPS:
+        raise ValueError(
+            f"Unknown expression op: '{op}'. "
+            f"Use aerospike_py.exp builder functions instead of constructing dicts manually."
+        )
     result: Expr = {"__expr__": op}
     result.update(kwargs)
     return result
