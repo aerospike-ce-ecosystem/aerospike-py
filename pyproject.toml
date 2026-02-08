@@ -14,7 +14,7 @@ dependencies = []
 numpy = ["numpy>=2.0"]
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "ruff", "maturin>=1.9,<2"]
+dev = ["pytest", "pytest-asyncio", "ruff", "maturin>=1.9,<2", "numpy>=2.0"]
 bench = ["aerospike>=17.0.0", "numpy>=2.0"]
 
 [tool.pytest.ini_options]
