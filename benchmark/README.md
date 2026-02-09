@@ -96,6 +96,20 @@ Benchmark config:
 | `AEROSPIKE_HOST` | `127.0.0.1` | Aerospike host |
 | `AEROSPIKE_PORT` | `3000` | Aerospike port |
 
+## Large-Scale Benchmark
+
+For production-realistic load testing with 100K+ operations:
+
+```bash
+make run-benchmark-large
+```
+
+This runs 100,000 ops x 5 rounds. You can also customize:
+
+```bash
+make run-benchmark BENCH_COUNT=100000 BENCH_ROUNDS=5
+```
+
 ## Why Faster?
 
 - **Rust async runtime**: Tokio-based async I/O under the hood

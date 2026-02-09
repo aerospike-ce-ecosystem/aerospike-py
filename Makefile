@@ -69,6 +69,18 @@ run-benchmark: build run-aerospike-ce ## Run benchmark with local build (COUNT, 
 		--port $(AEROSPIKE_PORT); \
 	$(MAKE) stop-aerospike-ce
 
+.PHONY: run-benchmark-large
+run-benchmark-large: build run-aerospike-ce ## Run large-scale benchmark (100K ops)
+	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
+	uv run python benchmark/bench_compare.py \
+		--count 100000 \
+		--rounds 5 \
+		--concurrency $(BENCH_CONCURRENCY) \
+		--batch-groups $(BENCH_BATCH_GROUPS) \
+		--host $(AEROSPIKE_HOST) \
+		--port $(AEROSPIKE_PORT); \
+	$(MAKE) stop-aerospike-ce
+
 .PHONY: run-benchmark-report
 run-benchmark-report: build run-aerospike-ce ## Run benchmark and generate docs report (JSON + charts)
 	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \

@@ -250,6 +250,43 @@ def bench_rust_sync(
     results["get"] = _median_of_medians(get_rounds)
     _settle()
 
+    # --- OPERATE (read + increment in single call) ---
+    _log(f"OPERATE  {count} ops x {rounds} rounds  (gc disabled)")
+    operate_rounds = []
+    for _ in range(rounds):
+        gc.disable()
+        times = _measure_loop(
+            lambda i: client.operate(
+                (NAMESPACE, SET_NAME, f"{prefix}{i}"),
+                [
+                    {"op": aerospike_py.OPERATOR_READ, "bin": "n"},
+                    {"op": aerospike_py.OPERATOR_INCR, "bin": "a", "val": 1},
+                ],
+            ),
+            count,
+        )
+        gc.enable()
+        operate_rounds.append(times)
+    results["operate"] = _median_of_medians(operate_rounds)
+    _settle()
+
+    # --- REMOVE ---
+    _log(f"REMOVE  {count} ops x {rounds} rounds  (gc disabled)")
+    remove_rounds = []
+    for r in range(rounds):
+        # seed fresh keys for removal
+        rm_prefix = f"{prefix}rm{r}_"
+        _seed_sync(client.put, rm_prefix, count)
+        gc.disable()
+        times = _measure_loop(
+            lambda i: client.remove((NAMESPACE, SET_NAME, f"{rm_prefix}{i}")),
+            count,
+        )
+        gc.enable()
+        remove_rounds.append(times)
+    results["remove"] = _median_of_medians(remove_rounds)
+    _settle()
+
     # --- BATCH READ MULTI (sequential) ---
     keys = [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)]
     _log(f"BATCH_READ  {batch_groups} groups x {rounds} rounds  (gc disabled)")
@@ -398,6 +435,41 @@ def bench_c_sync(
         gc.enable()
         get_rounds.append(times)
     results["get"] = _median_of_medians(get_rounds)
+    _settle()
+
+    # --- OPERATE (read + increment in single call) ---
+    from aerospike_helpers.operations import operations as as_ops_single
+
+    _log(f"OPERATE  {count} ops x {rounds} rounds  (gc disabled)")
+    operate_rounds = []
+    for _ in range(rounds):
+        gc.disable()
+        times = _measure_loop(
+            lambda i: client.operate(
+                (NAMESPACE, SET_NAME, f"{prefix}{i}"),
+                [as_ops_single.read("n"), as_ops_single.increment("a", 1)],
+            ),
+            count,
+        )
+        gc.enable()
+        operate_rounds.append(times)
+    results["operate"] = _median_of_medians(operate_rounds)
+    _settle()
+
+    # --- REMOVE ---
+    _log(f"REMOVE  {count} ops x {rounds} rounds  (gc disabled)")
+    remove_rounds = []
+    for r in range(rounds):
+        rm_prefix = f"{prefix}rm{r}_"
+        _seed_sync(client.put, rm_prefix, count)
+        gc.disable()
+        times = _measure_loop(
+            lambda i: client.remove((NAMESPACE, SET_NAME, f"{rm_prefix}{i}")),
+            count,
+        )
+        gc.enable()
+        remove_rounds.append(times)
+    results["remove"] = _median_of_medians(remove_rounds)
     _settle()
 
     # --- BATCH READ MULTI (sequential) ---
@@ -550,6 +622,57 @@ async def bench_rust_async(
         gc.enable()
         get_rounds.append(elapsed)
     results["get"] = _bulk_median(get_rounds, count)
+    _settle()
+
+    # --- OPERATE (concurrent: read + increment) ---
+    from aerospike_py import OPERATOR_READ, OPERATOR_INCR
+
+    _log(
+        f"OPERATE  {count} ops x {rounds} rounds, concurrency={concurrency}  (gc disabled)"
+    )
+    operate_ops = [
+        {"op": OPERATOR_READ, "bin": "n"},
+        {"op": OPERATOR_INCR, "bin": "a", "val": 1},
+    ]
+    operate_rounds = []
+    for _ in range(rounds):
+
+        async def _operate(i):
+            async with sem:
+                await client.operate(
+                    (NAMESPACE, SET_NAME, f"{prefix}{i}"),
+                    operate_ops,
+                )
+
+        gc.disable()
+        t0 = time.perf_counter()
+        await asyncio.gather(*[_operate(i) for i in range(count)])
+        elapsed = time.perf_counter() - t0
+        gc.enable()
+        operate_rounds.append(elapsed)
+    results["operate"] = _bulk_median(operate_rounds, count)
+    _settle()
+
+    # --- REMOVE (concurrent) ---
+    _log(
+        f"REMOVE  {count} ops x {rounds} rounds, concurrency={concurrency}  (gc disabled)"
+    )
+    remove_rounds = []
+    for r in range(rounds):
+        rm_prefix = f"{prefix}rm{r}_"
+        await _seed_async(client, rm_prefix, count, concurrency)
+
+        async def _rm(i, _p=rm_prefix):
+            async with sem:
+                await client.remove((NAMESPACE, SET_NAME, f"{_p}{i}"))
+
+        gc.disable()
+        t0 = time.perf_counter()
+        await asyncio.gather(*[_rm(i) for i in range(count)])
+        elapsed = time.perf_counter() - t0
+        gc.enable()
+        remove_rounds.append(elapsed)
+    results["remove"] = _bulk_median(remove_rounds, count)
     _settle()
 
     # --- BATCH READ MULTI (concurrent) ---
@@ -721,10 +844,10 @@ def _print_table(
     print(_c(Color.DIM, f"  {'':─<{w}}") if color else f"  {'':─<{w}}")
 
     h = f"  {'Operation':<{COL_OP}}"
-    h += f" | {'aerospike-py (SyncClient)':>{COL_VAL}}"
+    h += f" | {'Sync (sequential)':>{COL_VAL}}"
     if has_c:
-        h += f" | {'aerospike (official)':>{COL_VAL}}"
-    h += f" | {'aerospike-py (AsyncClient)':>{COL_VAL}}"
+        h += f" | {'Official (sequential)':>{COL_VAL}}"
+    h += f" | {'Async (concurrent)':>{COL_VAL}}"
     if has_c:
         h += f" | {'Sync vs Official':>{COL_SP}}"
         h += f" | {'Async vs Official':>{COL_SP}}"
@@ -774,7 +897,16 @@ def print_comparison(
     batch_groups: int,
     color: bool = True,
 ):
-    ops = ["put", "get", "batch_read", "batch_read_numpy", "batch_write", "scan"]
+    ops = [
+        "put",
+        "get",
+        "operate",
+        "remove",
+        "batch_read",
+        "batch_read_numpy",
+        "batch_write",
+        "scan",
+    ]
 
     print()
     banner = (
@@ -864,6 +996,12 @@ def print_comparison(
                 line += f" | {_fmt_ms(c[op].get('p99_ms')):>16}"
             print(line)
 
+    note = (
+        f"  Note: Sync clients are measured sequentially (one op at a time).\n"
+        f"  Async client uses asyncio.gather with concurrency={concurrency}.\n"
+        f"  Async per-op latency reflects amortized time under concurrent load."
+    )
+    print(_c(Color.DIM, note) if color else note)
     print()
 
 
