@@ -57,6 +57,8 @@ bench = [
 ]
 dev = [
     { name = "maturin" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -73,6 +75,7 @@ bench = [
 ]
 dev = [
     { name = "maturin", specifier = ">=1.9,<2" },
+    { name = "numpy", specifier = ">=2.0" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },

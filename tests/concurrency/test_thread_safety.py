@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import aerospike_py
 
-
 CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 NS = "test"
 SET_NAME = "conc_thread"
@@ -27,9 +26,7 @@ class TestThreadSafety:
             except Exception as e:
                 errors.put(e)
 
-        threads = [
-            threading.Thread(target=put_records, args=(t,)) for t in range(num_threads)
-        ]
+        threads = [threading.Thread(target=put_records, args=(t,)) for t in range(num_threads)]
         for t in threads:
             t.start()
         for t in threads:
@@ -101,9 +98,7 @@ class TestThreadSafety:
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(cycle, range(100)))
 
-        assert errors.empty(), (
-            f"Errors in ThreadPoolExecutor test: {list(_drain(errors))}"
-        )
+        assert errors.empty(), f"Errors in ThreadPoolExecutor test: {list(_drain(errors))}"
 
     def test_multiple_clients_from_threads(self):
         """Each thread creates its own client, uses it, and closes it."""
@@ -123,9 +118,7 @@ class TestThreadSafety:
             except Exception as e:
                 errors.put(e)
 
-        threads = [
-            threading.Thread(target=thread_fn, args=(t,)) for t in range(num_threads)
-        ]
+        threads = [threading.Thread(target=thread_fn, args=(t,)) for t in range(num_threads)]
         for t in threads:
             t.start()
         for t in threads:
