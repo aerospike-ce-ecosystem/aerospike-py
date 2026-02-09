@@ -184,8 +184,7 @@ def _numpy_takeaways(results) -> list[str]:
         if len(data) >= 2:
             last = data[-1]
             sync_ratio = (
-                last["batch_read_sync"]["avg_ms"]
-                / last["batch_read_numpy_sync"]["avg_ms"]
+                last["batch_read_sync"]["avg_ms"] / last["batch_read_numpy_sync"]["avg_ms"]
                 if last["batch_read_numpy_sync"]["avg_ms"] > 0
                 else 0
             )
@@ -201,15 +200,12 @@ def _numpy_takeaways(results) -> list[str]:
         agg = next((d for d in data if d["stage"] == "read_aggregation"), None)
         if agg:
             sync_ratio = (
-                agg["batch_read_sync"]["avg_ms"]
-                / agg["batch_read_numpy_sync"]["avg_ms"]
+                agg["batch_read_sync"]["avg_ms"] / agg["batch_read_numpy_sync"]["avg_ms"]
                 if agg["batch_read_numpy_sync"]["avg_ms"] > 0
                 else 0
             )
             if sync_ratio > 1:
-                takeaways.append(
-                    f"Aggregation with numpy is **{sync_ratio:.1f}x** faster than dict-based processing"
-                )
+                takeaways.append(f"Aggregation with numpy is **{sync_ratio:.1f}x** faster than dict-based processing")
 
     # Memory insight
     if results.memory:
@@ -271,9 +267,7 @@ def generate_numpy_report(results, json_dir: str, date_slug: str) -> None:
                     "batch_read_sync": _metrics_dict(d["batch_read_sync"]),
                     "batch_read_numpy_sync": _metrics_dict(d["batch_read_numpy_sync"]),
                     "batch_read_async": _metrics_dict(d.get("batch_read_async", {})),
-                    "batch_read_numpy_async": _metrics_dict(
-                        d.get("batch_read_numpy_async", {})
-                    ),
+                    "batch_read_numpy_async": _metrics_dict(d.get("batch_read_numpy_async", {})),
                 }
                 for d in results.record_scaling["data"]
             ],
@@ -289,9 +283,7 @@ def generate_numpy_report(results, json_dir: str, date_slug: str) -> None:
                     "batch_read_sync": _metrics_dict(d["batch_read_sync"]),
                     "batch_read_numpy_sync": _metrics_dict(d["batch_read_numpy_sync"]),
                     "batch_read_async": _metrics_dict(d.get("batch_read_async", {})),
-                    "batch_read_numpy_async": _metrics_dict(
-                        d.get("batch_read_numpy_async", {})
-                    ),
+                    "batch_read_numpy_async": _metrics_dict(d.get("batch_read_numpy_async", {})),
                 }
                 for d in results.bin_scaling["data"]
             ],
@@ -309,9 +301,7 @@ def generate_numpy_report(results, json_dir: str, date_slug: str) -> None:
                     "batch_read_sync": _metrics_dict(d["batch_read_sync"]),
                     "batch_read_numpy_sync": _metrics_dict(d["batch_read_numpy_sync"]),
                     "batch_read_async": _metrics_dict(d.get("batch_read_async", {})),
-                    "batch_read_numpy_async": _metrics_dict(
-                        d.get("batch_read_numpy_async", {})
-                    ),
+                    "batch_read_numpy_async": _metrics_dict(d.get("batch_read_numpy_async", {})),
                 }
                 for d in results.post_processing["data"]
             ],

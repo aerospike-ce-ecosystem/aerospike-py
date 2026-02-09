@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from aerospike_py import AsyncClient
 from fastapi import APIRouter, Depends
 
+from aerospike_py import AsyncClient
 from app.dependencies import get_client
 from app.models import (
     AppendPrependRequest,
@@ -48,9 +48,7 @@ async def append(body: AppendPrependRequest, client: AsyncClient = Depends(get_c
 
 
 @router.post("/prepend", response_model=MessageResponse)
-async def prepend(
-    body: AppendPrependRequest, client: AsyncClient = Depends(get_client)
-):
+async def prepend(body: AppendPrependRequest, client: AsyncClient = Depends(get_client)):
     """Prepend a string to a bin value."""
     await client.prepend(body.key.to_tuple(), body.bin, body.val)
     return MessageResponse(message="Value prepended")

@@ -32,9 +32,7 @@ class TestCreateOnlyDuplicate:
                 policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
             )
 
-    def test_create_only_duplicate_official(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_create_only_duplicate_official(self, rust_client, official_client, cleanup):
         key = ("test", "compat", "err_dup_off")
         cleanup.append(key)
 

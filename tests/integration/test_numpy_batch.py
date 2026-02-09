@@ -51,9 +51,7 @@ class TestNumericBatchRead:
         assert result.batch_records.dtype == dtype
 
         for i in range(5):
-            np.testing.assert_almost_equal(
-                result.batch_records[i]["temperature"], 20.0 + i * 0.5
-            )
+            np.testing.assert_almost_equal(result.batch_records[i]["temperature"], 20.0 + i * 0.5)
             assert result.batch_records[i]["reading_id"] == i
 
     def test_result_codes_all_ok(self, client, cleanup):
@@ -221,9 +219,7 @@ class TestVectorEmbedding:
         dtype = np.dtype([("embedding", f"S{blob_size}"), ("score", "f4")])
         result = client.batch_read([key], _dtype=dtype)
 
-        recovered = np.frombuffer(
-            result.batch_records[0]["embedding"], dtype=np.float32
-        )
+        recovered = np.frombuffer(result.batch_records[0]["embedding"], dtype=np.float32)
         np.testing.assert_array_almost_equal(recovered, vec)
 
     def test_multiple_vectors_batch(self, client, cleanup):

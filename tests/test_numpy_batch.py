@@ -129,9 +129,7 @@ class TestSubArrayDtype:
             ]
         )
         result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")])
-        np.testing.assert_array_almost_equal(
-            result.batch_records[0]["embedding"], [1.0, 2.0, 3.0, 4.0]
-        )
+        np.testing.assert_array_almost_equal(result.batch_records[0]["embedding"], [1.0, 2.0, 3.0, 4.0])
         np.testing.assert_almost_equal(result.batch_records[0]["score"], 0.95)
 
 
@@ -160,13 +158,9 @@ class TestErrorRecords:
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
-                _make_batch_record(
-                    ("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})
-                ),
+                _make_batch_record(("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
                 _make_batch_record(("test", "demo", "k2"), 2, None),  # RECORD_NOT_FOUND
-                _make_batch_record(
-                    ("test", "demo", "k3"), 0, (None, {"gen": 2, "ttl": 0}, {"val": 30})
-                ),
+                _make_batch_record(("test", "demo", "k3"), 0, (None, {"gen": 2, "ttl": 0}, {"val": 30})),
             ]
         )
         keys = [("test", "demo", f"k{i + 1}") for i in range(3)]
@@ -224,12 +218,8 @@ class TestGetMethod:
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
-                _make_batch_record(
-                    ("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})
-                ),
-                _make_batch_record(
-                    ("test", "demo", "k2"), 0, (None, {"gen": 2, "ttl": 0}, {"val": 20})
-                ),
+                _make_batch_record(("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
+                _make_batch_record(("test", "demo", "k2"), 0, (None, {"gen": 2, "ttl": 0}, {"val": 20})),
             ]
         )
         keys = [("test", "demo", "k1"), ("test", "demo", "k2")]
@@ -242,9 +232,7 @@ class TestGetMethod:
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
-                _make_batch_record(
-                    ("test", "demo", 42), 0, (None, {"gen": 1, "ttl": 0}, {"val": 99})
-                ),
+                _make_batch_record(("test", "demo", 42), 0, (None, {"gen": 1, "ttl": 0}, {"val": 99})),
             ]
         )
         result = _batch_records_to_numpy(batch, dtype, [("test", "demo", 42)])
@@ -254,9 +242,7 @@ class TestGetMethod:
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
-                _make_batch_record(
-                    ("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})
-                ),
+                _make_batch_record(("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
             ]
         )
         result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")])
@@ -307,9 +293,7 @@ class TestMeta:
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
-                _make_batch_record(
-                    ("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 1})
-                ),
+                _make_batch_record(("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 1})),
             ]
         )
         result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")])
@@ -355,9 +339,7 @@ class TestKeyFallbackWarning:
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
-                _make_batch_record(
-                    ("test",), 0, (None, {"gen": 1, "ttl": 0}, {"val": 20})
-                ),
+                _make_batch_record(("test",), 0, (None, {"gen": 1, "ttl": 0}, {"val": 20})),
             ]
         )
         with warnings.catch_warnings(record=True) as w:
@@ -427,9 +409,7 @@ class TestLargeBatch:
                 # Simulate RECORD_NOT_FOUND
                 records.append(_make_batch_record(key, 2, None))
             else:
-                records.append(
-                    _make_batch_record(key, 0, (None, {"gen": 1, "ttl": 0}, {"val": i}))
-                )
+                records.append(_make_batch_record(key, 0, (None, {"gen": 1, "ttl": 0}, {"val": i})))
         batch = _make_batch_records(records)
         result = _batch_records_to_numpy(batch, dtype, keys)
 
@@ -472,13 +452,9 @@ class TestVectorizedAccess:
     def test_result_code_mask_filtering(self):
         dtype = np.dtype([("val", "i4")])
         records = [
-            _make_batch_record(
-                ("test", "demo", "k0"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})
-            ),
+            _make_batch_record(("test", "demo", "k0"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
             _make_batch_record(("test", "demo", "k1"), 2, None),
-            _make_batch_record(
-                ("test", "demo", "k2"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 30})
-            ),
+            _make_batch_record(("test", "demo", "k2"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 30})),
         ]
         keys = [("test", "demo", f"k{i}") for i in range(3)]
         batch = _make_batch_records(records)
@@ -509,9 +485,7 @@ class TestStrictMode:
         )
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            result = _batch_records_to_numpy(
-                batch, dtype, [("test", "demo", "k1")], strict=True
-            )
+            result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")], strict=True)
             missing_warns = [x for x in w if "not found in bins" in str(x.message)]
             assert len(missing_warns) == 1
             assert "'b'" in str(missing_warns[0].message)
@@ -531,9 +505,7 @@ class TestStrictMode:
         )
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            result = _batch_records_to_numpy(
-                batch, dtype, [("test", "demo", "k1")], strict=True
-            )
+            result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")], strict=True)
             extra_warns = [x for x in w if "not in dtype" in str(x.message)]
             assert len(extra_warns) == 1
             assert "'extra'" in str(extra_warns[0].message)
@@ -552,16 +524,9 @@ class TestStrictMode:
         )
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            result = _batch_records_to_numpy(
-                batch, dtype, [("test", "demo", "k1")], strict=True
-            )
+            result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")], strict=True)
             # key 관련 warning 외에는 없어야 함
-            schema_warns = [
-                x
-                for x in w
-                if "not found in bins" in str(x.message)
-                or "not in dtype" in str(x.message)
-            ]
+            schema_warns = [x for x in w if "not found in bins" in str(x.message) or "not in dtype" in str(x.message)]
             assert len(schema_warns) == 0
         assert result.batch_records[0]["a"] == 10
 
@@ -578,15 +543,8 @@ class TestStrictMode:
         )
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            _batch_records_to_numpy(
-                batch, dtype, [("test", "demo", "k1")], strict=False
-            )
-            schema_warns = [
-                x
-                for x in w
-                if "not found in bins" in str(x.message)
-                or "not in dtype" in str(x.message)
-            ]
+            _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")], strict=False)
+            schema_warns = [x for x in w if "not found in bins" in str(x.message) or "not in dtype" in str(x.message)]
             assert len(schema_warns) == 0
 
 
@@ -686,11 +644,7 @@ class TestVeryLargeBatch:
                 records.append(_make_batch_record(key, 2, None))
                 error_count += 1
             else:
-                records.append(
-                    _make_batch_record(
-                        key, 0, (None, {"gen": 1, "ttl": 0}, {"val": float(i)})
-                    )
-                )
+                records.append(_make_batch_record(key, 0, (None, {"gen": 1, "ttl": 0}, {"val": float(i)})))
         batch = _make_batch_records(records)
         result = _batch_records_to_numpy(batch, dtype, keys)
 

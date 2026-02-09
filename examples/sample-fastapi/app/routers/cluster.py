@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from aerospike_py import AsyncClient
 from fastapi import APIRouter, Depends
 
+from aerospike_py import AsyncClient
 from app.dependencies import get_client
 
 router = APIRouter(prefix="/cluster", tags=["cluster"])

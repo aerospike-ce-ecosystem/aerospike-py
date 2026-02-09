@@ -38,18 +38,14 @@ class TestString:
         result = _put_and_cross_read(rust_client, official_client, key, "v", val)
         assert result == val
 
-    def test_unicode_rust_write_official_read(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_unicode_rust_write_official_read(self, rust_client, official_client, cleanup):
         key = ("test", "compat", "str_unicode_r2o")
         cleanup.append(key)
         val = "한글🎉"
         result = _put_and_cross_read(rust_client, official_client, key, "v", val)
         assert result == val
 
-    def test_unicode_official_write_rust_read(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_unicode_official_write_rust_read(self, rust_client, official_client, cleanup):
         key = ("test", "compat", "str_unicode_o2r")
         cleanup.append(key)
         val = "한글🎉"
@@ -190,9 +186,7 @@ class TestNoneBin:
 class TestMixedComplex:
     """Deep nested structure cross-client test."""
 
-    def test_complex_rust_write_official_read(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_complex_rust_write_official_read(self, rust_client, official_client, cleanup):
         key = ("test", "compat", "complex_r2o")
         cleanup.append(key)
 
@@ -210,9 +204,7 @@ class TestMixedComplex:
         assert bins["val"]["users"][1]["scores"] == [78, 82, 90]
         assert bins["val"]["metadata"]["tags"] == ["test", "compat"]
 
-    def test_complex_official_write_rust_read(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_complex_official_write_rust_read(self, rust_client, official_client, cleanup):
         key = ("test", "compat", "complex_o2r")
         cleanup.append(key)
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from aerospike_py import AsyncClient
 from fastapi import Request
+
+from aerospike_py import AsyncClient
 
 
 def get_client(request: Request) -> AsyncClient:

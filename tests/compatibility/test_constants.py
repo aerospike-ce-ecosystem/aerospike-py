@@ -53,9 +53,7 @@ IDENTICAL_CONSTANTS = [
 def test_constant_value_matches(name):
     rust_val = getattr(aerospike_py, name)
     off_val = getattr(aerospike, name)
-    assert rust_val == off_val, (
-        f"{name}: aerospike_py={rust_val} != aerospike={off_val}"
-    )
+    assert rust_val == off_val, f"{name}: aerospike_py={rust_val} != aerospike={off_val}"
 
 
 # Constants whose names differ between the two libraries

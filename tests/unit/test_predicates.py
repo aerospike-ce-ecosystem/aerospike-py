@@ -1,9 +1,9 @@
-from aerospike_py import predicates as p
 from aerospike_py import (
     INDEX_TYPE_LIST,
     INDEX_TYPE_MAPKEYS,
     INDEX_TYPE_MAPVALUES,
 )
+from aerospike_py import predicates as p
 
 
 class TestEquals:
@@ -62,9 +62,7 @@ class TestContains:
 
 class TestGeoPredicates:
     def test_geo_within_geojson_region(self):
-        geojson = (
-            '{"type": "Polygon", "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
-        )
+        geojson = '{"type": "Polygon", "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
         result = p.geo_within_geojson_region("location", geojson)
         assert result == ("geo_within_geojson_region", "location", geojson)
         assert len(result) == 3

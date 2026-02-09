@@ -9,9 +9,7 @@ import aerospike_py
 def client():
     """Create and connect a client for the test module."""
     try:
-        c = aerospike_py.client(
-            {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
-        ).connect()
+        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}).connect()
     except Exception:
         pytest.skip("Aerospike server not available")
     yield c

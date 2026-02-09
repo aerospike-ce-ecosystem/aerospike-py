@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 
-import aerospike_py
-from aerospike_py import AsyncClient
 from fastapi import FastAPI
 
+import aerospike_py
+from aerospike_py import AsyncClient
 from app.config import settings
 from app.routers import (
     admin_roles,

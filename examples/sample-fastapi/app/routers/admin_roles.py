@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from aerospike_py import AsyncClient
 from fastapi import APIRouter, Depends
 
+from aerospike_py import AsyncClient
 from app.dependencies import get_client
 from app.models import (
     AdminCreateRoleRequest,
@@ -23,9 +23,7 @@ def _privileges_to_dicts(privileges):
 
 
 @router.post("", response_model=MessageResponse, status_code=201)
-async def admin_create_role(
-    body: AdminCreateRoleRequest, client: AsyncClient = Depends(get_client)
-):
+async def admin_create_role(body: AdminCreateRoleRequest, client: AsyncClient = Depends(get_client)):
     """Create a new admin role."""
     privs = _privileges_to_dicts(body.privileges)
     await client.admin_create_role(
@@ -70,9 +68,7 @@ async def admin_revoke_privileges(
 
 
 @router.get("/{role_name}")
-async def admin_query_role(
-    role_name: str, client: AsyncClient = Depends(get_client)
-) -> dict[str, Any]:
+async def admin_query_role(role_name: str, client: AsyncClient = Depends(get_client)) -> dict[str, Any]:
     """Query info for a specific role."""
     return await client.admin_query_role(role_name)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import socket
 import sys
 import time
@@ -83,9 +84,7 @@ def aerospike_container(tmp_path_factory):
     container = (
         DockerContainer("aerospike:ce-8.1.0.3_1")
         .with_bind_ports(3000, host_port)
-        .with_volume_mapping(
-            str(config_path), "/etc/aerospike/aerospike.template.conf", "ro"
-        )
+        .with_volume_mapping(str(config_path), "/etc/aerospike/aerospike.template.conf", "ro")
         .with_env("NAMESPACE", "test")
         .with_env("DEFAULT_TTL", "2592000")
     )
@@ -145,7 +144,5 @@ def cleanup(aerospike_client):
     keys: list[tuple] = []
     yield keys
     for key in keys:
-        try:
+        with contextlib.suppress(Exception):
             aerospike_client.remove(key)
-        except Exception:
-            pass

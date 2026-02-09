@@ -32,9 +32,7 @@ class UserResponse(BaseModel):
     name: str
     email: str
     age: int
-    generation: int = Field(
-        description="Aerospike record generation (optimistic lock version)"
-    )
+    generation: int = Field(description="Aerospike record generation (optimistic lock version)")
 
 
 class MessageResponse(BaseModel):
@@ -134,9 +132,7 @@ class OperateRequest(BaseModel):
 
 class OperateOrderedResponse(BaseModel):
     meta: dict[str, Any] | None = None
-    ordered_bins: list[list[Any]] = Field(
-        description="List of [bin_name, value] pairs in operation order"
-    )
+    ordered_bins: list[list[Any]] = Field(description="List of [bin_name, value] pairs in operation order")
 
 
 # ── Batch router models ───────────────────────────────────────
@@ -187,9 +183,7 @@ class IndexCreateRequest(BaseModel):
 class TruncateRequest(BaseModel):
     namespace: str = Field(..., examples=["test"])
     set_name: str = Field(..., examples=["users"])
-    nanos: int = Field(
-        0, description="Cutoff timestamp in nanoseconds (0 = truncate all)"
-    )
+    nanos: int = Field(0, description="Cutoff timestamp in nanoseconds (0 = truncate all)")
 
 
 # ── UDF router models ─────────────────────────────────────────
@@ -287,12 +281,8 @@ class NumpyBatchReadRequest(BaseModel):
 
 
 class NumpyBatchReadResponse(BaseModel):
-    columns: dict[str, list[Any]] = Field(
-        description="Columnar data: field name → list of values"
-    )
-    meta: dict[str, list[int]] = Field(
-        description="Record metadata: gen and ttl arrays"
-    )
+    columns: dict[str, list[Any]] = Field(description="Columnar data: field name → list of values")
+    meta: dict[str, list[int]] = Field(description="Record metadata: gen and ttl arrays")
     result_codes: list[int]
     keys: list[str | int]
     count: int
@@ -300,12 +290,8 @@ class NumpyBatchReadResponse(BaseModel):
 
 class VectorSearchRequest(BaseModel):
     keys: list[AerospikeKey]
-    query_vector: list[float] = Field(
-        ..., description="Query vector for similarity search"
-    )
-    embedding_bin: str = Field(
-        "embedding", description="Bin name storing the vector blob"
-    )
+    query_vector: list[float] = Field(..., description="Query vector for similarity search")
+    embedding_bin: str = Field("embedding", description="Bin name storing the vector blob")
     embedding_dim: int = Field(..., description="Vector dimensionality", examples=[768])
     extra_bins: list[str] | None = Field(
         None,

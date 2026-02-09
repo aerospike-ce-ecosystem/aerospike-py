@@ -44,9 +44,7 @@ class TestBatchCrossRead:
 
 
 class TestBatchRemove:
-    def test_official_batch_remove_rust_verify(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_official_batch_remove_rust_verify(self, rust_client, official_client, cleanup):
         keys = [("test", "compat", f"brm_{i}") for i in range(5)]
 
         for key in keys:
@@ -58,9 +56,7 @@ class TestBatchRemove:
             _, meta = rust_client.exists(key)
             assert meta is None
 
-    def test_rust_batch_remove_official_verify(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_rust_batch_remove_official_verify(self, rust_client, official_client, cleanup):
         keys = [("test", "compat", f"brm2_{i}") for i in range(5)]
 
         for key in keys:
@@ -74,9 +70,7 @@ class TestBatchRemove:
 
 
 class TestBatchOperate:
-    def test_rust_put_official_batch_operate(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_rust_put_official_batch_operate(self, rust_client, official_client, cleanup):
         """Rust puts records, official batch_operate increments them."""
         keys = [("test", "compat", f"bop_r2o_{i}") for i in range(5)]
         for k in keys:
@@ -92,9 +86,7 @@ class TestBatchOperate:
             _, _, bins = rust_client.get(key)
             assert bins["counter"] == 15
 
-    def test_official_put_rust_batch_operate(
-        self, rust_client, official_client, cleanup
-    ):
+    def test_official_put_rust_batch_operate(self, rust_client, official_client, cleanup):
         """Official puts records, rust batch_operate increments them."""
         keys = [("test", "compat", f"bop_o2r_{i}") for i in range(5)]
         for k in keys:

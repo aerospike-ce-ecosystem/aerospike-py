@@ -237,9 +237,7 @@ except PackageNotFoundError:
 class Client(_NativeClient):
     """Aerospike client wrapper that supports method chaining on connect()."""
 
-    def connect(
-        self, username: str | None = None, password: str | None = None
-    ) -> "Client":
+    def connect(self, username: str | None = None, password: str | None = None) -> "Client":
         """Connect to the Aerospike cluster.
 
         Returns self for method chaining:
@@ -282,9 +280,7 @@ class AsyncClient:
         try:
             return getattr(self._inner, name)
         except AttributeError:
-            raise AttributeError(
-                f"'{type(self).__name__}' has no attribute '{name}'"
-            ) from None
+            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'") from None
 
     async def connect(self, username=None, password=None):
         return await self._inner.connect(username, password)

@@ -46,9 +46,7 @@ def test_touch(client, aerospike_client, cleanup):
     aerospike_client.put(key, {"name": "Alice"})
     cleanup.append(key)
 
-    resp = client.post(
-        "/records/touch", json={"key": _key_body("rec-touch-1"), "val": 300}
-    )
+    resp = client.post("/records/touch", json={"key": _key_body("rec-touch-1"), "val": 300})
 
     assert resp.status_code == 200
     assert resp.json()["message"] == "Record touched"

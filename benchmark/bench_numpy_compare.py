@@ -138,9 +138,7 @@ def run_benchmark(scales: list[int], rounds: int, num_bins: int = 5):
 
     # ── Conversion Time ──
     print(f"\n  {'Conversion Time (ms)':}")
-    print(
-        f"  {'Records':>10} | {'dict avg':>12} {'median':>10} | {'numpy avg':>12} {'median':>10} | {'speedup':>10}"
-    )
+    print(f"  {'Records':>10} | {'dict avg':>12} {'median':>10} | {'numpy avg':>12} {'median':>10} | {'speedup':>10}")
     print(f"  {'':─<80}")
 
     for n in scales:
@@ -149,11 +147,7 @@ def run_benchmark(scales: list[int], rounds: int, num_bins: int = 5):
         dict_stats = _measure(lambda: _dict_convert(batch), rounds)
         numpy_stats = _measure(lambda: _numpy_convert(batch, dtype), rounds)
 
-        speedup = (
-            dict_stats["avg_ms"] / numpy_stats["avg_ms"]
-            if numpy_stats["avg_ms"] > 0
-            else 0
-        )
+        speedup = dict_stats["avg_ms"] / numpy_stats["avg_ms"] if numpy_stats["avg_ms"] > 0 else 0
         marker = "numpy faster" if speedup > 1 else "dict faster"
 
         print(
@@ -173,15 +167,9 @@ def run_benchmark(scales: list[int], rounds: int, num_bins: int = 5):
         numpy_result = _numpy_convert(batch, dtype)
 
         dict_stats = _measure(lambda: _dict_column_access(dict_records, "bin0"), rounds)
-        numpy_stats = _measure(
-            lambda: _numpy_column_access(numpy_result, "bin0"), rounds
-        )
+        numpy_stats = _measure(lambda: _numpy_column_access(numpy_result, "bin0"), rounds)
 
-        speedup = (
-            dict_stats["avg_ms"] / numpy_stats["avg_ms"]
-            if numpy_stats["avg_ms"] > 0
-            else 0
-        )
+        speedup = dict_stats["avg_ms"] / numpy_stats["avg_ms"] if numpy_stats["avg_ms"] > 0 else 0
         marker = "numpy faster" if speedup > 1 else "dict faster"
 
         print(
@@ -202,11 +190,7 @@ def run_benchmark(scales: list[int], rounds: int, num_bins: int = 5):
         dict_stats = _measure(lambda: _dict_filter(dict_records), rounds)
         numpy_stats = _measure(lambda: _numpy_filter(numpy_result), rounds)
 
-        speedup = (
-            dict_stats["avg_ms"] / numpy_stats["avg_ms"]
-            if numpy_stats["avg_ms"] > 0
-            else 0
-        )
+        speedup = dict_stats["avg_ms"] / numpy_stats["avg_ms"] if numpy_stats["avg_ms"] > 0 else 0
         marker = "numpy faster" if speedup > 1 else "dict faster"
 
         print(
@@ -229,10 +213,7 @@ def run_benchmark(scales: list[int], rounds: int, num_bins: int = 5):
         numpy_kb = numpy_mem / 1024
         savings = (1 - numpy_kb / dict_kb) * 100 if dict_kb > 0 else 0
 
-        print(
-            f"  {n:>10,} | {dict_kb:>10.1f}KB | {numpy_kb:>10.1f}KB"
-            f" | {savings:>8.1f}% less"
-        )
+        print(f"  {n:>10,} | {dict_kb:>10.1f}KB | {numpy_kb:>10.1f}KB | {savings:>8.1f}% less")
 
     # ── Crossover Point ──
     print(f"\n  {'Crossover Point Analysis':}")
@@ -245,11 +226,7 @@ def run_benchmark(scales: list[int], rounds: int, num_bins: int = 5):
         dict_stats = _measure(lambda: _dict_convert(batch), rounds)
         numpy_stats = _measure(lambda: _numpy_convert(batch, dtype), rounds)
 
-        ratio = (
-            numpy_stats["avg_ms"] / dict_stats["avg_ms"]
-            if dict_stats["avg_ms"] > 0
-            else 0
-        )
+        ratio = numpy_stats["avg_ms"] / dict_stats["avg_ms"] if dict_stats["avg_ms"] > 0 else 0
         winner = "numpy" if ratio < 1 else "dict"
 
         if winner == "numpy" and not crossover_found:
@@ -268,9 +245,7 @@ def run_benchmark(scales: list[int], rounds: int, num_bins: int = 5):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Benchmark: dict-based vs NumpyBatchRecords (no server)"
-    )
+    parser = argparse.ArgumentParser(description="Benchmark: dict-based vs NumpyBatchRecords (no server)")
     parser.add_argument(
         "--max-scale",
         type=int,

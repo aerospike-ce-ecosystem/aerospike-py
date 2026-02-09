@@ -6,9 +6,9 @@ import base64
 from typing import Any
 
 import numpy as np
-from aerospike_py import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException
 
+from aerospike_py import AsyncClient
 from app.dependencies import get_client
 from app.models import (
     NumpyBatchReadRequest,
@@ -56,7 +56,7 @@ async def numpy_batch_read(
     try:
         dtype = _build_dtype(body.dtype)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid dtype: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid dtype: {e}") from e
 
     keys = [k.to_tuple() for k in body.keys]
     bin_names = body.bins or [f.name for f in body.dtype]
@@ -64,7 +64,7 @@ async def numpy_batch_read(
     try:
         result = await client.batch_read(keys, bins=bin_names, _dtype=dtype)
     except TypeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     columns = {}
     for name in dtype.names:

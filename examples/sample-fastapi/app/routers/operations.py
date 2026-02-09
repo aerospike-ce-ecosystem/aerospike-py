@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from aerospike_py import AsyncClient
 from fastapi import APIRouter, Depends
 
+from aerospike_py import AsyncClient
 from app.dependencies import get_client
 from app.models import OperateOrderedResponse, OperateRequest, RecordResponse
 
@@ -36,15 +36,11 @@ async def operate(body: OperateRequest, client: AsyncClient = Depends(get_client
 
 
 @router.post("/operate-ordered", response_model=OperateOrderedResponse)
-async def operate_ordered(
-    body: OperateRequest, client: AsyncClient = Depends(get_client)
-):
+async def operate_ordered(body: OperateRequest, client: AsyncClient = Depends(get_client)):
     """Execute multiple operations on a single record, returning results in operation order."""
     ops = _build_ops(body.ops)
     meta = _build_meta(body.meta)
-    _, result_meta, ordered_bins = await client.operate_ordered(
-        body.key.to_tuple(), ops, meta=meta
-    )
+    _, result_meta, ordered_bins = await client.operate_ordered(body.key.to_tuple(), ops, meta=meta)
     return OperateOrderedResponse(
         meta=result_meta,
         ordered_bins=[[b, v] for b, v in ordered_bins],

@@ -146,9 +146,7 @@ class TestGunicornFeasibility:
             assert r.status_code == 200
             body = r.json()
             assert body["status"] == "ok"
-            assert body["connected"] is True, (
-                f"Worker PID {body['pid']} failed to connect after fork"
-            )
+            assert body["connected"] is True, f"Worker PID {body['pid']} failed to connect after fork"
             pids.add(body["pid"])
 
         print(f"\n  [info] Observed {len(pids)} distinct worker PID(s): {pids}")

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import uuid
 
-from aerospike_py import AsyncClient
-from aerospike_py.exception import RecordNotFound
 from fastapi import APIRouter, HTTPException, Request
 
+from aerospike_py import AsyncClient
+from aerospike_py.exception import RecordNotFound
 from app.config import settings
 from app.models import MessageResponse, UserCreate, UserResponse, UserUpdate
 
@@ -54,7 +54,7 @@ async def get_user(user_id: str, request: Request):
     try:
         _, meta, bins = await client.get(_key(user_id))
     except RecordNotFound:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User not found") from None
     return _to_response(user_id, meta, bins)
 
 
@@ -68,7 +68,7 @@ async def update_user(user_id: str, body: UserUpdate, request: Request):
     try:
         await client.get(key)
     except RecordNotFound:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User not found") from None
 
     update_bins = body.model_dump(exclude_none=True)
     if not update_bins:
@@ -87,7 +87,7 @@ async def delete_user(user_id: str, request: Request):
     try:
         await client.remove(_key(user_id))
     except RecordNotFound:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User not found") from None
     return MessageResponse(message=f"User {user_id} deleted")
 
 

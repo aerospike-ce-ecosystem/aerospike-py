@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from aerospike_py import AsyncClient
 from fastapi import APIRouter, Depends
 
+from aerospike_py import AsyncClient
 from app.dependencies import get_client
 from app.models import ApplyRequest, MessageResponse, UdfPutRequest
 
@@ -26,11 +26,7 @@ async def udf_remove(module_name: str, client: AsyncClient = Depends(get_client)
 
 
 @router.post("/apply")
-async def apply_udf(
-    body: ApplyRequest, client: AsyncClient = Depends(get_client)
-) -> Any:
+async def apply_udf(body: ApplyRequest, client: AsyncClient = Depends(get_client)) -> Any:
     """Apply a UDF function to a record."""
-    result = await client.apply(
-        body.key.to_tuple(), body.module, body.function, args=body.args
-    )
+    result = await client.apply(body.key.to_tuple(), body.module, body.function, args=body.args)
     return {"result": result}

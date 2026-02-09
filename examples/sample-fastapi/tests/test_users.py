@@ -2,9 +2,7 @@ from __future__ import annotations
 
 
 def test_create_user(client, cleanup):
-    resp = client.post(
-        "/users", json={"name": "Alice", "email": "alice@example.com", "age": 30}
-    )
+    resp = client.post("/users", json={"name": "Alice", "email": "alice@example.com", "age": 30})
 
     assert resp.status_code == 201
     data = resp.json()

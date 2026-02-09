@@ -100,14 +100,12 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
                     extra = bin_keys - dtype_fields
                     if missing:
                         warnings.warn(
-                            f"record at index {i}: dtype fields {missing} "
-                            f"not found in bins (zero-filled)",
+                            f"record at index {i}: dtype fields {missing} not found in bins (zero-filled)",
                             stacklevel=2,
                         )
                     if extra:
                         warnings.warn(
-                            f"record at index {i}: bin fields {extra} "
-                            f"not in dtype (ignored)",
+                            f"record at index {i}: bin fields {extra} not in dtype (ignored)",
                             stacklevel=2,
                         )
                 for field in dtype.names:

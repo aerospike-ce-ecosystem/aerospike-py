@@ -6,7 +6,6 @@ import base64
 
 import numpy as np
 
-
 NS, SET = "test", "np_vec"
 DIM = 128
 N = 500
@@ -119,7 +118,7 @@ def test_vector_search_top_k(client, aerospike_client, cleanup):
 
 def test_batch_read_with_missing_keys(client, aerospike_client, cleanup):
     """존재하는 벡터 + 존재하지 않는 key 혼합 batch_read."""
-    vectors, _ = _seed_vectors(aerospike_client, cleanup)
+    _vectors, _ = _seed_vectors(aerospike_client, cleanup)
 
     # 0~9: 존재, 10~14: 존재하지 않음
     key_bodies = [_key_body(f"v_{i}") for i in range(10)]

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from aerospike_py import AsyncClient
 from fastapi import APIRouter, Depends
 
+from aerospike_py import AsyncClient
 from app.dependencies import get_client
 from app.models import (
     BatchOperateRequest,
@@ -33,9 +33,7 @@ async def batch_read(body: BatchReadRequest, client: AsyncClient = Depends(get_c
 
 
 @router.post("/operate", response_model=list[RecordResponse])
-async def batch_operate(
-    body: BatchOperateRequest, client: AsyncClient = Depends(get_client)
-):
+async def batch_operate(body: BatchOperateRequest, client: AsyncClient = Depends(get_client)):
     """Execute operations on multiple records in a single batch call."""
     keys = [k.to_tuple() for k in body.keys]
     ops = [{"op": op.op, "bin": op.bin, "val": op.val} for op in body.ops]
@@ -44,9 +42,7 @@ async def batch_operate(
 
 
 @router.post("/remove", response_model=MessageResponse)
-async def batch_remove(
-    body: BatchRemoveRequest, client: AsyncClient = Depends(get_client)
-):
+async def batch_remove(body: BatchRemoveRequest, client: AsyncClient = Depends(get_client)):
     """Remove multiple records in a single batch call."""
     keys = [k.to_tuple() for k in body.keys]
     await client.batch_remove(keys)

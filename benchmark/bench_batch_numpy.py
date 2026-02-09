@@ -86,9 +86,7 @@ def _cleanup_data(client, prefix: str, count: int):
             pass
 
 
-async def _seed_data_async(
-    client, prefix: str, count: int, num_bins: int, concurrency: int
-):
+async def _seed_data_async(client, prefix: str, count: int, num_bins: int, concurrency: int):
     """Seed count records async."""
     sem = asyncio.Semaphore(concurrency)
 
@@ -190,9 +188,7 @@ def _run_record_scaling(
     data = []
 
     # Sync client
-    client = aerospike_py.client(
-        {"hosts": [(host, port)], "cluster_name": "docker"}
-    ).connect()
+    client = aerospike_py.client({"hosts": [(host, port)], "cluster_name": "docker"}).connect()
     _warmup_sync(client, warmup)
 
     for rc in RECORD_COUNTS:
@@ -219,9 +215,7 @@ def _run_record_scaling(
         np_rounds = []
         for _ in range(rounds):
             gc.disable()
-            elapsed = _measure_bulk(
-                lambda: [client.batch_read(g, _dtype=dtype) for g in groups]
-            )
+            elapsed = _measure_bulk(lambda: [client.batch_read(g, _dtype=dtype) for g in groups])
             gc.enable()
             np_rounds.append(elapsed)
         np_sync = _bulk_median(np_rounds, rc)
@@ -248,9 +242,7 @@ def _run_record_scaling(
         for entry in data:
             rc = entry["record_count"]
             prefix = f"ra_{rc}_"
-            _log(
-                f"Record Scaling (Async): seeding {rc} records (bins={fixed_bins}) ..."
-            )
+            _log(f"Record Scaling (Async): seeding {rc} records (bins={fixed_bins}) ...")
             await _seed_data_async(aclient, prefix, rc, fixed_bins, concurrency)
             _settle()
 
@@ -275,9 +267,7 @@ def _run_record_scaling(
             for _ in range(rounds):
                 gc.disable()
                 t0 = time.perf_counter()
-                await asyncio.gather(
-                    *[aclient.batch_read(g, _dtype=dtype) for g in groups]
-                )
+                await asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in groups])
                 elapsed = time.perf_counter() - t0
                 gc.enable()
                 np_rounds.append(elapsed)
@@ -310,9 +300,7 @@ def _run_bin_scaling(
     fixed_records = 1000
     data = []
 
-    client = aerospike_py.client(
-        {"hosts": [(host, port)], "cluster_name": "docker"}
-    ).connect()
+    client = aerospike_py.client({"hosts": [(host, port)], "cluster_name": "docker"}).connect()
     _warmup_sync(client, warmup)
 
     for bc in BIN_COUNTS:
@@ -340,9 +328,7 @@ def _run_bin_scaling(
         np_rounds = []
         for _ in range(rounds):
             gc.disable()
-            elapsed = _measure_bulk(
-                lambda: [client.batch_read(g, _dtype=dtype) for g in groups]
-            )
+            elapsed = _measure_bulk(lambda: [client.batch_read(g, _dtype=dtype) for g in groups])
             gc.enable()
             np_rounds.append(elapsed)
         np_sync = _bulk_median(np_rounds, fixed_records)
@@ -370,9 +356,7 @@ def _run_bin_scaling(
             bc = entry["bin_count"]
             prefix = f"ba_{bc}_"
             dtype = _make_dtype(bc)
-            _log(
-                f"Bin Scaling (Async): seeding {fixed_records} records (bins={bc}) ..."
-            )
+            _log(f"Bin Scaling (Async): seeding {fixed_records} records (bins={bc}) ...")
             await _seed_data_async(aclient, prefix, fixed_records, bc, concurrency)
             _settle()
 
@@ -395,9 +379,7 @@ def _run_bin_scaling(
             for _ in range(rounds):
                 gc.disable()
                 t0 = time.perf_counter()
-                await asyncio.gather(
-                    *[aclient.batch_read(g, _dtype=dtype) for g in groups]
-                )
+                await asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in groups])
                 elapsed = time.perf_counter() - t0
                 gc.enable()
                 np_rounds.append(elapsed)
@@ -433,9 +415,7 @@ def _run_post_processing(
     prefix = "pp_"
     data = []
 
-    client = aerospike_py.client(
-        {"hosts": [(host, port)], "cluster_name": "docker"}
-    ).connect()
+    client = aerospike_py.client({"hosts": [(host, port)], "cluster_name": "docker"}).connect()
     _warmup_sync(client, warmup)
 
     _log(f"Post-Processing: seeding {record_count} records (bins={num_bins}) ...")
@@ -453,29 +433,17 @@ def _run_post_processing(
     def _dict_column_access():
         for g in groups:
             results = client.batch_read(g)
-            _ = [
-                br.record[2]["bin0"]
-                for br in results.batch_records
-                if br.record is not None
-            ]
+            _ = [br.record[2]["bin0"] for br in results.batch_records if br.record is not None]
 
     def _dict_filter():
         for g in groups:
             results = client.batch_read(g)
-            _ = [
-                br
-                for br in results.batch_records
-                if br.record is not None and br.record[2].get("bin0", 0) > 50.0
-            ]
+            _ = [br for br in results.batch_records if br.record is not None and br.record[2].get("bin0", 0) > 50.0]
 
     def _dict_aggregation():
         for g in groups:
             results = client.batch_read(g)
-            _ = sum(
-                br.record[2]["bin0"]
-                for br in results.batch_records
-                if br.record is not None
-            )
+            _ = sum(br.record[2]["bin0"] for br in results.batch_records if br.record is not None)
 
     # Define stage functions for numpy (sync)
     def _numpy_raw_read():
@@ -506,9 +474,7 @@ def _run_post_processing(
         _numpy_aggregation,
     ]
 
-    for (stage_key, stage_label), dict_fn, numpy_fn in zip(
-        POST_STAGES, dict_fns, numpy_fns
-    ):
+    for (stage_key, stage_label), dict_fn, numpy_fn in zip(POST_STAGES, dict_fns, numpy_fns):
         _log(f"  Post-Processing: {stage_label} (Sync)")
 
         # batch_read sync
@@ -548,9 +514,7 @@ def _run_post_processing(
         await _warmup_async(aclient, warmup)
 
         a_prefix = "ppa_"
-        _log(
-            f"Post-Processing (Async): seeding {record_count} records (bins={num_bins}) ..."
-        )
+        _log(f"Post-Processing (Async): seeding {record_count} records (bins={num_bins}) ...")
         await _seed_data_async(aclient, a_prefix, record_count, num_bins, concurrency)
         _settle()
 
@@ -562,63 +526,37 @@ def _run_post_processing(
             await asyncio.gather(*[aclient.batch_read(g) for g in a_groups])
 
         async def _adict_column_access():
-            all_results = await asyncio.gather(
-                *[aclient.batch_read(g) for g in a_groups]
-            )
+            all_results = await asyncio.gather(*[aclient.batch_read(g) for g in a_groups])
             for results in all_results:
-                _ = [
-                    br.record[2]["bin0"]
-                    for br in results.batch_records
-                    if br.record is not None
-                ]
+                _ = [br.record[2]["bin0"] for br in results.batch_records if br.record is not None]
 
         async def _adict_filter():
-            all_results = await asyncio.gather(
-                *[aclient.batch_read(g) for g in a_groups]
-            )
+            all_results = await asyncio.gather(*[aclient.batch_read(g) for g in a_groups])
             for results in all_results:
-                _ = [
-                    br
-                    for br in results.batch_records
-                    if br.record is not None and br.record[2].get("bin0", 0) > 50.0
-                ]
+                _ = [br for br in results.batch_records if br.record is not None and br.record[2].get("bin0", 0) > 50.0]
 
         async def _adict_aggregation():
-            all_results = await asyncio.gather(
-                *[aclient.batch_read(g) for g in a_groups]
-            )
+            all_results = await asyncio.gather(*[aclient.batch_read(g) for g in a_groups])
             for results in all_results:
-                _ = sum(
-                    br.record[2]["bin0"]
-                    for br in results.batch_records
-                    if br.record is not None
-                )
+                _ = sum(br.record[2]["bin0"] for br in results.batch_records if br.record is not None)
 
         # Async stage functions for numpy
         async def _anumpy_raw_read():
-            await asyncio.gather(
-                *[aclient.batch_read(g, _dtype=dtype) for g in a_groups]
-            )
+            await asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in a_groups])
 
         async def _anumpy_column_access():
-            all_results = await asyncio.gather(
-                *[aclient.batch_read(g, _dtype=dtype) for g in a_groups]
-            )
+            all_results = await asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in a_groups])
             for result in all_results:
                 _ = result.batch_records["bin0"]
 
         async def _anumpy_filter():
-            all_results = await asyncio.gather(
-                *[aclient.batch_read(g, _dtype=dtype) for g in a_groups]
-            )
+            all_results = await asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in a_groups])
             for result in all_results:
                 arr = result.batch_records
                 _ = arr[arr["bin0"] > 50.0]
 
         async def _anumpy_aggregation():
-            all_results = await asyncio.gather(
-                *[aclient.batch_read(g, _dtype=dtype) for g in a_groups]
-            )
+            all_results = await asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in a_groups])
             for result in all_results:
                 _ = result.batch_records["bin0"].sum()
 
@@ -683,9 +621,7 @@ def _run_memory(
     dtype = _make_dtype(num_bins)
     data = []
 
-    client = aerospike_py.client(
-        {"hosts": [(host, port)], "cluster_name": "docker"}
-    ).connect()
+    client = aerospike_py.client({"hosts": [(host, port)], "cluster_name": "docker"}).connect()
     _warmup_sync(client, warmup)
 
     for rc in RECORD_COUNTS:
@@ -717,11 +653,7 @@ def _run_memory(
         tracemalloc.stop()
         numpy_peak_kb = numpy_peak / 1024
 
-        savings_pct = (
-            ((dict_peak_kb - numpy_peak_kb) / dict_peak_kb * 100)
-            if dict_peak_kb > 0
-            else 0
-        )
+        savings_pct = ((dict_peak_kb - numpy_peak_kb) / dict_peak_kb * 100) if dict_peak_kb > 0 else 0
 
         _cleanup_data(client, prefix, rc)
         _settle()
@@ -745,9 +677,7 @@ def _run_memory(
 COL_W = 18
 
 
-def _print_scaling_table(
-    title: str, x_label: str, x_key: str, result: dict, rounds: int
-):
+def _print_scaling_table(title: str, x_label: str, x_key: str, result: dict, rounds: int):
     data = result["data"]
     fixed_info = ""
     if "fixed_bins" in result:
@@ -873,17 +803,13 @@ class NumpyBenchmarkResults:
     batch_groups: int = 10
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     python_version: str = field(default_factory=platform.python_version)
-    platform_info: str = field(
-        default_factory=lambda: f"{platform.system()} {platform.machine()}"
-    )
+    platform_info: str = field(default_factory=lambda: f"{platform.system()} {platform.machine()}")
 
 
 def main():
     global _use_color
 
-    parser = argparse.ArgumentParser(
-        description="Benchmark: batch_read (dict) vs batch_read_numpy (numpy)"
-    )
+    parser = argparse.ArgumentParser(description="Benchmark: batch_read (dict) vs batch_read_numpy (numpy)")
     parser.add_argument(
         "--scenario",
         default="all",
@@ -901,9 +827,7 @@ def main():
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=3000)
-    parser.add_argument(
-        "--no-color", action="store_true", help="Disable colored output"
-    )
+    parser.add_argument("--no-color", action="store_true", help="Disable colored output")
     parser.add_argument(
         "--report",
         action="store_true",
@@ -920,9 +844,7 @@ def main():
         _use_color = False
 
     scenarios = (
-        ["record_scaling", "bin_scaling", "post_processing", "memory"]
-        if args.scenario == "all"
-        else [args.scenario]
+        ["record_scaling", "bin_scaling", "post_processing", "memory"] if args.scenario == "all" else [args.scenario]
     )
 
     print("NumPy Batch Benchmark config:")
@@ -1014,17 +936,13 @@ def main():
     if args.report:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         date_slug = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        json_dir = args.report_dir or os.path.join(
-            project_root, "docs", "static", "benchmark", "numpy-results"
-        )
+        json_dir = args.report_dir or os.path.join(project_root, "docs", "static", "benchmark", "numpy-results")
 
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from report_generator import generate_numpy_report
 
         generate_numpy_report(results, json_dir, date_slug)
-        print(
-            _c(Color.BOLD_CYAN, "[report]") + f" Generated: {json_dir}/{date_slug}.json"
-        )
+        print(_c(Color.BOLD_CYAN, "[report]") + f" Generated: {json_dir}/{date_slug}.json")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 # Path to the test UDF file
 UDF_PATH = str(Path(__file__).parent / "fixtures" / "test_udf.lua")
 

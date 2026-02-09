@@ -135,14 +135,10 @@ def test_sync_async_method_parity():
     from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 
     sync_methods = {
-        m
-        for m in dir(aerospike_py.Client)
-        if not m.startswith("_") and callable(getattr(aerospike_py.Client, m))
+        m for m in dir(aerospike_py.Client) if not m.startswith("_") and callable(getattr(aerospike_py.Client, m))
     }
     async_methods = {
-        m
-        for m in dir(_NativeAsyncClient)
-        if not m.startswith("_") and callable(getattr(_NativeAsyncClient, m))
+        m for m in dir(_NativeAsyncClient) if not m.startswith("_") and callable(getattr(_NativeAsyncClient, m))
     }
 
     # query() is sync-only (returns PyQuery object)
@@ -151,12 +147,8 @@ def test_sync_async_method_parity():
     sync_extra = sync_methods - async_methods - sync_only_expected
     async_extra = async_methods - sync_methods
 
-    assert not sync_extra, (
-        f"Methods in Client but missing from AsyncClient: {sync_extra}"
-    )
-    assert not async_extra, (
-        f"Methods in AsyncClient but missing from Client: {async_extra}"
-    )
+    assert not sync_extra, f"Methods in Client but missing from AsyncClient: {sync_extra}"
+    assert not async_extra, f"Methods in AsyncClient but missing from Client: {async_extra}"
 
 
 def test_exp_invalid_op_rejected():
@@ -180,28 +172,16 @@ def test_list_map_op_codes_contiguous():
     from aerospike_py import list_operations, map_operations
 
     # Collect all _OP_LIST_* constants
-    list_ops = {
-        name: getattr(list_operations, name)
-        for name in dir(list_operations)
-        if name.startswith("_OP_LIST_")
-    }
+    list_ops = {name: getattr(list_operations, name) for name in dir(list_operations) if name.startswith("_OP_LIST_")}
     list_codes = sorted(list_ops.values())
     assert list_codes[0] == 1001, f"List ops should start at 1001, got {list_codes[0]}"
-    assert list_codes == list(range(1001, 1001 + len(list_codes))), (
-        f"List op codes are not contiguous: {list_codes}"
-    )
+    assert list_codes == list(range(1001, 1001 + len(list_codes))), f"List op codes are not contiguous: {list_codes}"
 
     # Collect all _OP_MAP_* constants
-    map_ops = {
-        name: getattr(map_operations, name)
-        for name in dir(map_operations)
-        if name.startswith("_OP_MAP_")
-    }
+    map_ops = {name: getattr(map_operations, name) for name in dir(map_operations) if name.startswith("_OP_MAP_")}
     map_codes = sorted(map_ops.values())
     assert map_codes[0] == 2001, f"Map ops should start at 2001, got {map_codes[0]}"
-    assert map_codes == list(range(2001, 2001 + len(map_codes))), (
-        f"Map op codes are not contiguous: {map_codes}"
-    )
+    assert map_codes == list(range(2001, 2001 + len(map_codes))), f"Map op codes are not contiguous: {map_codes}"
 
 
 def test_connect_username_without_password():

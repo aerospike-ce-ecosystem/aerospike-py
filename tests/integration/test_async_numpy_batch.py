@@ -30,9 +30,7 @@ class TestAsyncNumericBatchRead:
         keys = [(NS, SET, f"num_{i}") for i in range(5)]
         for i, key in enumerate(keys):
             cleanup.append(key)
-            await async_client.put(
-                key, {"temperature": 20.0 + i * 0.5, "reading_id": i}
-            )
+            await async_client.put(key, {"temperature": 20.0 + i * 0.5, "reading_id": i})
 
         dtype = np.dtype([("temperature", "f8"), ("reading_id", "i4")])
         result = await async_client.batch_read(keys, _dtype=dtype)
@@ -42,9 +40,7 @@ class TestAsyncNumericBatchRead:
         assert result.batch_records.dtype == dtype
 
         for i in range(5):
-            np.testing.assert_almost_equal(
-                result.batch_records[i]["temperature"], 20.0 + i * 0.5
-            )
+            np.testing.assert_almost_equal(result.batch_records[i]["temperature"], 20.0 + i * 0.5)
             assert result.batch_records[i]["reading_id"] == i
 
     async def test_result_codes(self, async_client, cleanup):

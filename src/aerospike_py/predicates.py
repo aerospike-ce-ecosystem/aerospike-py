@@ -47,9 +47,7 @@ def geo_within_geojson_region(bin_name: str, geojson: str) -> tuple[str, str, st
     return ("geo_within_geojson_region", bin_name, geojson)
 
 
-def geo_within_radius(
-    bin_name: str, lat: float, lng: float, radius: float
-) -> tuple[str, str, float, float, float]:
+def geo_within_radius(bin_name: str, lat: float, lng: float, radius: float) -> tuple[str, str, float, float, float]:
     """Create a geospatial 'within radius' predicate."""
     return ("geo_within_radius", bin_name, lat, lng, radius)
 
