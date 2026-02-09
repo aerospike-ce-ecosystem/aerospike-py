@@ -9,9 +9,10 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-import aerospike_py  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+
+import aerospike_py  # noqa: E402
 
 CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 NS = "test"
