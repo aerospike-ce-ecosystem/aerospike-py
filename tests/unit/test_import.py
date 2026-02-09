@@ -75,7 +75,9 @@ def test_exception_hierarchy():
     assert issubclass(aerospike_py.ServerError, aerospike_py.AerospikeError)
     assert issubclass(aerospike_py.RecordError, aerospike_py.AerospikeError)
     assert issubclass(aerospike_py.ClusterError, aerospike_py.AerospikeError)
+    assert issubclass(aerospike_py.AerospikeTimeoutError, aerospike_py.AerospikeError)
     assert issubclass(aerospike_py.TimeoutError, aerospike_py.AerospikeError)
+    assert aerospike_py.AerospikeTimeoutError is aerospike_py.TimeoutError
     assert issubclass(aerospike_py.InvalidArgError, aerospike_py.AerospikeError)
 
     # Record-level subclasses
@@ -93,6 +95,9 @@ def test_exception_hierarchy():
     assert issubclass(exception.RecordNotFound, aerospike_py.RecordError)
     assert issubclass(exception.RecordExistsError, aerospike_py.RecordError)
     assert issubclass(exception.BinNameError, aerospike_py.RecordError)
+    assert issubclass(exception.AerospikeIndexError, aerospike_py.ServerError)
+    assert exception.AerospikeIndexError is exception.IndexError
+    assert issubclass(exception.IndexNotFound, exception.AerospikeIndexError)
     assert issubclass(exception.IndexNotFound, exception.IndexError)
     assert issubclass(exception.QueryAbortedError, exception.QueryError)
     assert issubclass(exception.AdminError, aerospike_py.ServerError)
@@ -123,6 +128,80 @@ def test_client_not_connected_operations():
             assert False, f"{method}() should have raised ClientError"
         except aerospike_py.ClientError:
             pass
+
+
+def test_sync_async_method_parity():
+    """Verify Client and AsyncClient expose the same public API methods."""
+    from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
+
+    sync_methods = {
+        m
+        for m in dir(aerospike_py.Client)
+        if not m.startswith("_") and callable(getattr(aerospike_py.Client, m))
+    }
+    async_methods = {
+        m
+        for m in dir(_NativeAsyncClient)
+        if not m.startswith("_") and callable(getattr(_NativeAsyncClient, m))
+    }
+
+    # query() is sync-only (returns PyQuery object)
+    sync_only_expected = {"query"}
+
+    sync_extra = sync_methods - async_methods - sync_only_expected
+    async_extra = async_methods - sync_methods
+
+    assert not sync_extra, (
+        f"Methods in Client but missing from AsyncClient: {sync_extra}"
+    )
+    assert not async_extra, (
+        f"Methods in AsyncClient but missing from Client: {async_extra}"
+    )
+
+
+def test_exp_invalid_op_rejected():
+    """Test that constructing an expression with invalid op raises ValueError."""
+    from aerospike_py import exp
+
+    try:
+        exp._cmd("nonexistent_op", val=42)
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "nonexistent_op" in str(e)
+
+    # Valid ops should work fine
+    result = exp.int_val(42)
+    assert result["__expr__"] == "int_val"
+    assert result["val"] == 42
+
+
+def test_list_map_op_codes_contiguous():
+    """Verify list/map operation code constants are contiguous and match expected ranges."""
+    from aerospike_py import list_operations, map_operations
+
+    # Collect all _OP_LIST_* constants
+    list_ops = {
+        name: getattr(list_operations, name)
+        for name in dir(list_operations)
+        if name.startswith("_OP_LIST_")
+    }
+    list_codes = sorted(list_ops.values())
+    assert list_codes[0] == 1001, f"List ops should start at 1001, got {list_codes[0]}"
+    assert list_codes == list(range(1001, 1001 + len(list_codes))), (
+        f"List op codes are not contiguous: {list_codes}"
+    )
+
+    # Collect all _OP_MAP_* constants
+    map_ops = {
+        name: getattr(map_operations, name)
+        for name in dir(map_operations)
+        if name.startswith("_OP_MAP_")
+    }
+    map_codes = sorted(map_ops.values())
+    assert map_codes[0] == 2001, f"Map ops should start at 2001, got {map_codes[0]}"
+    assert map_codes == list(range(2001, 2001 + len(map_codes))), (
+        f"Map op codes are not contiguous: {map_codes}"
+    )
 
 
 def test_connect_username_without_password():

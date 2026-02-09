@@ -20,6 +20,9 @@ Usage example::
 
 from typing import Any
 
+# Type alias for expression nodes returned by builder functions
+Expr = dict[str, Any]
+
 # Expression type constants
 EXP_TYPE_NIL = 0
 EXP_TYPE_BOOL = 1
@@ -33,9 +36,42 @@ EXP_TYPE_GEO = 8
 EXP_TYPE_HLL = 9
 
 
-def _cmd(op: str, **kwargs: Any) -> dict:
+_VALID_OPS: frozenset[str] = frozenset({
+    # Value constructors
+    "int_val", "float_val", "string_val", "bool_val", "blob_val",
+    "list_val", "map_val", "geo_val", "nil", "infinity", "wildcard",
+    # Bin accessors
+    "int_bin", "float_bin", "string_bin", "bool_bin", "blob_bin",
+    "list_bin", "map_bin", "geo_bin", "hll_bin", "bin_exists", "bin_type",
+    # Record metadata
+    "key", "key_exists", "set_name", "record_size", "last_update",
+    "since_update", "void_time", "ttl", "is_tombstone", "digest_modulo",
+    # Comparison
+    "eq", "ne", "gt", "ge", "lt", "le",
+    # Logical
+    "and", "or", "not", "xor",
+    # Numeric
+    "num_add", "num_sub", "num_mul", "num_div", "num_mod", "num_pow",
+    "num_log", "num_abs", "num_floor", "num_ceil", "to_int", "to_float",
+    "min", "max",
+    # Integer bitwise
+    "int_and", "int_or", "int_xor", "int_not", "int_lshift", "int_rshift",
+    "int_arshift", "int_count", "int_lscan", "int_rscan",
+    # Pattern matching
+    "regex_compare", "geo_compare",
+    # Control flow
+    "cond", "var", "def", "let",
+})  # fmt: skip
+
+
+def _cmd(op: str, **kwargs: Any) -> Expr:
     """Build an expression node dict."""
-    result: dict[str, Any] = {"__expr__": op}
+    if op not in _VALID_OPS:
+        raise ValueError(
+            f"Unknown expression op: '{op}'. "
+            f"Use aerospike_py.exp builder functions instead of constructing dicts manually."
+        )
+    result: Expr = {"__expr__": op}
     result.update(kwargs)
     return result
 
@@ -43,57 +79,57 @@ def _cmd(op: str, **kwargs: Any) -> dict:
 # ── Value constructors ──────────────────────────────────────────────
 
 
-def int_val(val: int) -> dict:
+def int_val(val: int) -> Expr:
     """Create 64-bit integer value expression."""
     return _cmd("int_val", val=val)
 
 
-def float_val(val: float) -> dict:
+def float_val(val: float) -> Expr:
     """Create 64-bit float value expression."""
     return _cmd("float_val", val=val)
 
 
-def string_val(val: str) -> dict:
+def string_val(val: str) -> Expr:
     """Create string value expression."""
     return _cmd("string_val", val=val)
 
 
-def bool_val(val: bool) -> dict:
+def bool_val(val: bool) -> Expr:
     """Create boolean value expression."""
     return _cmd("bool_val", val=val)
 
 
-def blob_val(val: bytes) -> dict:
+def blob_val(val: bytes) -> Expr:
     """Create blob (bytes) value expression."""
     return _cmd("blob_val", val=val)
 
 
-def list_val(val: list) -> dict:
+def list_val(val: list[Any]) -> Expr:
     """Create list value expression."""
     return _cmd("list_val", val=val)
 
 
-def map_val(val: dict) -> dict:
+def map_val(val: dict[Any, Any]) -> Expr:
     """Create map value expression."""
     return _cmd("map_val", val=val)
 
 
-def geo_val(val: str) -> dict:
+def geo_val(val: str) -> Expr:
     """Create geospatial JSON string value expression."""
     return _cmd("geo_val", val=val)
 
 
-def nil() -> dict:
+def nil() -> Expr:
     """Create nil value expression."""
     return _cmd("nil")
 
 
-def infinity() -> dict:
+def infinity() -> Expr:
     """Create infinity value expression."""
     return _cmd("infinity")
 
 
-def wildcard() -> dict:
+def wildcard() -> Expr:
     """Create wildcard value expression."""
     return _cmd("wildcard")
 
@@ -101,57 +137,57 @@ def wildcard() -> dict:
 # ── Bin accessors ───────────────────────────────────────────────────
 
 
-def int_bin(name: str) -> dict:
+def int_bin(name: str) -> Expr:
     """Create 64-bit integer bin expression."""
     return _cmd("int_bin", name=name)
 
 
-def float_bin(name: str) -> dict:
+def float_bin(name: str) -> Expr:
     """Create 64-bit float bin expression."""
     return _cmd("float_bin", name=name)
 
 
-def string_bin(name: str) -> dict:
+def string_bin(name: str) -> Expr:
     """Create string bin expression."""
     return _cmd("string_bin", name=name)
 
 
-def bool_bin(name: str) -> dict:
+def bool_bin(name: str) -> Expr:
     """Create boolean bin expression."""
     return _cmd("bool_bin", name=name)
 
 
-def blob_bin(name: str) -> dict:
+def blob_bin(name: str) -> Expr:
     """Create blob bin expression."""
     return _cmd("blob_bin", name=name)
 
 
-def list_bin(name: str) -> dict:
+def list_bin(name: str) -> Expr:
     """Create list bin expression."""
     return _cmd("list_bin", name=name)
 
 
-def map_bin(name: str) -> dict:
+def map_bin(name: str) -> Expr:
     """Create map bin expression."""
     return _cmd("map_bin", name=name)
 
 
-def geo_bin(name: str) -> dict:
+def geo_bin(name: str) -> Expr:
     """Create geospatial bin expression."""
     return _cmd("geo_bin", name=name)
 
 
-def hll_bin(name: str) -> dict:
+def hll_bin(name: str) -> Expr:
     """Create HyperLogLog bin expression."""
     return _cmd("hll_bin", name=name)
 
 
-def bin_exists(name: str) -> dict:
+def bin_exists(name: str) -> Expr:
     """Create expression that returns true if bin exists."""
     return _cmd("bin_exists", name=name)
 
 
-def bin_type(name: str) -> dict:
+def bin_type(name: str) -> Expr:
     """Create expression that returns bin's particle type."""
     return _cmd("bin_type", name=name)
 
@@ -159,52 +195,52 @@ def bin_type(name: str) -> dict:
 # ── Record metadata ────────────────────────────────────────────────
 
 
-def key(exp_type: int) -> dict:
+def key(exp_type: int) -> Expr:
     """Create record key expression of specified type."""
     return _cmd("key", exp_type=exp_type)
 
 
-def key_exists() -> dict:
+def key_exists() -> Expr:
     """Create expression that returns if primary key is stored in record metadata."""
     return _cmd("key_exists")
 
 
-def set_name() -> dict:
+def set_name() -> Expr:
     """Create expression that returns record set name."""
     return _cmd("set_name")
 
 
-def record_size() -> dict:
+def record_size() -> Expr:
     """Create expression that returns record size (server 7.0+)."""
     return _cmd("record_size")
 
 
-def last_update() -> dict:
+def last_update() -> Expr:
     """Create expression that returns record last update time (nanoseconds since epoch)."""
     return _cmd("last_update")
 
 
-def since_update() -> dict:
+def since_update() -> Expr:
     """Create expression that returns milliseconds since last update."""
     return _cmd("since_update")
 
 
-def void_time() -> dict:
+def void_time() -> Expr:
     """Create expression that returns record expiration time (nanoseconds since epoch)."""
     return _cmd("void_time")
 
 
-def ttl() -> dict:
+def ttl() -> Expr:
     """Create expression that returns record TTL in seconds."""
     return _cmd("ttl")
 
 
-def is_tombstone() -> dict:
+def is_tombstone() -> Expr:
     """Create expression that returns if record is in tombstone state."""
     return _cmd("is_tombstone")
 
 
-def digest_modulo(modulo: int) -> dict:
+def digest_modulo(modulo: int) -> Expr:
     """Create expression that returns record digest modulo."""
     return _cmd("digest_modulo", modulo=modulo)
 
@@ -212,32 +248,32 @@ def digest_modulo(modulo: int) -> dict:
 # ── Comparison operations ──────────────────────────────────────────
 
 
-def eq(left: dict, right: dict) -> dict:
+def eq(left: Expr, right: Expr) -> Expr:
     """Create equal (==) expression."""
     return _cmd("eq", left=left, right=right)
 
 
-def ne(left: dict, right: dict) -> dict:
+def ne(left: Expr, right: Expr) -> Expr:
     """Create not equal (!=) expression."""
     return _cmd("ne", left=left, right=right)
 
 
-def gt(left: dict, right: dict) -> dict:
+def gt(left: Expr, right: Expr) -> Expr:
     """Create greater than (>) expression."""
     return _cmd("gt", left=left, right=right)
 
 
-def ge(left: dict, right: dict) -> dict:
+def ge(left: Expr, right: Expr) -> Expr:
     """Create greater than or equal (>=) expression."""
     return _cmd("ge", left=left, right=right)
 
 
-def lt(left: dict, right: dict) -> dict:
+def lt(left: Expr, right: Expr) -> Expr:
     """Create less than (<) expression."""
     return _cmd("lt", left=left, right=right)
 
 
-def le(left: dict, right: dict) -> dict:
+def le(left: Expr, right: Expr) -> Expr:
     """Create less than or equal (<=) expression."""
     return _cmd("le", left=left, right=right)
 
@@ -245,22 +281,22 @@ def le(left: dict, right: dict) -> dict:
 # ── Logical operations ─────────────────────────────────────────────
 
 
-def and_(*exprs: dict) -> dict:
+def and_(*exprs: Expr) -> Expr:
     """Create logical AND expression."""
     return _cmd("and", exprs=list(exprs))
 
 
-def or_(*exprs: dict) -> dict:
+def or_(*exprs: Expr) -> Expr:
     """Create logical OR expression."""
     return _cmd("or", exprs=list(exprs))
 
 
-def not_(expr: dict) -> dict:
+def not_(expr: Expr) -> Expr:
     """Create logical NOT expression."""
     return _cmd("not", expr=expr)
 
 
-def xor_(*exprs: dict) -> dict:
+def xor_(*exprs: Expr) -> Expr:
     """Create logical XOR expression."""
     return _cmd("xor", exprs=list(exprs))
 
@@ -268,72 +304,72 @@ def xor_(*exprs: dict) -> dict:
 # ── Numeric operations ─────────────────────────────────────────────
 
 
-def num_add(*exprs: dict) -> dict:
+def num_add(*exprs: Expr) -> Expr:
     """Create numeric add expression."""
     return _cmd("num_add", exprs=list(exprs))
 
 
-def num_sub(*exprs: dict) -> dict:
+def num_sub(*exprs: Expr) -> Expr:
     """Create numeric subtract expression."""
     return _cmd("num_sub", exprs=list(exprs))
 
 
-def num_mul(*exprs: dict) -> dict:
+def num_mul(*exprs: Expr) -> Expr:
     """Create numeric multiply expression."""
     return _cmd("num_mul", exprs=list(exprs))
 
 
-def num_div(*exprs: dict) -> dict:
+def num_div(*exprs: Expr) -> Expr:
     """Create numeric divide expression."""
     return _cmd("num_div", exprs=list(exprs))
 
 
-def num_mod(numerator: dict, denominator: dict) -> dict:
+def num_mod(numerator: Expr, denominator: Expr) -> Expr:
     """Create numeric modulo expression."""
     return _cmd("num_mod", exprs=[numerator, denominator])
 
 
-def num_pow(base: dict, exponent: dict) -> dict:
+def num_pow(base: Expr, exponent: Expr) -> Expr:
     """Create numeric power expression."""
     return _cmd("num_pow", exprs=[base, exponent])
 
 
-def num_log(num: dict, base: dict) -> dict:
+def num_log(num: Expr, base: Expr) -> Expr:
     """Create numeric log expression."""
     return _cmd("num_log", exprs=[num, base])
 
 
-def num_abs(value: dict) -> dict:
+def num_abs(value: Expr) -> Expr:
     """Create numeric absolute value expression."""
     return _cmd("num_abs", exprs=[value])
 
 
-def num_floor(num: dict) -> dict:
+def num_floor(num: Expr) -> Expr:
     """Create numeric floor expression."""
     return _cmd("num_floor", exprs=[num])
 
 
-def num_ceil(num: dict) -> dict:
+def num_ceil(num: Expr) -> Expr:
     """Create numeric ceil expression."""
     return _cmd("num_ceil", exprs=[num])
 
 
-def to_int(num: dict) -> dict:
+def to_int(num: Expr) -> Expr:
     """Create convert-to-integer expression."""
     return _cmd("to_int", exprs=[num])
 
 
-def to_float(num: dict) -> dict:
+def to_float(num: Expr) -> Expr:
     """Create convert-to-float expression."""
     return _cmd("to_float", exprs=[num])
 
 
-def min_(*exprs: dict) -> dict:
+def min_(*exprs: Expr) -> Expr:
     """Create minimum value expression."""
     return _cmd("min", exprs=list(exprs))
 
 
-def max_(*exprs: dict) -> dict:
+def max_(*exprs: Expr) -> Expr:
     """Create maximum value expression."""
     return _cmd("max", exprs=list(exprs))
 
@@ -341,52 +377,52 @@ def max_(*exprs: dict) -> dict:
 # ── Integer bitwise operations ─────────────────────────────────────
 
 
-def int_and(*exprs: dict) -> dict:
+def int_and(*exprs: Expr) -> Expr:
     """Create integer bitwise AND expression."""
     return _cmd("int_and", exprs=list(exprs))
 
 
-def int_or(*exprs: dict) -> dict:
+def int_or(*exprs: Expr) -> Expr:
     """Create integer bitwise OR expression."""
     return _cmd("int_or", exprs=list(exprs))
 
 
-def int_xor(*exprs: dict) -> dict:
+def int_xor(*exprs: Expr) -> Expr:
     """Create integer bitwise XOR expression."""
     return _cmd("int_xor", exprs=list(exprs))
 
 
-def int_not(expr: dict) -> dict:
+def int_not(expr: Expr) -> Expr:
     """Create integer bitwise NOT expression."""
     return _cmd("int_not", exprs=[expr])
 
 
-def int_lshift(value: dict, shift: dict) -> dict:
+def int_lshift(value: Expr, shift: Expr) -> Expr:
     """Create integer left shift expression."""
     return _cmd("int_lshift", exprs=[value, shift])
 
 
-def int_rshift(value: dict, shift: dict) -> dict:
+def int_rshift(value: Expr, shift: Expr) -> Expr:
     """Create integer logical right shift expression."""
     return _cmd("int_rshift", exprs=[value, shift])
 
 
-def int_arshift(value: dict, shift: dict) -> dict:
+def int_arshift(value: Expr, shift: Expr) -> Expr:
     """Create integer arithmetic right shift expression."""
     return _cmd("int_arshift", exprs=[value, shift])
 
 
-def int_count(expr: dict) -> dict:
+def int_count(expr: Expr) -> Expr:
     """Create integer bit count expression."""
     return _cmd("int_count", exprs=[expr])
 
 
-def int_lscan(value: dict, search: dict) -> dict:
+def int_lscan(value: Expr, search: Expr) -> Expr:
     """Create integer scan from MSB expression."""
     return _cmd("int_lscan", exprs=[value, search])
 
 
-def int_rscan(value: dict, search: dict) -> dict:
+def int_rscan(value: Expr, search: Expr) -> Expr:
     """Create integer scan from LSB expression."""
     return _cmd("int_rscan", exprs=[value, search])
 
@@ -394,12 +430,12 @@ def int_rscan(value: dict, search: dict) -> dict:
 # ── Pattern matching ───────────────────────────────────────────────
 
 
-def regex_compare(regex: str, flags: int, bin_expr: dict) -> dict:
+def regex_compare(regex: str, flags: int, bin_expr: Expr) -> Expr:
     """Create regex string comparison expression."""
     return _cmd("regex_compare", regex=regex, flags=flags, bin=bin_expr)
 
 
-def geo_compare(left: dict, right: dict) -> dict:
+def geo_compare(left: Expr, right: Expr) -> Expr:
     """Create geospatial comparison expression."""
     return _cmd("geo_compare", left=left, right=right)
 
@@ -407,21 +443,21 @@ def geo_compare(left: dict, right: dict) -> dict:
 # ── Variables and control flow ─────────────────────────────────────
 
 
-def cond(*exprs: dict) -> dict:
+def cond(*exprs: Expr) -> Expr:
     """Create conditional expression: cond(bool1, action1, bool2, action2, ..., default)."""
     return _cmd("cond", exprs=list(exprs))
 
 
-def var(name: str) -> dict:
+def var(name: str) -> Expr:
     """Create variable reference expression."""
     return _cmd("var", name=name)
 
 
-def def_(name: str, value: dict) -> dict:
+def def_(name: str, value: Expr) -> Expr:
     """Create variable definition expression (used with let_)."""
     return _cmd("def", name=name, value=value)
 
 
-def let_(*exprs: dict) -> dict:
+def let_(*exprs: Expr) -> Expr:
     """Create let binding expression: let_(def_("x", ...), def_("y", ...), scope_expr)."""
     return _cmd("let", exprs=list(exprs))

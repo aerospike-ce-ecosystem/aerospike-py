@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use aerospike_core::{
     BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
@@ -26,9 +26,22 @@ use crate::types::key::{key_to_py, py_to_key};
 use crate::types::record::record_to_py;
 use crate::types::value::{py_to_value, value_to_py};
 
+/// Shared async client state.
+///
+/// The triple wrapping is required by PyO3 async constraints:
+/// - outer `Arc`: allows cloning into `future_into_py` closures (connect/close)
+/// - `Mutex`: interior mutability for connect/close state changes
+/// - `Option`: represents connected (Some) vs disconnected (None)
+/// - inner `Arc<AsClient>`: cheap cloning per-operation without holding the Mutex lock
+type SharedClientState = Arc<Mutex<Option<Arc<AsClient>>>>;
+
+fn lock_err<T>(e: PoisonError<T>) -> PyErr {
+    crate::errors::ClientError::new_err(format!("Internal lock poisoned: {e}"))
+}
+
 #[pyclass(name = "AsyncClient")]
 pub struct PyAsyncClient {
-    inner: Arc<Mutex<Option<Arc<AsClient>>>>,
+    inner: SharedClientState,
     config: Py<PyAny>,
 }
 
@@ -78,10 +91,7 @@ impl PyAsyncClient {
             .await
             .map_err(as_to_pyerr)?;
 
-            *inner
-                .lock()
-                .map_err(|_| crate::errors::ClientError::new_err("Internal lock poisoned"))? =
-                Some(Arc::new(client));
+            *inner.lock().map_err(lock_err)? = Some(Arc::new(client));
             Ok(())
         })
     }
@@ -96,11 +106,7 @@ impl PyAsyncClient {
 
     /// Close connection (async).
     fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let client = self
-            .inner
-            .lock()
-            .map_err(|_| crate::errors::ClientError::new_err("Internal lock poisoned"))?
-            .take();
+        let client = self.inner.lock().map_err(lock_err)?.take();
         future_into_py(py, async move {
             if let Some(c) = client {
                 c.close().await.map_err(as_to_pyerr)?;
@@ -129,11 +135,7 @@ impl PyAsyncClient {
         _exc_val: Option<&Bound<'_, PyAny>>,
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let client = self
-            .inner
-            .lock()
-            .map_err(|_| crate::errors::ClientError::new_err("Internal lock poisoned"))?
-            .take();
+        let client = self.inner.lock().map_err(lock_err)?.take();
         future_into_py(py, async move {
             if let Some(c) = client {
                 c.close().await.map_err(as_to_pyerr)?;
@@ -1242,7 +1244,7 @@ impl PyAsyncClient {
     fn get_client(&self) -> PyResult<Arc<AsClient>> {
         self.inner
             .lock()
-            .map_err(|_| crate::errors::ClientError::new_err("Internal lock poisoned"))?
+            .map_err(lock_err)?
             .as_ref()
             .cloned()
             .ok_or_else(|| {

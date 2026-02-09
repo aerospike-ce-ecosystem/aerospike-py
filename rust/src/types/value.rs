@@ -3,8 +3,19 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
 use std::collections::HashMap;
 
+const MAX_NESTING_DEPTH: usize = 64;
+
 /// Convert a Python object to an Aerospike Value
 pub fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
+    py_to_value_inner(obj, 0)
+}
+
+fn py_to_value_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
+    if depth > MAX_NESTING_DEPTH {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Value nesting exceeds maximum depth of {MAX_NESTING_DEPTH}"
+        )));
+    }
     if obj.is_none() {
         return Ok(Value::Nil);
     }
@@ -30,15 +41,15 @@ pub fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     if let Ok(list) = obj.cast::<PyList>() {
         let mut values = Vec::with_capacity(list.len());
         for item in list.iter() {
-            values.push(py_to_value(&item)?);
+            values.push(py_to_value_inner(&item, depth + 1)?);
         }
         return Ok(Value::List(values));
     }
     if let Ok(dict) = obj.cast::<PyDict>() {
         let mut map = HashMap::new();
         for (k, v) in dict.iter() {
-            let key = py_to_value(&k)?;
-            let val = py_to_value(&v)?;
+            let key = py_to_value_inner(&k, depth + 1)?;
+            let val = py_to_value_inner(&v, depth + 1)?;
             map.insert(key, val);
         }
         return Ok(Value::HashMap(map));

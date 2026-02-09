@@ -16,7 +16,8 @@ from aerospike_py._aerospike import (  # noqa: F401
     InvalidArgError,
     RecordError,
     ServerError,
-    TimeoutError,
+    AerospikeTimeoutError,
+    TimeoutError,  # deprecated alias for AerospikeTimeoutError
     RecordNotFound,
     RecordExistsError,
     RecordGenerationError,
@@ -26,7 +27,8 @@ from aerospike_py._aerospike import (  # noqa: F401
     BinNotFound,
     BinTypeError,
     FilteredOut,
-    IndexError,
+    AerospikeIndexError,
+    IndexError,  # deprecated alias for AerospikeIndexError
     IndexNotFound,
     IndexFoundError,
     QueryError,
@@ -276,8 +278,13 @@ class AsyncClient:
         self._inner = _NativeAsyncClient(config)
 
     # -- Delegate all native methods via __getattr__ --
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
+    def __getattr__(self, name: str):
+        try:
+            return getattr(self._inner, name)
+        except AttributeError:
+            raise AttributeError(
+                f"'{type(self).__name__}' has no attribute '{name}'"
+            ) from None
 
     async def connect(self, username=None, password=None):
         return await self._inner.connect(username, password)
@@ -339,7 +346,8 @@ __all__ = [
     "InvalidArgError",
     "RecordError",
     "ServerError",
-    "TimeoutError",
+    "AerospikeTimeoutError",
+    "TimeoutError",  # deprecated alias
     "RecordNotFound",
     "RecordExistsError",
     "RecordGenerationError",
@@ -349,7 +357,8 @@ __all__ = [
     "BinNotFound",
     "BinTypeError",
     "FilteredOut",
-    "IndexError",
+    "AerospikeIndexError",
+    "IndexError",  # deprecated alias
     "IndexNotFound",
     "IndexFoundError",
     "QueryError",

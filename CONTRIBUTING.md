@@ -15,7 +15,7 @@ maturin develop
 
 ### Start Aerospike Server
 
-Integration 및 feasibility 테스트를 실행하려면 Aerospike 서버가 필요합니다 (unit 테스트 제외).
+Running integration and feasibility tests requires an Aerospike server (except unit tests).
 
 ```bash
 podman run -d --name aerospike \
@@ -27,8 +27,8 @@ podman run -d --name aerospike \
   aerospike:ce-8.1.0.3_1
 ```
 
-> `scripts/aerospike.template.conf`에 `access-address 127.0.0.1`이 설정되어 있습니다.
-> Rust 기반 client는 서버가 알려주는 컨테이너 내부 IP로 재연결을 시도하므로, 이 설정이 필수입니다.
+> `scripts/aerospike.template.conf` has `access-address 127.0.0.1` configured.
+> The Rust-based client attempts to reconnect using the container's internal IP reported by the server, so this setting is required.
 
 ### Run Tests
 

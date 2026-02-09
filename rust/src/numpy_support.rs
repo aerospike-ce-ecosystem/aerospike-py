@@ -86,6 +86,14 @@ fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usi
 
 // ── raw pointer from numpy array ────────────────────────────────
 
+/// Extract the raw data pointer from a writable numpy array via `__array_interface__`.
+///
+/// # Safety contract for callers
+///
+/// The returned pointer is only valid while the numpy array is alive and not
+/// reallocated. Callers must ensure:
+/// - The array outlives all writes through the returned pointer.
+/// - No concurrent Python code resizes or replaces the array's buffer.
 fn get_array_data_ptr(array: &Bound<'_, PyAny>) -> PyResult<*mut u8> {
     let iface = array.getattr("__array_interface__")?;
     let data_tuple = iface.get_item("data")?;
@@ -94,12 +102,22 @@ fn get_array_data_ptr(array: &Bound<'_, PyAny>) -> PyResult<*mut u8> {
     if readonly {
         return Err(PyValueError::new_err("numpy array is read-only"));
     }
+    debug_assert!(ptr_int != 0, "numpy array data pointer is null");
     Ok(ptr_int as *mut u8)
 }
 
 // ── buffer write helpers (all unsafe) ───────────────────────────
+//
+// # Safety (applies to all write_* functions below)
+//
+// - `row_ptr` must point to a valid, writable buffer of at least
+//   `field.offset + field.itemsize` bytes.
+// - The buffer must remain valid for the duration of the write.
+// - These invariants are upheld by `batch_to_numpy_py`, which allocates
+//   the buffer via `np.zeros` and validates field bounds in `parse_dtype_fields`.
 
 unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> PyResult<()> {
+    debug_assert!(!row_ptr.is_null());
     let dst = row_ptr.add(field.offset);
     match field.base_itemsize {
         1 => ptr::write_unaligned(dst as *mut i8, val as i8),
@@ -117,6 +135,7 @@ unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> 
 }
 
 unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) -> PyResult<()> {
+    debug_assert!(!row_ptr.is_null());
     let dst = row_ptr.add(field.offset);
     match field.base_itemsize {
         1 => ptr::write_unaligned(dst, val as u8),
@@ -134,6 +153,7 @@ unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) ->
 }
 
 unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -> PyResult<()> {
+    debug_assert!(!row_ptr.is_null());
     let dst = row_ptr.add(field.offset);
     match field.base_itemsize {
         4 => ptr::write_unaligned(dst as *mut f32, val as f32),
@@ -155,6 +175,7 @@ unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -
 }
 
 unsafe fn write_bytes_to_buffer(row_ptr: *mut u8, field: &FieldInfo, data: &[u8]) {
+    debug_assert!(!row_ptr.is_null());
     let dst = row_ptr.add(field.offset);
     // Clamp copy length to field size to prevent buffer overrun
     let copy_len = data.len().min(field.itemsize);

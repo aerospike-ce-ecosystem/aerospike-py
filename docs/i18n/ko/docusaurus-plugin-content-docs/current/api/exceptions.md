@@ -20,9 +20,9 @@ Exception
     ├── ClientError
     ├── ClusterError
     ├── InvalidArgError
-    ├── TimeoutError
+    ├── AerospikeTimeoutError
     ├── ServerError
-    │   ├── IndexError
+    │   ├── AerospikeIndexError
     │   │   ├── IndexNotFound
     │   │   └── IndexFoundError
     │   ├── QueryError
@@ -49,7 +49,7 @@ Exception
 | `ClientError` | 클라이언트 측 오류 (연결, 설정) |
 | `ClusterError` | 클러스터 연결/탐색 오류 |
 | `InvalidArgError` | 메서드에 잘못된 인수가 전달됨 |
-| `TimeoutError` | 작업 시간 초과 |
+| `AerospikeTimeoutError` | 작업 시간 초과 (alias: `TimeoutError`, deprecated) |
 | `ServerError` | 서버 측 오류 |
 | `RecordError` | 레코드 수준 작업 오류 |
 
@@ -71,7 +71,7 @@ Exception
 
 | Exception | 설명 |
 |-----------|-------------|
-| `IndexError` | Secondary Index 작업 오류 |
+| `AerospikeIndexError` | Secondary Index 작업 오류 (alias: `IndexError`, deprecated) |
 | `IndexNotFound` | 인덱스가 존재하지 않음 |
 | `IndexFoundError` | 인덱스가 이미 존재함 |
 | `QueryError` | 쿼리 실행 오류 |
@@ -123,13 +123,13 @@ except RecordExistsError:
 ### Connection Errors
 
 ```python
-from aerospike_py.exception import ClientError, ClusterError, TimeoutError
+from aerospike_py.exception import ClientError, ClusterError, AerospikeTimeoutError
 
 try:
     client = aerospike.client(config).connect()
 except ClusterError:
     print("Cannot connect to cluster")
-except TimeoutError:
+except AerospikeTimeoutError:
     print("Connection timed out")
 except ClientError as e:
     print(f"Client error: {e}")

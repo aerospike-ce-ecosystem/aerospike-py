@@ -13,7 +13,8 @@ from aerospike_py._aerospike import (
     InvalidArgError,
     RecordError,
     ServerError,
-    TimeoutError,
+    AerospikeTimeoutError,
+    TimeoutError,  # deprecated alias for AerospikeTimeoutError
     # Record-level exceptions
     RecordNotFound,
     RecordExistsError,
@@ -25,7 +26,8 @@ from aerospike_py._aerospike import (
     BinTypeError,
     FilteredOut,
     # Index exceptions
-    IndexError,
+    AerospikeIndexError,
+    IndexError,  # deprecated alias for AerospikeIndexError
     IndexNotFound,
     IndexFoundError,
     # Query exceptions
@@ -42,7 +44,8 @@ __all__ = [
     "ServerError",
     "RecordError",
     "ClusterError",
-    "TimeoutError",
+    "AerospikeTimeoutError",
+    "TimeoutError",  # deprecated alias
     "InvalidArgError",
     "RecordNotFound",
     "RecordExistsError",
@@ -53,7 +56,8 @@ __all__ = [
     "BinNotFound",
     "BinTypeError",
     "FilteredOut",
-    "IndexError",
+    "AerospikeIndexError",
+    "IndexError",  # deprecated alias
     "IndexNotFound",
     "IndexFoundError",
     "QueryError",

@@ -4,6 +4,7 @@ use aerospike_core::{CommitLevel, Expiration, GenerationPolicy, RecordExistsActi
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use super::extract_policy_fields;
 use crate::expressions::{is_expression, py_to_expression};
 
 pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePolicy::default);
@@ -42,25 +43,16 @@ pub fn parse_write_policy(
         None => return Ok(policy),
     };
 
-    // Socket timeout
-    if let Some(val) = dict.get_item("socket_timeout")? {
-        policy.base_policy.socket_timeout = val.extract::<u32>()?;
-    }
-
-    // Total timeout
-    if let Some(val) = dict.get_item("total_timeout")? {
-        policy.base_policy.total_timeout = val.extract::<u32>()?;
-    }
-
-    // Max retries
-    if let Some(val) = dict.get_item("max_retries")? {
-        policy.base_policy.max_retries = val.extract::<usize>()?;
-    }
+    extract_policy_fields!(dict, {
+        "socket_timeout" => policy.base_policy.socket_timeout;
+        "total_timeout" => policy.base_policy.total_timeout;
+        "max_retries" => policy.base_policy.max_retries;
+        "durable_delete" => policy.durable_delete
+    });
 
     // Key (send_key)
     if let Some(val) = dict.get_item("key")? {
         let key_val: i32 = val.extract()?;
-        // POLICY_KEY_SEND = 1
         policy.send_key = key_val == 1;
     }
 
@@ -101,11 +93,6 @@ pub fn parse_write_policy(
     // TTL / expiration
     if let Some(val) = dict.get_item("ttl")? {
         policy.expiration = parse_ttl(val.extract::<i64>()?);
-    }
-
-    // Durable delete
-    if let Some(val) = dict.get_item("durable_delete")? {
-        policy.durable_delete = val.extract::<bool>()?;
     }
 
     // Filter expression
