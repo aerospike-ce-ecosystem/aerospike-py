@@ -9,6 +9,37 @@ from typing import Any, Optional
 # Type alias for operation dicts passed to client.operate()
 Operation = dict[str, Any]
 
+__all__ = [
+    "Operation",
+    "map_set_order",
+    "map_put",
+    "map_put_items",
+    "map_increment",
+    "map_decrement",
+    "map_clear",
+    "map_remove_by_key",
+    "map_remove_by_key_list",
+    "map_remove_by_key_range",
+    "map_remove_by_value",
+    "map_remove_by_value_list",
+    "map_remove_by_value_range",
+    "map_remove_by_index",
+    "map_remove_by_index_range",
+    "map_remove_by_rank",
+    "map_remove_by_rank_range",
+    "map_size",
+    "map_get_by_key",
+    "map_get_by_key_range",
+    "map_get_by_value",
+    "map_get_by_value_range",
+    "map_get_by_index",
+    "map_get_by_index_range",
+    "map_get_by_rank",
+    "map_get_by_rank_range",
+    "map_get_by_key_list",
+    "map_get_by_value_list",
+]
+
 # Map operation codes (must match rust/src/operations.rs CDT codes)
 _OP_MAP_SET_ORDER = 2001
 _OP_MAP_PUT = 2002

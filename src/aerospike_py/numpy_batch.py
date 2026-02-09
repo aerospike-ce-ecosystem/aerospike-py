@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Union
 if TYPE_CHECKING:
     import numpy as np
 
+__all__ = ["NumpyBatchRecords"]
+
 
 class NumpyBatchRecords:
     """batch_read 결과를 numpy structured array로 보관."""
