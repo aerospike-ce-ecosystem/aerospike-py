@@ -9,6 +9,41 @@ from typing import Any, Optional
 # Type alias for operation dicts passed to client.operate()
 Operation = dict[str, Any]
 
+__all__ = [
+    "Operation",
+    "list_append",
+    "list_append_items",
+    "list_insert",
+    "list_insert_items",
+    "list_pop",
+    "list_pop_range",
+    "list_remove",
+    "list_remove_range",
+    "list_set",
+    "list_trim",
+    "list_clear",
+    "list_size",
+    "list_get",
+    "list_get_range",
+    "list_get_by_value",
+    "list_get_by_index",
+    "list_get_by_index_range",
+    "list_get_by_rank",
+    "list_get_by_rank_range",
+    "list_get_by_value_list",
+    "list_get_by_value_range",
+    "list_remove_by_value",
+    "list_remove_by_value_list",
+    "list_remove_by_value_range",
+    "list_remove_by_index",
+    "list_remove_by_index_range",
+    "list_remove_by_rank",
+    "list_remove_by_rank_range",
+    "list_increment",
+    "list_sort",
+    "list_set_order",
+]
+
 # List operation codes (must match rust/src/operations.rs CDT codes)
 _OP_LIST_APPEND = 1001
 _OP_LIST_APPEND_ITEMS = 1002

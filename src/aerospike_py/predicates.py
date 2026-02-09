@@ -11,6 +11,15 @@ Usage:
 
 from typing import Any
 
+__all__ = [
+    "equals",
+    "between",
+    "contains",
+    "geo_within_geojson_region",
+    "geo_within_radius",
+    "geo_contains_geojson_point",
+]
+
 
 def equals(bin_name: str, val: Any) -> tuple[str, str, Any]:
     """Create an equality predicate for a secondary index query."""
