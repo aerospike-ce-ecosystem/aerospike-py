@@ -195,12 +195,25 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
-        let read_policy = parse_read_policy(policy)?;
 
         let bin_names: Vec<String> = bins.extract()?;
         let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
         let bins_selector = Bins::from(bin_refs.as_slice());
 
+        if policy.is_none() {
+            let rp = &*DEFAULT_READ_POLICY;
+            let record = py.detach(|| {
+                RUNTIME.block_on(async {
+                    client
+                        .get(rp, &rust_key, bins_selector)
+                        .await
+                        .map_err(as_to_pyerr)
+                })
+            })?;
+            return record_to_py(py, &record);
+        }
+
+        let read_policy = parse_read_policy(policy)?;
         let record = py.detach(|| {
             RUNTIME.block_on(async {
                 client
@@ -223,13 +236,17 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let rust_key = py_to_key(key)?;
-        let read_policy = parse_read_policy(policy)?;
         let key_py = key_to_py(py, &rust_key)?;
 
-        // Single server call: get header only (Bins::None)
-        let result = py.detach(|| {
-            RUNTIME.block_on(async { client.get(&read_policy, &rust_key, Bins::None).await })
-        });
+        let result = if policy.is_none() {
+            let rp = &*DEFAULT_READ_POLICY;
+            py.detach(|| RUNTIME.block_on(async { client.get(rp, &rust_key, Bins::None).await }))
+        } else {
+            let read_policy = parse_read_policy(policy)?;
+            py.detach(|| {
+                RUNTIME.block_on(async { client.get(&read_policy, &rust_key, Bins::None).await })
+            })
+        };
 
         match result {
             Ok(record) => {
