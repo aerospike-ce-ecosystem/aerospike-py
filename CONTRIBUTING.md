@@ -6,9 +6,16 @@
 git clone https://github.com/KimSoungRyoul/aerospike-py.git
 cd aerospike-py
 
-python -m venv .venv && source .venv/bin/activate
-pip install maturin pytest pytest-asyncio
-maturin develop
+# Install uv (if not already installed)
+# https://docs.astral.sh/uv/getting-started/installation/
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies and build the Rust extension
+make build
+
+# Or manually:
+uv sync --group dev
+uv run maturin develop --release
 ```
 
 ## Running Tests
@@ -51,9 +58,18 @@ uvx --with tox-uv tox -e compat
 uvx --with tox-uv tox -e all
 ```
 
+## Pre-commit hooks
+
+This project uses [pre-commit](https://pre-commit.com/) for linting and formatting:
+
+```bash
+uvx pre-commit install
+uvx pre-commit run --all-files
+```
+
 ## Making Changes
 
-1. **Rust code** (`rust/src/`): Edit, then `maturin develop` to rebuild.
+1. **Rust code** (`rust/src/`): Edit, then `uv run maturin develop --release` to rebuild.
 2. **Python code** (`src/aerospike_py/`): Changes apply immediately.
 3. **Tests**: Add to `tests/unit/` or `tests/integration/` as appropriate.
 
