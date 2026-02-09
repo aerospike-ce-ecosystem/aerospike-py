@@ -113,20 +113,48 @@ run-numpy-benchmark-report: build run-aerospike-ce ## Run numpy batch benchmark 
 	$(MAKE) stop-aerospike-ce
 
 # ---------------------------------------------------------------------------
+# Lint & Format
+# ---------------------------------------------------------------------------
+
+.PHONY: lint
+lint: ## Run all linters (ruff + clippy)
+	uv run ruff check src/ tests/ benchmark/
+	uv run ruff format --check src/ tests/ benchmark/
+	cargo clippy --manifest-path rust/Cargo.toml -- -D warnings
+
+.PHONY: fmt
+fmt: ## Auto-format Python (ruff) and Rust (cargo fmt)
+	uv run ruff format src/ tests/ benchmark/
+	uv run ruff check --fix src/ tests/ benchmark/
+	cargo fmt --manifest-path rust/Cargo.toml
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
 .PHONY: test-unit
 test-unit: build ## Run unit tests (no server needed)
-	uvx --with tox-uv tox -e py312
+	uv run pytest tests/unit/ -v
 
 .PHONY: test-integration
 test-integration: build run-aerospike-ce ## Run integration tests
 	uvx --with tox-uv tox -e integration
 
+.PHONY: test-concurrency
+test-concurrency: build run-aerospike-ce ## Run concurrency/thread-safety tests
+	uvx --with tox-uv tox -e concurrency
+
+.PHONY: test-compat
+test-compat: build run-aerospike-ce ## Run compatibility tests (vs official C client)
+	uvx --with tox-uv tox -e compat
+
 .PHONY: test-all
 test-all: build run-aerospike-ce ## Run all tests
 	uvx --with tox-uv tox -e all
+
+.PHONY: test-matrix
+test-matrix: build ## Run unit tests across all Python versions
+	uvx --with tox-uv tox
 
 # ---------------------------------------------------------------------------
 # Helpers
