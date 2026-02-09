@@ -1,4 +1,4 @@
-"""BatchRecords → numpy structured array 변환 모듈."""
+"""BatchRecords to numpy structured array conversion module."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class NumpyBatchRecords:
-    """batch_read 결과를 numpy structured array로 보관."""
+    """Holds batch_read results as a numpy structured array."""
 
     def __init__(
         self,
@@ -25,13 +25,13 @@ class NumpyBatchRecords:
         self._map = _map
 
     def get(self, key: Union[str, int, bytes]) -> "np.void":
-        """primary_key로 단일 레코드 조회.
+        """Retrieve a single record by primary key.
 
         Returns:
-            np.void: structured array의 단일 행 (numpy scalar record).
+            np.void: A single row of the structured array (numpy scalar record).
 
         Raises:
-            KeyError: key가 _map에 존재하지 않을 때.
+            KeyError: When the key does not exist in the map.
         """
         return self.batch_records[self._map[key]]
 
@@ -41,21 +41,21 @@ _ALLOWED_KINDS = {"i", "u", "f", "S", "V"}
 
 
 def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
-    """BatchRecords → NumpyBatchRecords 변환.
+    """Convert BatchRecords to NumpyBatchRecords.
 
     Args:
-        batch_records_obj: BatchRecords 객체.
+        batch_records_obj: BatchRecords object.
         dtype: numpy structured array dtype.
-        keys: key 목록.
-        strict: True이면 dtype에 정의된 bin이 레코드에 없거나,
-                레코드에 있는 bin이 dtype에 없을 때 경고를 발생시킴.
+        keys: List of keys.
+        strict: If True, raises warnings when dtype-defined bins are missing from records,
+                or when record bins are not in dtype.
     """
     import numpy as np
 
-    # dtype 검증: 숫자(int/float) 또는 고정 길이 bytes만 허용
+    # Validate dtype: only numeric (int/float) or fixed-length bytes allowed
     for name in dtype.names:
         field_dtype = dtype[name]
-        base = field_dtype.base  # sub-array인 경우 base dtype 확인
+        base = field_dtype.base  # Check base dtype for sub-array types
         if base.kind not in _ALLOWED_KINDS:
             raise TypeError(
                 f"dtype field '{name}' must be numeric (int/float) or "
@@ -71,7 +71,7 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
 
     for i, br in enumerate(batch_records_obj.batch_records):
         result_codes[i] = br.result
-        # key → index 매핑 (primary_key는 key tuple의 [2])
+        # key → index mapping (primary_key is key tuple[2])
         if br.key and len(br.key) >= 3:
             pk = br.key[2]
         else:
@@ -86,11 +86,11 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
 
         if br.result == 0 and br.record is not None:
             _, record_meta, bins = br.record
-            # meta 채우기
+            # Fill metadata
             if record_meta:
                 meta[i]["gen"] = record_meta.get("gen", 0)
                 meta[i]["ttl"] = record_meta.get("ttl", 0)
-            # bins → structured array 채우기
+            # Fill bins into structured array
             if bins:
                 if strict:
                     bin_keys = set(bins.keys())
