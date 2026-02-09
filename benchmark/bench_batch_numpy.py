@@ -1013,7 +1013,7 @@ def main():
 
     if args.report:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        date_slug = datetime.now().strftime("%Y-%m-%d_%H:%M")
+        date_slug = datetime.now().strftime("%Y-%m-%d_%H-%M")
         json_dir = args.report_dir or os.path.join(
             project_root, "docs", "static", "benchmark", "numpy-results"
         )

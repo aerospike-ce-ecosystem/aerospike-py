@@ -1099,7 +1099,7 @@ def main():
 
         # Determine project root (benchmark/ is one level down)
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        date_slug = _dt.now().strftime("%Y-%m-%d_%H:%M")
+        date_slug = _dt.now().strftime("%Y-%m-%d_%H-%M")
         json_dir = args.report_dir or os.path.join(
             project_root, "docs", "static", "benchmark", "results"
         )
