@@ -6,8 +6,7 @@ and ``client.operate_ordered()``.
 
 from typing import Any, Optional
 
-# Type alias for operation dicts passed to client.operate()
-Operation = dict[str, Any]
+from aerospike_py._types import Operation
 
 __all__ = [
     "Operation",

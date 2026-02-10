@@ -16,6 +16,17 @@ class TestContextManager:
         assert hasattr(c, "__aenter__")
         assert hasattr(c, "__aexit__")
 
+    def test_async_client_aenter_defined_on_class(self):
+        """Test that __aenter__/__aexit__ are defined on the class itself, not via __getattr__."""
+        assert "__aenter__" in aerospike_py.AsyncClient.__dict__
+        assert "__aexit__" in aerospike_py.AsyncClient.__dict__
+
+    async def test_async_client_aenter_returns_self(self):
+        """Test that AsyncClient.__aenter__ returns self."""
+        c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+        result = await c.__aenter__()
+        assert result is c
+
     def test_client_enter_returns_self(self):
         """Test that Client.__enter__ returns self."""
         c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
