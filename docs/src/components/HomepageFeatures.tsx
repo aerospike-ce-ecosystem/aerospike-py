@@ -5,17 +5,8 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import styles from './HomepageFeatures.module.css';
 
-const CODE_OFFICIAL = `import aerospike
-
-config = {'hosts': [('localhost', 3000)]}
-client = aerospike.client(config).connect()
-
-key = ('test', 'demo', 'key1')
-client.put(key, {'name': 'Alice', 'age': 30})
-_, _, bins = client.get(key)
-client.close()`;
-
-const CODE_AEROSPIKE_PY = `import aerospike_py as aerospike
+const CODE_DROP_IN = `- import aerospike
++ import aerospike_py as aerospike
 
 config = {'hosts': [('localhost', 3000)]}
 client = aerospike.client(config).connect()
@@ -63,19 +54,10 @@ function DropInReplacementSection() {
             Just change the import — your existing code works as-is
           </p>
         </div>
-        <div className={styles.codeCompare}>
-          <div className={styles.codeBlock}>
-            <div className={styles.codeBlockHeader}>Official Client</div>
-            <CodeBlock language="python" metastring="{1}">
-              {CODE_OFFICIAL}
-            </CodeBlock>
-          </div>
-          <div className={styles.codeBlock}>
-            <div className={styles.codeBlockHeader}>aerospike-py</div>
-            <CodeBlock language="python" metastring="{1}">
-              {CODE_AEROSPIKE_PY}
-            </CodeBlock>
-          </div>
+        <div className={styles.dropInBlock}>
+          <CodeBlock language="diff">
+            {CODE_DROP_IN}
+          </CodeBlock>
         </div>
       </div>
     </section>
