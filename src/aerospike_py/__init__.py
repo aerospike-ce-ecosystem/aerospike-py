@@ -3,6 +3,8 @@
 Drop-in compatible replacement for the aerospike-client-python package.
 """
 
+from typing import Any
+
 from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query, Scan  # noqa: F401
@@ -276,19 +278,30 @@ class AsyncClient:
         self._inner = _NativeAsyncClient(config)
 
     # -- Delegate all native methods via __getattr__ --
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         try:
             return getattr(self._inner, name)
         except AttributeError:
             raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'") from None
 
-    async def connect(self, username=None, password=None):
+    async def __aenter__(self) -> "AsyncClient":
+        return self
+
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> bool:
+        await self.close()
+        return False
+
+    async def connect(self, username: str | None = None, password: str | None = None) -> None:
+        """Connect to the Aerospike cluster."""
         return await self._inner.connect(username, password)
 
-    async def close(self):
+    async def close(self) -> None:
+        """Close the connection."""
         return await self._inner.close()
 
-    async def batch_read(self, keys, bins=None, policy=None, _dtype=None):
+    async def batch_read(
+        self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None, _dtype: Any = None
+    ) -> Any:
         """Batch read records asynchronously.
 
         Args:

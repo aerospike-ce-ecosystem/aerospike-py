@@ -38,7 +38,7 @@ Issues = "https://github.com/KimSoungRyoul/aerospike-py/issues"
 numpy = ["numpy>=2.0"]
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "ruff", "maturin>=1.9,<2", "numpy>=2.0"]
+dev = ["pytest", "pytest-asyncio", "ruff", "maturin>=1.9,<2", "numpy>=2.0", "pyright>=1.1"]
 bench = ["aerospike>=17.0.0", "numpy>=2.0"]
 
 [tool.pytest.ini_options]
@@ -83,6 +83,14 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["aerospike_py"]
+
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+include = ["src/aerospike_py"]
+reportMissingModuleSource = false
+venvPath = "."
+venv = ".venv"
 
 [tool.maturin]
 python-source = "src"
