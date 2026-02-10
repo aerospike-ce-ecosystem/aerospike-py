@@ -22,39 +22,10 @@
   margin: 0;
 }
 
-/* Drop-in Replacement: side-by-side code comparison */
-.codeCompare {
-  display: flex;
-  gap: 1.5rem;
-  align-items: stretch;
-}
-
-@media (max-width: 768px) {
-  .codeCompare {
-    flex-direction: column;
-  }
-}
-
-.codeBlock {
-  flex: 1;
-  border: 1px solid var(--ifm-color-emphasis-200);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-/* Remove CodeBlock's own margin and border-radius inside our wrapper */
-.codeBlock > div {
-  margin: 0 !important;
-  border-radius: 0 !important;
-}
-
-.codeBlockHeader {
-  padding: 0.5rem 1rem;
-  font-weight: 600;
-  font-size: 0.85rem;
-  background: var(--ifm-color-emphasis-100);
-  border-bottom: 1px solid var(--ifm-color-emphasis-200);
-  color: var(--ifm-color-emphasis-700);
+/* Drop-in Replacement: single diff code block */
+.dropInBlock {
+  max-width: 720px;
+  margin: 0 auto;
 }
 
 /* Sync & Async: tabs section */

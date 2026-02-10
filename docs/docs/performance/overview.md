@@ -10,17 +10,54 @@ aerospike-py provides a high-performance Aerospike client based on the **Rust + 
 
 ## Architecture
 
-```
-Python (sync/async API)
-    ↓ PyO3 FFI
-Rust (aerospike-rs client)
-    ↓ Tokio async runtime
-TCP/IP → Aerospike Server
+```mermaid
+flowchart TD
+  subgraph APP["Python Application"]
+    Client["Client (sync)"]
+    AsyncClient["AsyncClient (async)"]
+  end
+
+  subgraph FFI["PyO3 Extension"]
+    Sync["py.detach + block_on"]
+    Async["future_into_py"]
+  end
+
+  subgraph RT["Tokio Runtime (GIL-free)"]
+    Core["aerospike-core + Pool"]
+    NP["NumPy zero-copy"]
+  end
+
+  subgraph OS["OS Kernel"]
+    TCP["TCP Socket"]
+  end
+
+  DB[("Aerospike Cluster")]
+
+  Client --> Sync
+  AsyncClient --> Async
+  Sync --> Core
+  Async --> Core
+  Core -.-> NP
+  Core --> TCP --> DB
+
+  style APP fill:#3776ab,color:#fff
+  style FFI fill:#dea584,color:#000
+  style RT fill:#ce422b,color:#fff
+  style OS fill:#555,color:#fff
+  style DB fill:#00bfa5,color:#fff
 ```
 
-- **Rust core**: Handles network I/O, serialization/deserialization, and connection pool management in Rust
-- **PyO3 bindings**: Minimizes Python GIL usage and calls Rust functions directly
-- **Tokio runtime**: The async client maximizes concurrency on Tokio's multi-threaded runtime
+### Key Design Decisions
+
+- **GIL release strategy**: Both sync and async clients release the Python GIL before entering Rust I/O. Sync uses `py.detach()` + `RUNTIME.block_on()`, async uses `future_into_py()` returning a native Python awaitable. This allows other Python threads to run during network calls.
+
+- **Single Tokio runtime**: A global multi-threaded Tokio runtime (`LazyLock`) is shared across all client instances. Sync client blocks on it, async client executes within it. Worker thread count defaults to the number of CPU cores.
+
+- **Zero-copy NumPy path**: `batch_read(..., _dtype=dtype)` writes Aerospike values directly into a pre-allocated numpy structured array buffer via raw pointer writes — no intermediate Python objects are created per value.
+
+  > `batch_read(keys, _dtype=dtype)` → Rust: `np.zeros(n, dtype)` → raw ptr writes (no GIL) → `NumpyBatchRecords`
+
+- **Connection pooling**: Managed by `aerospike-core` with configurable `max_conns_per_node` and `idle_timeout`. The `Arc<AsClient>` is cheaply cloned per operation without holding locks.
 
 ## Benchmark Methodology
 
