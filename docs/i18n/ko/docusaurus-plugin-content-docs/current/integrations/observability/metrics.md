@@ -11,24 +11,33 @@ aerospike-py는 Rust에서 오퍼레이션 수준의 메트릭을 수집하고 *
 
 ## 아키텍처
 
-```
-┌────────────────────────────────────────────────────────┐
-│  Rust (prometheus-client crate)                        │
-│                                                        │
-│  client.put() ──▶ OperationTimer ──▶ Histogram.observe │
-│  client.get() ──▶ OperationTimer ──▶ Histogram.observe │
-│  ...                                                   │
-│                                                        │
-│  Registry ──▶ encode() ──▶ Prometheus text format       │
-└───────────────────────┬────────────────────────────────┘
-                        │ PyO3
-┌───────────────────────▼────────────────────────────────┐
-│  Python                                                │
-│                                                        │
-│  aerospike_py.get_metrics() → str                      │
-│  aerospike_py.start_metrics_server(port=9464)          │
-│  aerospike_py.stop_metrics_server()                    │
-└────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Rust["**Rust** (prometheus-client crate)"]
+        direction LR
+        PUT["client.put()"] --> TIMER["OperationTimer"]
+        GET["client.get()"] --> TIMER
+        MORE["..."] --> TIMER
+        TIMER -- "observe(duration)" --> HIST["Histogram\n(lock-free atomic)"]
+        HIST --> REG["Registry"]
+        REG -- "encode()" --> TEXT["Prometheus\ntext format"]
+    end
+
+    subgraph Python["**Python**"]
+        direction LR
+        GM["get_metrics() → str"]
+        START["start_metrics_server(port)"]
+        STOP["stop_metrics_server()"]
+    end
+
+    TEXT -- "PyO3 FFI" --> GM
+
+    subgraph Scrape["**Prometheus / Grafana**"]
+        PROM["GET /metrics"]
+    end
+
+    GM --> PROM
+    START --> PROM
 ```
 
 메트릭 기록은 핫 패스에서 **lock-free atomic 오퍼레이션**을 사용합니다. `Mutex`는 스크레이핑 시 텍스트 인코딩할 때만 획득되며, 일반적인 15~30초 스크레이프 간격에서는 영향이 없습니다.

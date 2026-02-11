@@ -11,19 +11,32 @@ aerospike-py includes a built-in **Rust-to-Python logging bridge** that forwards
 
 ## Architecture
 
-```
-┌─────────────────────────────┐     ┌──────────────────────────────┐
-│  Rust (aerospike-core)      │     │  Python                      │
-│                             │     │                              │
-│  log::info!("connecting")   │────▶│  logging.getLogger(target)   │
-│  log::debug!("batch done")  │     │    .log(level, message)      │
-│                             │     │                              │
-│  Level::Error → 40          │     │  StreamHandler / FileHandler │
-│  Level::Warn  → 30          │     │  JSONFormatter / etc.        │
-│  Level::Info  → 20          │     │                              │
-│  Level::Debug → 10          │     │                              │
-│  Level::Trace →  5          │     │                              │
-└─────────────────────────────┘     └──────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Rust["**Rust** (aerospike-core)"]
+        direction TB
+        LOG["log::info!() / log::debug!()"]
+        BRIDGE["PyLogger — log::Log trait"]
+        LOG --> BRIDGE
+    end
+
+    subgraph Python["**Python** (logging)"]
+        direction TB
+        GETLOGGER["logging.getLogger(target)"]
+        HANDLER["StreamHandler / FileHandler\nJSONFormatter / etc."]
+        GETLOGGER --> HANDLER
+    end
+
+    BRIDGE -- "GIL acquire\n.log(level, message)" --> GETLOGGER
+
+    subgraph Levels["Level Mapping"]
+        direction TB
+        L1["Error → 40"]
+        L2["Warn  → 30"]
+        L3["Info  → 20"]
+        L4["Debug → 10"]
+        L5["Trace →  5"]
+    end
 ```
 
 The bridge is initialized automatically when the module is imported. No extra setup is required.

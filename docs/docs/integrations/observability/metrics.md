@@ -11,24 +11,33 @@ aerospike-py collects operation-level metrics in Rust and exposes them in **Prom
 
 ## Architecture
 
-```
-┌────────────────────────────────────────────────────────┐
-│  Rust (prometheus-client crate)                        │
-│                                                        │
-│  client.put() ──▶ OperationTimer ──▶ Histogram.observe │
-│  client.get() ──▶ OperationTimer ──▶ Histogram.observe │
-│  ...                                                   │
-│                                                        │
-│  Registry ──▶ encode() ──▶ Prometheus text format       │
-└───────────────────────┬────────────────────────────────┘
-                        │ PyO3
-┌───────────────────────▼────────────────────────────────┐
-│  Python                                                │
-│                                                        │
-│  aerospike_py.get_metrics() → str                      │
-│  aerospike_py.start_metrics_server(port=9464)          │
-│  aerospike_py.stop_metrics_server()                    │
-└────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Rust["**Rust** (prometheus-client crate)"]
+        direction LR
+        PUT["client.put()"] --> TIMER["OperationTimer"]
+        GET["client.get()"] --> TIMER
+        MORE["..."] --> TIMER
+        TIMER -- "observe(duration)" --> HIST["Histogram\n(lock-free atomic)"]
+        HIST --> REG["Registry"]
+        REG -- "encode()" --> TEXT["Prometheus\ntext format"]
+    end
+
+    subgraph Python["**Python**"]
+        direction LR
+        GM["get_metrics() → str"]
+        START["start_metrics_server(port)"]
+        STOP["stop_metrics_server()"]
+    end
+
+    TEXT -- "PyO3 FFI" --> GM
+
+    subgraph Scrape["**Prometheus / Grafana**"]
+        PROM["GET /metrics"]
+    end
+
+    GM --> PROM
+    START --> PROM
 ```
 
 Metrics recording uses **lock-free atomic operations** in the hot path. The `Mutex` is only acquired when encoding text for scraping, which has negligible impact at typical 15–30 second scrape intervals.
