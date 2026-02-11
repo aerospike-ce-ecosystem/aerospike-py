@@ -47,8 +47,11 @@ def cleanup(client):
 
 
 @pytest.fixture
-def async_cleanup():
+async def async_cleanup(async_client):
     """Collect keys to clean up after an async test.
+
+    Depends on async_client explicitly so pytest tears this fixture down
+    *before* closing the client connection.
 
     Usage:
         async def test_something(async_client, async_cleanup):
@@ -56,4 +59,10 @@ def async_cleanup():
             async_cleanup.append(key)
             ...
     """
-    return []
+    keys = []
+    yield keys
+    for key in keys:
+        try:
+            await async_client.remove(key)
+        except Exception:
+            pass
