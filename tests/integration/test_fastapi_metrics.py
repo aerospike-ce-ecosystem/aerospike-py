@@ -2,11 +2,16 @@
 
 import re
 
-from fastapi import FastAPI, Response
-from fastapi.testclient import TestClient
-from prometheus_client import REGISTRY, Counter, Gauge, Histogram, generate_latest
+import pytest
 
-import aerospike_py
+pytest.importorskip("fastapi")
+pytest.importorskip("prometheus_client")
+
+from fastapi import FastAPI, Response  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from prometheus_client import REGISTRY, Counter, Gauge, Histogram, generate_latest  # noqa: E402
+
+import aerospike_py  # noqa: E402
 
 app = FastAPI()
 

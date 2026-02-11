@@ -1,0 +1,10 @@
+{
+  "label": "Observability",
+  "position": 2,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Observability",
+    "description": "Logging, metrics, and monitoring for aerospike-py applications."
+  }
+}
