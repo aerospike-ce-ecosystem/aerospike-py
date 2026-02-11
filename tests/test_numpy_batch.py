@@ -654,3 +654,68 @@ class TestVeryLargeBatch:
         # Error records should be zero
         error_vals = result.batch_records[~ok]["val"]
         assert np.all(error_vals == 0.0)
+
+
+# ── key 충돌 경고 테스트 ──────────────────────────────────────
+
+
+class TestKeyCollision:
+    def test_integer_key_collides_with_fallback_index(self):
+        """fallback index와 실제 integer PK 충돌 시 경고 발생 확인."""
+        dtype = np.dtype([("val", "i4")])
+        # Record 0: key=None → fallback to index 0
+        # Record 1: key=(test, demo, 0) → pk=0, collides with record 0
+        batch = _make_batch_records(
+            [
+                _make_batch_record(None, 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
+                _make_batch_record(("test", "demo", 0), 0, (None, {"gen": 1, "ttl": 0}, {"val": 20})),
+            ]
+        )
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = _batch_records_to_numpy(batch, dtype, [])
+            collision_warns = [x for x in w if "collides with" in str(x.message)]
+            assert len(collision_warns) == 1
+            assert "index 0" in str(collision_warns[0].message)
+        # The second record should overwrite the first in the map
+        assert result._map[0] == 1
+
+    def test_no_collision_with_distinct_keys(self):
+        """모든 키가 고유할 때 경고 없음 확인."""
+        dtype = np.dtype([("val", "i4")])
+        batch = _make_batch_records(
+            [
+                _make_batch_record(("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
+                _make_batch_record(("test", "demo", "k2"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 20})),
+                _make_batch_record(("test", "demo", "k3"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 30})),
+            ]
+        )
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            _batch_records_to_numpy(batch, dtype, [])
+            collision_warns = [x for x in w if "collides with" in str(x.message)]
+            assert len(collision_warns) == 0
+
+
+# ── 타입 변환 에러 컨텍스트 테스트 ────────────────────────────
+
+
+class TestTypeConversionErrors:
+    def test_string_to_int_field_raises_with_context(self):
+        """문자열을 정수 필드에 할당 시 에러 메시지에 필드명/인덱스 포함 확인."""
+        dtype = np.dtype([("count", "i4")])
+        batch = _make_batch_records(
+            [
+                _make_batch_record(
+                    ("test", "demo", "bad_key"),
+                    0,
+                    (None, {"gen": 1, "ttl": 0}, {"count": "not_a_number"}),
+                ),
+            ]
+        )
+        with pytest.raises((ValueError, TypeError)) as exc_info:
+            _batch_records_to_numpy(batch, dtype, [("test", "demo", "bad_key")])
+        msg = str(exc_info.value)
+        assert "count" in msg
+        assert "bad_key" in msg
+        assert "index 0" in msg

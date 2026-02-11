@@ -5,8 +5,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import aerospike_py
+from tests import AEROSPIKE_CONFIG
 
-CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 NS = "test"
 SET_NAME = "conc_thread"
 
@@ -107,7 +107,7 @@ class TestThreadSafety:
 
         def thread_fn(tid):
             try:
-                c = aerospike_py.client(CONFIG).connect()
+                c = aerospike_py.client(AEROSPIKE_CONFIG).connect()
                 for i in range(10):
                     key = (NS, SET_NAME, f"mcft_{tid}_{i}")
                     c.put(key, {"v": tid})

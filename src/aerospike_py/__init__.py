@@ -289,7 +289,13 @@ class AsyncClient:
     # -- Delegate all native methods via __getattr__ --
     def __getattr__(self, name: str) -> Any:
         try:
-            return getattr(self._inner, name)
+            inner = object.__getattribute__(self, "_inner")
+        except AttributeError:
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}' (client may not be fully initialized)"
+            ) from None
+        try:
+            return getattr(inner, name)
         except AttributeError:
             raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'") from None
 
@@ -378,9 +384,6 @@ def start_metrics_server(port: int = 9464) -> None:
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    if _metrics_server is not None:
-        _metrics_server.shutdown()
-
     class _MetricsHandler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path == "/metrics":
@@ -397,7 +400,12 @@ def start_metrics_server(port: int = 9464) -> None:
         def log_message(self, format, *args):
             pass
 
-    _metrics_server = HTTPServer(("", port), _MetricsHandler)
+    new_server = HTTPServer(("", port), _MetricsHandler)
+
+    if _metrics_server is not None:
+        _metrics_server.shutdown()
+
+    _metrics_server = new_server
     _metrics_server_thread = threading.Thread(target=_metrics_server.serve_forever, daemon=True)
     _metrics_server_thread.start()
 

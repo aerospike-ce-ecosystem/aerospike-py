@@ -5,6 +5,8 @@ import socket
 import threading
 import urllib.request
 
+import pytest
+
 import aerospike_py
 
 
@@ -170,4 +172,30 @@ class TestMetricsServer:
             resp = urllib.request.urlopen(f"http://127.0.0.1:{port2}/metrics", timeout=2)
             assert resp.status == 200
         finally:
+            aerospike_py.stop_metrics_server()
+
+
+class TestMetricsServerRestart:
+    def test_restart_on_occupied_port_keeps_old_server(self):
+        """새 포트 바인딩 실패 시 기존 서버 유지 확인."""
+        port1 = _find_free_port()
+        aerospike_py.start_metrics_server(port=port1)
+
+        # Occupy a port with a separate socket
+        occupied = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        port2 = _find_free_port()
+        occupied.bind(("", port2))
+        occupied.listen(1)
+
+        try:
+            # Attempting to start on occupied port should raise
+            with pytest.raises(OSError):
+                aerospike_py.start_metrics_server(port=port2)
+
+            # Old server should still be running on port1
+            resp = urllib.request.urlopen(f"http://127.0.0.1:{port1}/metrics", timeout=2)
+            assert resp.status == 200
+        finally:
+            occupied.close()
             aerospike_py.stop_metrics_server()

@@ -84,6 +84,12 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
                 stacklevel=2,
             )
             pk = i
+        if pk in key_map:
+            warnings.warn(
+                f"batch record at index {i}: primary key {pk!r} collides with "
+                f"record at index {key_map[pk]}; earlier mapping will be overwritten.",
+                stacklevel=2,
+            )
         key_map[pk] = i
 
         if br.result == 0 and br.record is not None:
@@ -111,6 +117,13 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
                 for field in dtype.names:
                     val = bins.get(field)
                     if val is not None:
-                        data[i][field] = val
+                        try:
+                            data[i][field] = val
+                        except (ValueError, TypeError, OverflowError) as exc:
+                            pk = br.key[2] if br.key and len(br.key) >= 3 else i
+                            raise type(exc)(
+                                f"Failed to assign value {val!r} to field '{field}' "
+                                f"(dtype={dtype[field]}) for record at index {i} (key={pk!r}): {exc}"
+                            ) from exc
 
     return NumpyBatchRecords(data, meta, result_codes, key_map)

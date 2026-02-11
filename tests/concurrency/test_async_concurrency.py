@@ -5,8 +5,8 @@ import asyncio
 import pytest
 
 import aerospike_py
+from tests import AEROSPIKE_CONFIG
 
-CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 NS = "test"
 SET_NAME = "conc_async"
 
@@ -55,7 +55,7 @@ class TestAsyncConcurrency:
     async def test_rapid_connect_disconnect(self):
         """Repeated connect/close cycles for stability."""
         for _ in range(10):
-            c = aerospike_py.AsyncClient(CONFIG)
+            c = aerospike_py.AsyncClient(AEROSPIKE_CONFIG)
             try:
                 await c.connect()
             except Exception:

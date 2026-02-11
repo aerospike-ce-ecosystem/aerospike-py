@@ -1,35 +1,12 @@
 """Integration tests for numpy batch_read (requires Aerospike server)."""
 
 import numpy as np
-import pytest
 
 import aerospike_py
 from aerospike_py.numpy_batch import NumpyBatchRecords
 
-CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 NS = "test"
 SET = "np_batch"
-
-
-@pytest.fixture(scope="module")
-def client():
-    try:
-        c = aerospike_py.client(CONFIG).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
-    yield c
-    c.close()
-
-
-@pytest.fixture(autouse=True)
-def cleanup(client):
-    keys = []
-    yield keys
-    for key in keys:
-        try:
-            client.remove(key)
-        except Exception:
-            pass
 
 
 # ── 기본 숫자 타입 변환 ────────────────────────────────────────

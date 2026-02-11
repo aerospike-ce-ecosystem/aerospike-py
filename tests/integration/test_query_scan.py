@@ -9,16 +9,6 @@ from aerospike_py import predicates as p
 
 
 @pytest.fixture(scope="module")
-def client():
-    try:
-        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
-    yield c
-    c.close()
-
-
-@pytest.fixture(scope="module")
 def seed_data(client):
     """Seed test data and create index for queries."""
     keys = []

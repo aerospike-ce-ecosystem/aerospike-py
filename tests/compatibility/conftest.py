@@ -3,18 +3,18 @@
 import pytest
 
 import aerospike_py
+from tests import AEROSPIKE_CONFIG
 
 # Skip entire module if official client is not installed
 aerospike = pytest.importorskip("aerospike")
 
-RUST_CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 OFFICIAL_CONFIG = {"hosts": [("127.0.0.1", 3000)]}
 
 
 @pytest.fixture(scope="module")
 def rust_client():
     try:
-        c = aerospike_py.client(RUST_CONFIG).connect()
+        c = aerospike_py.client(AEROSPIKE_CONFIG).connect()
     except Exception:
         pytest.skip("Aerospike server not available")
     yield c

@@ -1,21 +1,9 @@
-"""Shared fixtures for async integration tests."""
+"""Integration test configuration — adds autouse cleanup."""
 
 import pytest
 
-import aerospike_py
 
-CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
-
-
-@pytest.fixture
-async def async_client():
-    """Create and connect an AsyncClient, skip if server is unavailable."""
-    try:
-        c = aerospike_py.AsyncClient(CONFIG)
-        await c.connect()
-    except Exception as e:
-        if "connect" in str(e).lower() or "cluster" in str(e).lower():
-            pytest.skip(f"Aerospike server not available: {e}")
-        raise
-    yield c
-    await c.close()
+@pytest.fixture(autouse=True)
+def _auto_cleanup(cleanup):
+    """Make cleanup autouse for integration tests."""
+    yield cleanup
