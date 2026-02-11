@@ -1,31 +1,6 @@
 """Integration tests for batch operations (requires Aerospike server)."""
 
-import pytest
-
 import aerospike_py
-
-
-@pytest.fixture(scope="module")
-def client():
-    """Create and connect a client for the test module."""
-    try:
-        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
-    yield c
-    c.close()
-
-
-@pytest.fixture(autouse=True)
-def cleanup(client):
-    """Clean up test keys after each test."""
-    keys = []
-    yield keys
-    for key in keys:
-        try:
-            client.remove(key)
-        except Exception:
-            pass
 
 
 class TestBatchRead:
