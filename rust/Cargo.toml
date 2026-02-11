@@ -18,3 +18,14 @@ futures = "0.3"
 half = "2"
 log = "0.4"
 prometheus-client = "0.23"
+opentelemetry = { version = "0.28", optional = true }
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic"], optional = true }
+
+[features]
+default = []
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+]
