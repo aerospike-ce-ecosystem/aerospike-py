@@ -8,6 +8,7 @@ mod constants;
 mod errors;
 pub mod expressions;
 mod logging;
+pub mod metrics;
 mod numpy_support;
 mod operations;
 mod policy;
@@ -15,6 +16,12 @@ pub mod query;
 mod record_helpers;
 mod runtime;
 mod types;
+
+/// Return collected metrics in Prometheus text format.
+#[pyfunction]
+fn get_metrics_text() -> String {
+    metrics::get_text()
+}
 
 /// Native Aerospike Python client module
 #[pymodule]
@@ -28,6 +35,9 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<query::PyScan>()?;
     m.add_class::<batch_types::PyBatchRecord>()?;
     m.add_class::<batch_types::PyBatchRecords>()?;
+
+    // Register functions
+    m.add_function(wrap_pyfunction!(get_metrics_text, m)?)?;
 
     // Register exceptions
     errors::register_exceptions(m)?;

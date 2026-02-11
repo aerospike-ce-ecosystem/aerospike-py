@@ -3,7 +3,8 @@ use std::sync::Arc;
 #[allow(unused_imports)]
 use aerospike_core::as_val;
 use aerospike_core::{
-    Bins, Client as AsClient, CollectionIndexType, PartitionFilter, Statement, Value,
+    Bins, Client as AsClient, CollectionIndexType, Error as AsError, PartitionFilter, Statement,
+    Value,
 };
 use futures::StreamExt;
 use log::{debug, trace};
@@ -175,27 +176,36 @@ fn execute_query(
     client: &Arc<AsClient>,
     statement: Statement,
     policy: Option<&Bound<'_, PyDict>>,
+    op_name: &str,
+    namespace: &str,
+    set_name: &str,
 ) -> PyResult<Py<PyAny>> {
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
-    debug!("Executing query/scan");
+    debug!("Executing {}", op_name);
 
-    let records = py.detach(|| {
+    let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
+    let result: Result<Vec<_>, AsError> = py.detach(|| {
         RUNTIME.block_on(async {
             let rs = client
                 .query(&query_policy, PartitionFilter::all(), statement)
-                .await
-                .map_err(as_to_pyerr)?;
+                .await?;
             let mut stream = rs.into_stream();
             let mut results = Vec::new();
             while let Some(result) = stream.next().await {
-                results.push(result.map_err(as_to_pyerr)?);
+                results.push(result?);
             }
-            Ok::<_, PyErr>(results)
+            Ok(results)
         })
-    })?;
+    });
 
-    debug!("Query/scan returned {} records", records.len());
+    match &result {
+        Ok(_) => timer.finish(""),
+        Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+    }
+
+    let records = result.map_err(as_to_pyerr)?;
+    debug!("{} returned {} records", op_name, records.len());
     let py_list = PyList::empty(py);
     for record in &records {
         py_list.append(record_to_py(py, record)?)?;
@@ -204,32 +214,42 @@ fn execute_query(
 }
 
 /// Execute a query/scan and call a callback for each record
+#[allow(clippy::too_many_arguments)]
 fn execute_foreach(
     py: Python<'_>,
     client: &Arc<AsClient>,
     statement: Statement,
     callback: &Bound<'_, PyAny>,
     policy: Option<&Bound<'_, PyDict>>,
+    op_name: &str,
+    namespace: &str,
+    set_name: &str,
 ) -> PyResult<()> {
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
-    debug!("Executing query/scan foreach");
+    debug!("Executing {} foreach", op_name);
 
-    let records = py.detach(|| {
+    let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
+    let result: Result<Vec<_>, AsError> = py.detach(|| {
         RUNTIME.block_on(async {
             let rs = client
                 .query(&query_policy, PartitionFilter::all(), statement)
-                .await
-                .map_err(as_to_pyerr)?;
+                .await?;
             let mut stream = rs.into_stream();
             let mut results = Vec::new();
             while let Some(result) = stream.next().await {
-                results.push(result.map_err(as_to_pyerr)?);
+                results.push(result?);
             }
-            Ok::<_, PyErr>(results)
+            Ok(results)
         })
-    })?;
+    });
 
+    match &result {
+        Ok(_) => timer.finish(""),
+        Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+    }
+
+    let records = result.map_err(as_to_pyerr)?;
     for record in &records {
         let py_record = record_to_py(py, record)?;
         let result = callback.call1((py_record,))?;
@@ -292,7 +312,15 @@ impl PyQuery {
             &self.bins,
             &self.predicates,
         )?;
-        execute_query(py, &self.client, stmt, policy)
+        execute_query(
+            py,
+            &self.client,
+            stmt,
+            policy,
+            "query",
+            &self.namespace,
+            &self.set_name,
+        )
     }
 
     /// Execute the query and call callback for each record.
@@ -309,7 +337,16 @@ impl PyQuery {
             &self.bins,
             &self.predicates,
         )?;
-        execute_foreach(py, &self.client, stmt, callback, policy)
+        execute_foreach(
+            py,
+            &self.client,
+            stmt,
+            callback,
+            policy,
+            "query",
+            &self.namespace,
+            &self.set_name,
+        )
     }
 }
 
@@ -349,7 +386,15 @@ impl PyScan {
     #[pyo3(signature = (policy=None))]
     fn results(&self, py: Python<'_>, policy: Option<&Bound<'_, PyDict>>) -> PyResult<Py<PyAny>> {
         let stmt = build_statement(&self.namespace, &self.set_name, &self.bins, &[])?;
-        execute_query(py, &self.client, stmt, policy)
+        execute_query(
+            py,
+            &self.client,
+            stmt,
+            policy,
+            "scan",
+            &self.namespace,
+            &self.set_name,
+        )
     }
 
     /// Execute the scan and call callback for each record.
@@ -361,6 +406,15 @@ impl PyScan {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let stmt = build_statement(&self.namespace, &self.set_name, &self.bins, &[])?;
-        execute_foreach(py, &self.client, stmt, callback, policy)
+        execute_foreach(
+            py,
+            &self.client,
+            stmt,
+            callback,
+            policy,
+            "scan",
+            &self.namespace,
+            &self.set_name,
+        )
     }
 }

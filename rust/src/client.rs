@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::timed_op;
 use aerospike_core::{
     BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
     Client as AsClient, Error as AsError, ResultCode, Task, UDFLang, Value,
@@ -134,10 +135,9 @@ impl PyClient {
             let wp = &*DEFAULT_WRITE_POLICY;
             return py.detach(|| {
                 RUNTIME.block_on(async {
-                    client
-                        .put(wp, &rust_key, &rust_bins)
-                        .await
-                        .map_err(as_to_pyerr)
+                    timed_op!("put", &rust_key.namespace, &rust_key.set_name, {
+                        client.put(wp, &rust_key, &rust_bins).await
+                    })
                 })
             });
         }
@@ -145,10 +145,9 @@ impl PyClient {
         let write_policy = parse_write_policy(policy, meta)?;
         py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .put(&write_policy, &rust_key, &rust_bins)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("put", &rust_key.namespace, &rust_key.set_name, {
+                    client.put(&write_policy, &rust_key, &rust_bins).await
+                })
             })
         })
     }
@@ -169,10 +168,9 @@ impl PyClient {
             let rp = &*DEFAULT_READ_POLICY;
             let record = py.detach(|| {
                 RUNTIME.block_on(async {
-                    client
-                        .get(rp, &rust_key, Bins::All)
-                        .await
-                        .map_err(as_to_pyerr)
+                    timed_op!("get", &rust_key.namespace, &rust_key.set_name, {
+                        client.get(rp, &rust_key, Bins::All).await
+                    })
                 })
             })?;
             return record_to_py(py, &record);
@@ -181,10 +179,9 @@ impl PyClient {
         let read_policy = parse_read_policy(policy)?;
         let record = py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .get(&read_policy, &rust_key, Bins::All)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("get", &rust_key.namespace, &rust_key.set_name, {
+                    client.get(&read_policy, &rust_key, Bins::All).await
+                })
             })
         })?;
 
@@ -215,10 +212,9 @@ impl PyClient {
             let rp = &*DEFAULT_READ_POLICY;
             let record = py.detach(|| {
                 RUNTIME.block_on(async {
-                    client
-                        .get(rp, &rust_key, bins_selector)
-                        .await
-                        .map_err(as_to_pyerr)
+                    timed_op!("select", &rust_key.namespace, &rust_key.set_name, {
+                        client.get(rp, &rust_key, bins_selector).await
+                    })
                 })
             })?;
             return record_to_py(py, &record);
@@ -227,10 +223,9 @@ impl PyClient {
         let read_policy = parse_read_policy(policy)?;
         let record = py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .get(&read_policy, &rust_key, bins_selector)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("select", &rust_key.namespace, &rust_key.set_name, {
+                    client.get(&read_policy, &rust_key, bins_selector).await
+                })
             })
         })?;
 
@@ -252,6 +247,11 @@ impl PyClient {
             rust_key.namespace, rust_key.set_name
         );
         let key_py = key_to_py(py, &rust_key)?;
+        let timer = crate::metrics::OperationTimer::start(
+            "exists",
+            &rust_key.namespace,
+            &rust_key.set_name,
+        );
 
         let result = if policy.is_none() {
             let rp = &*DEFAULT_READ_POLICY;
@@ -262,6 +262,12 @@ impl PyClient {
                 RUNTIME.block_on(async { client.get(&read_policy, &rust_key, Bins::None).await })
             })
         };
+
+        match &result {
+            Ok(_) => timer.finish(""),
+            Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => timer.finish(""),
+            Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+        }
 
         match result {
             Ok(record) => {
@@ -296,11 +302,10 @@ impl PyClient {
 
         py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .delete(&write_policy, &rust_key)
-                    .await
-                    .map_err(as_to_pyerr)?;
-                Ok(())
+                timed_op!("delete", &rust_key.namespace, &rust_key.set_name, {
+                    client.delete(&write_policy, &rust_key).await
+                })
+                .map(|_| ())
             })
         })
     }
@@ -326,10 +331,9 @@ impl PyClient {
 
         py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .touch(&write_policy, &rust_key)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("touch", &rust_key.namespace, &rust_key.set_name, {
+                    client.touch(&write_policy, &rust_key).await
+                })
             })
         })
     }
@@ -357,10 +361,9 @@ impl PyClient {
 
         py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .append(&write_policy, &rust_key, &bins)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("append", &rust_key.namespace, &rust_key.set_name, {
+                    client.append(&write_policy, &rust_key, &bins).await
+                })
             })
         })
     }
@@ -388,10 +391,9 @@ impl PyClient {
 
         py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .prepend(&write_policy, &rust_key, &bins)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("prepend", &rust_key.namespace, &rust_key.set_name, {
+                    client.prepend(&write_policy, &rust_key, &bins).await
+                })
             })
         })
     }
@@ -419,10 +421,9 @@ impl PyClient {
 
         py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .add(&write_policy, &rust_key, &bins)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("increment", &rust_key.namespace, &rust_key.set_name, {
+                    client.add(&write_policy, &rust_key, &bins).await
+                })
             })
         })
     }
@@ -446,10 +447,9 @@ impl PyClient {
 
         py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .put(&write_policy, &rust_key, &bins)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("remove_bin", &rust_key.namespace, &rust_key.set_name, {
+                    client.put(&write_policy, &rust_key, &bins).await
+                })
             })
         })
     }
@@ -477,10 +477,9 @@ impl PyClient {
 
         let record = py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .operate(&write_policy, &rust_key, &rust_ops)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("operate", &rust_key.namespace, &rust_key.set_name, {
+                    client.operate(&write_policy, &rust_key, &rust_ops).await
+                })
             })
         })?;
 
@@ -510,10 +509,12 @@ impl PyClient {
 
         let record = py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .operate(&write_policy, &rust_key, &rust_ops)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!(
+                    "operate_ordered",
+                    &rust_key.namespace,
+                    &rust_key.set_name,
+                    { client.operate(&write_policy, &rust_key, &rust_ops).await }
+                )
             })
         })?;
 
@@ -531,7 +532,7 @@ impl PyClient {
             let tuple = PyTuple::new(
                 py,
                 [
-                    name.into_pyobject(py)?.into_any().unbind(),
+                    name.as_str().into_pyobject(py)?.into_any().unbind(),
                     value_to_py(py, value)?,
                 ],
             )?;
@@ -1249,8 +1250,17 @@ impl PyClient {
             .map(|k| BatchOperation::read(&read_policy, k.clone(), bins_selector.clone()))
             .collect();
 
+        let (batch_ns, batch_set) = rust_keys
+            .first()
+            .map(|k| (k.namespace.clone(), k.set_name.clone()))
+            .unwrap_or_default();
+
         let results = py.detach(|| {
-            RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
+            RUNTIME.block_on(async {
+                timed_op!("batch_read", &batch_ns, &batch_set, {
+                    client.batch(&batch_policy, &ops).await
+                })
+            })
         })?;
 
         match _dtype {
@@ -1287,12 +1297,16 @@ impl PyClient {
             .map(|k| BatchOperation::write(&write_policy, k.clone(), rust_ops.clone()))
             .collect();
 
+        let (batch_ns, batch_set) = rust_keys
+            .first()
+            .map(|k| (k.namespace.clone(), k.set_name.clone()))
+            .unwrap_or_default();
+
         let results = py.detach(|| {
             RUNTIME.block_on(async {
-                client
-                    .batch(&batch_policy, &batch_ops)
-                    .await
-                    .map_err(as_to_pyerr)
+                timed_op!("batch_operate", &batch_ns, &batch_set, {
+                    client.batch(&batch_policy, &batch_ops).await
+                })
             })
         })?;
 
@@ -1322,8 +1336,17 @@ impl PyClient {
             .map(|k| BatchOperation::delete(&delete_policy, k.clone()))
             .collect();
 
+        let (batch_ns, batch_set) = rust_keys
+            .first()
+            .map(|k| (k.namespace.clone(), k.set_name.clone()))
+            .unwrap_or_default();
+
         let results = py.detach(|| {
-            RUNTIME.block_on(async { client.batch(&batch_policy, &ops).await.map_err(as_to_pyerr) })
+            RUNTIME.block_on(async {
+                timed_op!("batch_remove", &batch_ns, &batch_set, {
+                    client.batch(&batch_policy, &ops).await
+                })
+            })
         })?;
 
         batch_records_to_py(py, &results)

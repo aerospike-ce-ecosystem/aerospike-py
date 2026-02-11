@@ -10,6 +10,7 @@ from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query, Scan  # noqa: F401
 from aerospike_py._aerospike import BatchRecord, BatchRecords  # noqa: F401
+from aerospike_py._aerospike import get_metrics_text as _get_metrics_text
 
 # Import all exceptions from native module
 from aerospike_py._aerospike import (  # noqa: F401
@@ -360,6 +361,54 @@ def client(config: dict) -> Client:
     return Client(config)
 
 
+def get_metrics() -> str:
+    """Return collected metrics in Prometheus text format."""
+    return _get_metrics_text()
+
+
+_metrics_server = None
+_metrics_server_thread = None
+
+
+def start_metrics_server(port: int = 9464) -> None:
+    """Start a background HTTP server serving /metrics for Prometheus scraping."""
+    global _metrics_server, _metrics_server_thread
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    if _metrics_server is not None:
+        _metrics_server.shutdown()
+
+    class _MetricsHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/metrics":
+                body = _get_metrics_text().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    _metrics_server = HTTPServer(("", port), _MetricsHandler)
+    _metrics_server_thread = threading.Thread(target=_metrics_server.serve_forever, daemon=True)
+    _metrics_server_thread.start()
+
+
+def stop_metrics_server() -> None:
+    """Stop the background metrics HTTP server."""
+    global _metrics_server, _metrics_server_thread
+    if _metrics_server is not None:
+        _metrics_server.shutdown()
+        _metrics_server = None
+        _metrics_server_thread = None
+
+
 __all__ = [
     # Core classes and factory
     "Client",
@@ -371,6 +420,9 @@ __all__ = [
     "NumpyBatchRecords",
     "client",
     "set_log_level",
+    "get_metrics",
+    "start_metrics_server",
+    "stop_metrics_server",
     "__version__",
     # Submodules
     "exception",
