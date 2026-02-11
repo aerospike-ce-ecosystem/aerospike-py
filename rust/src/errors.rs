@@ -1,4 +1,5 @@
 use aerospike_core::{Error as AsError, ResultCode};
+use log::debug;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 
@@ -195,6 +196,7 @@ pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
 }
 
 pub fn as_to_pyerr(err: AsError) -> PyErr {
+    debug!("Mapping aerospike error: {}", err);
     match &err {
         AsError::Connection(msg) => ClusterError::new_err(format!("Connection error: {msg}")),
         AsError::Timeout(msg) => AerospikeTimeoutError::new_err(format!("Timeout: {msg}")),

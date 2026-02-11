@@ -1,4 +1,5 @@
 use aerospike_core::{AuthMode, ClientPolicy};
+use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -6,6 +7,7 @@ use super::extract_policy_fields;
 
 /// Parse a Python config dict into a ClientPolicy
 pub fn parse_client_policy(config: &Bound<'_, PyDict>) -> PyResult<ClientPolicy> {
+    trace!("Parsing client policy");
     let mut policy = ClientPolicy::default();
 
     extract_policy_fields!(config, {

@@ -7,6 +7,7 @@ use aerospike_core::{
     operations::Operation,
     Bin, Value,
 };
+use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -240,6 +241,7 @@ fn values_from_list(val: &Value) -> Vec<Value> {
 /// Convert a Python list of operation dicts to Rust Operations.
 /// Each operation is a dict: {"op": int, "bin": str, "val": any, ...}
 pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> {
+    trace!("Converting {} Python operations to Rust", ops_list.len());
     let mut rust_ops: Vec<Operation> = Vec::with_capacity(ops_list.len());
 
     for item in ops_list.iter() {

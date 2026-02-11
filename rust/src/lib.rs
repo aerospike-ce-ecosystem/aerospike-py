@@ -1,3 +1,4 @@
+use log::info;
 use pyo3::prelude::*;
 
 mod async_client;
@@ -6,6 +7,7 @@ mod client;
 mod constants;
 mod errors;
 pub mod expressions;
+mod logging;
 mod numpy_support;
 mod operations;
 mod policy;
@@ -17,6 +19,8 @@ mod types;
 /// Native Aerospike Python client module
 #[pymodule]
 fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    logging::init();
+
     // Register classes
     m.add_class::<client::PyClient>()?;
     m.add_class::<async_client::PyAsyncClient>()?;
@@ -31,5 +35,6 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register constants
     constants::register_constants(m)?;
 
+    info!("aerospike-py native module initialized");
     Ok(())
 }

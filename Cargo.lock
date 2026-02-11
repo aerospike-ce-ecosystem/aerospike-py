@@ -56,6 +56,7 @@ dependencies = [
  "aerospike-core",
  "futures",
  "half",
+ "log",
  "pyo3",
  "pyo3-async-runtimes",
  "tokio",

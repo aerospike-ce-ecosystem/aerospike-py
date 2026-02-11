@@ -6,6 +6,7 @@ use aerospike_core::{
     Bins, Client as AsClient, CollectionIndexType, PartitionFilter, Statement, Value,
 };
 use futures::StreamExt;
+use log::{debug, trace};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
@@ -59,6 +60,7 @@ enum Predicate {
 fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
     let kind: String = pred.get_item(0)?.extract()?;
     let bin: String = pred.get_item(1)?.extract()?;
+    trace!("Parsing predicate: kind={} bin={}", kind, bin);
 
     match kind.as_str() {
         "equals" => {
@@ -176,6 +178,7 @@ fn execute_query(
 ) -> PyResult<Py<PyAny>> {
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
+    debug!("Executing query/scan");
 
     let records = py.detach(|| {
         RUNTIME.block_on(async {
@@ -192,6 +195,7 @@ fn execute_query(
         })
     })?;
 
+    debug!("Query/scan returned {} records", records.len());
     let py_list = PyList::empty(py);
     for record in &records {
         py_list.append(record_to_py(py, record)?)?;
@@ -209,6 +213,7 @@ fn execute_foreach(
 ) -> PyResult<()> {
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
+    debug!("Executing query/scan foreach");
 
     let records = py.detach(|| {
         RUNTIME.block_on(async {

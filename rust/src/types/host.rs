@@ -1,3 +1,4 @@
+use log::debug;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
@@ -36,5 +37,7 @@ pub fn parse_hosts_from_config(config: &Bound<'_, PyDict>) -> PyResult<String> {
         ));
     }
 
-    Ok(host_strings.join(","))
+    let result = host_strings.join(",");
+    debug!("Parsed hosts: {}", result);
+    Ok(result)
 }

@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 
 use aerospike_core::{CommitLevel, Expiration, GenerationPolicy, RecordExistsAction, WritePolicy};
+use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -25,6 +26,7 @@ pub fn parse_write_policy(
     policy_dict: Option<&Bound<'_, PyDict>>,
     meta: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<WritePolicy> {
+    trace!("Parsing write policy");
     let mut policy = WritePolicy::default();
 
     // Apply meta (gen, ttl) first

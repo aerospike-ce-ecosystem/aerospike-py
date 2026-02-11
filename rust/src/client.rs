@@ -4,6 +4,7 @@ use aerospike_core::{
     BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
     Client as AsClient, Error as AsError, ResultCode, Task, UDFLang, Value,
 };
+use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
@@ -70,6 +71,7 @@ impl PyClient {
         let hosts_str = parse_hosts_from_config(&effective_config)?;
         let client_policy = parse_client_policy(&effective_config)?;
 
+        info!("Connecting to Aerospike cluster: {}", hosts_str);
         let client = py.detach(|| {
             RUNTIME.block_on(async {
                 AsClient::new(
@@ -82,11 +84,13 @@ impl PyClient {
         })?;
 
         self.inner = Some(Arc::new(client));
+        info!("Connected to Aerospike cluster");
         Ok(())
     }
 
     /// Check if the client is connected
     fn is_connected(&self, py: Python<'_>) -> PyResult<bool> {
+        trace!("Checking client connection status");
         match &self.inner {
             Some(client) => {
                 let client = client.clone();
@@ -98,6 +102,7 @@ impl PyClient {
 
     /// Close the connection to the cluster
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
+        info!("Closing client connection");
         if let Some(client) = self.inner.take() {
             py.detach(|| RUNTIME.block_on(async { client.close().await.map_err(as_to_pyerr) }))?;
         }
@@ -122,6 +127,7 @@ impl PyClient {
     ) -> PyResult<()> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!("put: ns={} set={}", rust_key.namespace, rust_key.set_name);
         let rust_bins = py_dict_to_bins(bins)?;
 
         if policy.is_none() && meta.is_none() {
@@ -157,6 +163,7 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!("get: ns={} set={}", rust_key.namespace, rust_key.set_name);
 
         if policy.is_none() {
             let rp = &*DEFAULT_READ_POLICY;
@@ -195,6 +202,10 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "select: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
 
         let bin_names: Vec<String> = bins.extract()?;
         let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
@@ -236,6 +247,10 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let rust_key = py_to_key(key)?;
+        debug!(
+            "exists: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
         let key_py = key_to_py(py, &rust_key)?;
 
         let result = if policy.is_none() {
@@ -273,6 +288,10 @@ impl PyClient {
     ) -> PyResult<()> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "remove: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
         let write_policy = parse_write_policy(policy, meta)?;
 
         py.detach(|| {
@@ -298,6 +317,7 @@ impl PyClient {
     ) -> PyResult<()> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!("touch: ns={} set={}", rust_key.namespace, rust_key.set_name);
         let mut write_policy = parse_write_policy(policy, meta)?;
 
         if val > 0 {
@@ -327,6 +347,10 @@ impl PyClient {
     ) -> PyResult<()> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "append: ns={} set={} bin={}",
+            rust_key.namespace, rust_key.set_name, bin
+        );
         let write_policy = parse_write_policy(policy, meta)?;
         let value = crate::types::value::py_to_value(val)?;
         let bins = [Bin::new(bin.to_string(), value)];
@@ -354,6 +378,10 @@ impl PyClient {
     ) -> PyResult<()> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "prepend: ns={} set={} bin={}",
+            rust_key.namespace, rust_key.set_name, bin
+        );
         let write_policy = parse_write_policy(policy, meta)?;
         let value = crate::types::value::py_to_value(val)?;
         let bins = [Bin::new(bin.to_string(), value)];
@@ -381,6 +409,10 @@ impl PyClient {
     ) -> PyResult<()> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "increment: ns={} set={} bin={}",
+            rust_key.namespace, rust_key.set_name, bin
+        );
         let write_policy = parse_write_policy(policy, meta)?;
         let value = crate::types::value::py_to_value(offset)?;
         let bins = [Bin::new(bin.to_string(), value)];
@@ -436,6 +468,12 @@ impl PyClient {
         let rust_key = py_to_key(key)?;
         let write_policy = parse_write_policy(policy, meta)?;
         let rust_ops = py_ops_to_rust(ops)?;
+        debug!(
+            "operate: ns={} set={} ops_count={}",
+            rust_key.namespace,
+            rust_key.set_name,
+            rust_ops.len()
+        );
 
         let record = py.detach(|| {
             RUNTIME.block_on(async {
@@ -463,6 +501,12 @@ impl PyClient {
         let rust_key = py_to_key(key)?;
         let write_policy = parse_write_policy(policy, meta)?;
         let rust_ops = py_ops_to_rust(ops)?;
+        debug!(
+            "operate_ordered: ns={} set={} ops_count={}",
+            rust_key.namespace,
+            rust_key.set_name,
+            rust_ops.len()
+        );
 
         let record = py.detach(|| {
             RUNTIME.block_on(async {
@@ -505,6 +549,7 @@ impl PyClient {
 
     /// Create a Query object for the given namespace and set.
     fn query(&self, namespace: &str, set_name: &str) -> PyResult<crate::query::PyQuery> {
+        debug!("Creating query: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
         Ok(crate::query::PyQuery::new(
             client,
@@ -515,6 +560,7 @@ impl PyClient {
 
     /// Create a Scan object for the given namespace and set.
     fn scan(&self, namespace: &str, set_name: &str) -> PyResult<crate::query::PyScan> {
+        debug!("Creating scan: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
         Ok(crate::query::PyScan::new(
             client,
@@ -598,6 +644,7 @@ impl PyClient {
         index_name: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Removing index: ns={} index={}", namespace, index_name);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
@@ -625,6 +672,7 @@ impl PyClient {
         nanos: i64,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        warn!("Truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
@@ -650,6 +698,7 @@ impl PyClient {
         udf_type: u8,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Registering UDF: filename={}", filename);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
         let language = match udf_type {
@@ -699,6 +748,7 @@ impl PyClient {
         module: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Removing UDF: module={}", module);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
         let server_path = if module.ends_with(".lua") {
@@ -735,6 +785,10 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let rust_key = py_to_key(key)?;
+        debug!(
+            "apply UDF: ns={} set={} module={} function={}",
+            rust_key.namespace, rust_key.set_name, module, function
+        );
         let write_policy = parse_write_policy(policy, None)?;
 
         // Convert args
@@ -785,6 +839,7 @@ impl PyClient {
         roles: Vec<String>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Creating user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
@@ -807,6 +862,7 @@ impl PyClient {
         username: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Dropping user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
@@ -829,6 +885,7 @@ impl PyClient {
         password: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Changing password for user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
@@ -851,6 +908,7 @@ impl PyClient {
         roles: Vec<String>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Granting roles to user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
@@ -874,6 +932,7 @@ impl PyClient {
         roles: Vec<String>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Revoking roles from user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
@@ -958,6 +1017,7 @@ impl PyClient {
         read_quota: u32,
         write_quota: u32,
     ) -> PyResult<()> {
+        info!("Creating role: role={}", role);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
@@ -989,6 +1049,7 @@ impl PyClient {
         role: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!("Dropping role: role={}", role);
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
@@ -1164,6 +1225,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
         _dtype: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
+        debug!("batch_read: keys_count={}", keys.len());
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let read_policy = BatchReadPolicy::default();
@@ -1209,6 +1271,7 @@ impl PyClient {
         ops: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
+        debug!("batch_operate: keys_count={}", keys.len());
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let write_policy = BatchWritePolicy::default();
@@ -1244,6 +1307,7 @@ impl PyClient {
         keys: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
+        debug!("batch_remove: keys_count={}", keys.len());
         let client = self.get_client()?.clone();
         let batch_policy = parse_batch_policy(policy)?;
         let delete_policy = BatchDeletePolicy::default();
@@ -1285,6 +1349,10 @@ impl PyClient {
         index_type: aerospike_core::IndexType,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        info!(
+            "Creating index: ns={} set={} bin={} index={}",
+            namespace, set_name, bin_name, index_name
+        );
         let client = self.get_client()?.clone();
         let admin_policy = parse_admin_policy(policy)?;
 
