@@ -39,6 +39,12 @@ numpy = ["numpy>=2.0"]
 
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio", "ruff", "maturin>=1.9,<2", "numpy>=2.0", "pyright>=1.1"]
+test = ["pytest", "pytest-asyncio", "numpy>=2.0"]
+test-integration = [{include-group = "test"}, "fastapi", "httpx", "prometheus-client"]
+test-fastapi = ["pytest", "pytest-asyncio", "fastapi", "httpx"]
+test-gunicorn = ["pytest", "pytest-asyncio", "gunicorn", "httpx"]
+test-compat = ["pytest", "pytest-asyncio", "aerospike"]
+test-all = [{include-group = "test-integration"}, "gunicorn"]
 bench = ["aerospike>=17.0.0", "numpy>=2.0"]
 
 [tool.pytest.ini_options]
@@ -91,6 +97,49 @@ include = ["src/aerospike_py"]
 reportMissingModuleSource = false
 venvPath = "."
 venv = ".venv"
+
+# ── tox (via tox-uv) ─────────────────────────────────────
+
+[tool.tox]
+requires = ["tox-uv>=1.25"]
+env_list = ["py{310,311,312,313,314}", "py314t"]
+
+[tool.tox.env_run_base]
+package = "wheel"
+dependency_groups = ["test"]
+commands = [["pytest", "tests/unit/", "-v"]]
+
+[tool.tox.env.py314t]
+base_python = ["python3.14t"]
+
+[tool.tox.env.integration]
+dependency_groups = ["test-integration"]
+commands = [["pytest", "tests/integration/", "-v"]]
+
+[tool.tox.env.concurrency]
+commands = [["pytest", "tests/concurrency/", "-v", "--ignore=tests/concurrency/test_freethreading.py"]]
+
+[tool.tox.env.freethreading]
+base_python = ["python3.14t"]
+commands = [["pytest", "tests/concurrency/", "-v"]]
+
+[tool.tox.env.fastapi]
+dependency_groups = ["test-fastapi"]
+commands = [["pytest", "tests/feasibility/test_fastapi.py", "-v"]]
+
+[tool.tox.env.gunicorn]
+dependency_groups = ["test-gunicorn"]
+commands = [["pytest", "tests/feasibility/test_gunicorn.py", "-v"]]
+
+[tool.tox.env.compat]
+dependency_groups = ["test-compat"]
+commands = [["pytest", "tests/compatibility/", "-v"]]
+
+[tool.tox.env.all]
+dependency_groups = ["test-all"]
+commands = [["pytest", "tests/", "-v"]]
+
+# ── maturin ──────────────────────────────────────────────
 
 [tool.maturin]
 python-source = "src"

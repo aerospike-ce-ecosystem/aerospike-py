@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
+use crate::timed_op;
 use aerospike_core::{
     BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
     Client as AsClient, Error as AsError, PartitionFilter, ResultCode, Statement, Task, UDFLang,
@@ -170,10 +171,9 @@ impl PyAsyncClient {
         let write_policy = parse_write_policy(policy, meta)?;
 
         future_into_py(py, async move {
-            client
-                .put(&write_policy, &rust_key, &rust_bins)
-                .await
-                .map_err(as_to_pyerr)
+            timed_op!("put", &rust_key.namespace, &rust_key.set_name, {
+                client.put(&write_policy, &rust_key, &rust_bins).await
+            })
         })
     }
 
@@ -194,10 +194,9 @@ impl PyAsyncClient {
         let read_policy = parse_read_policy(policy)?;
 
         future_into_py(py, async move {
-            let record = client
-                .get(&read_policy, &rust_key, Bins::All)
-                .await
-                .map_err(as_to_pyerr)?;
+            let record = timed_op!("get", &rust_key.namespace, &rust_key.set_name, {
+                client.get(&read_policy, &rust_key, Bins::All).await
+            })?;
 
             Python::attach(|py| record_to_py(py, &record))
         })
@@ -224,10 +223,9 @@ impl PyAsyncClient {
         future_into_py(py, async move {
             let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
             let bins_selector = Bins::from(bin_refs.as_slice());
-            let record = client
-                .get(&read_policy, &rust_key, bins_selector)
-                .await
-                .map_err(as_to_pyerr)?;
+            let record = timed_op!("select", &rust_key.namespace, &rust_key.set_name, {
+                client.get(&read_policy, &rust_key, bins_selector).await
+            })?;
 
             Python::attach(|py| record_to_py(py, &record))
         })
@@ -250,7 +248,18 @@ impl PyAsyncClient {
         let read_policy = parse_read_policy(policy)?;
 
         future_into_py(py, async move {
+            let timer = crate::metrics::OperationTimer::start(
+                "exists",
+                &rust_key.namespace,
+                &rust_key.set_name,
+            );
             let result = client.get(&read_policy, &rust_key, Bins::None).await;
+
+            match &result {
+                Ok(_) => timer.finish(""),
+                Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => timer.finish(""),
+                Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+            }
 
             Python::attach(|py| {
                 let key_py = key_to_py(py, &rust_key)?;
@@ -288,11 +297,10 @@ impl PyAsyncClient {
         let write_policy = parse_write_policy(policy, meta)?;
 
         future_into_py(py, async move {
-            client
-                .delete(&write_policy, &rust_key)
-                .await
-                .map_err(as_to_pyerr)?;
-            Ok(())
+            timed_op!("delete", &rust_key.namespace, &rust_key.set_name, {
+                client.delete(&write_policy, &rust_key).await
+            })
+            .map(|_| ())
         })
     }
 
@@ -318,10 +326,9 @@ impl PyAsyncClient {
         }
 
         future_into_py(py, async move {
-            client
-                .touch(&write_policy, &rust_key)
-                .await
-                .map_err(as_to_pyerr)
+            timed_op!("touch", &rust_key.namespace, &rust_key.set_name, {
+                client.touch(&write_policy, &rust_key).await
+            })
         })
     }
 
@@ -347,10 +354,9 @@ impl PyAsyncClient {
         let bins = vec![Bin::new(bin.to_string(), value)];
 
         future_into_py(py, async move {
-            client
-                .add(&write_policy, &rust_key, &bins)
-                .await
-                .map_err(as_to_pyerr)
+            timed_op!("increment", &rust_key.namespace, &rust_key.set_name, {
+                client.add(&write_policy, &rust_key, &bins).await
+            })
         })
     }
 
@@ -376,10 +382,9 @@ impl PyAsyncClient {
         );
 
         future_into_py(py, async move {
-            let record = client
-                .operate(&write_policy, &rust_key, &rust_ops)
-                .await
-                .map_err(as_to_pyerr)?;
+            let record = timed_op!("operate", &rust_key.namespace, &rust_key.set_name, {
+                client.operate(&write_policy, &rust_key, &rust_ops).await
+            })?;
 
             Python::attach(|py| record_to_py(py, &record))
         })
@@ -409,10 +414,9 @@ impl PyAsyncClient {
         let bins = vec![Bin::new(bin.to_string(), value)];
 
         future_into_py(py, async move {
-            client
-                .append(&write_policy, &rust_key, &bins)
-                .await
-                .map_err(as_to_pyerr)
+            timed_op!("append", &rust_key.namespace, &rust_key.set_name, {
+                client.append(&write_policy, &rust_key, &bins).await
+            })
         })
     }
 
@@ -438,10 +442,9 @@ impl PyAsyncClient {
         let bins = vec![Bin::new(bin.to_string(), value)];
 
         future_into_py(py, async move {
-            client
-                .prepend(&write_policy, &rust_key, &bins)
-                .await
-                .map_err(as_to_pyerr)
+            timed_op!("prepend", &rust_key.namespace, &rust_key.set_name, {
+                client.prepend(&write_policy, &rust_key, &bins).await
+            })
         })
     }
 
@@ -462,10 +465,9 @@ impl PyAsyncClient {
         let bins: Vec<Bin> = names.into_iter().map(|n| Bin::new(n, Value::Nil)).collect();
 
         future_into_py(py, async move {
-            client
-                .put(&write_policy, &rust_key, &bins)
-                .await
-                .map_err(as_to_pyerr)
+            timed_op!("remove_bin", &rust_key.namespace, &rust_key.set_name, {
+                client.put(&write_policy, &rust_key, &bins).await
+            })
         })
     }
 
@@ -493,10 +495,12 @@ impl PyAsyncClient {
         );
 
         future_into_py(py, async move {
-            let record = client
-                .operate(&write_policy, &rust_key, &rust_ops)
-                .await
-                .map_err(as_to_pyerr)?;
+            let record = timed_op!(
+                "operate_ordered",
+                &rust_key.namespace,
+                &rust_key.set_name,
+                { client.operate(&write_policy, &rust_key, &rust_ops).await }
+            )?;
 
             Python::attach(|py| {
                 let key_py = match &record.key {
@@ -509,7 +513,7 @@ impl PyAsyncClient {
                     let tuple = PyTuple::new(
                         py,
                         [
-                            name.into_pyobject(py)?.into_any().unbind(),
+                            name.as_str().into_pyobject(py)?.into_any().unbind(),
                             value_to_py(py, value)?,
                         ],
                     )?;
@@ -714,16 +718,20 @@ impl PyAsyncClient {
         let use_numpy = _dtype.is_some();
         let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
 
+        let (batch_ns, batch_set) = rust_keys
+            .first()
+            .map(|k| (k.namespace.clone(), k.set_name.clone()))
+            .unwrap_or_default();
+
         future_into_py(py, async move {
             let ops: Vec<BatchOperation> = rust_keys
                 .iter()
                 .map(|k| BatchOperation::read(&read_policy, k.clone(), bins_selector.clone()))
                 .collect();
 
-            let results = client
-                .batch(&batch_policy, &ops)
-                .await
-                .map_err(as_to_pyerr)?;
+            let results = timed_op!("batch_read", &batch_ns, &batch_set, {
+                client.batch(&batch_policy, &ops).await
+            })?;
 
             Python::attach(|py| {
                 if use_numpy {
@@ -759,16 +767,20 @@ impl PyAsyncClient {
             .map(|k| py_to_key(&k))
             .collect::<PyResult<_>>()?;
 
+        let (batch_ns, batch_set) = rust_keys
+            .first()
+            .map(|k| (k.namespace.clone(), k.set_name.clone()))
+            .unwrap_or_default();
+
         future_into_py(py, async move {
             let batch_ops: Vec<BatchOperation> = rust_keys
                 .iter()
                 .map(|k| BatchOperation::write(&write_policy, k.clone(), rust_ops.clone()))
                 .collect();
 
-            let results = client
-                .batch(&batch_policy, &batch_ops)
-                .await
-                .map_err(as_to_pyerr)?;
+            let results = timed_op!("batch_operate", &batch_ns, &batch_set, {
+                client.batch(&batch_policy, &batch_ops).await
+            })?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
@@ -790,16 +802,20 @@ impl PyAsyncClient {
             .map(|k| py_to_key(&k))
             .collect::<PyResult<_>>()?;
 
+        let (batch_ns, batch_set) = rust_keys
+            .first()
+            .map(|k| (k.namespace.clone(), k.set_name.clone()))
+            .unwrap_or_default();
+
         future_into_py(py, async move {
             let ops: Vec<BatchOperation> = rust_keys
                 .iter()
                 .map(|k| BatchOperation::delete(&delete_policy, k.clone()))
                 .collect();
 
-            let results = client
-                .batch(&batch_policy, &ops)
-                .await
-                .map_err(as_to_pyerr)?;
+            let results = timed_op!("batch_remove", &batch_ns, &batch_set, {
+                client.batch(&batch_policy, &ops).await
+            })?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
@@ -819,17 +835,30 @@ impl PyAsyncClient {
         let client = self.get_client()?;
         let query_policy = parse_query_policy(policy)?;
         let stmt = Statement::new(namespace, set_name, Bins::All);
+        let ns = namespace.to_string();
+        let set = set_name.to_string();
 
         future_into_py(py, async move {
-            let rs = client
-                .query(&query_policy, PartitionFilter::all(), stmt)
-                .await
-                .map_err(as_to_pyerr)?;
-            let mut stream = rs.into_stream();
-            let mut records = Vec::new();
-            while let Some(result) = stream.next().await {
-                records.push(result.map_err(as_to_pyerr)?);
+            let timer = crate::metrics::OperationTimer::start("scan", &ns, &set);
+            let scan_result: Result<Vec<_>, AsError> = async {
+                let rs = client
+                    .query(&query_policy, PartitionFilter::all(), stmt)
+                    .await?;
+                let mut stream = rs.into_stream();
+                let mut results = Vec::new();
+                while let Some(result) = stream.next().await {
+                    results.push(result?);
+                }
+                Ok(results)
             }
+            .await;
+
+            match &scan_result {
+                Ok(_) => timer.finish(""),
+                Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+            }
+
+            let records = scan_result.map_err(as_to_pyerr)?;
 
             Python::attach(|py| {
                 let py_list = PyList::empty(py);

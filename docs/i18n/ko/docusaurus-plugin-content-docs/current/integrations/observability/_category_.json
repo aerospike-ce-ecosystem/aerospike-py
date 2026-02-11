@@ -1,0 +1,10 @@
+{
+  "label": "Observability",
+  "position": 2,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Observability",
+    "description": "aerospike-py 애플리케이션의 로깅, 메트릭, 모니터링 가이드."
+  }
+}
