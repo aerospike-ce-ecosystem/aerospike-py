@@ -3,6 +3,7 @@
 Drop-in compatible replacement for the aerospike-client-python package.
 """
 
+import logging
 from typing import Any
 
 from aerospike_py._aerospike import Client as _NativeClient
@@ -235,6 +236,9 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0"  # Fallback for development
 
+logger = logging.getLogger("aerospike_py")
+logger.addHandler(logging.NullHandler())
+
 
 class Client(_NativeClient):
     """Aerospike client wrapper that supports method chaining on connect()."""
@@ -245,6 +249,7 @@ class Client(_NativeClient):
         Returns self for method chaining:
             client = aerospike_py.client({...}).connect()
         """
+        logger.info("Connecting to Aerospike cluster")
         super().connect(username, password)
         return self
 
@@ -264,6 +269,7 @@ class Client(_NativeClient):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        logger.debug("Closing client connection")
         self.close()
         return False
 
@@ -293,10 +299,12 @@ class AsyncClient:
 
     async def connect(self, username: str | None = None, password: str | None = None) -> None:
         """Connect to the Aerospike cluster."""
+        logger.info("Async client connecting")
         return await self._inner.connect(username, password)
 
     async def close(self) -> None:
         """Close the connection."""
+        logger.debug("Async client closing")
         return await self._inner.close()
 
     async def batch_read(
@@ -312,6 +320,27 @@ class AsyncClient:
                 NumpyBatchRecords instead of BatchRecords.
         """
         return await self._inner.batch_read(keys, bins, policy, _dtype)
+
+
+def set_log_level(level: int) -> None:
+    """Set the aerospike_py log level.
+
+    Accepts LOG_LEVEL_* constants or standard Python logging levels.
+    Controls both Rust internal logs and Python logs.
+    """
+    _LEVEL_MAP = {
+        -1: logging.CRITICAL + 1,  # OFF
+        0: logging.ERROR,
+        1: logging.WARNING,
+        2: logging.INFO,
+        3: logging.DEBUG,
+        4: 5,  # TRACE
+    }
+    py_level = _LEVEL_MAP.get(level, level)
+    logging.getLogger("aerospike_py").setLevel(py_level)
+    logging.getLogger("_aerospike").setLevel(py_level)
+    logging.getLogger("aerospike_core").setLevel(py_level)
+    logging.getLogger("aerospike").setLevel(py_level)
 
 
 def client(config: dict) -> Client:
@@ -341,6 +370,7 @@ __all__ = [
     "BatchRecords",
     "NumpyBatchRecords",
     "client",
+    "set_log_level",
     "__version__",
     # Submodules
     "exception",

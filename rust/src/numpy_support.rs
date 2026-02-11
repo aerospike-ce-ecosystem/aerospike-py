@@ -3,6 +3,7 @@ use std::ptr;
 
 use aerospike_core::{BatchRecord, FloatValue, Value};
 use half::f16;
+use log::{debug, warn};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -54,6 +55,7 @@ fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usi
             "S" => DtypeKind::FixedBytes,
             "V" => DtypeKind::VoidBytes,
             other => {
+                warn!("Unsupported dtype kind '{}' for field '{}'", other, name);
                 return Err(PyTypeError::new_err(format!(
                     "dtype field '{}' must be numeric (int/float) or fixed-length bytes, got {} (kind='{}')",
                     name, field_dtype, other,
@@ -275,6 +277,7 @@ pub fn batch_to_numpy_py(
     results: &[BatchRecord],
     dtype_obj: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
+    debug!("Converting batch to numpy: records_count={}", results.len());
     let np = py.import("numpy")?;
     let n = results.len();
 

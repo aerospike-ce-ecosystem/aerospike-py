@@ -1,4 +1,5 @@
 use aerospike_core::Record;
+use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
@@ -10,6 +11,7 @@ use super::value::value_to_py;
 /// meta = {"gen": generation, "ttl": ttl_seconds}
 /// bins = {"bin_name": value, ...}
 pub fn record_to_py(py: Python<'_>, record: &Record) -> PyResult<Py<PyAny>> {
+    trace!("Converting Rust record to Python");
     // Key tuple
     let key_py = match &record.key {
         Some(key) => key_to_py(py, key)?,

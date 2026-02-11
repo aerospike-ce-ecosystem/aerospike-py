@@ -1,4 +1,5 @@
 use aerospike_core::QueryPolicy;
+use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -7,6 +8,7 @@ use crate::expressions::{is_expression, py_to_expression};
 
 /// Parse a Python policy dict into a QueryPolicy
 pub fn parse_query_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<QueryPolicy> {
+    trace!("Parsing query policy");
     let mut policy = QueryPolicy::default();
 
     let dict = match policy_dict {

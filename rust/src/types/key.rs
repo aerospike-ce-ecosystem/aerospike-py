@@ -1,4 +1,5 @@
 use aerospike_core::{Key, Value};
+use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
@@ -6,6 +7,7 @@ use super::value::{py_to_value, value_to_py};
 
 /// Convert a Python key tuple (namespace, set, key) to Rust Key
 pub fn py_to_key(key_tuple: &Bound<'_, PyAny>) -> PyResult<Key> {
+    trace!("Converting Python key to Rust key");
     let tuple = key_tuple.cast::<PyTuple>()?;
 
     if tuple.len() < 3 {

@@ -1,4 +1,5 @@
 use aerospike_core::Value;
+use log::warn;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
 use std::collections::HashMap;
@@ -12,6 +13,10 @@ pub fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
 
 fn py_to_value_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
     if depth > MAX_NESTING_DEPTH {
+        warn!(
+            "Value nesting exceeds maximum depth of {}",
+            MAX_NESTING_DEPTH
+        );
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
             "Value nesting exceeds maximum depth of {MAX_NESTING_DEPTH}"
         )));

@@ -1,10 +1,12 @@
 use aerospike_core::{Privilege, PrivilegeCode};
+use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 pub fn parse_admin_policy(
     policy: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<aerospike_core::AdminPolicy> {
+    trace!("Parsing admin policy");
     let mut p = aerospike_core::AdminPolicy::default();
     if let Some(dict) = policy {
         if let Some(val) = dict.get_item("timeout")? {

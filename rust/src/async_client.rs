@@ -6,6 +6,7 @@ use aerospike_core::{
     Value,
 };
 use futures::StreamExt;
+use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use pyo3_async_runtimes::tokio::future_into_py;
@@ -83,6 +84,7 @@ impl PyAsyncClient {
         let client_policy = parse_client_policy(&effective_config)?;
         let inner = self.inner.clone();
 
+        info!("Async connecting to Aerospike cluster: {}", hosts_str);
         future_into_py(py, async move {
             let client = AsClient::new(
                 &client_policy,
@@ -98,6 +100,7 @@ impl PyAsyncClient {
 
     /// Check if connected (sync, no I/O).
     fn is_connected(&self) -> bool {
+        trace!("Checking async client connection status");
         self.inner
             .lock()
             .map(|guard| guard.is_some())
@@ -106,6 +109,7 @@ impl PyAsyncClient {
 
     /// Close connection (async).
     fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        info!("Closing async client connection");
         let client = self.inner.lock().map_err(lock_err)?.take();
         future_into_py(py, async move {
             if let Some(c) = client {
@@ -158,6 +162,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async put: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
         let rust_bins = py_dict_to_bins(bins)?;
         let write_policy = parse_write_policy(policy, meta)?;
 
@@ -179,6 +187,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async get: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
         let read_policy = parse_read_policy(policy)?;
 
         future_into_py(py, async move {
@@ -202,6 +214,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async select: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
         let read_policy = parse_read_policy(policy)?;
         let bin_names: Vec<String> = bins.extract()?;
 
@@ -227,6 +243,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async exists: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
         let read_policy = parse_read_policy(policy)?;
 
         future_into_py(py, async move {
@@ -261,6 +281,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async remove: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
         let write_policy = parse_write_policy(policy, meta)?;
 
         future_into_py(py, async move {
@@ -284,6 +308,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async touch: ns={} set={}",
+            rust_key.namespace, rust_key.set_name
+        );
         let mut write_policy = parse_write_policy(policy, meta)?;
         if val > 0 {
             write_policy.expiration = aerospike_core::Expiration::Seconds(val);
@@ -310,6 +338,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async increment: ns={} set={} bin={}",
+            rust_key.namespace, rust_key.set_name, bin
+        );
         let write_policy = parse_write_policy(policy, meta)?;
         let value = py_to_value(offset)?;
         let bins = vec![Bin::new(bin.to_string(), value)];
@@ -336,6 +368,12 @@ impl PyAsyncClient {
         let rust_key = py_to_key(key)?;
         let write_policy = parse_write_policy(policy, meta)?;
         let rust_ops = py_ops_to_rust(ops)?;
+        debug!(
+            "async operate: ns={} set={} ops_count={}",
+            rust_key.namespace,
+            rust_key.set_name,
+            rust_ops.len()
+        );
 
         future_into_py(py, async move {
             let record = client
@@ -362,6 +400,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async append: ns={} set={} bin={}",
+            rust_key.namespace, rust_key.set_name, bin
+        );
         let write_policy = parse_write_policy(policy, meta)?;
         let value = py_to_value(val)?;
         let bins = vec![Bin::new(bin.to_string(), value)];
@@ -387,6 +429,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async prepend: ns={} set={} bin={}",
+            rust_key.namespace, rust_key.set_name, bin
+        );
         let write_policy = parse_write_policy(policy, meta)?;
         let value = py_to_value(val)?;
         let bins = vec![Bin::new(bin.to_string(), value)];
@@ -439,6 +485,12 @@ impl PyAsyncClient {
         let rust_key = py_to_key(key)?;
         let write_policy = parse_write_policy(policy, meta)?;
         let rust_ops = py_ops_to_rust(ops)?;
+        debug!(
+            "async operate_ordered: ns={} set={} ops_count={}",
+            rust_key.namespace,
+            rust_key.set_name,
+            rust_ops.len()
+        );
 
         future_into_py(py, async move {
             let record = client
@@ -484,6 +536,7 @@ impl PyAsyncClient {
         nanos: i64,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        warn!("Async truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let namespace = namespace.to_string();
@@ -508,6 +561,7 @@ impl PyAsyncClient {
         udf_type: u8,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async registering UDF: filename={}", filename);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let language = match udf_type {
@@ -552,6 +606,7 @@ impl PyAsyncClient {
         module: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async removing UDF: module={}", module);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let server_path = if module.ends_with(".lua") {
@@ -585,6 +640,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
+        debug!(
+            "async apply UDF: ns={} set={} module={} function={}",
+            rust_key.namespace, rust_key.set_name, module, function
+        );
         let write_policy = parse_write_policy(policy, None)?;
 
         let rust_args: Option<Vec<Value>> = match args {
@@ -633,6 +692,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
         _dtype: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        debug!("async batch_read: keys_count={}", keys.len());
         let client = self.get_client()?;
         let batch_policy = parse_batch_policy(policy)?;
         let read_policy = BatchReadPolicy::default();
@@ -689,6 +749,7 @@ impl PyAsyncClient {
         ops: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        debug!("async batch_operate: keys_count={}", keys.len());
         let client = self.get_client()?;
         let batch_policy = parse_batch_policy(policy)?;
         let write_policy = BatchWritePolicy::default();
@@ -720,6 +781,7 @@ impl PyAsyncClient {
         keys: &Bound<'_, PyList>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        debug!("async batch_remove: keys_count={}", keys.len());
         let client = self.get_client()?;
         let batch_policy = parse_batch_policy(policy)?;
         let delete_policy = BatchDeletePolicy::default();
@@ -753,6 +815,7 @@ impl PyAsyncClient {
         set_name: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        debug!("async scan: ns={} set={}", namespace, set_name);
         let client = self.get_client()?;
         let query_policy = parse_query_policy(policy)?;
         let stmt = Statement::new(namespace, set_name, Bins::All);
@@ -854,6 +917,10 @@ impl PyAsyncClient {
         index_name: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!(
+            "Async removing index: ns={} index={}",
+            namespace, index_name
+        );
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let namespace = namespace.to_string();
@@ -880,6 +947,7 @@ impl PyAsyncClient {
         roles: Vec<String>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async creating user: username={}", username);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let username = username.to_string();
@@ -902,6 +970,7 @@ impl PyAsyncClient {
         username: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async dropping user: username={}", username);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let username = username.to_string();
@@ -923,6 +992,7 @@ impl PyAsyncClient {
         password: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async changing password for user: username={}", username);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let username = username.to_string();
@@ -945,6 +1015,7 @@ impl PyAsyncClient {
         roles: Vec<String>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async granting roles to user: username={}", username);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let username = username.to_string();
@@ -967,6 +1038,7 @@ impl PyAsyncClient {
         roles: Vec<String>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async revoking roles from user: username={}", username);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let username = username.to_string();
@@ -1052,6 +1124,7 @@ impl PyAsyncClient {
         read_quota: u32,
         write_quota: u32,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async creating role: role={}", role);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
@@ -1082,6 +1155,7 @@ impl PyAsyncClient {
         role: &str,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!("Async dropping role: role={}", role);
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let role = role.to_string();
@@ -1266,6 +1340,10 @@ impl PyAsyncClient {
         index_type: aerospike_core::IndexType,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        info!(
+            "Async creating index: ns={} set={} bin={} index={}",
+            namespace, set_name, bin_name, index_name
+        );
         let client = self.get_client()?;
         let admin_policy = parse_admin_policy(policy)?;
         let namespace = namespace.to_string();

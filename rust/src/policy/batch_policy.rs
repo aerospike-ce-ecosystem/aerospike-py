@@ -1,4 +1,5 @@
 use aerospike_core::BatchPolicy;
+use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -7,6 +8,7 @@ use crate::expressions::{is_expression, py_to_expression};
 
 /// Parse a Python policy dict into a BatchPolicy
 pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchPolicy> {
+    trace!("Parsing batch policy");
     let mut policy = BatchPolicy::default();
 
     let dict = match policy_dict {

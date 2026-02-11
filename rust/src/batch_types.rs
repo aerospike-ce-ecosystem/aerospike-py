@@ -1,4 +1,5 @@
 use aerospike_core::BatchRecord;
+use log::trace;
 use pyo3::prelude::*;
 
 use crate::errors::result_code_to_int;
@@ -25,6 +26,7 @@ pub fn batch_to_batch_records_py(
     py: Python<'_>,
     results: &[BatchRecord],
 ) -> PyResult<PyBatchRecords> {
+    trace!("Converting {} batch records to Python", results.len());
     let mut batch_records = Vec::with_capacity(results.len());
 
     for br in results {
