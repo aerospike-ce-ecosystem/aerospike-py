@@ -17,6 +17,14 @@ base_python = ["python3.14t"]
 
 # --- Integration tests (requires Aerospike server) ---
 [env.integration]
+deps = [
+    "pytest",
+    "pytest-asyncio",
+    "numpy>=2.0",
+    "fastapi",
+    "httpx",
+    "prometheus-client",
+]
 commands = [["pytest", "tests/integration/", "-v"]]
 
 # --- Concurrency tests (requires Aerospike server) ---
@@ -66,5 +74,6 @@ deps = [
     "fastapi",
     "httpx",
     "gunicorn",
+    "prometheus-client",
 ]
 commands = [["pytest", "tests/", "-v"]]
