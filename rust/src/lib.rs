@@ -15,6 +15,7 @@ mod policy;
 pub mod query;
 mod record_helpers;
 mod runtime;
+pub mod tracing;
 mod types;
 
 /// Return collected metrics in Prometheus text format.
@@ -38,6 +39,8 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Register functions
     m.add_function(wrap_pyfunction!(get_metrics_text, m)?)?;
+    m.add_function(wrap_pyfunction!(tracing::init_tracing, m)?)?;
+    m.add_function(wrap_pyfunction!(tracing::shutdown_tracing, m)?)?;
 
     // Register exceptions
     errors::register_exceptions(m)?;

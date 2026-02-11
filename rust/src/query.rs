@@ -204,6 +204,31 @@ fn execute_query(
         Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
     }
 
+    // OTel span for query/scan
+    #[cfg(feature = "otel")]
+    {
+        use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
+        use opentelemetry::KeyValue;
+        let tracer = crate::tracing::otel_impl::get_tracer();
+        let span_name = format!("{} {}.{}", op_name.to_uppercase(), namespace, set_name);
+        let span = tracer
+            .span_builder(span_name)
+            .with_kind(SpanKind::Client)
+            .with_attributes(vec![
+                KeyValue::new("db.system.name", "aerospike"),
+                KeyValue::new("db.namespace", namespace.to_string()),
+                KeyValue::new("db.collection.name", set_name.to_string()),
+                KeyValue::new("db.operation.name", op_name.to_uppercase()),
+            ])
+            .start(&tracer);
+        let cx = opentelemetry::Context::current().with_span(span);
+        let span_ref = opentelemetry::trace::TraceContextExt::span(&cx);
+        if let Err(e) = &result {
+            crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
+        }
+        span_ref.end();
+    }
+
     let records = result.map_err(as_to_pyerr)?;
     debug!("{} returned {} records", op_name, records.len());
     let py_list = PyList::empty(py);
@@ -247,6 +272,31 @@ fn execute_foreach(
     match &result {
         Ok(_) => timer.finish(""),
         Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+    }
+
+    // OTel span for query/scan foreach
+    #[cfg(feature = "otel")]
+    {
+        use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
+        use opentelemetry::KeyValue;
+        let tracer = crate::tracing::otel_impl::get_tracer();
+        let span_name = format!("{} {}.{}", op_name.to_uppercase(), namespace, set_name);
+        let span = tracer
+            .span_builder(span_name)
+            .with_kind(SpanKind::Client)
+            .with_attributes(vec![
+                KeyValue::new("db.system.name", "aerospike"),
+                KeyValue::new("db.namespace", namespace.to_string()),
+                KeyValue::new("db.collection.name", set_name.to_string()),
+                KeyValue::new("db.operation.name", op_name.to_uppercase()),
+            ])
+            .start(&tracer);
+        let cx = opentelemetry::Context::current().with_span(span);
+        let span_ref = opentelemetry::trace::TraceContextExt::span(&cx);
+        if let Err(e) = &result {
+            crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
+        }
+        span_ref.end();
     }
 
     let records = result.map_err(as_to_pyerr)?;

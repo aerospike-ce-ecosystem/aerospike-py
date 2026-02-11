@@ -11,6 +11,8 @@ from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query, Scan  # noqa: F401
 from aerospike_py._aerospike import BatchRecord, BatchRecords  # noqa: F401
 from aerospike_py._aerospike import get_metrics_text as _get_metrics_text
+from aerospike_py._aerospike import init_tracing as _init_tracing
+from aerospike_py._aerospike import shutdown_tracing as _shutdown_tracing
 
 # Import all exceptions from native module
 from aerospike_py._aerospike import (  # noqa: F401
@@ -409,6 +411,27 @@ def stop_metrics_server() -> None:
         _metrics_server_thread = None
 
 
+def init_tracing() -> None:
+    """Initialize OpenTelemetry tracing.
+
+    Reads standard OTEL_* environment variables for configuration.
+    Key variables:
+        OTEL_EXPORTER_OTLP_ENDPOINT  - gRPC endpoint (default: http://localhost:4317)
+        OTEL_SERVICE_NAME            - service name (default: aerospike-py)
+        OTEL_SDK_DISABLED=true       - disable tracing entirely
+        OTEL_TRACES_EXPORTER=none    - disable trace export
+    """
+    _init_tracing()
+
+
+def shutdown_tracing() -> None:
+    """Shut down the tracer provider, flushing pending spans.
+
+    Call before process exit to ensure all spans are exported.
+    """
+    _shutdown_tracing()
+
+
 __all__ = [
     # Core classes and factory
     "Client",
@@ -423,6 +446,8 @@ __all__ = [
     "get_metrics",
     "start_metrics_server",
     "stop_metrics_server",
+    "init_tracing",
+    "shutdown_tracing",
     "__version__",
     # Submodules
     "exception",
