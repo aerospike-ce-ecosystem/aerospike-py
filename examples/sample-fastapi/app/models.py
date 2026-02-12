@@ -309,3 +309,15 @@ class VectorSearchResult(BaseModel):
 class VectorSearchResponse(BaseModel):
     results: list[VectorSearchResult]
     total_found: int = Field(description="Total records successfully read")
+
+
+# ── Observability models ──────────────────────────────────────
+
+
+class LogLevelRequest(BaseModel):
+    level: int = Field(
+        ...,
+        ge=-1,
+        le=4,
+        description="Log level: -1=OFF, 0=ERROR, 1=WARN, 2=INFO, 3=DEBUG, 4=TRACE",
+    )

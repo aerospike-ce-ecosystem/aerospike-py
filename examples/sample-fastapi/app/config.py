@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     aerospike_namespace: str = "test"
     aerospike_set: str = "users"
 
+    # Observability
+    otel_endpoint: str = "http://localhost:4317"
+    otel_service_name: str = "sample-fastapi"
+    log_level: int = 2  # LOG_LEVEL_INFO
+
     model_config = {"env_prefix": "APP_"}
 
 
