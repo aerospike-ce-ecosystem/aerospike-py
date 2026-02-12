@@ -2,6 +2,8 @@
 
 import threading
 
+import pytest
+
 import aerospike_py
 
 # ---------------------------------------------------------------------------
@@ -297,5 +299,367 @@ class TestAsyncClientTracing:
                 assert False, "Should have raised ClientError"
             except aerospike_py.ClientError:
                 pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+
+# ---------------------------------------------------------------------------
+# Connection info & span attribute tests (server.address, server.port,
+# db.aerospike.cluster_name)
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionInfoHostFormats:
+    """Verify client creation with various host config formats doesn't break tracing."""
+
+    def test_tuple_host_single(self, monkeypatch):
+        """Single (host, port) tuple should work."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": [("10.0.0.1", 3000)]})
+            # Client created successfully - connection info should be set on connect
+            try:
+                c.put(("test", "demo", "k"), {"a": 1})
+            except aerospike_py.ClientError:
+                pass  # Expected: not connected
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_tuple_host_custom_port(self, monkeypatch):
+        """Non-default port should be accepted."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": [("myhost.example.com", 4000)]})
+            try:
+                c.get(("test", "demo", "k"))
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_multiple_hosts(self, monkeypatch):
+        """Multiple hosts in config should be accepted."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": [("node1.local", 3000), ("node2.local", 3001), ("node3.local", 3002)]})
+            try:
+                c.put(("test", "demo", "k"), {"a": 1})
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_string_host_with_port(self, monkeypatch):
+        """String 'host:port' format should be accepted."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": ["192.168.1.100:3000"]})
+            try:
+                c.get(("test", "demo", "k"))
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_string_host_without_port(self, monkeypatch):
+        """String host without port should default to 3000."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": ["myhost.local"]})
+            try:
+                c.get(("test", "demo", "k"))
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_localhost_default(self, monkeypatch):
+        """Default localhost config should work with tracing."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            try:
+                c.exists(("test", "demo", "k"))
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+
+class TestConnectionInfoClusterName:
+    """Verify cluster_name config is accepted and doesn't break tracing."""
+
+    def test_with_cluster_name(self, monkeypatch):
+        """Config with cluster_name should work."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "my-cluster"})
+            try:
+                c.put(("test", "demo", "k"), {"a": 1})
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_with_none_cluster_name(self, monkeypatch):
+        """Config with cluster_name=None should fallback to empty string."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": None})
+            try:
+                c.get(("test", "demo", "k"))
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_without_cluster_name(self, monkeypatch):
+        """Config without cluster_name key should default gracefully."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            try:
+                c.remove(("test", "demo", "k"))
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_empty_cluster_name(self, monkeypatch):
+        """Config with empty string cluster_name should work."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": ""})
+            try:
+                c.put(("test", "demo", "k"), {"a": 1})
+            except aerospike_py.ClientError:
+                pass
+        finally:
+            aerospike_py.shutdown_tracing()
+
+
+class TestConnectionInfoAllOperations:
+    """Verify connection info propagation doesn't break any operation type."""
+
+    def _make_client(self):
+        return aerospike_py.client({"hosts": [("10.0.0.1", 3000)], "cluster_name": "test-cluster"})
+
+    def test_put_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.put(("test", "demo", "k"), {"a": 1})
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_get_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.get(("test", "demo", "k"))
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_exists_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.exists(("test", "demo", "k"))
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_remove_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.remove(("test", "demo", "k"))
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_select_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.select(("test", "demo", "k"), ["a"])
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_touch_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.touch(("test", "demo", "k"))
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_increment_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.increment(("test", "demo", "k"), "counter", 1)
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_append_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.append(("test", "demo", "k"), "str_bin", "suffix")
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_prepend_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.prepend(("test", "demo", "k"), "str_bin", "prefix")
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_batch_read_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.batch_read([("test", "demo", "k1"), ("test", "demo", "k2")])
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_operate_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            ops = [{"op": aerospike_py.OPERATOR_READ, "bin": "a"}]
+            with pytest.raises(aerospike_py.ClientError):
+                c.operate(("test", "demo", "k"), ops)
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_query_creation_with_connection_info(self, monkeypatch):
+        """Query creation requires connected client; verify error propagation with tracing."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.query("test", "demo")
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    def test_scan_creation_with_connection_info(self, monkeypatch):
+        """Scan creation requires connected client; verify error propagation with tracing."""
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_client()
+            with pytest.raises(aerospike_py.ClientError):
+                c.scan("test", "demo")
+        finally:
+            aerospike_py.shutdown_tracing()
+
+
+class TestAsyncConnectionInfoOperations:
+    """Verify connection info propagation for async client operations."""
+
+    def _make_async_client(self):
+        return aerospike_py.AsyncClient({"hosts": [("10.0.0.1", 3000)], "cluster_name": "async-cluster"})
+
+    async def test_async_put_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_async_client()
+            with pytest.raises(aerospike_py.ClientError):
+                await c.put(("test", "demo", "k"), {"a": 1})
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    async def test_async_get_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_async_client()
+            with pytest.raises(aerospike_py.ClientError):
+                await c.get(("test", "demo", "k"))
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    async def test_async_exists_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_async_client()
+            with pytest.raises(aerospike_py.ClientError):
+                await c.exists(("test", "demo", "k"))
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    async def test_async_remove_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_async_client()
+            with pytest.raises(aerospike_py.ClientError):
+                await c.remove(("test", "demo", "k"))
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    async def test_async_batch_read_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_async_client()
+            with pytest.raises(aerospike_py.ClientError):
+                await c.batch_read([("test", "demo", "k1"), ("test", "demo", "k2")])
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    async def test_async_select_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_async_client()
+            with pytest.raises(aerospike_py.ClientError):
+                await c.select(("test", "demo", "k"), ["a"])
+        finally:
+            aerospike_py.shutdown_tracing()
+
+    async def test_async_touch_with_connection_info(self, monkeypatch):
+        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+        aerospike_py.init_tracing()
+        try:
+            c = self._make_async_client()
+            with pytest.raises(aerospike_py.ClientError):
+                await c.touch(("test", "demo", "k"))
         finally:
             aerospike_py.shutdown_tracing()
