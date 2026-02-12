@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import socket
 import sys
 import time
@@ -97,6 +98,36 @@ def aerospike_container(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def jaeger_container():
+    """Start a Jaeger all-in-one container for tracing tests."""
+    ui_port = _find_free_port()
+    otlp_port = _find_free_port()
+
+    container = (
+        DockerContainer("jaegertracing/jaeger:latest")
+        .with_bind_ports(16686, ui_port)
+        .with_bind_ports(4317, otlp_port)
+        .with_env("COLLECTOR_OTLP_ENABLED", "true")
+    )
+    container.start()
+    # Wait for Jaeger HTTP API to become available
+    import urllib.error
+    import urllib.request
+
+    for _ in range(30):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{ui_port}/api/services")
+            break
+        except (urllib.error.URLError, ConnectionError):
+            time.sleep(1)
+    else:
+        raise RuntimeError("Jaeger did not become ready in time")
+
+    yield container, otlp_port, ui_port
+    container.stop()
+
+
+@pytest.fixture(scope="session")
 def aerospike_client(aerospike_container):
     """Provide a sync Aerospike client for test data setup/teardown."""
     _, port = aerospike_container
@@ -119,6 +150,12 @@ def client(aerospike_container):
 
     @asynccontextmanager
     async def _test_lifespan(a):
+        # Disable tracing export in default test lifespan (no Jaeger by default)
+        os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+        aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_INFO)
+        aerospike_py.init_tracing()
+        a.state.tracing_enabled = True
+
         ac = aerospike_py.AsyncClient(
             {
                 "hosts": [("127.0.0.1", port)],
@@ -130,6 +167,8 @@ def client(aerospike_container):
         a.state.aerospike = ac
         yield
         await ac.close()
+        aerospike_py.shutdown_tracing()
+        a.state.tracing_enabled = False
 
     original_lifespan = app.router.lifespan_context
     app.router.lifespan_context = _test_lifespan
