@@ -352,7 +352,7 @@ aerospike-py의 tracing은 **클라이언트 동작에 절대 영향을 주지 �
 
 ## Metrics와 함께 사용하기
 
-Tracing과 [Prometheus 메트릭](./metrics.md)은 독립적으로 동작하며 동시에 사용할 수 있습니다:
+Tracing과 [Prometheus 메트릭](./metrics)은 독립적으로 동작하며 동시에 사용할 수 있습니다:
 
 ```python
 import aerospike_py
