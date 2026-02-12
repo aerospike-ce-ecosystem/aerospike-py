@@ -7,6 +7,14 @@
 //
 // When the `otel` feature is disabled, `traced_op!` falls back to `timed_op!`.
 
+/// Connection metadata attached to every span.
+#[derive(Clone, Debug, Default)]
+pub struct ConnectionInfo {
+    pub server_address: String,
+    pub server_port: i64,
+    pub cluster_name: String,
+}
+
 // ── Feature-gated implementation ────────────────────────────────────────────
 
 #[cfg(feature = "otel")]
@@ -187,12 +195,13 @@ pub fn shutdown_tracing() {
 #[cfg(feature = "otel")]
 #[macro_export]
 macro_rules! traced_op {
-    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $body:expr) => {{
+    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {{
         use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
         use opentelemetry::KeyValue;
 
         let tracer = $crate::tracing::otel_impl::get_tracer();
         let span_name = format!("{} {}.{}", $op.to_uppercase(), $ns, $set);
+        let conn = &$conn_info;
         let span = tracer
             .span_builder(span_name)
             .with_kind(SpanKind::Client)
@@ -201,6 +210,9 @@ macro_rules! traced_op {
                 KeyValue::new("db.namespace", $ns.to_string()),
                 KeyValue::new("db.collection.name", $set.to_string()),
                 KeyValue::new("db.operation.name", $op.to_uppercase()),
+                KeyValue::new("server.address", conn.server_address.clone()),
+                KeyValue::new("server.port", conn.server_port),
+                KeyValue::new("db.aerospike.cluster_name", conn.cluster_name.clone()),
             ])
             .start_with_context(&tracer, &$parent_ctx);
         let _cx = $parent_ctx.with_span(span);
@@ -230,8 +242,9 @@ macro_rules! traced_op {
 #[cfg(not(feature = "otel"))]
 #[macro_export]
 macro_rules! traced_op {
-    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $body:expr) => {{
+    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {{
         let _ = $parent_ctx;
+        let _ = &$conn_info;
         $crate::timed_op!($op, $ns, $set, $body)
     }};
 }

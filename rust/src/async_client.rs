@@ -45,6 +45,7 @@ fn lock_err<T>(e: PoisonError<T>) -> PyErr {
 pub struct PyAsyncClient {
     inner: SharedClientState,
     config: Py<PyAny>,
+    connection_info: crate::tracing::ConnectionInfo,
 }
 
 #[pymethods]
@@ -54,13 +55,14 @@ impl PyAsyncClient {
         Ok(PyAsyncClient {
             inner: Arc::new(Mutex::new(None)),
             config,
+            connection_info: crate::tracing::ConnectionInfo::default(),
         })
     }
 
     /// Connect to the Aerospike cluster (async).
     #[pyo3(signature = (username=None, password=None))]
     fn connect<'py>(
-        &self,
+        &mut self,
         py: Python<'py>,
         username: Option<&str>,
         password: Option<&str>,
@@ -81,10 +83,29 @@ impl PyAsyncClient {
             effective_config.set_item("password", pass)?;
         }
 
-        let hosts_str = parse_hosts_from_config(&effective_config)?;
+        let parsed = parse_hosts_from_config(&effective_config)?;
         let client_policy = parse_client_policy(&effective_config)?;
         let inner = self.inner.clone();
 
+        // Build connection info for span attributes
+        let cluster_name = effective_config
+            .get_item("cluster_name")?
+            .and_then(|v| {
+                if v.is_none() {
+                    None
+                } else {
+                    v.extract::<String>().ok()
+                }
+            })
+            .unwrap_or_default();
+
+        self.connection_info = crate::tracing::ConnectionInfo {
+            server_address: parsed.first_address,
+            server_port: parsed.first_port as i64,
+            cluster_name,
+        };
+
+        let hosts_str = parsed.connection_string;
         info!("Async connecting to Aerospike cluster: {}", hosts_str);
         future_into_py(py, async move {
             let client = AsClient::new(
@@ -174,6 +195,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
@@ -181,6 +203,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.put(&write_policy, &rust_key, &rust_bins).await }
             )
         })
@@ -206,6 +229,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let record = traced_op!(
@@ -213,6 +237,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.get(&read_policy, &rust_key, Bins::All).await }
             )?;
 
@@ -242,6 +267,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
@@ -251,6 +277,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.get(&read_policy, &rust_key, bins_selector).await }
             )?;
 
@@ -276,6 +303,8 @@ impl PyAsyncClient {
 
         #[cfg(feature = "otel")]
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
+        #[allow(unused)]
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let timer = crate::metrics::OperationTimer::start(
@@ -306,6 +335,9 @@ impl PyAsyncClient {
                         KeyValue::new("db.namespace", rust_key.namespace.clone()),
                         KeyValue::new("db.collection.name", rust_key.set_name.clone()),
                         KeyValue::new("db.operation.name", "EXISTS"),
+                        KeyValue::new("server.address", conn_info.server_address.clone()),
+                        KeyValue::new("server.port", conn_info.server_port),
+                        KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
                     ])
                     .start_with_context(&tracer, &parent_ctx);
                 let cx = parent_ctx.with_span(span);
@@ -358,6 +390,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
@@ -365,6 +398,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.delete(&write_policy, &rust_key).await }
             )
             .map(|_| ())
@@ -396,6 +430,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
@@ -403,6 +438,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.touch(&write_policy, &rust_key).await }
             )
         })
@@ -433,6 +469,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
@@ -440,6 +477,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.add(&write_policy, &rust_key, &bins).await }
             )
         })
@@ -470,6 +508,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let record = traced_op!(
@@ -477,6 +516,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.operate(&write_policy, &rust_key, &rust_ops).await }
             )?;
 
@@ -511,6 +551,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
@@ -518,6 +559,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.append(&write_policy, &rust_key, &bins).await }
             )
         })
@@ -548,6 +590,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
@@ -555,6 +598,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.prepend(&write_policy, &rust_key, &bins).await }
             )
         })
@@ -580,6 +624,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
@@ -587,6 +632,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.put(&write_policy, &rust_key, &bins).await }
             )
         })
@@ -619,6 +665,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let record = traced_op!(
@@ -626,6 +673,7 @@ impl PyAsyncClient {
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
+                conn_info,
                 { client.operate(&write_policy, &rust_key, &rust_ops).await }
             )?;
 
@@ -854,6 +902,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let ops: Vec<BatchOperation> = rust_keys
@@ -861,9 +910,14 @@ impl PyAsyncClient {
                 .map(|k| BatchOperation::read(&read_policy, k.clone(), bins_selector.clone()))
                 .collect();
 
-            let results = traced_op!("batch_read", &batch_ns, &batch_set, parent_ctx, {
-                client.batch(&batch_policy, &ops).await
-            })?;
+            let results = traced_op!(
+                "batch_read",
+                &batch_ns,
+                &batch_set,
+                parent_ctx,
+                conn_info,
+                { client.batch(&batch_policy, &ops).await }
+            )?;
 
             Python::attach(|py| {
                 if use_numpy {
@@ -908,6 +962,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let batch_ops: Vec<BatchOperation> = rust_keys
@@ -915,9 +970,14 @@ impl PyAsyncClient {
                 .map(|k| BatchOperation::write(&write_policy, k.clone(), rust_ops.clone()))
                 .collect();
 
-            let results = traced_op!("batch_operate", &batch_ns, &batch_set, parent_ctx, {
-                client.batch(&batch_policy, &batch_ops).await
-            })?;
+            let results = traced_op!(
+                "batch_operate",
+                &batch_ns,
+                &batch_set,
+                parent_ctx,
+                conn_info,
+                { client.batch(&batch_policy, &batch_ops).await }
+            )?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
@@ -948,6 +1008,7 @@ impl PyAsyncClient {
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
         #[cfg(not(feature = "otel"))]
         let parent_ctx = ();
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let ops: Vec<BatchOperation> = rust_keys
@@ -955,9 +1016,14 @@ impl PyAsyncClient {
                 .map(|k| BatchOperation::delete(&delete_policy, k.clone()))
                 .collect();
 
-            let results = traced_op!("batch_remove", &batch_ns, &batch_set, parent_ctx, {
-                client.batch(&batch_policy, &ops).await
-            })?;
+            let results = traced_op!(
+                "batch_remove",
+                &batch_ns,
+                &batch_set,
+                parent_ctx,
+                conn_info,
+                { client.batch(&batch_policy, &ops).await }
+            )?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
@@ -982,6 +1048,8 @@ impl PyAsyncClient {
 
         #[cfg(feature = "otel")]
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
+        #[allow(unused)]
+        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let timer = crate::metrics::OperationTimer::start("scan", &ns, &set);
@@ -1018,6 +1086,9 @@ impl PyAsyncClient {
                         KeyValue::new("db.namespace", ns.clone()),
                         KeyValue::new("db.collection.name", set.clone()),
                         KeyValue::new("db.operation.name", "SCAN"),
+                        KeyValue::new("server.address", conn_info.server_address.clone()),
+                        KeyValue::new("server.port", conn_info.server_port),
+                        KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
                     ])
                     .start_with_context(&tracer, &parent_ctx);
                 let cx = parent_ctx.with_span(span);

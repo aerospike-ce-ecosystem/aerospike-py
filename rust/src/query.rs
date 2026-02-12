@@ -171,6 +171,7 @@ fn int_to_collection_index_type(val: i32) -> CollectionIndexType {
 }
 
 /// Execute a query/scan and collect all results
+#[allow(unused, clippy::too_many_arguments)]
 fn execute_query(
     py: Python<'_>,
     client: &Arc<AsClient>,
@@ -179,6 +180,7 @@ fn execute_query(
     op_name: &str,
     namespace: &str,
     set_name: &str,
+    conn_info: &crate::tracing::ConnectionInfo,
 ) -> PyResult<Py<PyAny>> {
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
@@ -219,6 +221,9 @@ fn execute_query(
                 KeyValue::new("db.namespace", namespace.to_string()),
                 KeyValue::new("db.collection.name", set_name.to_string()),
                 KeyValue::new("db.operation.name", op_name.to_uppercase()),
+                KeyValue::new("server.address", conn_info.server_address.clone()),
+                KeyValue::new("server.port", conn_info.server_port),
+                KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
             ])
             .start(&tracer);
         let cx = opentelemetry::Context::current().with_span(span);
@@ -239,7 +244,7 @@ fn execute_query(
 }
 
 /// Execute a query/scan and call a callback for each record
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, unused)]
 fn execute_foreach(
     py: Python<'_>,
     client: &Arc<AsClient>,
@@ -249,6 +254,7 @@ fn execute_foreach(
     op_name: &str,
     namespace: &str,
     set_name: &str,
+    conn_info: &crate::tracing::ConnectionInfo,
 ) -> PyResult<()> {
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
@@ -289,6 +295,9 @@ fn execute_foreach(
                 KeyValue::new("db.namespace", namespace.to_string()),
                 KeyValue::new("db.collection.name", set_name.to_string()),
                 KeyValue::new("db.operation.name", op_name.to_uppercase()),
+                KeyValue::new("server.address", conn_info.server_address.clone()),
+                KeyValue::new("server.port", conn_info.server_port),
+                KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
             ])
             .start(&tracer);
         let cx = opentelemetry::Context::current().with_span(span);
@@ -320,16 +329,23 @@ pub struct PyQuery {
     set_name: String,
     bins: Vec<String>,
     predicates: Vec<Predicate>,
+    connection_info: crate::tracing::ConnectionInfo,
 }
 
 impl PyQuery {
-    pub fn new(client: Arc<AsClient>, namespace: String, set_name: String) -> Self {
+    pub fn new(
+        client: Arc<AsClient>,
+        namespace: String,
+        set_name: String,
+        connection_info: crate::tracing::ConnectionInfo,
+    ) -> Self {
         Self {
             client,
             namespace,
             set_name,
             bins: vec![],
             predicates: vec![],
+            connection_info,
         }
     }
 }
@@ -370,6 +386,7 @@ impl PyQuery {
             "query",
             &self.namespace,
             &self.set_name,
+            &self.connection_info,
         )
     }
 
@@ -396,6 +413,7 @@ impl PyQuery {
             "query",
             &self.namespace,
             &self.set_name,
+            &self.connection_info,
         )
     }
 }
@@ -408,15 +426,22 @@ pub struct PyScan {
     namespace: String,
     set_name: String,
     bins: Vec<String>,
+    connection_info: crate::tracing::ConnectionInfo,
 }
 
 impl PyScan {
-    pub fn new(client: Arc<AsClient>, namespace: String, set_name: String) -> Self {
+    pub fn new(
+        client: Arc<AsClient>,
+        namespace: String,
+        set_name: String,
+        connection_info: crate::tracing::ConnectionInfo,
+    ) -> Self {
         Self {
             client,
             namespace,
             set_name,
             bins: vec![],
+            connection_info,
         }
     }
 }
@@ -444,6 +469,7 @@ impl PyScan {
             "scan",
             &self.namespace,
             &self.set_name,
+            &self.connection_info,
         )
     }
 
@@ -465,6 +491,7 @@ impl PyScan {
             "scan",
             &self.namespace,
             &self.set_name,
+            &self.connection_info,
         )
     }
 }
