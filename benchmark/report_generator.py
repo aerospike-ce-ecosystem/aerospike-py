@@ -174,38 +174,101 @@ def _update_index(json_dir: str, date_slug: str, json_filename: str) -> None:
 # ── numpy batch report ────────────────────────────────────────
 
 
+def _safe_ratio(numerator_ms: float | None, denominator_ms: float | None) -> float:
+    """Return numerator / denominator safely, 0 if invalid."""
+    if not numerator_ms or not denominator_ms or denominator_ms <= 0:
+        return 0.0
+    return numerator_ms / denominator_ms
+
+
 def _numpy_takeaways(results) -> list[str]:
     """Generate key insights from numpy batch benchmark results."""
     takeaways = []
 
-    # Record scaling insight
+    # Record scaling insight (sync + async)
     if results.record_scaling:
         data = results.record_scaling["data"]
         if len(data) >= 2:
             last = data[-1]
-            sync_ratio = (
-                last["batch_read_sync"]["avg_ms"] / last["batch_read_numpy_sync"]["avg_ms"]
-                if last["batch_read_numpy_sync"]["avg_ms"] > 0
-                else 0
+            rc = last["record_count"]
+
+            sync_ratio = _safe_ratio(
+                last["batch_read_sync"]["avg_ms"],
+                last["batch_read_numpy_sync"]["avg_ms"],
             )
             if sync_ratio > 1:
                 takeaways.append(
-                    f"At {last['record_count']:,} records, batch_read_numpy is "
-                    f"**{sync_ratio:.1f}x** faster than batch_read (Sync)"
+                    f"At {rc:,} records, batch_read_numpy is **{sync_ratio:.1f}x** faster than batch_read (Sync)"
                 )
 
-    # Post-processing insight
+            async_ratio = _safe_ratio(
+                last.get("batch_read_async", {}).get("avg_ms"),
+                last.get("batch_read_numpy_async", {}).get("avg_ms"),
+            )
+            if async_ratio > 1:
+                takeaways.append(
+                    f"At {rc:,} records, batch_read_numpy is **{async_ratio:.1f}x** faster than batch_read (Async)"
+                )
+
+    # Bin scaling insight - report the bin count with the best async speedup
+    if results.bin_scaling:
+        data = results.bin_scaling["data"]
+        best_async = {"ratio": 0.0, "bins": 0}
+        best_sync = {"ratio": 0.0, "bins": 0}
+        for entry in data:
+            sr = _safe_ratio(
+                entry["batch_read_sync"]["avg_ms"],
+                entry["batch_read_numpy_sync"]["avg_ms"],
+            )
+            ar = _safe_ratio(
+                entry.get("batch_read_async", {}).get("avg_ms"),
+                entry.get("batch_read_numpy_async", {}).get("avg_ms"),
+            )
+            if sr > best_sync["ratio"]:
+                best_sync = {"ratio": sr, "bins": entry["bin_count"]}
+            if ar > best_async["ratio"]:
+                best_async = {"ratio": ar, "bins": entry["bin_count"]}
+
+        if best_sync["ratio"] > 1:
+            takeaways.append(
+                f"Bin scaling: numpy is up to **{best_sync['ratio']:.1f}x** faster "
+                f"at {best_sync['bins']} bins (Sync, {results.bin_scaling['fixed_records']:,} records)"
+            )
+        if best_async["ratio"] > 1:
+            takeaways.append(
+                f"Bin scaling: numpy is up to **{best_async['ratio']:.1f}x** faster "
+                f"at {best_async['bins']} bins (Async)"
+            )
+
+    # Post-processing insight - find the stage with the best speedup
     if results.post_processing:
         data = results.post_processing["data"]
-        agg = next((d for d in data if d["stage"] == "read_aggregation"), None)
-        if agg:
-            sync_ratio = (
-                agg["batch_read_sync"]["avg_ms"] / agg["batch_read_numpy_sync"]["avg_ms"]
-                if agg["batch_read_numpy_sync"]["avg_ms"] > 0
-                else 0
+        best_stage_sync = {"ratio": 0.0, "label": ""}
+        best_stage_async = {"ratio": 0.0, "label": ""}
+        for entry in data:
+            sr = _safe_ratio(
+                entry["batch_read_sync"]["avg_ms"],
+                entry["batch_read_numpy_sync"]["avg_ms"],
             )
-            if sync_ratio > 1:
-                takeaways.append(f"Aggregation with numpy is **{sync_ratio:.1f}x** faster than dict-based processing")
+            ar = _safe_ratio(
+                entry.get("batch_read_async", {}).get("avg_ms"),
+                entry.get("batch_read_numpy_async", {}).get("avg_ms"),
+            )
+            if sr > best_stage_sync["ratio"]:
+                best_stage_sync = {"ratio": sr, "label": entry["stage_label"]}
+            if ar > best_stage_async["ratio"]:
+                best_stage_async = {"ratio": ar, "label": entry["stage_label"]}
+
+        if best_stage_sync["ratio"] > 1:
+            takeaways.append(
+                f"Post-processing: numpy **{best_stage_sync['label']}** is "
+                f"**{best_stage_sync['ratio']:.1f}x** faster (Sync)"
+            )
+        if best_stage_async["ratio"] > 1:
+            takeaways.append(
+                f"Post-processing: numpy **{best_stage_async['label']}** is "
+                f"**{best_stage_async['ratio']:.1f}x** faster (Async)"
+            )
 
     # Memory insight
     if results.memory:
