@@ -34,6 +34,24 @@ const config: Config = {
     },
   },
 
+  plugins: [
+    [
+      '@docusaurus/plugin-content-blog',
+      {
+        id: 'docs-for-agent',
+        routeBasePath: 'docs-for-agent',
+        path: './docs-for-agent',
+        blogTitle: 'Docs for Agent',
+        blogDescription: 'AI-agent-friendly documentation for aerospike-py',
+        showReadingTime: false,
+        blogSidebarCount: 'ALL',
+        blogSidebarTitle: 'All Docs',
+        onUntruncatedBlogPosts: 'ignore',
+        onInlineTags: 'ignore',
+      },
+    ],
+  ],
+
   presets: [
     [
       'classic',
@@ -44,11 +62,7 @@ const config: Config = {
             'https://github.com/KimSoungRyoul/aerospike-py/tree/main/docs/',
           showLastUpdateTime: true,
         },
-        blog: {
-          showReadingTime: true,
-          editUrl:
-            'https://github.com/KimSoungRyoul/aerospike-py/tree/main/docs/',
-        },
+        blog: false,
         theme: {
           customCss: './src/css/custom.css',
         },
@@ -76,7 +90,7 @@ const config: Config = {
           position: 'left',
           label: 'Docs',
         },
-        {to: '/blog', label: 'Blog', position: 'left'},
+        {to: '/docs-for-agent', label: 'Docs for Agent', position: 'left'},
         {to: '/releases', label: 'Releases', position: 'left'},
         {
           type: 'localeDropdown',
@@ -116,10 +130,6 @@ const config: Config = {
         {
           title: 'More',
           items: [
-            {
-              label: 'Blog',
-              to: '/blog',
-            },
             {
               label: 'Releases',
               to: '/releases',

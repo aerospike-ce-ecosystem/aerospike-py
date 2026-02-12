@@ -5,8 +5,9 @@
   "scripts": {
     "docusaurus": "docusaurus",
     "fetch-releases": "node scripts/fetch-releases.mjs",
-    "prebuild": "node scripts/fetch-releases.mjs",
-    "start": "node scripts/fetch-releases.mjs && docusaurus start",
+    "generate-agent-docs": "node scripts/generate-agent-docs.mjs",
+    "prebuild": "node scripts/fetch-releases.mjs && node scripts/generate-agent-docs.mjs",
+    "start": "node scripts/fetch-releases.mjs && node scripts/generate-agent-docs.mjs && docusaurus start",
     "build": "docusaurus build",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",

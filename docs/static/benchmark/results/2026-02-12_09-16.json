@@ -1,0 +1,151 @@
+{
+  "timestamp": "2026-02-12T09:16:58.293002",
+  "date": "2026-02-12_09-16",
+  "environment": {
+    "platform": "Darwin arm64",
+    "python_version": "3.13.11",
+    "count": 5000,
+    "rounds": 20,
+    "warmup": 500,
+    "concurrency": 50,
+    "batch_groups": 10
+  },
+  "rust_sync": {
+    "put": {
+      "avg_ms": 0.1905407124082558,
+      "p50_ms": 0.18324999837204814,
+      "p99_ms": 0.28345902683213353,
+      "ops_per_sec": 5248.225464747833,
+      "stdev_ms": 0.00133632088694601
+    },
+    "get": {
+      "avg_ms": 0.19180053576128556,
+      "p50_ms": 0.18405199807602912,
+      "p99_ms": 0.2830000012181699,
+      "ops_per_sec": 5213.7497741121915,
+      "stdev_ms": 0.0012017840069037638
+    },
+    "batch_read": {
+      "avg_ms": 0.007844599999953062,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 126819.73314778319,
+      "stdev_ms": 0.0007972526231715927
+    },
+    "batch_read_numpy": {
+      "avg_ms": 0.006581666797865182,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 151619.4787102068,
+      "stdev_ms": 0.0009628346178442398
+    },
+    "batch_write": {
+      "avg_ms": 0.007551916601369157,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 132418.65691078213,
+      "stdev_ms": 0.0012188329875339975
+    },
+    "scan": {
+      "avg_ms": 0.002608029299881309,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 383435.6530185294,
+      "stdev_ms": 0.00023600447486891725
+    }
+  },
+  "c_sync": {
+    "put": {
+      "avg_ms": 0.1474891005200334,
+      "p50_ms": 0.14391652075573802,
+      "p99_ms": 0.21583301713690162,
+      "ops_per_sec": 6780.162054372966,
+      "stdev_ms": 0.0013288192963824478
+    },
+    "get": {
+      "avg_ms": 0.14572836668230593,
+      "p50_ms": 0.1417915045749396,
+      "p99_ms": 0.21875003585591912,
+      "ops_per_sec": 6862.0827791693855,
+      "stdev_ms": 0.0011148889726080747
+    },
+    "batch_read": {
+      "avg_ms": 0.0050785082974471145,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 197391.12390132906,
+      "stdev_ms": 0.001953891351403076
+    },
+    "batch_read_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null,
+      "stdev_ms": null
+    },
+    "batch_write": {
+      "avg_ms": 0.004058025003178045,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 246465.02685515635,
+      "stdev_ms": 0.0020453269952076386
+    },
+    "scan": {
+      "avg_ms": 0.0014365832088515163,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 686562.5598951092,
+      "stdev_ms": 0.00038613743198359125
+    }
+  },
+  "rust_async": {
+    "put": {
+      "avg_ms": 0.06905563320033252,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 14481.07784485835,
+      "stdev_ms": 0.0005537782440049738
+    },
+    "get": {
+      "avg_ms": 0.08917346659582108,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 11214.098073954015,
+      "stdev_ms": 0.00042887679096584205
+    },
+    "batch_read": {
+      "avg_ms": 0.0023023167974315583,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 434345.091481585,
+      "stdev_ms": 0.00032336007505336843
+    },
+    "batch_read_numpy": {
+      "avg_ms": 0.0015041915932670236,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 664808.9275835225,
+      "stdev_ms": 0.00035977655553579816
+    },
+    "batch_write": {
+      "avg_ms": 0.0016096000035759062,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 618260.3417821015,
+      "stdev_ms": 0.0002672532751590604
+    },
+    "scan": {
+      "avg_ms": 0.0026764834066852925,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 373624.58422204683,
+      "stdev_ms": 0.0001139778852954205
+    }
+  },
+  "takeaways": [
+    "AsyncClient shows **2.5x** faster latency than the official client in BATCH_WRITE operations",
+    "BATCH_READ_NUMPY (SyncClient) is **1.3x** slower than official BATCH_READ (returns numpy structured array vs Python dict)",
+    "BATCH_READ_NUMPY (AsyncClient) is **3.4x** faster than official BATCH_READ (returns numpy structured array vs Python dict)",
+    "AsyncClient shows **4.7x** higher throughput than SyncClient in BATCH_WRITE operations (concurrency=50)"
+  ]
+}
