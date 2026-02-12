@@ -5,7 +5,7 @@
   "scripts": {
     "docusaurus": "docusaurus",
     "fetch-releases": "node scripts/fetch-releases.mjs",
-    "generate-agent-docs": "node scripts/generate-agent-docs.mjs",
+    "generate-llms-txt": "node scripts/generate-agent-docs.mjs",
     "prebuild": "node scripts/fetch-releases.mjs && node scripts/generate-agent-docs.mjs",
     "start": "node scripts/fetch-releases.mjs && node scripts/generate-agent-docs.mjs && docusaurus start",
     "build": "docusaurus build",

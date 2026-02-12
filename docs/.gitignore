@@ -7,7 +7,6 @@
 # Generated files
 .docusaurus
 .cache-loader
-/docs-for-agent
 
 # Misc
 .DS_Store

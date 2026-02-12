@@ -7,7 +7,7 @@ import Heading from '@theme/Heading';
 import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import styles from './index.module.css';
 
-function CopyBlock({text}: {text: string}) {
+function CopyBlock({text, className}: {text: string; className?: string}) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(text).then(() => {
@@ -16,7 +16,7 @@ function CopyBlock({text}: {text: string}) {
     });
   }, [text]);
   return (
-    <div className={styles.installCommand}>
+    <div className={clsx(styles.installCommand, className)}>
       <code>{text}</code>
       <button
         className={styles.copyButton}
@@ -51,6 +51,10 @@ function HomepageHeader() {
           </Link>
         </div>
         <CopyBlock text="pip install aerospike-py" />
+        <p className={styles.agentLabel}>
+          For AI Agents — copy this prompt to give your agent full context:
+        </p>
+        <CopyBlock className={styles.agentPrompt} text="Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to understand the aerospike-py Python client API, then write code based on that documentation." />
       </div>
     </header>
   );
