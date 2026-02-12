@@ -56,6 +56,27 @@ function HomepageHeader() {
   );
 }
 
+function AgentPromptSection() {
+  const prompt = 'Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to understand the aerospike-py Python client API, then write code based on that documentation.';
+  return (
+    <section className={styles.agentSection}>
+      <div className="container">
+        <Heading as="h2">For AI Agents</Heading>
+        <p>
+          This project supports the <Link to="https://llmstxt.org/">llms.txt</Link> standard.
+          Copy the prompt below to give your AI agent full context about aerospike-py:
+        </p>
+        <CopyBlock text={prompt} />
+        <p className={styles.agentLinks}>
+          <Link to="https://kimsoungryoul.github.io/aerospike-py/llms.txt">llms.txt</Link>
+          {' | '}
+          <Link to="https://kimsoungryoul.github.io/aerospike-py/llms-full.txt">llms-full.txt</Link>
+        </p>
+      </div>
+    </section>
+  );
+}
+
 export default function Home(): ReactNode {
   return (
     <Layout
@@ -64,6 +85,7 @@ export default function Home(): ReactNode {
       <HomepageHeader />
       <main>
         <HomepageFeatures />
+        <AgentPromptSection />
       </main>
     </Layout>
   );

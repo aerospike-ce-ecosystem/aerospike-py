@@ -55,3 +55,36 @@
   color: #fff;
   border-color: rgba(255, 255, 255, 0.7);
 }
+
+.agentSection {
+  padding: 3rem 0;
+  background: var(--ifm-background-surface-color);
+  text-align: center;
+}
+
+.agentSection .installCommand {
+  background: var(--ifm-color-emphasis-100);
+  max-width: 800px;
+  margin: 1rem auto;
+  text-align: left;
+}
+
+.agentSection .installCommand code {
+  color: var(--ifm-font-color-base);
+  font-size: 0.9rem;
+}
+
+.agentSection .copyButton {
+  color: var(--ifm-color-emphasis-600);
+  border-color: var(--ifm-color-emphasis-300);
+}
+
+.agentSection .copyButton:hover {
+  background: var(--ifm-color-emphasis-200);
+  color: var(--ifm-color-emphasis-800);
+}
+
+.agentLinks {
+  margin-top: 1rem;
+  font-size: 0.95rem;
+}

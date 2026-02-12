@@ -1,0 +1,42 @@
+# aerospike-py
+
+> High-performance Aerospike Python Client built in Rust (Sync/Async). Provides both synchronous and asynchronous APIs with zero-copy NumPy batch reads, OpenTelemetry tracing, and Prometheus metrics.
+
+- [Full documentation](https://kimsoungryoul.github.io/aerospike-py/llms-full.txt): Complete documentation in a single file
+
+## Getting Started
+
+- [Contributing](https://kimsoungryoul.github.io/aerospike-py/docs/contributing): Development setup, build instructions, testing, and code style guidelines for contributors.
+- [Getting Started](https://kimsoungryoul.github.io/aerospike-py/docs/getting-started): Install aerospike-py and connect to an Aerospike cluster in minutes with sync or async Python clients.
+
+## API Reference
+
+- [Client](https://kimsoungryoul.github.io/aerospike-py/docs/api/client): Complete API reference for the synchronous Client and asynchronous AsyncClient classes.
+- [Constants](https://kimsoungryoul.github.io/aerospike-py/docs/api/constants): Policy, TTL, operator, index type, and other constants used across the aerospike-py API.
+- [Exceptions](https://kimsoungryoul.github.io/aerospike-py/docs/api/exceptions): Exception hierarchy and error handling patterns for aerospike-py.
+- [Query & Scan](https://kimsoungryoul.github.io/aerospike-py/docs/api/query-scan): API reference for Query and Scan classes including predicates and result iteration.
+
+## Guides
+
+- [Admin Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/admin): User and role management operations for security-enabled Aerospike clusters.
+- [List CDT Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/cdt-list): 31 atomic list operations for append, insert, remove, sort, and advanced queries on list bins.
+- [Map CDT Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/cdt-map): 27 atomic map operations for put, get, remove, and advanced queries on map bins.
+- [CRUD & Batch Operations Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/crud): Step-by-step guide covering put, get, remove, batch operations, and optimistic locking.
+- [Error Handling](https://kimsoungryoul.github.io/aerospike-py/docs/guides/error-handling): Best practices for handling Aerospike errors in production applications.
+- [Expression Filters](https://kimsoungryoul.github.io/aerospike-py/docs/guides/expression-filters): Use 104+ composable expression filter functions for server-side record filtering.
+- [Migration from Official Client](https://kimsoungryoul.github.io/aerospike-py/docs/guides/migration): Migrate from the official aerospike-client-python (C-based) to aerospike-py (Rust-based).
+- [NumPy Batch Read Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/numpy-batch): Use batch_read with numpy structured arrays for high-performance columnar analytics directly from Aerospike.
+- [Performance Tuning](https://kimsoungryoul.github.io/aerospike-py/docs/guides/performance-tuning): Tips for optimizing aerospike-py throughput and latency.
+- [Query & Scan Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/query-scan): Learn how to create secondary index queries, full namespace scans, and use predicates.
+- [UDF Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/udf): Register, execute, and remove User Defined Functions (Lua scripts) on the Aerospike server.
+
+## Integrations
+
+- [FastAPI Integration](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/fastapi): How to use aerospike-py AsyncClient with FastAPI lifespan and dependency injection.
+- [Logging](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/logging): Structured logging with the Rust-to-Python logging bridge in aerospike-py.
+- [Prometheus Metrics](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/metrics): OpenTelemetry-compatible Prometheus metrics for monitoring Aerospike operations.
+- [Distributed Tracing](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/tracing): OpenTelemetry distributed tracing for Aerospike operations with OTLP gRPC export.
+
+## Performance
+
+- [Performance Overview](https://kimsoungryoul.github.io/aerospike-py/docs/performance/overview)

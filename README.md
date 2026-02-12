@@ -89,6 +89,17 @@ aerospike-py provides **native `async/await`** via Tokio + PyO3, enabling `async
 
 > Full benchmark details: [benchmark/](benchmark/) | Run: `make run-benchmark`
 
+## For AI Agents
+
+This project supports the [llms.txt](https://llmstxt.org/) standard. Use the following prompt to give your AI agent full context about aerospike-py:
+
+```
+Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to understand the aerospike-py Python client API, then write code based on that documentation.
+```
+
+- [`llms.txt`](https://kimsoungryoul.github.io/aerospike-py/llms.txt) — Documentation index for AI agents
+- [`llms-full.txt`](https://kimsoungryoul.github.io/aerospike-py/llms-full.txt) — Complete documentation in a single file
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and making changes.

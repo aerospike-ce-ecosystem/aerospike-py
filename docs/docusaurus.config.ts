@@ -34,23 +34,7 @@ const config: Config = {
     },
   },
 
-  plugins: [
-    [
-      '@docusaurus/plugin-content-blog',
-      {
-        id: 'docs-for-agent',
-        routeBasePath: 'docs-for-agent',
-        path: './docs-for-agent',
-        blogTitle: 'Docs for Agent',
-        blogDescription: 'AI-agent-friendly documentation for aerospike-py',
-        showReadingTime: false,
-        blogSidebarCount: 'ALL',
-        blogSidebarTitle: 'All Docs',
-        onUntruncatedBlogPosts: 'ignore',
-        onInlineTags: 'ignore',
-      },
-    ],
-  ],
+  plugins: [],
 
   presets: [
     [
@@ -90,7 +74,6 @@ const config: Config = {
           position: 'left',
           label: 'Docs',
         },
-        {to: '/docs-for-agent', label: 'Docs for Agent', position: 'left'},
         {to: '/releases', label: 'Releases', position: 'left'},
         {
           type: 'localeDropdown',

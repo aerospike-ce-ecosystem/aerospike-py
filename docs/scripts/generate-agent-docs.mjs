@@ -1,23 +1,22 @@
 /**
- * Generates AI-agent-friendly markdown docs from existing Docusaurus docs.
+ * Generates AI-agent-friendly documentation files (llms.txt, llms-full.txt)
+ * from existing Docusaurus docs.
  *
  * Strips MDX components (Tabs, TabItem, imports), converts admonitions to
- * blockquotes, and outputs clean markdown as a Docusaurus blog under
- * docs-for-agent/.
+ * blockquotes, and outputs llms.txt standard files in static/.
  *
  * Usage: node scripts/generate-agent-docs.mjs
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, rmSync, existsSync } from 'fs';
-import { dirname, join, basename, extname, relative } from 'path';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync } from 'fs';
+import { dirname, join, extname, relative } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = join(__dirname, '..', 'docs');
-const OUTPUT_DIR = join(__dirname, '..', 'docs-for-agent');
+const STATIC_DIR = join(__dirname, '..', 'static');
+const SITE_URL = 'https://kimsoungryoul.github.io/aerospike-py';
 const BASE_URL = '/docs';
-
-const BUILD_DATE = new Date().toISOString().split('T')[0];
 
 // ── File collection ──────────────────────────────────────────────────
 
@@ -56,22 +55,22 @@ function stripImports(content) {
   return content.replace(/^import\s+.*from\s+['"].*['"];?\s*$/gm, '');
 }
 
-/** 2. Flatten <Tabs>/<TabItem> into #### headers */
+/** 2. Flatten <Tabs>/<TabItem> into ### headers */
 function flattenTabs(content) {
   // Remove <Tabs> and </Tabs>
   content = content.replace(/^\s*<Tabs>\s*$/gm, '');
   content = content.replace(/^\s*<\/Tabs>\s*$/gm, '');
 
-  // Convert <TabItem> opening tags to #### headers
+  // Convert <TabItem> opening tags to ### headers
   content = content.replace(
     /^\s*<TabItem\s+value="[^"]*"\s+label="([^"]*)"\s*(?:default)?\s*>\s*$/gm,
-    '\n#### $1\n'
+    '\n### $1\n'
   );
 
   // Also handle different attribute ordering
   content = content.replace(
     /^\s*<TabItem\s+label="([^"]*)"\s+value="[^"]*"\s*(?:default)?\s*>\s*$/gm,
-    '\n#### $1\n'
+    '\n### $1\n'
   );
 
   // Remove </TabItem>
@@ -93,12 +92,35 @@ function processAdmonitions(content) {
   });
 }
 
-/** 4. Add description comment to mermaid code blocks */
+/** 4. Add descriptive text before mermaid code blocks */
 function convertMermaid(content) {
   return content.replace(
     /```mermaid\n([\s\S]*?)```/g,
-    '```mermaid\n%% Diagram (rendered as Mermaid chart in browser)\n$1```'
+    (_match, src) => {
+      const desc = describeMermaid(src);
+      return `> **Diagram:** ${desc}\n\n\`\`\`mermaid\n${src}\`\`\``;
+    }
   );
+}
+
+function describeMermaid(source) {
+  const firstLine = source.trim().split('\n')[0].trim();
+  const subgraphs = [...source.matchAll(/subgraph\s+\w+\["([^"]+)"\]/g)]
+    .map(m => m[1].replace(/\*\*/g, '').trim());
+  const participants = [...source.matchAll(/participant\s+\w+\s+as\s+(.+)$/gm)]
+    .map(m => m[1].trim());
+
+  if (firstLine.startsWith('sequenceDiagram')) {
+    return participants.length
+      ? `Sequence diagram showing interactions between ${participants.join(', ')}.`
+      : 'Sequence diagram showing component interactions.';
+  }
+  if (firstLine.startsWith('flowchart')) {
+    return subgraphs.length
+      ? `Flowchart showing data flow between ${subgraphs.join(', ')}.`
+      : 'Flowchart showing system architecture and data flow.';
+  }
+  return 'Architecture diagram.';
 }
 
 /** 5. Convert relative markdown links to absolute site paths */
@@ -133,44 +155,10 @@ function convertLinks(content, filePath) {
   );
 }
 
-/** 6. Transform docs frontmatter to blog frontmatter */
-function transformFrontmatter(content, slug) {
+/** 6. Strip frontmatter from content */
+function stripFrontmatter(content) {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
-  if (!fmMatch) {
-    return content;
-  }
-
-  const fmBlock = fmMatch[1];
-  const body = content.slice(fmMatch[0].length);
-
-  // Parse existing frontmatter
-  const title = fmBlock.match(/^title:\s*(.+)$/m)?.[1]?.trim() || slug;
-  const description = fmBlock.match(/^description:\s*(.+)$/m)?.[1]?.trim() || '';
-
-  // Determine tags from slug
-  const tags = ['agent-docs'];
-  if (slug.startsWith('api-')) tags.unshift('api');
-  else if (slug.startsWith('guides-')) tags.unshift('guides');
-  else if (slug.startsWith('integrations-')) tags.unshift('integrations');
-  else if (slug.startsWith('performance-')) tags.unshift('performance');
-  else tags.unshift('general');
-
-  // Build new frontmatter
-  const newFm = [
-    '---',
-    `title: "${title}"`,
-    `slug: ${slug}`,
-    `date: ${BUILD_DATE}`,
-    `tags: [${tags.join(', ')}]`,
-  ];
-
-  if (description) {
-    newFm.push(`description: "${description}"`);
-  }
-
-  newFm.push('---');
-
-  return newFm.join('\n') + '\n' + body;
+  return fmMatch ? content.slice(fmMatch[0].length) : content;
 }
 
 /** 7. Clean up excessive whitespace */
@@ -187,52 +175,74 @@ function getCategory(filePath) {
   return parts.length > 1 ? parts[0] : 'general';
 }
 
+function buildDocPath(filePath) {
+  // Build the Docusaurus docs URL path from source file path
+  // e.g. "guides/crud.md" → "guides/crud", "getting-started.md" → "getting-started"
+  return relative(DOCS_DIR, filePath).replace(/\.md$/, '');
+}
+
 function transformFile(filePath) {
   let content = readFileSync(filePath, 'utf-8');
   const slug = buildSlug(filePath);
   const category = getCategory(filePath);
+  const docPath = buildDocPath(filePath);
+
+  // Extract title and description from original frontmatter
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
+  const title = fmMatch?.[1]?.match(/^title:\s*(.+)$/m)?.[1]?.trim() || slug;
+  const description = fmMatch?.[1]?.match(/^description:\s*(.+)$/m)?.[1]?.trim() || '';
 
   content = stripImports(content);
   content = flattenTabs(content);
   content = processAdmonitions(content);
   content = convertMermaid(content);
   content = convertLinks(content, filePath);
-  content = transformFrontmatter(content, slug);
-  content = cleanWhitespace(content);
+  content = stripFrontmatter(content);
+  const body = cleanWhitespace(content);
 
-  return { slug, category, content };
+  return { slug, category, docPath, title, description, body };
 }
 
-function generateIndex(entries) {
+// ── llms.txt generation ──────────────────────────────────────────────
+
+const CATEGORY_ORDER = ['general', 'api', 'guides', 'integrations', 'performance'];
+const CATEGORY_TITLES = {
+  general: 'Getting Started',
+  api: 'API Reference',
+  guides: 'Guides',
+  integrations: 'Integrations',
+  performance: 'Performance',
+};
+
+function groupByCategory(entries) {
+  const categories = {};
+  for (const entry of entries) {
+    if (!categories[entry.category]) categories[entry.category] = [];
+    categories[entry.category].push(entry);
+  }
+  return categories;
+}
+
+function generateLlmsTxt(entries) {
   const lines = [
-    '---',
-    `title: "aerospike-py Documentation Index"`,
-    `slug: index`,
-    `date: ${BUILD_DATE.replace(/(\d+)$/, (d) => String(Number(d) - 1).padStart(2, '0'))}`,
-    `tags: [index, agent-docs]`,
-    `description: "Table of contents for all aerospike-py agent-friendly docs."`,
-    '---',
+    '# aerospike-py',
     '',
-    '# aerospike-py Documentation Index',
+    '> High-performance Aerospike Python Client built in Rust (Sync/Async). Provides both synchronous and asynchronous APIs with zero-copy NumPy batch reads, OpenTelemetry tracing, and Prometheus metrics.',
     '',
-    'This is a clean-markdown version of the aerospike-py documentation, optimized for AI agents.',
-    '',
-    '## Documents',
+    `- [Full documentation](${SITE_URL}/llms-full.txt): Complete documentation in a single file`,
     '',
   ];
 
-  // Group by category (from directory structure)
-  const categories = {};
-  for (const { slug, category } of entries) {
-    if (!categories[category]) categories[category] = [];
-    categories[category].push(slug);
-  }
+  const categories = groupByCategory(entries);
 
-  for (const [category, catSlugs] of Object.entries(categories).sort()) {
-    lines.push(`### ${category.charAt(0).toUpperCase() + category.slice(1)}`);
+  for (const cat of CATEGORY_ORDER) {
+    const docs = categories[cat];
+    if (!docs) continue;
+    lines.push(`## ${CATEGORY_TITLES[cat] || cat}`);
     lines.push('');
-    for (const slug of catSlugs.sort()) {
-      lines.push(`- [${slug}](/docs-for-agent/${slug})`);
+    for (const { title, description, docPath } of docs.sort((a, b) => a.slug.localeCompare(b.slug))) {
+      const desc = description ? `: ${description}` : '';
+      lines.push(`- [${title}](${SITE_URL}/docs/${docPath})${desc}`);
     }
     lines.push('');
   }
@@ -240,23 +250,68 @@ function generateIndex(entries) {
   return lines.join('\n');
 }
 
-function generateAuthorsYml() {
-  return [
-    'agent-docs-generator:',
-    '  name: Auto-generated',
-    '  title: Generated from aerospike-py docs',
-    '',
-  ].join('\n');
+/**
+ * Shift markdown heading levels by n (e.g., ## -> ####).
+ * Skips headings inside fenced code blocks.
+ */
+function shiftHeadings(content, shift) {
+  const lines = content.split('\n');
+  let inCodeBlock = false;
+  return lines.map(line => {
+    if (line.startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      return line;
+    }
+    if (inCodeBlock) return line;
+
+    const headingMatch = line.match(/^(#{1,6})\s+(.*)/);
+    if (headingMatch) {
+      const newLevel = Math.min(headingMatch[1].length + shift, 6);
+      return '#'.repeat(newLevel) + ' ' + headingMatch[2];
+    }
+    return line;
+  }).join('\n');
 }
 
-function main() {
-  console.log('Generating agent-friendly docs...');
+function generateLlmsFullTxt(entries) {
+  const lines = [
+    '# aerospike-py',
+    '',
+    '> High-performance Aerospike Python Client built in Rust (Sync/Async). Provides both synchronous and asynchronous APIs with zero-copy NumPy batch reads, OpenTelemetry tracing, and Prometheus metrics.',
+    '',
+  ];
 
-  // Clean output directory
-  if (existsSync(OUTPUT_DIR)) {
-    rmSync(OUTPUT_DIR, { recursive: true });
+  const categories = groupByCategory(entries);
+
+  for (const cat of CATEGORY_ORDER) {
+    const docs = categories[cat];
+    if (!docs) continue;
+    lines.push(`## ${CATEGORY_TITLES[cat] || cat}`);
+    lines.push('');
+
+    for (const { title, description, body } of docs.sort((a, b) => a.slug.localeCompare(b.slug))) {
+      lines.push(`### ${title}`);
+      if (description) {
+        lines.push('');
+        lines.push(`> ${description}`);
+      }
+      lines.push('');
+      lines.push(shiftHeadings(body, 2));
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+    }
   }
-  mkdirSync(OUTPUT_DIR, { recursive: true });
+
+  return lines.join('\n');
+}
+
+// ── Entry point ──────────────────────────────────────────────────────
+
+function main() {
+  console.log('Generating llms.txt and llms-full.txt...');
+
+  mkdirSync(STATIC_DIR, { recursive: true });
 
   // Collect and transform
   const mdFiles = collectMarkdownFiles(DOCS_DIR);
@@ -265,24 +320,21 @@ function main() {
   const entries = [];
 
   for (const filePath of mdFiles) {
-    const { slug, category, content } = transformFile(filePath);
-    const outputFile = join(OUTPUT_DIR, `${BUILD_DATE}-${slug}.md`);
-    writeFileSync(outputFile, content, 'utf-8');
-    entries.push({ slug, category });
-    console.log(`  ✓ ${slug}`);
+    const entry = transformFile(filePath);
+    entries.push(entry);
+    console.log(`  ✓ ${entry.slug}`);
   }
 
-  // Generate index (date - 1 day to sort it first)
-  const indexContent = generateIndex(entries);
-  const indexDate = BUILD_DATE.replace(/(\d+)$/, (d) => String(Number(d) - 1).padStart(2, '0'));
-  writeFileSync(join(OUTPUT_DIR, `${indexDate}-index.md`), indexContent, 'utf-8');
-  console.log(`  ✓ index`);
+  // Generate llms.txt and llms-full.txt in static/
+  const llmsTxt = generateLlmsTxt(entries);
+  writeFileSync(join(STATIC_DIR, 'llms.txt'), llmsTxt, 'utf-8');
+  console.log(`  ✓ static/llms.txt`);
 
-  // Generate authors.yml
-  writeFileSync(join(OUTPUT_DIR, 'authors.yml'), generateAuthorsYml(), 'utf-8');
-  console.log(`  ✓ authors.yml`);
+  const llmsFullTxt = generateLlmsFullTxt(entries);
+  writeFileSync(join(STATIC_DIR, 'llms-full.txt'), llmsFullTxt, 'utf-8');
+  console.log(`  ✓ static/llms-full.txt (${(Buffer.byteLength(llmsFullTxt) / 1024).toFixed(1)} KB)`);
 
-  console.log(`\nGenerated ${entries.length + 1} files in docs-for-agent/`);
+  console.log(`\nGenerated llms.txt and llms-full.txt in static/`);
 }
 
 main();
