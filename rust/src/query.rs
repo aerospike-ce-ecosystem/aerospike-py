@@ -106,7 +106,7 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
                 radius,
             })
         }
-        "geo_contains_point" => {
+        "geo_contains_geojson_point" => {
             let geojson: String = pred.get_item(2)?.extract()?;
             Ok(Predicate::GeoContainsPoint { bin, geojson })
         }

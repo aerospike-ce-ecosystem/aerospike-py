@@ -44,11 +44,6 @@ function HomepageHeader() {
             to="/docs/getting-started">
             Get Started
           </Link>
-          <Link
-            className="button button--secondary button--outline button--lg"
-            to="/releases">
-            Releases
-          </Link>
         </div>
         <CopyBlock text="pip install aerospike-py" />
         <p className={styles.agentLabel}>

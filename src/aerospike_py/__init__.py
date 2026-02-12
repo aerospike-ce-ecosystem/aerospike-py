@@ -414,9 +414,11 @@ def stop_metrics_server() -> None:
     """Stop the background metrics HTTP server."""
     global _metrics_server, _metrics_server_thread
     if _metrics_server is not None:
-        _metrics_server.shutdown()
-        _metrics_server = None
-        _metrics_server_thread = None
+        try:
+            _metrics_server.shutdown()
+        finally:
+            _metrics_server = None
+            _metrics_server_thread = None
 
 
 def init_tracing() -> None:
