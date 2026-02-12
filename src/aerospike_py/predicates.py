@@ -43,15 +43,30 @@ def contains(bin_name: str, index_type: int, val: Any) -> tuple[str, str, int, A
 
 
 def geo_within_geojson_region(bin_name: str, geojson: str) -> tuple[str, str, str]:
-    """Create a geospatial 'within region' predicate."""
+    """Create a geospatial 'within region' predicate.
+
+    .. warning::
+        Geo filters are not yet supported in this version.
+        Using this predicate in a query will raise ``ClientError`` at execution time.
+    """
     return ("geo_within_geojson_region", bin_name, geojson)
 
 
 def geo_within_radius(bin_name: str, lat: float, lng: float, radius: float) -> tuple[str, str, float, float, float]:
-    """Create a geospatial 'within radius' predicate."""
+    """Create a geospatial 'within radius' predicate.
+
+    .. warning::
+        Geo filters are not yet supported in this version.
+        Using this predicate in a query will raise ``ClientError`` at execution time.
+    """
     return ("geo_within_radius", bin_name, lat, lng, radius)
 
 
 def geo_contains_geojson_point(bin_name: str, geojson: str) -> tuple[str, str, str]:
-    """Create a geospatial 'contains point' predicate."""
-    return ("geo_contains_point", bin_name, geojson)
+    """Create a geospatial 'contains point' predicate.
+
+    .. warning::
+        Geo filters are not yet supported in this version.
+        Using this predicate in a query will raise ``ClientError`` at execution time.
+    """
+    return ("geo_contains_geojson_point", bin_name, geojson)

@@ -18,6 +18,23 @@ Aerospike Python Client built with PyO3 + Rust. Drop-in replacement for [aerospi
 
 > API details: [docs/api/](docs/api/) | Usage guides: [docs/guides/](docs/guides/)
 
+## Drop-in Replacement
+
+Just change the import — your existing code works as-is:
+
+```diff
+- import aerospike
++ import aerospike_py as aerospike
+
+config = {'hosts': [('localhost', 3000)]}
+client = aerospike.client(config).connect()
+
+key = ('test', 'demo', 'key1')
+client.put(key, {'name': 'Alice', 'age': 30})
+_, _, bins = client.get(key)
+client.close()
+```
+
 ## Quickstart
 
 ```bash

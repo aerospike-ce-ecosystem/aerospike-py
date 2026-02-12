@@ -75,7 +75,7 @@ class TestGeoPredicates:
     def test_geo_contains_geojson_point(self):
         geojson = '{"type": "Point", "coordinates": [0.5, 0.5]}'
         result = p.geo_contains_geojson_point("region", geojson)
-        assert result == ("geo_contains_point", "region", geojson)
+        assert result == ("geo_contains_geojson_point", "region", geojson)
         assert len(result) == 3
 
 
