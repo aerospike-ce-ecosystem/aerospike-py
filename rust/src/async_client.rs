@@ -307,7 +307,7 @@ impl PyAsyncClient {
                 { client.get(&read_policy, &rust_key, Bins::All).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
         })
     }
 
@@ -347,7 +347,7 @@ impl PyAsyncClient {
                 { client.get(&read_policy, &rust_key, bins_selector).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
         })
     }
 
@@ -586,7 +586,7 @@ impl PyAsyncClient {
                 { client.operate(&write_policy, &rust_key, &rust_ops).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
         })
     }
 
@@ -746,7 +746,7 @@ impl PyAsyncClient {
             Python::attach(|py| {
                 let key_py = match &record.key {
                     Some(k) => key_to_py(py, k)?,
-                    None => py.None(),
+                    None => key_to_py(py, &rust_key)?,
                 };
                 let meta_dict_obj = record_to_meta(py, &record)?;
                 let ordered_bins = PyList::empty(py);
@@ -1170,7 +1170,7 @@ impl PyAsyncClient {
             Python::attach(|py| {
                 let py_list = PyList::empty(py);
                 for record in &records {
-                    py_list.append(record_to_py(py, record)?)?;
+                    py_list.append(record_to_py(py, record, None)?)?;
                 }
                 Ok(py_list.into_any().unbind())
             })

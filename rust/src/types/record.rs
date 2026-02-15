@@ -1,4 +1,4 @@
-use aerospike_core::Record;
+use aerospike_core::{Key, Record};
 use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
@@ -10,12 +10,22 @@ use super::value::value_to_py;
 /// key = (namespace, set, user_key, digest)
 /// meta = {"gen": generation, "ttl": ttl_seconds}
 /// bins = {"bin_name": value, ...}
-pub fn record_to_py(py: Python<'_>, record: &Record) -> PyResult<Py<PyAny>> {
+///
+/// When the server does not return a key (e.g. POLICY_KEY_DIGEST),
+/// `fallback_key` is used so the caller always gets a valid key tuple.
+pub fn record_to_py(
+    py: Python<'_>,
+    record: &Record,
+    fallback_key: Option<&Key>,
+) -> PyResult<Py<PyAny>> {
     trace!("Converting Rust record to Python");
-    // Key tuple
+    // Key tuple: prefer the key from the record, fall back to the original request key
     let key_py = match &record.key {
         Some(key) => key_to_py(py, key)?,
-        None => py.None(),
+        None => match fallback_key {
+            Some(key) => key_to_py(py, key)?,
+            None => py.None(),
+        },
     };
 
     // Meta dict

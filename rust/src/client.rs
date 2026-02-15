@@ -291,7 +291,7 @@ impl PyClient {
                     )
                 })
             })?;
-            return record_to_py(py, &record);
+            return record_to_py(py, &record, Some(&rust_key));
         }
 
         let read_policy = parse_read_policy(policy)?;
@@ -308,7 +308,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record)
+        record_to_py(py, &record, Some(&rust_key))
     }
 
     /// Read specific bins of a record
@@ -351,7 +351,7 @@ impl PyClient {
                     )
                 })
             })?;
-            return record_to_py(py, &record);
+            return record_to_py(py, &record, Some(&rust_key));
         }
 
         let read_policy = parse_read_policy(policy)?;
@@ -368,7 +368,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record)
+        record_to_py(py, &record, Some(&rust_key))
     }
 
     /// Check if a record exists. Returns (key, meta) or (key, None)
@@ -736,7 +736,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record)
+        record_to_py(py, &record, Some(&rust_key))
     }
 
     /// Perform multiple operations on a single record, returning ordered results
@@ -783,7 +783,7 @@ impl PyClient {
         // where ordered_bins is a list of (bin_name, value) tuples
         let key_py = match &record.key {
             Some(k) => key_to_py(py, k)?,
-            None => py.None(),
+            None => key_to_py(py, &rust_key)?,
         };
 
         let meta_dict_obj = record_to_meta(py, &record)?;
