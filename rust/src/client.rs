@@ -137,6 +137,76 @@ impl PyClient {
         py.detach(|| RUNTIME.block_on(async { Ok(client.node_names().await) }))
     }
 
+    // ── Info ─────────────────────────────────────────────────────
+
+    /// Send an info command to all nodes in the cluster.
+    /// Returns a list of (node_name, error_code, response) tuples.
+    #[pyo3(signature = (command, policy=None))]
+    fn info_all(
+        &self,
+        py: Python<'_>,
+        command: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Vec<(String, i32, String)>> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let cmd = command.to_string();
+
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let nodes = client.nodes().await;
+                let mut results = Vec::new();
+                for node in &nodes {
+                    match node.info(&admin_policy, &[&cmd]).await {
+                        Ok(map) => {
+                            let response = map.get(&cmd).cloned().unwrap_or_default();
+                            results.push((node.name().to_string(), 0, response));
+                        }
+                        Err(e) => {
+                            let code = match &e {
+                                aerospike_core::Error::ServerError(rc, _, _) => {
+                                    crate::errors::result_code_to_int(rc)
+                                }
+                                _ => -1,
+                            };
+                            results.push((node.name().to_string(), code, e.to_string()));
+                        }
+                    }
+                }
+                Ok(results)
+            })
+        })
+    }
+
+    /// Send an info command to a random node in the cluster.
+    /// Returns the response string.
+    #[pyo3(signature = (command, policy=None))]
+    fn info_random_node(
+        &self,
+        py: Python<'_>,
+        command: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<String> {
+        let client = self.get_client()?;
+        let admin_policy = parse_admin_policy(policy)?;
+        let cmd = command.to_string();
+
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let node = client
+                    .cluster
+                    .get_random_node()
+                    .await
+                    .map_err(as_to_pyerr)?;
+                let map = node
+                    .info(&admin_policy, &[&cmd])
+                    .await
+                    .map_err(as_to_pyerr)?;
+                Ok(map.get(&cmd).cloned().unwrap_or_default())
+            })
+        })
+    }
+
     /// Write a record
     #[pyo3(signature = (key, bins, meta=None, policy=None))]
     fn put(
