@@ -20,7 +20,19 @@ env:
 jobs:
   build:
     name: Build wheels (${{ matrix.os }})
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    # Only run for valid PEP 440 dot-separated tags: vX.Y.Z or vX.Y.Z.alpha4 (not v0.0.1alpha4)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        startsWith(github.event.release.tag_name, 'v') &&
+        (
+          (!contains(github.event.release.tag_name, 'alpha') && !contains(github.event.release.tag_name, 'beta') && !contains(github.event.release.tag_name, 'rc') && !contains(github.event.release.tag_name, 'dev')) ||
+          contains(github.event.release.tag_name, '.alpha') ||
+          contains(github.event.release.tag_name, '.beta') ||
+          contains(github.event.release.tag_name, '.rc') ||
+          contains(github.event.release.tag_name, '.dev')
+        )
+      )
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -103,7 +115,19 @@ jobs:
 
   sdist:
     name: Build source distribution
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    # Only run for valid PEP 440 dot-separated tags: vX.Y.Z or vX.Y.Z.alpha4 (not v0.0.1alpha4)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        startsWith(github.event.release.tag_name, 'v') &&
+        (
+          (!contains(github.event.release.tag_name, 'alpha') && !contains(github.event.release.tag_name, 'beta') && !contains(github.event.release.tag_name, 'rc') && !contains(github.event.release.tag_name, 'dev')) ||
+          contains(github.event.release.tag_name, '.alpha') ||
+          contains(github.event.release.tag_name, '.beta') ||
+          contains(github.event.release.tag_name, '.rc') ||
+          contains(github.event.release.tag_name, '.dev')
+        )
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
