@@ -62,7 +62,8 @@ jobs:
             VERSION="0.0.0-dev${{ github.run_number }}"
           fi
           # Convert PEP 440 pre-release suffixes to Cargo semver format
-          VERSION=$(echo "$VERSION" | sed -E 's/\.(alpha|beta|rc|dev)/-\1/g')
+          # e.g. "0.0.1alpha4" / "0.0.1.alpha4" / "0.0.1a4" → "0.0.1-alpha.4"
+          VERSION=$(echo "$VERSION" | sed -E 's/\.?(alpha|beta|rc|dev|a|b)\.?([0-9]+)/-\1.\2/g')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
         shell: bash
@@ -120,7 +121,8 @@ jobs:
             VERSION="0.0.0-dev${{ github.run_number }}"
           fi
           # Convert PEP 440 pre-release suffixes to Cargo semver format
-          VERSION=$(echo "$VERSION" | sed -E 's/\.(alpha|beta|rc|dev)/-\1/g')
+          # e.g. "0.0.1alpha4" / "0.0.1.alpha4" / "0.0.1a4" → "0.0.1-alpha.4"
+          VERSION=$(echo "$VERSION" | sed -E 's/\.?(alpha|beta|rc|dev|a|b)\.?([0-9]+)/-\1.\2/g')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Using version: $VERSION"
 
