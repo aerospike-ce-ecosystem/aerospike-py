@@ -244,17 +244,33 @@ impl PyAsyncClient {
         &self,
         py: Python<'py>,
         key: &Bound<'_, PyAny>,
-        bins: &Bound<'_, PyDict>,
+        bins: &Bound<'_, PyAny>,
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        // Validate bins argument before checking connection
+        let type_name = bins
+            .get_type()
+            .name()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        let bins_dict = bins.cast::<PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "bins argument must be a dict, got {type_name}"
+            ))
+        })?;
+        let rust_bins = py_dict_to_bins(bins_dict)?;
+        if rust_bins.is_empty() {
+            return Err(crate::errors::new_param_error(
+                "bins dict must contain at least one non-None value",
+            ));
+        }
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         debug!(
             "async put: ns={} set={}",
             rust_key.namespace, rust_key.set_name
         );
-        let rust_bins = py_dict_to_bins(bins)?;
         let write_policy = parse_write_policy(policy, meta)?;
 
         #[cfg(feature = "otel")]
