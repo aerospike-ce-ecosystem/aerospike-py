@@ -31,6 +31,12 @@ def official_client():
     c.close()
 
 
+@pytest.fixture()
+def both_clients(rust_client, official_client):
+    """Convenience fixture returning (rust_client, official_client) tuple."""
+    return rust_client, official_client
+
+
 @pytest.fixture(autouse=True)
 def cleanup(rust_client):
     """Clean up test keys after each test."""
