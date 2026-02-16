@@ -144,7 +144,13 @@ class TestTruncateBehavior:
 
         # Truncate
         rust_client.truncate(NS, trunc_set, 0)
-        time.sleep(3)
+
+        # Truncate is async on the server; poll until records are gone
+        for _ in range(20):
+            time.sleep(1)
+            _, meta = official_client.exists(keys[-1])
+            if meta is None:
+                break
 
         # Verify all records are gone via official client
         for key in keys:
@@ -166,7 +172,7 @@ class TestTruncateBehavior:
         official_client.truncate(NS, trunc_set, 0)
 
         # Truncate is async on the server; poll until records are gone
-        for _ in range(10):
+        for _ in range(20):
             time.sleep(1)
             _, meta = rust_client.exists(keys[-1])
             if meta is None:
@@ -185,7 +191,13 @@ class TestTruncateBehavior:
         rust_client.put(key, {"val": "before"})
 
         rust_client.truncate(NS, trunc_set, 0)
-        time.sleep(3)
+
+        # Truncate is async on the server; poll until record is gone
+        for _ in range(20):
+            time.sleep(1)
+            _, meta = rust_client.exists(key)
+            if meta is None:
+                break
 
         # Write new data
         rust_client.put(key, {"val": "after"})
