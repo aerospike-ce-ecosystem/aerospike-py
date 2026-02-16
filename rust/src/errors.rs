@@ -195,10 +195,6 @@ pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
     }
 }
 
-pub fn new_param_error(msg: &str) -> PyErr {
-    InvalidArgError::new_err(msg.to_string())
-}
-
 pub fn as_to_pyerr(err: AsError) -> PyErr {
     debug!("Mapping aerospike error: {}", err);
     match &err {

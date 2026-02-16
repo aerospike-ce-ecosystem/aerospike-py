@@ -229,11 +229,6 @@ impl PyClient {
             ))
         })?;
         let rust_bins = py_dict_to_bins(bins_dict)?;
-        if rust_bins.is_empty() {
-            return Err(crate::errors::new_param_error(
-                "bins dict must contain at least one non-None value",
-            ));
-        }
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         debug!("put: ns={} set={}", rust_key.namespace, rust_key.set_name);
@@ -498,7 +493,7 @@ impl PyClient {
         let parent_ctx = ();
         let conn_info = self.connection_info.clone();
 
-        py.detach(|| {
+        let existed = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "delete",
@@ -508,9 +503,15 @@ impl PyClient {
                     conn_info,
                     { client.delete(&write_policy, &rust_key).await }
                 )
-                .map(|_| ())
             })
-        })
+        })?;
+
+        if !existed {
+            return Err(crate::errors::RecordNotFound::new_err(
+                "AEROSPIKE_ERR (2): Record not found",
+            ));
+        }
+        Ok(())
     }
 
     /// Reset record's TTL

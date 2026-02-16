@@ -19,7 +19,9 @@ pub fn record_to_py(
     fallback_key: Option<&Key>,
 ) -> PyResult<Py<PyAny>> {
     trace!("Converting Rust record to Python");
-    // Key tuple: prefer the key from the record, fall back to the original request key
+    // Key tuple: prefer the key from the record, fall back to the original request key.
+    // The aerospike_core crate does not populate record.key from server responses,
+    // so we use the caller-provided key to ensure a valid key tuple is always returned.
     let key_py = match &record.key {
         Some(key) => key_to_py(py, key)?,
         None => match fallback_key {
