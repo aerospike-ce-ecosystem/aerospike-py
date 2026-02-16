@@ -164,7 +164,13 @@ class TestTruncateBehavior:
 
         # Truncate via official client
         official_client.truncate(NS, trunc_set, 0)
-        time.sleep(3)
+
+        # Truncate is async on the server; poll until records are gone
+        for _ in range(10):
+            time.sleep(1)
+            _, meta = rust_client.exists(keys[-1])
+            if meta is None:
+                break
 
         # Verify via rust client
         for key in keys:

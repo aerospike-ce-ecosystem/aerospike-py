@@ -183,6 +183,7 @@ class TestOperateOrderedReturnTypes:
             assert len(item) == 2
             assert isinstance(item[0], str)
 
+    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_return_structure_matches_official(self, rust_client, official_client, cleanup):
         """Both clients should return the same structure."""
         key = (NS, SET, "oo_struct_cmp")
