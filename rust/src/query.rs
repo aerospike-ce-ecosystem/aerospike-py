@@ -238,7 +238,7 @@ fn execute_query(
     debug!("{} returned {} records", op_name, records.len());
     let py_list = PyList::empty(py);
     for record in &records {
-        py_list.append(record_to_py(py, record)?)?;
+        py_list.append(record_to_py(py, record, None)?)?;
     }
     Ok(py_list.into_any().unbind())
 }
@@ -310,7 +310,7 @@ fn execute_foreach(
 
     let records = result.map_err(as_to_pyerr)?;
     for record in &records {
-        let py_record = record_to_py(py, record)?;
+        let py_record = record_to_py(py, record, None)?;
         let result = callback.call1((py_record,))?;
         // If callback returns False, stop iteration
         if let Ok(false) = result.extract::<bool>() {

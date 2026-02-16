@@ -213,14 +213,25 @@ impl PyClient {
         &self,
         py: Python<'_>,
         key: &Bound<'_, PyAny>,
-        bins: &Bound<'_, PyDict>,
+        bins: &Bound<'_, PyAny>,
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
+        // Validate bins argument before checking connection
+        let type_name = bins
+            .get_type()
+            .name()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        let bins_dict = bins.cast::<PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "bins argument must be a dict, got {type_name}"
+            ))
+        })?;
+        let rust_bins = py_dict_to_bins(bins_dict)?;
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         debug!("put: ns={} set={}", rust_key.namespace, rust_key.set_name);
-        let rust_bins = py_dict_to_bins(bins)?;
 
         #[cfg(feature = "otel")]
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
@@ -291,7 +302,7 @@ impl PyClient {
                     )
                 })
             })?;
-            return record_to_py(py, &record);
+            return record_to_py(py, &record, Some(&rust_key));
         }
 
         let read_policy = parse_read_policy(policy)?;
@@ -308,7 +319,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record)
+        record_to_py(py, &record, Some(&rust_key))
     }
 
     /// Read specific bins of a record
@@ -351,7 +362,7 @@ impl PyClient {
                     )
                 })
             })?;
-            return record_to_py(py, &record);
+            return record_to_py(py, &record, Some(&rust_key));
         }
 
         let read_policy = parse_read_policy(policy)?;
@@ -368,7 +379,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record)
+        record_to_py(py, &record, Some(&rust_key))
     }
 
     /// Check if a record exists. Returns (key, meta) or (key, None)
@@ -482,7 +493,7 @@ impl PyClient {
         let parent_ctx = ();
         let conn_info = self.connection_info.clone();
 
-        py.detach(|| {
+        let existed = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "delete",
@@ -492,9 +503,15 @@ impl PyClient {
                     conn_info,
                     { client.delete(&write_policy, &rust_key).await }
                 )
-                .map(|_| ())
             })
-        })
+        })?;
+
+        if !existed {
+            return Err(crate::errors::RecordNotFound::new_err(
+                "AEROSPIKE_ERR (2): Record not found",
+            ));
+        }
+        Ok(())
     }
 
     /// Reset record's TTL
@@ -736,7 +753,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record)
+        record_to_py(py, &record, Some(&rust_key))
     }
 
     /// Perform multiple operations on a single record, returning ordered results
@@ -783,7 +800,7 @@ impl PyClient {
         // where ordered_bins is a list of (bin_name, value) tuples
         let key_py = match &record.key {
             Some(k) => key_to_py(py, k)?,
-            None => py.None(),
+            None => key_to_py(py, &rust_key)?,
         };
 
         let meta_dict_obj = record_to_meta(py, &record)?;

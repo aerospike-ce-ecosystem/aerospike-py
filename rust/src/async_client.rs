@@ -244,17 +244,28 @@ impl PyAsyncClient {
         &self,
         py: Python<'py>,
         key: &Bound<'_, PyAny>,
-        bins: &Bound<'_, PyDict>,
+        bins: &Bound<'_, PyAny>,
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        // Validate bins argument before checking connection
+        let type_name = bins
+            .get_type()
+            .name()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        let bins_dict = bins.cast::<PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "bins argument must be a dict, got {type_name}"
+            ))
+        })?;
+        let rust_bins = py_dict_to_bins(bins_dict)?;
         let client = self.get_client()?;
         let rust_key = py_to_key(key)?;
         debug!(
             "async put: ns={} set={}",
             rust_key.namespace, rust_key.set_name
         );
-        let rust_bins = py_dict_to_bins(bins)?;
         let write_policy = parse_write_policy(policy, meta)?;
 
         #[cfg(feature = "otel")]
@@ -307,7 +318,7 @@ impl PyAsyncClient {
                 { client.get(&read_policy, &rust_key, Bins::All).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
         })
     }
 
@@ -347,7 +358,7 @@ impl PyAsyncClient {
                 { client.get(&read_policy, &rust_key, bins_selector).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
         })
     }
 
@@ -459,15 +470,21 @@ impl PyAsyncClient {
         let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
-            traced_op!(
+            let existed = traced_op!(
                 "delete",
                 &rust_key.namespace,
                 &rust_key.set_name,
                 parent_ctx,
                 conn_info,
                 { client.delete(&write_policy, &rust_key).await }
-            )
-            .map(|_| ())
+            )?;
+
+            if !existed {
+                return Err(crate::errors::RecordNotFound::new_err(
+                    "AEROSPIKE_ERR (2): Record not found",
+                ));
+            }
+            Ok(())
         })
     }
 
@@ -586,7 +603,7 @@ impl PyAsyncClient {
                 { client.operate(&write_policy, &rust_key, &rust_ops).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record))
+            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
         })
     }
 
@@ -746,7 +763,7 @@ impl PyAsyncClient {
             Python::attach(|py| {
                 let key_py = match &record.key {
                     Some(k) => key_to_py(py, k)?,
-                    None => py.None(),
+                    None => key_to_py(py, &rust_key)?,
                 };
                 let meta_dict_obj = record_to_meta(py, &record)?;
                 let ordered_bins = PyList::empty(py);
@@ -1170,7 +1187,7 @@ impl PyAsyncClient {
             Python::attach(|py| {
                 let py_list = PyList::empty(py);
                 for record in &records {
-                    py_list.append(record_to_py(py, record)?)?;
+                    py_list.append(record_to_py(py, record, None)?)?;
                 }
                 Ok(py_list.into_any().unbind())
             })

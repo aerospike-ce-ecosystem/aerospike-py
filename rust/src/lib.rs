@@ -25,7 +25,7 @@ fn get_metrics_text() -> String {
 }
 
 /// Native Aerospike Python client module
-#[pymodule]
+#[pymodule(gil_used = true)]
 fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     logging::init();
 

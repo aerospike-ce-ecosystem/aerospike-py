@@ -38,7 +38,7 @@ pub fn batch_to_batch_records_py(
         };
 
         let record_py = match &br.record {
-            Some(_) => record_to_py(py, br.record.as_ref().unwrap())?,
+            Some(_) => record_to_py(py, br.record.as_ref().unwrap(), Some(&br.key))?,
             None => py.None(),
         };
 

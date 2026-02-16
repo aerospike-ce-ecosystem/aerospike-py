@@ -119,7 +119,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: "rust-build"
+          shared-key: "rust-build-freethreaded"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up uv
@@ -259,7 +259,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: "rust-build"
+          shared-key: "rust-build-freethreaded"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up uv
