@@ -12,7 +12,7 @@ from aerospike_py.numpy_batch import NumpyBatchRecords as NumpyBatchRecords
 
 __version__: str
 
-# ── Type aliases ─────────────────────────────────────────────
+# -- Type aliases --------------------------------------------------------
 
 Key = tuple[str, str, Union[str, int, bytes]]
 """Aerospike key: (namespace, set, primary_key)"""
@@ -50,13 +50,27 @@ OperationDict = dict[str, Any]
 PrivilegeDict = dict[str, Any]
 """Privilege dict with 'code', optional 'ns', optional 'set' keys."""
 
-# ── Client ───────────────────────────────────────────────────
+# -- Client --------------------------------------------------------------
 
 class Client:
-    """Aerospike client supporting sync operations.
+    """Aerospike client for synchronous operations.
 
-    Wraps the native Rust client with Python-friendly API.
-    Supports method chaining on ``connect()``.
+    Wraps the native Rust client with a Python-friendly API.
+    Supports method chaining on ``connect()`` and context-manager usage.
+
+    Example:
+        ```python
+        import aerospike_py
+
+        client = aerospike_py.client({
+            "hosts": [("127.0.0.1", 3000)],
+        }).connect()
+
+        client.put(("test", "demo", "key1"), {"name": "Alice"})
+        _, meta, bins = client.get(("test", "demo", "key1"))
+
+        client.close()
+        ```
     """
 
     def __init__(self, config: dict[str, Any]) -> None: ...
@@ -64,41 +78,293 @@ class Client:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool: ...
 
     # -- Connection --
-    def connect(self, username: Optional[str] = None, password: Optional[str] = None) -> "Client": ...
-    def is_connected(self) -> bool: ...
-    def close(self) -> None: ...
-    def get_node_names(self) -> list[str]: ...
+
+    def connect(
+        self,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> "Client":
+        """Connect to the Aerospike cluster.
+
+        Returns ``self`` for method chaining.
+
+        Args:
+            username: Optional username for authentication.
+            password: Optional password for authentication.
+
+        Returns:
+            The connected client instance.
+
+        Raises:
+            ClusterError: Failed to connect to any cluster node.
+
+        Example:
+            ```python
+            client = aerospike_py.client(config).connect()
+
+            # With authentication
+            client = aerospike_py.client(config).connect("admin", "admin")
+            ```
+        """
+        ...
+
+    def is_connected(self) -> bool:
+        """Check whether the client is connected to the cluster.
+
+        Returns:
+            ``True`` if the client has an active cluster connection.
+
+        Example:
+            ```python
+            if client.is_connected():
+                print("Connected")
+            ```
+        """
+        ...
+
+    def close(self) -> None:
+        """Close the connection to the cluster.
+
+        After calling this method the client can no longer be used for
+        database operations.
+
+        Example:
+            ```python
+            client.close()
+            ```
+        """
+        ...
+
+    def get_node_names(self) -> list[str]:
+        """Return the names of all nodes in the cluster.
+
+        Returns:
+            A list of node name strings.
+
+        Example:
+            ```python
+            nodes = client.get_node_names()
+            # ['BB9020011AC4202', 'BB9030011AC4202']
+            ```
+        """
+        ...
 
     # -- Info --
-    def info_all(self, command: str, policy: Optional[PolicyDict] = None) -> list[tuple[str, int, str]]: ...
-    def info_random_node(self, command: str, policy: Optional[PolicyDict] = None) -> str: ...
+
+    def info_all(
+        self,
+        command: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> list[tuple[str, int, str]]:
+        """Send an info command to all cluster nodes.
+
+        Args:
+            command: The info command string (e.g. ``"namespaces"``).
+            policy: Optional info policy dict.
+
+        Returns:
+            A list of ``(node_name, error_code, response)`` tuples.
+
+        Example:
+            ```python
+            results = client.info_all("namespaces")
+            for node, err, response in results:
+                print(f"{node}: {response}")
+            ```
+        """
+        ...
+
+    def info_random_node(
+        self,
+        command: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> str:
+        """Send an info command to a random cluster node.
+
+        Args:
+            command: The info command string.
+            policy: Optional info policy dict.
+
+        Returns:
+            The info response string.
+
+        Example:
+            ```python
+            response = client.info_random_node("build")
+            ```
+        """
+        ...
 
     # -- CRUD --
+
     def put(
         self,
         key: Key,
         bins: Bins,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
-    def get(self, key: Key, policy: Optional[PolicyDict] = None) -> Record: ...
-    def select(self, key: Key, bins: list[str], policy: Optional[PolicyDict] = None) -> Record: ...
-    def exists(self, key: Key, policy: Optional[PolicyDict] = None) -> ExistsResult: ...
+    ) -> None:
+        """Write a record to the Aerospike cluster.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bins: Dictionary of bin name-value pairs to write.
+            meta: Optional metadata dict with ``"ttl"`` and ``"gen"`` keys.
+            policy: Optional write policy dict.
+
+        Raises:
+            RecordExistsError: Record already exists (with CREATE_ONLY policy).
+            RecordTooBig: Record size exceeds the configured write-block-size.
+
+        Example:
+            ```python
+            key = ("test", "demo", "user1")
+            client.put(key, {"name": "Alice", "age": 30})
+
+            # With TTL (seconds)
+            client.put(key, {"score": 100}, meta={"ttl": 300})
+
+            # Create only (fail if exists)
+            import aerospike_py
+            client.put(
+                key,
+                {"x": 1},
+                policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+            )
+            ```
+        """
+        ...
+
+    def get(self, key: Key, policy: Optional[PolicyDict] = None) -> Record:
+        """Read a record from the cluster.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            policy: Optional read policy dict.
+
+        Returns:
+            A ``(key, meta, bins)`` tuple.
+
+        Raises:
+            RecordNotFound: The record does not exist.
+
+        Example:
+            ```python
+            key, meta, bins = client.get(("test", "demo", "user1"))
+            print(bins)  # {"name": "Alice", "age": 30}
+            ```
+        """
+        ...
+
+    def select(
+        self,
+        key: Key,
+        bins: list[str],
+        policy: Optional[PolicyDict] = None,
+    ) -> Record:
+        """Read specific bins from a record.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bins: List of bin names to retrieve.
+            policy: Optional read policy dict.
+
+        Returns:
+            A ``(key, meta, bins)`` tuple containing only the requested bins.
+
+        Raises:
+            RecordNotFound: The record does not exist.
+
+        Example:
+            ```python
+            _, meta, bins = client.select(("test", "demo", "user1"), ["name"])
+            # bins = {"name": "Alice"}
+            ```
+        """
+        ...
+
+    def exists(
+        self,
+        key: Key,
+        policy: Optional[PolicyDict] = None,
+    ) -> ExistsResult:
+        """Check whether a record exists.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            policy: Optional read policy dict.
+
+        Returns:
+            A ``(key, meta)`` tuple. ``meta`` is ``None`` if the record
+            does not exist.
+
+        Example:
+            ```python
+            _, meta = client.exists(("test", "demo", "user1"))
+            if meta is not None:
+                print(f"Found, gen={meta['gen']}")
+            ```
+        """
+        ...
+
     def remove(
         self,
         key: Key,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Delete a record from the cluster.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            meta: Optional metadata dict for generation check.
+            policy: Optional remove policy dict.
+
+        Raises:
+            RecordNotFound: The record does not exist.
+
+        Example:
+            ```python
+            client.remove(("test", "demo", "user1"))
+
+            # With generation check
+            import aerospike_py
+            client.remove(
+                key,
+                meta={"gen": 3},
+                policy={"gen": aerospike_py.POLICY_GEN_EQ},
+            )
+            ```
+        """
+        ...
+
     def touch(
         self,
         key: Key,
         val: int = 0,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Reset the TTL of a record.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            val: New TTL value in seconds.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Raises:
+            RecordNotFound: The record does not exist.
+
+        Example:
+            ```python
+            client.touch(("test", "demo", "user1"), val=300)
+            ```
+        """
+        ...
 
     # -- String / Numeric --
+
     def append(
         self,
         key: Key,
@@ -106,7 +372,23 @@ class Client:
         val: Any,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Append a string to a bin value.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bin: Target bin name.
+            val: String value to append.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Example:
+            ```python
+            client.append(("test", "demo", "user1"), "name", "_suffix")
+            ```
+        """
+        ...
+
     def prepend(
         self,
         key: Key,
@@ -114,7 +396,23 @@ class Client:
         val: Any,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Prepend a string to a bin value.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bin: Target bin name.
+            val: String value to prepend.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Example:
+            ```python
+            client.prepend(("test", "demo", "user1"), "name", "prefix_")
+            ```
+        """
+        ...
+
     def increment(
         self,
         key: Key,
@@ -122,32 +420,117 @@ class Client:
         offset: Union[int, float],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Increment a numeric bin value.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bin: Target bin name.
+            offset: Integer or float amount to add (use negative to decrement).
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Example:
+            ```python
+            client.increment(("test", "demo", "user1"), "age", 1)
+            client.increment(("test", "demo", "user1"), "score", 0.5)
+            ```
+        """
+        ...
+
     def remove_bin(
         self,
         key: Key,
         bin_names: list[str],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Remove specific bins from a record by setting them to nil.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bin_names: List of bin names to remove.
+            meta: Optional metadata dict.
+            policy: Optional write policy dict.
+
+        Example:
+            ```python
+            client.remove_bin(("test", "demo", "user1"), ["temp_bin", "debug_bin"])
+            ```
+        """
+        ...
 
     # -- Multi-operation --
+
     def operate(
         self,
         key: Key,
         ops: list[OperationDict],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> Record: ...
+    ) -> Record:
+        """Execute multiple operations atomically on a single record.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Returns:
+            A ``(key, meta, bins)`` tuple with the results of read operations.
+
+        Example:
+            ```python
+            import aerospike_py
+
+            ops = [
+                {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+                {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+            ]
+            _, meta, bins = client.operate(("test", "demo", "key1"), ops)
+            ```
+        """
+        ...
+
     def operate_ordered(
         self,
         key: Key,
         ops: list[OperationDict],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> tuple[Any, Metadata, list[tuple[str, Any]]]: ...
+    ) -> tuple[Any, Metadata, list[tuple[str, Any]]]:
+        """Execute multiple operations with ordered results.
+
+        Like ``operate()`` but returns results as an ordered list preserving
+        the operation order.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Returns:
+            A ``(key, meta, results)`` tuple where ``results`` is a list of
+            ``(bin_name, value)`` tuples in operation order.
+
+        Example:
+            ```python
+            import aerospike_py
+
+            ops = [
+                {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+                {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+            ]
+            _, meta, results = client.operate_ordered(("test", "demo", "key1"), ops)
+            # results = [("counter", 2)]
+            ```
+        """
+        ...
 
     # -- Batch --
+
     @overload
     def batch_read(
         self,
@@ -171,20 +554,129 @@ class Client:
         bins: Optional[list[str]] = None,
         policy: Optional[PolicyDict] = None,
         _dtype: Optional[np.dtype] = None,
-    ) -> Union[BatchRecords, NumpyBatchRecords]: ...
+    ) -> Union[BatchRecords, NumpyBatchRecords]:
+        """Read multiple records in a single batch call.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            bins: Optional list of bin names to read. ``None`` reads all bins;
+                an empty list performs an existence check only.
+            policy: Optional batch policy dict.
+            _dtype: Optional NumPy dtype. When provided, returns
+                ``NumpyBatchRecords`` instead of ``BatchRecords``.
+
+        Returns:
+            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+
+        Example:
+            ```python
+            keys = [("test", "demo", f"user_{i}") for i in range(10)]
+
+            batch = client.batch_read(keys)
+            for br in batch.batch_records:
+                if br.record:
+                    key, meta, bins = br.record
+                    print(bins)
+
+            # Read specific bins
+            batch = client.batch_read(keys, bins=["name", "age"])
+            ```
+        """
+        ...
+
     def batch_operate(
         self,
         keys: list[Key],
         ops: list[OperationDict],
         policy: Optional[PolicyDict] = None,
-    ) -> list[Record]: ...
-    def batch_remove(self, keys: list[Key], policy: Optional[PolicyDict] = None) -> list[Record]: ...
+    ) -> list[Record]:
+        """Execute operations on multiple records in a single batch call.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            ops: List of operation dicts to apply to each record.
+            policy: Optional batch policy dict.
+
+        Returns:
+            A list of ``(key, meta, bins)`` result tuples.
+
+        Example:
+            ```python
+            import aerospike_py
+
+            keys = [("test", "demo", f"user_{i}") for i in range(10)]
+            ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}]
+            results = client.batch_operate(keys, ops)
+            ```
+        """
+        ...
+
+    def batch_remove(
+        self,
+        keys: list[Key],
+        policy: Optional[PolicyDict] = None,
+    ) -> list[Record]:
+        """Delete multiple records in a single batch call.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            policy: Optional batch policy dict.
+
+        Returns:
+            A list of ``(key, meta, bins)`` result tuples.
+
+        Example:
+            ```python
+            keys = [("test", "demo", f"user_{i}") for i in range(10)]
+            results = client.batch_remove(keys)
+            ```
+        """
+        ...
 
     # -- Query / Scan --
-    def query(self, namespace: str, set_name: str) -> "Query": ...
-    def scan(self, namespace: str, set_name: str) -> "Scan": ...
+
+    def query(self, namespace: str, set_name: str) -> "Query":
+        """Create a Query object for secondary index queries.
+
+        Args:
+            namespace: The namespace to query.
+            set_name: The set to query.
+
+        Returns:
+            A ``Query`` object. Use ``where()`` to set a predicate filter
+            and ``results()`` or ``foreach()`` to execute.
+
+        Example:
+            ```python
+            query = client.query("test", "demo")
+            query.select("name", "age")
+            query.where(predicates.between("age", 20, 30))
+            records = query.results()
+            ```
+        """
+        ...
+
+    def scan(self, namespace: str, set_name: str) -> "Scan":
+        """Create a Scan object for full namespace/set scans.
+
+        Args:
+            namespace: The namespace to scan.
+            set_name: The set to scan.
+
+        Returns:
+            A ``Scan`` object. Use ``results()`` or ``foreach()`` to execute.
+
+        Example:
+            ```python
+            scan = client.scan("test", "demo")
+            scan.select("name", "age")
+            records = scan.results()
+            ```
+        """
+        ...
 
     # -- Index --
+
     def index_integer_create(
         self,
         namespace: str,
@@ -192,7 +684,26 @@ class Client:
         bin_name: str,
         index_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Create a numeric secondary index.
+
+        Args:
+            namespace: Target namespace.
+            set_name: Target set.
+            bin_name: Bin to index.
+            index_name: Name for the new index.
+            policy: Optional info policy dict.
+
+        Raises:
+            IndexFoundError: An index with that name already exists.
+
+        Example:
+            ```python
+            client.index_integer_create("test", "demo", "age", "age_idx")
+            ```
+        """
+        ...
+
     def index_string_create(
         self,
         namespace: str,
@@ -200,7 +711,26 @@ class Client:
         bin_name: str,
         index_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Create a string secondary index.
+
+        Args:
+            namespace: Target namespace.
+            set_name: Target set.
+            bin_name: Bin to index.
+            index_name: Name for the new index.
+            policy: Optional info policy dict.
+
+        Raises:
+            IndexFoundError: An index with that name already exists.
+
+        Example:
+            ```python
+            client.index_string_create("test", "demo", "name", "name_idx")
+            ```
+        """
+        ...
+
     def index_geo2dsphere_create(
         self,
         namespace: str,
@@ -208,31 +738,113 @@ class Client:
         bin_name: str,
         index_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Create a geospatial secondary index.
+
+        Args:
+            namespace: Target namespace.
+            set_name: Target set.
+            bin_name: Bin to index (must contain GeoJSON values).
+            index_name: Name for the new index.
+            policy: Optional info policy dict.
+
+        Raises:
+            IndexFoundError: An index with that name already exists.
+
+        Example:
+            ```python
+            client.index_geo2dsphere_create("test", "demo", "location", "geo_idx")
+            ```
+        """
+        ...
+
     def index_remove(
         self,
         namespace: str,
         index_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Remove a secondary index.
+
+        Args:
+            namespace: Target namespace.
+            index_name: Name of the index to remove.
+            policy: Optional info policy dict.
+
+        Raises:
+            IndexNotFound: The index does not exist.
+
+        Example:
+            ```python
+            client.index_remove("test", "age_idx")
+            ```
+        """
+        ...
 
     # -- Truncate --
+
     def truncate(
         self,
         namespace: str,
         set_name: str,
         nanos: int = 0,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Remove all records in a namespace/set.
+
+        Args:
+            namespace: Target namespace.
+            set_name: Target set.
+            nanos: Optional last-update cutoff in nanoseconds.
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            client.truncate("test", "demo")
+            ```
+        """
+        ...
 
     # -- UDF --
+
     def udf_put(
         self,
         filename: str,
         udf_type: int = 0,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
-    def udf_remove(self, module: str, policy: Optional[PolicyDict] = None) -> None: ...
+    ) -> None:
+        """Register a Lua UDF module on the cluster.
+
+        Args:
+            filename: Path to the Lua source file.
+            udf_type: UDF language type (only Lua ``0`` is supported).
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            client.udf_put("my_udf.lua")
+            ```
+        """
+        ...
+
+    def udf_remove(
+        self,
+        module: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> None:
+        """Remove a registered UDF module.
+
+        Args:
+            module: Module name to remove (without ``.lua`` extension).
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            client.udf_remove("my_udf")
+            ```
+        """
+        ...
+
     def apply(
         self,
         key: Key,
@@ -240,9 +852,33 @@ class Client:
         function: str,
         args: Optional[list[Any]] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Execute a UDF on a single record.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            module: Name of the registered UDF module.
+            function: Name of the function within the module.
+            args: Optional list of arguments to pass to the function.
+            policy: Optional apply policy dict.
+
+        Returns:
+            The return value of the UDF function.
+
+        Example:
+            ```python
+            result = client.apply(
+                ("test", "demo", "key1"),
+                "my_udf",
+                "my_function",
+                [1, "hello"],
+            )
+            ```
+        """
+        ...
 
     # -- Admin: User --
+
     def admin_create_user(
         self,
         username: str,
@@ -273,6 +909,7 @@ class Client:
     def admin_query_users_info(self, policy: Optional[PolicyDict] = None) -> list[dict[str, Any]]: ...
 
     # -- Admin: Role --
+
     def admin_create_role(
         self,
         role: str,
@@ -312,48 +949,293 @@ class Client:
     ) -> None: ...
 
 class AsyncClient:
-    """Aerospike async client. All I/O methods return coroutines."""
+    """Aerospike client for asynchronous operations.
+
+    All I/O methods are coroutines and must be awaited.
+    Provides the same functionality as ``Client`` with an async interface.
+
+    Example:
+        ```python
+        import aerospike_py
+
+        async def main():
+            client = aerospike_py.AsyncClient({
+                "hosts": [("127.0.0.1", 3000)],
+            })
+            await client.connect()
+
+            await client.put(("test", "demo", "key1"), {"name": "Alice"})
+            _, meta, bins = await client.get(("test", "demo", "key1"))
+
+            await client.close()
+        ```
+    """
 
     def __init__(self, config: dict[str, Any]) -> None: ...
     async def __aenter__(self) -> "AsyncClient": ...
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool: ...
 
     # -- Connection --
-    async def connect(self, username: Optional[str] = None, password: Optional[str] = None) -> None: ...
-    def is_connected(self) -> bool: ...
-    async def close(self) -> None: ...
-    async def get_node_names(self) -> list[str]: ...
+
+    async def connect(
+        self,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> None:
+        """Connect to the Aerospike cluster.
+
+        Args:
+            username: Optional username for authentication.
+            password: Optional password for authentication.
+
+        Raises:
+            ClusterError: Failed to connect to any cluster node.
+
+        Example:
+            ```python
+            await client.connect()
+            await client.connect("admin", "admin")
+            ```
+        """
+        ...
+
+    def is_connected(self) -> bool:
+        """Check whether the client is connected to the cluster.
+
+        Returns:
+            ``True`` if the client has an active cluster connection.
+
+        Example:
+            ```python
+            if client.is_connected():
+                print("Connected")
+            ```
+        """
+        ...
+
+    async def close(self) -> None:
+        """Close the connection to the cluster.
+
+        Example:
+            ```python
+            await client.close()
+            ```
+        """
+        ...
+
+    async def get_node_names(self) -> list[str]:
+        """Return the names of all nodes in the cluster.
+
+        Returns:
+            A list of node name strings.
+
+        Example:
+            ```python
+            nodes = await client.get_node_names()
+            ```
+        """
+        ...
 
     # -- Info --
-    async def info_all(self, command: str, policy: Optional[PolicyDict] = None) -> list[tuple[str, int, str]]: ...
-    async def info_random_node(self, command: str, policy: Optional[PolicyDict] = None) -> str: ...
+
+    async def info_all(
+        self,
+        command: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> list[tuple[str, int, str]]:
+        """Send an info command to all cluster nodes.
+
+        Args:
+            command: The info command string (e.g. ``"namespaces"``).
+            policy: Optional info policy dict.
+
+        Returns:
+            A list of ``(node_name, error_code, response)`` tuples.
+
+        Example:
+            ```python
+            results = await client.info_all("namespaces")
+            for node, err, response in results:
+                print(f"{node}: {response}")
+            ```
+        """
+        ...
+
+    async def info_random_node(
+        self,
+        command: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> str:
+        """Send an info command to a random cluster node.
+
+        Args:
+            command: The info command string.
+            policy: Optional info policy dict.
+
+        Returns:
+            The info response string.
+
+        Example:
+            ```python
+            response = await client.info_random_node("build")
+            ```
+        """
+        ...
 
     # -- CRUD --
+
     async def put(
         self,
         key: Key,
         bins: Bins,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
-    async def get(self, key: Key, policy: Optional[PolicyDict] = None) -> Record: ...
-    async def select(self, key: Key, bins: list[str], policy: Optional[PolicyDict] = None) -> Record: ...
-    async def exists(self, key: Key, policy: Optional[PolicyDict] = None) -> ExistsResult: ...
+    ) -> None:
+        """Write a record to the Aerospike cluster.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bins: Dictionary of bin name-value pairs to write.
+            meta: Optional metadata dict with ``"ttl"`` and ``"gen"`` keys.
+            policy: Optional write policy dict.
+
+        Raises:
+            RecordExistsError: Record already exists (with CREATE_ONLY policy).
+            RecordTooBig: Record size exceeds the configured write-block-size.
+
+        Example:
+            ```python
+            key = ("test", "demo", "user1")
+            await client.put(key, {"name": "Alice", "age": 30})
+
+            # With TTL (seconds)
+            await client.put(key, {"score": 100}, meta={"ttl": 300})
+            ```
+        """
+        ...
+
+    async def get(self, key: Key, policy: Optional[PolicyDict] = None) -> Record:
+        """Read a record from the cluster.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            policy: Optional read policy dict.
+
+        Returns:
+            A ``(key, meta, bins)`` tuple.
+
+        Raises:
+            RecordNotFound: The record does not exist.
+
+        Example:
+            ```python
+            key, meta, bins = await client.get(("test", "demo", "user1"))
+            print(bins)  # {"name": "Alice", "age": 30}
+            ```
+        """
+        ...
+
+    async def select(
+        self,
+        key: Key,
+        bins: list[str],
+        policy: Optional[PolicyDict] = None,
+    ) -> Record:
+        """Read specific bins from a record.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bins: List of bin names to retrieve.
+            policy: Optional read policy dict.
+
+        Returns:
+            A ``(key, meta, bins)`` tuple containing only the requested bins.
+
+        Raises:
+            RecordNotFound: The record does not exist.
+
+        Example:
+            ```python
+            _, meta, bins = await client.select(("test", "demo", "user1"), ["name"])
+            # bins = {"name": "Alice"}
+            ```
+        """
+        ...
+
+    async def exists(
+        self,
+        key: Key,
+        policy: Optional[PolicyDict] = None,
+    ) -> ExistsResult:
+        """Check whether a record exists.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            policy: Optional read policy dict.
+
+        Returns:
+            A ``(key, meta)`` tuple. ``meta`` is ``None`` if the record
+            does not exist.
+
+        Example:
+            ```python
+            _, meta = await client.exists(("test", "demo", "user1"))
+            if meta is not None:
+                print(f"Found, gen={meta['gen']}")
+            ```
+        """
+        ...
+
     async def remove(
         self,
         key: Key,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Delete a record from the cluster.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            meta: Optional metadata dict for generation check.
+            policy: Optional remove policy dict.
+
+        Raises:
+            RecordNotFound: The record does not exist.
+
+        Example:
+            ```python
+            await client.remove(("test", "demo", "user1"))
+            ```
+        """
+        ...
+
     async def touch(
         self,
         key: Key,
         val: int = 0,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Reset the TTL of a record.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            val: New TTL value in seconds.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Raises:
+            RecordNotFound: The record does not exist.
+
+        Example:
+            ```python
+            await client.touch(("test", "demo", "user1"), val=300)
+            ```
+        """
+        ...
 
     # -- String / Numeric --
+
     async def append(
         self,
         key: Key,
@@ -361,7 +1243,23 @@ class AsyncClient:
         val: Any,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Append a string to a bin value.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bin: Target bin name.
+            val: String value to append.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Example:
+            ```python
+            await client.append(("test", "demo", "user1"), "name", "_suffix")
+            ```
+        """
+        ...
+
     async def prepend(
         self,
         key: Key,
@@ -369,7 +1267,23 @@ class AsyncClient:
         val: Any,
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Prepend a string to a bin value.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bin: Target bin name.
+            val: String value to prepend.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Example:
+            ```python
+            await client.prepend(("test", "demo", "user1"), "name", "prefix_")
+            ```
+        """
+        ...
+
     async def increment(
         self,
         key: Key,
@@ -377,32 +1291,118 @@ class AsyncClient:
         offset: Union[int, float],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Increment a numeric bin value.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bin: Target bin name.
+            offset: Integer or float amount to add (use negative to decrement).
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Example:
+            ```python
+            await client.increment(("test", "demo", "user1"), "age", 1)
+            await client.increment(("test", "demo", "user1"), "score", 0.5)
+            ```
+        """
+        ...
+
     async def remove_bin(
         self,
         key: Key,
         bin_names: list[str],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Remove specific bins from a record by setting them to nil.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            bin_names: List of bin names to remove.
+            meta: Optional metadata dict.
+            policy: Optional write policy dict.
+
+        Example:
+            ```python
+            await client.remove_bin(("test", "demo", "user1"), ["temp_bin"])
+            ```
+        """
+        ...
 
     # -- Multi-operation --
+
     async def operate(
         self,
         key: Key,
         ops: list[OperationDict],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> Record: ...
+    ) -> Record:
+        """Execute multiple operations atomically on a single record.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Returns:
+            A ``(key, meta, bins)`` tuple with the results of read operations.
+
+        Example:
+            ```python
+            import aerospike_py
+
+            ops = [
+                {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+                {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+            ]
+            _, meta, bins = await client.operate(("test", "demo", "key1"), ops)
+            ```
+        """
+        ...
+
     async def operate_ordered(
         self,
         key: Key,
         ops: list[OperationDict],
         meta: Optional[Metadata] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> tuple[Any, Metadata, list[tuple[str, Any]]]: ...
+    ) -> tuple[Any, Metadata, list[tuple[str, Any]]]:
+        """Execute multiple operations with ordered results.
+
+        Like ``operate()`` but returns results as an ordered list preserving
+        the operation order.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
+            meta: Optional metadata dict.
+            policy: Optional operate policy dict.
+
+        Returns:
+            A ``(key, meta, results)`` tuple where ``results`` is a list of
+            ``(bin_name, value)`` tuples in operation order.
+
+        Example:
+            ```python
+            import aerospike_py
+
+            ops = [
+                {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+                {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+            ]
+            _, meta, results = await client.operate_ordered(
+                ("test", "demo", "key1"), ops
+            )
+            ```
+        """
+        ...
 
     # -- Batch --
+
     @overload
     async def batch_read(
         self,
@@ -426,24 +1426,114 @@ class AsyncClient:
         bins: Optional[list[str]] = None,
         policy: Optional[PolicyDict] = None,
         _dtype: Optional[np.dtype] = None,
-    ) -> Union[BatchRecords, NumpyBatchRecords]: ...
+    ) -> Union[BatchRecords, NumpyBatchRecords]:
+        """Read multiple records in a single batch call.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            bins: Optional list of bin names to read. ``None`` reads all bins;
+                an empty list performs an existence check only.
+            policy: Optional batch policy dict.
+            _dtype: Optional NumPy dtype. When provided, returns
+                ``NumpyBatchRecords`` instead of ``BatchRecords``.
+
+        Returns:
+            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+
+        Example:
+            ```python
+            keys = [("test", "demo", f"user_{i}") for i in range(10)]
+            batch = await client.batch_read(keys, bins=["name", "age"])
+            for br in batch.batch_records:
+                if br.record:
+                    key, meta, bins = br.record
+                    print(bins)
+            ```
+        """
+        ...
+
     async def batch_operate(
         self,
         keys: list[Key],
         ops: list[OperationDict],
         policy: Optional[PolicyDict] = None,
-    ) -> list[Record]: ...
-    async def batch_remove(self, keys: list[Key], policy: Optional[PolicyDict] = None) -> list[Record]: ...
+    ) -> list[Record]:
+        """Execute operations on multiple records in a single batch call.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            ops: List of operation dicts to apply to each record.
+            policy: Optional batch policy dict.
+
+        Returns:
+            A list of ``(key, meta, bins)`` result tuples.
+
+        Example:
+            ```python
+            import aerospike_py
+
+            keys = [("test", "demo", f"user_{i}") for i in range(10)]
+            ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}]
+            results = await client.batch_operate(keys, ops)
+            ```
+        """
+        ...
+
+    async def batch_remove(
+        self,
+        keys: list[Key],
+        policy: Optional[PolicyDict] = None,
+    ) -> list[Record]:
+        """Delete multiple records in a single batch call.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            policy: Optional batch policy dict.
+
+        Returns:
+            A list of ``(key, meta, bins)`` result tuples.
+
+        Example:
+            ```python
+            keys = [("test", "demo", f"user_{i}") for i in range(10)]
+            results = await client.batch_remove(keys)
+            ```
+        """
+        ...
 
     # -- Scan --
+
     async def scan(
         self,
         namespace: str,
         set_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> list[Record]: ...
+    ) -> list[Record]:
+        """Scan all records in a namespace/set.
+
+        Returns a list of records directly (unlike the sync client which
+        returns a ``Scan`` object).
+
+        Args:
+            namespace: The namespace to scan.
+            set_name: The set to scan.
+            policy: Optional scan policy dict. Supports ``"filter_expression"``
+                for server-side filtering.
+
+        Returns:
+            A list of ``(key, meta, bins)`` tuples.
+
+        Example:
+            ```python
+            records = await client.scan("test", "demo")
+            for key, meta, bins in records:
+                print(bins)
+            ```
+        """
+        ...
 
     # -- Index --
+
     async def index_integer_create(
         self,
         namespace: str,
@@ -451,7 +1541,23 @@ class AsyncClient:
         bin_name: str,
         index_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Create a numeric secondary index.
+
+        Args:
+            namespace: Target namespace.
+            set_name: Target set.
+            bin_name: Bin to index.
+            index_name: Name for the new index.
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            await client.index_integer_create("test", "demo", "age", "age_idx")
+            ```
+        """
+        ...
+
     async def index_string_create(
         self,
         namespace: str,
@@ -459,7 +1565,23 @@ class AsyncClient:
         bin_name: str,
         index_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Create a string secondary index.
+
+        Args:
+            namespace: Target namespace.
+            set_name: Target set.
+            bin_name: Bin to index.
+            index_name: Name for the new index.
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            await client.index_string_create("test", "demo", "name", "name_idx")
+            ```
+        """
+        ...
+
     async def index_geo2dsphere_create(
         self,
         namespace: str,
@@ -467,31 +1589,109 @@ class AsyncClient:
         bin_name: str,
         index_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Create a geospatial secondary index.
+
+        Args:
+            namespace: Target namespace.
+            set_name: Target set.
+            bin_name: Bin to index (must contain GeoJSON values).
+            index_name: Name for the new index.
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            await client.index_geo2dsphere_create(
+                "test", "demo", "location", "geo_idx"
+            )
+            ```
+        """
+        ...
+
     async def index_remove(
         self,
         namespace: str,
         index_name: str,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Remove a secondary index.
+
+        Args:
+            namespace: Target namespace.
+            index_name: Name of the index to remove.
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            await client.index_remove("test", "age_idx")
+            ```
+        """
+        ...
 
     # -- Truncate --
+
     async def truncate(
         self,
         namespace: str,
         set_name: str,
         nanos: int = 0,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Remove all records in a namespace/set.
+
+        Args:
+            namespace: Target namespace.
+            set_name: Target set.
+            nanos: Optional last-update cutoff in nanoseconds.
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            await client.truncate("test", "demo")
+            ```
+        """
+        ...
 
     # -- UDF --
+
     async def udf_put(
         self,
         filename: str,
         udf_type: int = 0,
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
-    async def udf_remove(self, module: str, policy: Optional[PolicyDict] = None) -> None: ...
+    ) -> None:
+        """Register a Lua UDF module on the cluster.
+
+        Args:
+            filename: Path to the Lua source file.
+            udf_type: UDF language type (only Lua ``0`` is supported).
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            await client.udf_put("my_udf.lua")
+            ```
+        """
+        ...
+
+    async def udf_remove(
+        self,
+        module: str,
+        policy: Optional[PolicyDict] = None,
+    ) -> None:
+        """Remove a registered UDF module.
+
+        Args:
+            module: Module name to remove (without ``.lua`` extension).
+            policy: Optional info policy dict.
+
+        Example:
+            ```python
+            await client.udf_remove("my_udf")
+            ```
+        """
+        ...
+
     async def apply(
         self,
         key: Key,
@@ -499,9 +1699,33 @@ class AsyncClient:
         function: str,
         args: Optional[list[Any]] = None,
         policy: Optional[PolicyDict] = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Execute a UDF on a single record.
+
+        Args:
+            key: Record key as ``(namespace, set, primary_key)`` tuple.
+            module: Name of the registered UDF module.
+            function: Name of the function within the module.
+            args: Optional list of arguments to pass to the function.
+            policy: Optional apply policy dict.
+
+        Returns:
+            The return value of the UDF function.
+
+        Example:
+            ```python
+            result = await client.apply(
+                ("test", "demo", "key1"),
+                "my_udf",
+                "my_function",
+                [1, "hello"],
+            )
+            ```
+        """
+        ...
 
     # -- Admin: User --
+
     async def admin_create_user(
         self,
         username: str,
@@ -532,6 +1756,7 @@ class AsyncClient:
     async def admin_query_users_info(self, policy: Optional[PolicyDict] = None) -> list[dict[str, Any]]: ...
 
     # -- Admin: Role --
+
     async def admin_create_role(
         self,
         role: str,
@@ -571,40 +1796,274 @@ class AsyncClient:
     ) -> None: ...
 
 class Query:
-    """Secondary index query object."""
+    """Secondary index query object.
 
-    def select(self, *bins: str) -> None: ...
-    # Named 'where' in Python (maps to 'where_' in Rust)
-    def where(self, predicate: tuple[str, ...]) -> None: ...
-    def results(self, policy: Optional[PolicyDict] = None) -> list[Record]: ...
+    Created via ``Client.query(namespace, set_name)``. Use ``where()``
+    to set a predicate filter, ``select()`` to choose bins, then
+    ``results()`` or ``foreach()`` to execute.
+
+    Example:
+        ```python
+        from aerospike_py import predicates
+
+        query = client.query("test", "demo")
+        query.select("name", "age")
+        query.where(predicates.between("age", 20, 30))
+        records = query.results()
+        ```
+    """
+
+    def select(self, *bins: str) -> None:
+        """Select specific bins to return in query results.
+
+        Args:
+            *bins: Bin names to include in the results.
+
+        Example:
+            ```python
+            query = client.query("test", "demo")
+            query.select("name", "age")
+            ```
+        """
+        ...
+
+    def where(self, predicate: tuple[str, ...]) -> None:
+        """Set a predicate filter for the query.
+
+        Requires a matching secondary index on the filtered bin.
+
+        Args:
+            predicate: A predicate tuple created by ``aerospike_py.predicates``
+                helper functions.
+
+        Example:
+            ```python
+            from aerospike_py import predicates
+
+            query = client.query("test", "demo")
+            query.where(predicates.equals("name", "Alice"))
+            ```
+        """
+        ...
+
+    def results(self, policy: Optional[PolicyDict] = None) -> list[Record]:
+        """Execute the query and return all matching records.
+
+        Args:
+            policy: Optional query policy dict.
+
+        Returns:
+            A list of ``(key, meta, bins)`` tuples.
+
+        Example:
+            ```python
+            records = query.results()
+            for key, meta, bins in records:
+                print(bins)
+            ```
+        """
+        ...
+
     def foreach(
         self,
         callback: Callable[[Record], Optional[bool]],
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Execute the query and invoke a callback for each record.
+
+        The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+        from the callback to stop iteration early.
+
+        Args:
+            callback: Function called with each record. Return ``False`` to stop.
+            policy: Optional query policy dict.
+
+        Example:
+            ```python
+            def process(record):
+                key, meta, bins = record
+                print(bins)
+
+            query.foreach(process)
+            ```
+        """
+        ...
 
 class Scan:
-    """Full namespace/set scan object."""
+    """Full namespace/set scan object.
 
-    def select(self, *bins: str) -> None: ...
-    def results(self, policy: Optional[PolicyDict] = None) -> list[Record]: ...
+    Created via ``Client.scan(namespace, set_name)``. Use ``select()``
+    to choose bins, then ``results()`` or ``foreach()`` to execute.
+
+    Example:
+        ```python
+        scan = client.scan("test", "demo")
+        scan.select("name", "age")
+        records = scan.results()
+        ```
+    """
+
+    def select(self, *bins: str) -> None:
+        """Select specific bins to return in scan results.
+
+        Args:
+            *bins: Bin names to include in the results.
+
+        Example:
+            ```python
+            scan = client.scan("test", "demo")
+            scan.select("name", "age")
+            ```
+        """
+        ...
+
+    def results(self, policy: Optional[PolicyDict] = None) -> list[Record]:
+        """Execute the scan and return all records.
+
+        Args:
+            policy: Optional scan policy dict.
+
+        Returns:
+            A list of ``(key, meta, bins)`` tuples.
+
+        Example:
+            ```python
+            records = scan.results()
+            for key, meta, bins in records:
+                print(bins)
+            ```
+        """
+        ...
+
     def foreach(
         self,
         callback: Callable[[Record], Optional[bool]],
         policy: Optional[PolicyDict] = None,
-    ) -> None: ...
+    ) -> None:
+        """Execute the scan and invoke a callback for each record.
 
-# ── Factory function ─────────────────────────────────────────
+        The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+        from the callback to stop iteration early.
 
-def client(config: dict[str, Any]) -> Client: ...
-def set_log_level(level: int) -> None: ...
-def get_metrics() -> str: ...
-def start_metrics_server(port: int = 9464) -> None: ...
-def stop_metrics_server() -> None: ...
-def init_tracing() -> None: ...
-def shutdown_tracing() -> None: ...
+        Args:
+            callback: Function called with each record. Return ``False`` to stop.
+            policy: Optional scan policy dict.
 
-# ── Exceptions ───────────────────────────────────────────────
+        Example:
+            ```python
+            def process(record):
+                key, meta, bins = record
+                print(bins)
+
+            scan.foreach(process)
+            ```
+        """
+        ...
+
+# -- Factory functions ---------------------------------------------------
+
+def client(config: dict[str, Any]) -> Client:
+    """Create a new Aerospike client instance.
+
+    Args:
+        config: Configuration dictionary. Must contain a ``"hosts"`` key
+            with a list of ``(host, port)`` tuples.
+
+    Returns:
+        A new ``Client`` instance (not yet connected).
+
+    Example:
+        ```python
+        import aerospike_py
+
+        client = aerospike_py.client({
+            "hosts": [("127.0.0.1", 3000)],
+        }).connect()
+        ```
+    """
+    ...
+
+def set_log_level(level: int) -> None:
+    """Set the aerospike_py log level.
+
+    Accepts ``LOG_LEVEL_*`` constants. Controls both Rust-internal
+    and Python-side logging.
+
+    Args:
+        level: One of ``LOG_LEVEL_OFF`` (-1), ``LOG_LEVEL_ERROR`` (0),
+            ``LOG_LEVEL_WARN`` (1), ``LOG_LEVEL_INFO`` (2),
+            ``LOG_LEVEL_DEBUG`` (3), ``LOG_LEVEL_TRACE`` (4).
+
+    Example:
+        ```python
+        import aerospike_py
+
+        aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
+        ```
+    """
+    ...
+
+def get_metrics() -> str:
+    """Return collected metrics in Prometheus text format.
+
+    Returns:
+        A string in Prometheus exposition format.
+
+    Example:
+        ```python
+        print(aerospike_py.get_metrics())
+        ```
+    """
+    ...
+
+def start_metrics_server(port: int = 9464) -> None:
+    """Start a background HTTP server serving ``/metrics`` for Prometheus.
+
+    Args:
+        port: TCP port to listen on (default ``9464``).
+
+    Example:
+        ```python
+        aerospike_py.start_metrics_server(port=9464)
+        ```
+    """
+    ...
+
+def stop_metrics_server() -> None:
+    """Stop the background metrics HTTP server.
+
+    Example:
+        ```python
+        aerospike_py.stop_metrics_server()
+        ```
+    """
+    ...
+
+def init_tracing() -> None:
+    """Initialize OpenTelemetry tracing.
+
+    Reads standard ``OTEL_*`` environment variables for configuration.
+
+    Example:
+        ```python
+        aerospike_py.init_tracing()
+        ```
+    """
+    ...
+
+def shutdown_tracing() -> None:
+    """Shut down the tracer provider, flushing pending spans.
+
+    Call before process exit to ensure all spans are exported.
+
+    Example:
+        ```python
+        aerospike_py.shutdown_tracing()
+        ```
+    """
+    ...
+
+# -- Exceptions ----------------------------------------------------------
 
 class AerospikeError(Exception): ...
 class ClientError(AerospikeError): ...
@@ -636,7 +2095,7 @@ class QueryAbortedError(QueryError): ...
 class AdminError(ServerError): ...
 class UDFError(ServerError): ...
 
-# ── Constants ────────────────────────────────────────────────
+# -- Constants -----------------------------------------------------------
 
 # Policy Key
 POLICY_KEY_DIGEST: int

@@ -1,3 +1,5 @@
+<!-- AUTO-GENERATED from .pyi docstrings. Do not edit manually. -->
+
 ---
 title: Client
 sidebar_label: Client (Sync & Async)
@@ -10,73 +12,72 @@ import TabItem from '@theme/TabItem';
 
 aerospike-py provides both synchronous (`Client`) and asynchronous (`AsyncClient`) APIs with identical functionality.
 
-## Creating a Client
+## Factory Functions
 
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+### `client(config)`
+
+Create a new Aerospike client instance.
+
+| Parameter | Description |
+|-----------|-------------|
+| `config` | Configuration dictionary. Must contain a ``"hosts"`` key with a list of ``(host, port)`` tuples. |
+
+**Returns:** A new ``Client`` instance (not yet connected).
 
 ```python
-import aerospike_py as aerospike
+import aerospike_py
 
-client = aerospike.client({
+client = aerospike_py.client({
     "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
 }).connect()
 ```
 
-  </TabItem>
-  <TabItem value="async" label="Async Client">
+### `set_log_level(level)`
+
+Set the aerospike_py log level.
+
+Accepts ``LOG_LEVEL_*`` constants. Controls both Rust-internal
+and Python-side logging.
+
+| Parameter | Description |
+|-----------|-------------|
+| `level` | One of ``LOG_LEVEL_OFF`` (-1), ``LOG_LEVEL_ERROR`` (0), ``LOG_LEVEL_WARN`` (1), ``LOG_LEVEL_INFO`` (2), ``LOG_LEVEL_DEBUG`` (3), ``LOG_LEVEL_TRACE`` (4). |
 
 ```python
-import asyncio
-from aerospike_py import AsyncClient
+import aerospike_py
 
-async def main():
-    client = AsyncClient({
-        "hosts": [("127.0.0.1", 3000)],
-        "cluster_name": "docker",
-    })
-    await client.connect()
-
-asyncio.run(main())
+aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
 ```
 
-  </TabItem>
-</Tabs>
+### `get_metrics()`
 
-## Context Manager
+Return collected metrics in Prometheus text format.
 
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-### `__enter__()` / `__exit__()`
+**Returns:** A string in Prometheus exposition format.
 
 ```python
-with aerospike.client({
-    "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
-}).connect() as client:
-    client.put(key, bins)
-# close() is called automatically on exit
+print(aerospike_py.get_metrics())
 ```
 
-  </TabItem>
-  <TabItem value="async" label="Async Client">
+### `start_metrics_server(port=9464)`
 
-### `async __aenter__()` / `async __aexit__()`
+Start a background HTTP server serving ``/metrics`` for Prometheus.
+
+| Parameter | Description |
+|-----------|-------------|
+| `port` | TCP port to listen on (default ``9464``). |
 
 ```python
-async with AsyncClient({
-    "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
-}) as client:
-    await client.connect()
-    await client.put(key, bins)
-# close() is called automatically
+aerospike_py.start_metrics_server(port=9464)
 ```
 
-  </TabItem>
-</Tabs>
+### `stop_metrics_server()`
+
+Stop the background metrics HTTP server.
+
+```python
+aerospike_py.stop_metrics_server()
+```
 
 ## Connection
 
@@ -84,15 +85,29 @@ async with AsyncClient({
 
 Connect to the Aerospike cluster.
 
+Returns ``self`` for method chaining.
+
+| Parameter | Description |
+|-----------|-------------|
+| `username` | Optional username for authentication. |
+| `password` | Optional password for authentication. |
+
+**Returns:** The connected client instance.
+
+:::note
+
+Raises `ClusterError` Failed to connect to any cluster node.
+
+:::
+
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
-Returns `self` for method chaining.
-
 ```python
-client = aerospike.client(config).connect()
+client = aerospike_py.client(config).connect()
+
 # With authentication
-client = aerospike.client(config).connect("admin", "admin")
+client = aerospike_py.client(config).connect("admin", "admin")
 ```
 
   </TabItem>
@@ -108,16 +123,35 @@ await client.connect("admin", "admin")
 
 ### `is_connected()`
 
-Returns `True` if the client is connected. This is a synchronous method in both clients.
+Check whether the client is connected to the cluster.
+
+**Returns:** ``True`` if the client has an active cluster connection.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
 
 ```python
 if client.is_connected():
     print("Connected")
 ```
 
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+if client.is_connected():
+    print("Connected")
+```
+
+  </TabItem>
+</Tabs>
+
 ### `close()`
 
 Close the connection to the cluster.
+
+After calling this method the client can no longer be used for
+database operations.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -138,13 +172,16 @@ await client.close()
 
 ### `get_node_names()`
 
-Returns a list of cluster node names.
+Return the names of all nodes in the cluster.
+
+**Returns:** A list of node name strings.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
 nodes = client.get_node_names()
+# ['BB9020011AC4202', 'BB9030011AC4202']
 ```
 
   </TabItem>
@@ -157,18 +194,92 @@ nodes = await client.get_node_names()
   </TabItem>
 </Tabs>
 
+## Info
+
+### `info_all(command, policy=None)`
+
+Send an info command to all cluster nodes.
+
+| Parameter | Description |
+|-----------|-------------|
+| `command` | The info command string (e.g. ``"namespaces"``). |
+| `policy` | Optional info policy dict. |
+
+**Returns:** A list of ``(node_name, error_code, response)`` tuples.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+results = client.info_all("namespaces")
+for node, err, response in results:
+    print(f"{node}: {response}")
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+results = await client.info_all("namespaces")
+for node, err, response in results:
+    print(f"{node}: {response}")
+```
+
+  </TabItem>
+</Tabs>
+
+### `info_random_node(command, policy=None)`
+
+Send an info command to a random cluster node.
+
+| Parameter | Description |
+|-----------|-------------|
+| `command` | The info command string. |
+| `policy` | Optional info policy dict. |
+
+**Returns:** The info response string.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+response = client.info_random_node("build")
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+response = await client.info_random_node("build")
+```
+
+  </TabItem>
+</Tabs>
+
 ## CRUD Operations
 
 ### `put(key, bins, meta=None, policy=None)`
 
-Write a record.
+Write a record to the Aerospike cluster.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `key` | `tuple[str, str, str\|int\|bytes]` | `(namespace, set, pk)` |
-| `bins` | `dict[str, Any]` | Bin name-value pairs |
-| `meta` | `dict` | Optional: `{"ttl": int, "gen": int}` |
-| `policy` | `dict` | Optional: `{"key", "exists", "gen", "timeout", ...}` |
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `bins` | Dictionary of bin name-value pairs to write. |
+| `meta` | Optional metadata dict with ``"ttl"`` and ``"gen"`` keys. |
+| `policy` | Optional write policy dict. |
+
+:::note
+
+Raises `RecordExistsError` Record already exists (with CREATE_ONLY policy).
+
+:::
+
+:::note
+
+Raises `RecordTooBig` Record size exceeds the configured write-block-size.
+
+:::
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -176,8 +287,17 @@ Write a record.
 ```python
 key = ("test", "demo", "user1")
 client.put(key, {"name": "Alice", "age": 30})
-client.put(key, {"x": 1}, meta={"ttl": 300})
-client.put(key, {"x": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
+
+# With TTL (seconds)
+client.put(key, {"score": 100}, meta={"ttl": 300})
+
+# Create only (fail if exists)
+import aerospike_py
+client.put(
+    key,
+    {"x": 1},
+    policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+)
 ```
 
   </TabItem>
@@ -186,8 +306,9 @@ client.put(key, {"x": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY}
 ```python
 key = ("test", "demo", "user1")
 await client.put(key, {"name": "Alice", "age": 30})
-await client.put(key, {"x": 1}, meta={"ttl": 300})
-await client.put(key, {"x": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
+
+# With TTL (seconds)
+await client.put(key, {"score": 100}, meta={"ttl": 300})
 ```
 
   </TabItem>
@@ -195,15 +316,27 @@ await client.put(key, {"x": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE
 
 ### `get(key, policy=None)`
 
-Read a record. Returns `(key, meta, bins)`.
+Read a record from the cluster.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `policy` | Optional read policy dict. |
+
+**Returns:** A ``(key, meta, bins)`` tuple.
+
+:::note
+
+Raises `RecordNotFound` The record does not exist.
+
+:::
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
 key, meta, bins = client.get(("test", "demo", "user1"))
-# meta = {"gen": 1, "ttl": 2591998}
-# bins = {"name": "Alice", "age": 30}
+print(bins)  # {"name": "Alice", "age": 30}
 ```
 
   </TabItem>
@@ -211,26 +344,35 @@ key, meta, bins = client.get(("test", "demo", "user1"))
 
 ```python
 key, meta, bins = await client.get(("test", "demo", "user1"))
+print(bins)  # {"name": "Alice", "age": 30}
 ```
 
   </TabItem>
 </Tabs>
 
-:::note
-
-Raises `RecordNotFound` if the record does not exist.
-
-:::
-
 ### `select(key, bins, policy=None)`
 
 Read specific bins from a record.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `bins` | List of bin names to retrieve. |
+| `policy` | Optional read policy dict. |
+
+**Returns:** A ``(key, meta, bins)`` tuple containing only the requested bins.
+
+:::note
+
+Raises `RecordNotFound` The record does not exist.
+
+:::
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-_, meta, bins = client.select(key, ["name"])
+_, meta, bins = client.select(("test", "demo", "user1"), ["name"])
 # bins = {"name": "Alice"}
 ```
 
@@ -238,7 +380,8 @@ _, meta, bins = client.select(key, ["name"])
   <TabItem value="async" label="Async Client">
 
 ```python
-_, meta, bins = await client.select(key, ["name"])
+_, meta, bins = await client.select(("test", "demo", "user1"), ["name"])
+# bins = {"name": "Alice"}
 ```
 
   </TabItem>
@@ -246,13 +389,21 @@ _, meta, bins = await client.select(key, ["name"])
 
 ### `exists(key, policy=None)`
 
-Check if a record exists. Returns `(key, meta)` where `meta` is `None` if not found.
+Check whether a record exists.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `policy` | Optional read policy dict. |
+
+**Returns:** A ``(key, meta)`` tuple. ``meta`` is ``None`` if the record
+    does not exist.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-_, meta = client.exists(key)
+_, meta = client.exists(("test", "demo", "user1"))
 if meta is not None:
     print(f"Found, gen={meta['gen']}")
 ```
@@ -261,7 +412,7 @@ if meta is not None:
   <TabItem value="async" label="Async Client">
 
 ```python
-_, meta = await client.exists(key)
+_, meta = await client.exists(("test", "demo", "user1"))
 if meta is not None:
     print(f"Found, gen={meta['gen']}")
 ```
@@ -271,23 +422,40 @@ if meta is not None:
 
 ### `remove(key, meta=None, policy=None)`
 
-Delete a record.
+Delete a record from the cluster.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `meta` | Optional metadata dict for generation check. |
+| `policy` | Optional remove policy dict. |
+
+:::note
+
+Raises `RecordNotFound` The record does not exist.
+
+:::
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-client.remove(key)
+client.remove(("test", "demo", "user1"))
+
 # With generation check
-client.remove(key, meta={"gen": 3}, policy={"gen": aerospike.POLICY_GEN_EQ})
+import aerospike_py
+client.remove(
+    key,
+    meta={"gen": 3},
+    policy={"gen": aerospike_py.POLICY_GEN_EQ},
+)
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-await client.remove(key)
-await client.remove(key, meta={"gen": 3}, policy={"gen": aerospike.POLICY_GEN_EQ})
+await client.remove(("test", "demo", "user1"))
 ```
 
   </TabItem>
@@ -295,20 +463,33 @@ await client.remove(key, meta={"gen": 3}, policy={"gen": aerospike.POLICY_GEN_EQ
 
 ### `touch(key, val=0, meta=None, policy=None)`
 
-Reset TTL for a record.
+Reset the TTL of a record.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `val` | New TTL value in seconds. |
+| `meta` | Optional metadata dict. |
+| `policy` | Optional operate policy dict. |
+
+:::note
+
+Raises `RecordNotFound` The record does not exist.
+
+:::
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-client.touch(key, val=300)
+client.touch(("test", "demo", "user1"), val=300)
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-await client.touch(key, val=300)
+await client.touch(("test", "demo", "user1"), val=300)
 ```
 
   </TabItem>
@@ -318,20 +499,28 @@ await client.touch(key, val=300)
 
 ### `append(key, bin, val, meta=None, policy=None)`
 
-Append string to a bin.
+Append a string to a bin value.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `bin` | Target bin name. |
+| `val` | String value to append. |
+| `meta` | Optional metadata dict. |
+| `policy` | Optional operate policy dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-client.append(key, "name", "_suffix")
+client.append(("test", "demo", "user1"), "name", "_suffix")
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-await client.append(key, "name", "_suffix")
+await client.append(("test", "demo", "user1"), "name", "_suffix")
 ```
 
   </TabItem>
@@ -339,20 +528,28 @@ await client.append(key, "name", "_suffix")
 
 ### `prepend(key, bin, val, meta=None, policy=None)`
 
-Prepend string to a bin.
+Prepend a string to a bin value.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `bin` | Target bin name. |
+| `val` | String value to prepend. |
+| `meta` | Optional metadata dict. |
+| `policy` | Optional operate policy dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-client.prepend(key, "name", "prefix_")
+client.prepend(("test", "demo", "user1"), "name", "prefix_")
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-await client.prepend(key, "name", "prefix_")
+await client.prepend(("test", "demo", "user1"), "name", "prefix_")
 ```
 
   </TabItem>
@@ -360,22 +557,30 @@ await client.prepend(key, "name", "prefix_")
 
 ### `increment(key, bin, offset, meta=None, policy=None)`
 
-Increment integer or float bin value.
+Increment a numeric bin value.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `bin` | Target bin name. |
+| `offset` | Integer or float amount to add (use negative to decrement). |
+| `meta` | Optional metadata dict. |
+| `policy` | Optional operate policy dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-client.increment(key, "age", 1)
-client.increment(key, "score", 0.5)
+client.increment(("test", "demo", "user1"), "age", 1)
+client.increment(("test", "demo", "user1"), "score", 0.5)
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-await client.increment(key, "age", 1)
-await client.increment(key, "score", 0.5)
+await client.increment(("test", "demo", "user1"), "age", 1)
+await client.increment(("test", "demo", "user1"), "score", 0.5)
 ```
 
   </TabItem>
@@ -383,20 +588,27 @@ await client.increment(key, "score", 0.5)
 
 ### `remove_bin(key, bin_names, meta=None, policy=None)`
 
-Remove specific bins from a record.
+Remove specific bins from a record by setting them to nil.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `bin_names` | List of bin names to remove. |
+| `meta` | Optional metadata dict. |
+| `policy` | Optional write policy dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-client.remove_bin(key, ["temp_bin", "debug_bin"])
+client.remove_bin(("test", "demo", "user1"), ["temp_bin", "debug_bin"])
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-await client.remove_bin(key, ["temp_bin", "debug_bin"])
+await client.remove_bin(("test", "demo", "user1"), ["temp_bin"])
 ```
 
   </TabItem>
@@ -408,26 +620,39 @@ await client.remove_bin(key, ["temp_bin", "debug_bin"])
 
 Execute multiple operations atomically on a single record.
 
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. |
+| `meta` | Optional metadata dict. |
+| `policy` | Optional operate policy dict. |
+
+**Returns:** A ``(key, meta, bins)`` tuple with the results of read operations.
+
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
+import aerospike_py
+
 ops = [
-    {"op": aerospike.OPERATOR_INCR, "bin": "counter", "val": 1},
-    {"op": aerospike.OPERATOR_READ, "bin": "counter", "val": None},
+    {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+    {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, bins = client.operate(key, ops)
+_, meta, bins = client.operate(("test", "demo", "key1"), ops)
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
+import aerospike_py
+
 ops = [
-    {"op": aerospike.OPERATOR_INCR, "bin": "counter", "val": 1},
-    {"op": aerospike.OPERATOR_READ, "bin": "counter", "val": None},
+    {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+    {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, bins = await client.operate(key, ops)
+_, meta, bins = await client.operate(("test", "demo", "key1"), ops)
 ```
 
   </TabItem>
@@ -435,13 +660,32 @@ _, meta, bins = await client.operate(key, ops)
 
 ### `operate_ordered(key, ops, meta=None, policy=None)`
 
-Same as `operate` but returns results as an ordered list of `(bin, value)` tuples.
+Execute multiple operations with ordered results.
+
+Like ``operate()`` but returns results as an ordered list preserving
+the operation order.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. |
+| `meta` | Optional metadata dict. |
+| `policy` | Optional operate policy dict. |
+
+**Returns:** A ``(key, meta, results)`` tuple where ``results`` is a list of
+    ``(bin_name, value)`` tuples in operation order.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-_, meta, results = client.operate_ordered(key, ops)
+import aerospike_py
+
+ops = [
+    {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+    {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+]
+_, meta, results = client.operate_ordered(("test", "demo", "key1"), ops)
 # results = [("counter", 2)]
 ```
 
@@ -449,8 +693,15 @@ _, meta, results = client.operate_ordered(key, ops)
   <TabItem value="async" label="Async Client">
 
 ```python
-_, meta, results = await client.operate_ordered(key, ops)
-# results = [("counter", 2)]
+import aerospike_py
+
+ops = [
+    {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
+    {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+]
+_, meta, results = await client.operate_ordered(
+    ("test", "demo", "key1"), ops
+)
 ```
 
   </TabItem>
@@ -458,13 +709,18 @@ _, meta, results = await client.operate_ordered(key, ops)
 
 ## Batch Operations
 
-### `batch_read(keys, bins=None, policy=None)`
+### `batch_read(keys, bins=None, policy=None, _dtype=None)`
 
-Read multiple records. Returns `BatchRecords`.
+Read multiple records in a single batch call.
 
-- `bins=None` - Read all bins
-- `bins=["a", "b"]` - Read specific bins
-- `bins=[]` - Existence check only
+| Parameter | Description |
+|-----------|-------------|
+| `keys` | List of ``(namespace, set, primary_key)`` tuples. |
+| `bins` | Optional list of bin names to read. ``None`` reads all bins; an empty list performs an existence check only. |
+| `policy` | Optional batch policy dict. |
+| `_dtype` | Optional NumPy dtype. When provided, returns ``NumpyBatchRecords`` instead of ``BatchRecords``. |
+
+**Returns:** ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -472,7 +728,6 @@ Read multiple records. Returns `BatchRecords`.
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# Read all bins
 batch = client.batch_read(keys)
 for br in batch.batch_records:
     if br.record:
@@ -481,11 +736,6 @@ for br in batch.batch_records:
 
 # Read specific bins
 batch = client.batch_read(keys, bins=["name", "age"])
-
-# Existence check
-batch = client.batch_read(keys, bins=[])
-for br in batch.batch_records:
-    print(f"{br.key}: exists={br.record is not None}")
 ```
 
   </TabItem>
@@ -493,21 +743,11 @@ for br in batch.batch_records:
 
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
-
-# Read all bins
-batch = await client.batch_read(keys)
+batch = await client.batch_read(keys, bins=["name", "age"])
 for br in batch.batch_records:
     if br.record:
         key, meta, bins = br.record
         print(bins)
-
-# Read specific bins
-batch = await client.batch_read(keys, bins=["name", "age"])
-
-# Existence check
-batch = await client.batch_read(keys, bins=[])
-for br in batch.batch_records:
-    print(f"{br.key}: exists={br.record is not None}")
 ```
 
   </TabItem>
@@ -515,13 +755,24 @@ for br in batch.batch_records:
 
 ### `batch_operate(keys, ops, policy=None)`
 
-Execute operations on multiple records.
+Execute operations on multiple records in a single batch call.
+
+| Parameter | Description |
+|-----------|-------------|
+| `keys` | List of ``(namespace, set, primary_key)`` tuples. |
+| `ops` | List of operation dicts to apply to each record. |
+| `policy` | Optional batch policy dict. |
+
+**Returns:** A list of ``(key, meta, bins)`` result tuples.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-ops = [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}]
+import aerospike_py
+
+keys = [("test", "demo", f"user_{i}") for i in range(10)]
+ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}]
 results = client.batch_operate(keys, ops)
 ```
 
@@ -529,7 +780,10 @@ results = client.batch_operate(keys, ops)
   <TabItem value="async" label="Async Client">
 
 ```python
-ops = [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}]
+import aerospike_py
+
+keys = [("test", "demo", f"user_{i}") for i in range(10)]
+ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}]
 results = await client.batch_operate(keys, ops)
 ```
 
@@ -538,12 +792,20 @@ results = await client.batch_operate(keys, ops)
 
 ### `batch_remove(keys, policy=None)`
 
-Delete multiple records.
+Delete multiple records in a single batch call.
+
+| Parameter | Description |
+|-----------|-------------|
+| `keys` | List of ``(namespace, set, primary_key)`` tuples. |
+| `policy` | Optional batch policy dict. |
+
+**Returns:** A list of ``(key, meta, bins)`` result tuples.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
+keys = [("test", "demo", f"user_{i}") for i in range(10)]
 results = client.batch_remove(keys)
 ```
 
@@ -551,7 +813,8 @@ results = client.batch_remove(keys)
   <TabItem value="async" label="Async Client">
 
 ```python
-await client.batch_remove(keys)
+keys = [("test", "demo", f"user_{i}") for i in range(10)]
+results = await client.batch_remove(keys)
 ```
 
   </TabItem>
@@ -559,43 +822,53 @@ await client.batch_remove(keys)
 
 ## Query & Scan
 
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
 ### `query(namespace, set_name)`
 
-Create a `Query` object for secondary index queries. See [Query & Scan API](query-scan.md).
+Create a Query object for secondary index queries.
+
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | The namespace to query. |
+| `set_name` | The set to query. |
+
+**Returns:** A ``Query`` object. Use ``where()`` to set a predicate filter
+    and ``results()`` or ``foreach()`` to execute.
 
 ```python
 query = client.query("test", "demo")
+query.select("name", "age")
+query.where(predicates.between("age", 20, 30))
+records = query.results()
 ```
 
 ### `scan(namespace, set_name)`
 
-Create a `Scan` object for full namespace/set scans. See [Query & Scan API](query-scan.md).
+Create a Scan object for full namespace/set scans.
+
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | The namespace to scan. |
+| `set_name` | The set to scan. |
+
+**Returns:** A ``Scan`` object. Use ``results()`` or ``foreach()`` to execute.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
 
 ```python
 scan = client.scan("test", "demo")
+scan.select("name", "age")
+records = scan.results()
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
-
-### `async scan(namespace, set_name, policy=None)`
-
-Scan all records in a namespace/set. Returns a list of records directly.
 
 ```python
 records = await client.scan("test", "demo")
 for key, meta, bins in records:
     print(bins)
 ```
-
-:::note
-
-AsyncClient does not have a `query()` method. Use `scan()` with [Expression Filters](../guides/expression-filters.md) for server-side filtering.
-
-:::
 
   </TabItem>
 </Tabs>
@@ -605,6 +878,20 @@ AsyncClient does not have a `query()` method. Use `scan()` with [Expression Filt
 ### `index_integer_create(namespace, set_name, bin_name, index_name, policy=None)`
 
 Create a numeric secondary index.
+
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | Target namespace. |
+| `set_name` | Target set. |
+| `bin_name` | Bin to index. |
+| `index_name` | Name for the new index. |
+| `policy` | Optional info policy dict. |
+
+:::note
+
+Raises `IndexFoundError` An index with that name already exists.
+
+:::
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -627,6 +914,20 @@ await client.index_integer_create("test", "demo", "age", "age_idx")
 
 Create a string secondary index.
 
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | Target namespace. |
+| `set_name` | Target set. |
+| `bin_name` | Bin to index. |
+| `index_name` | Name for the new index. |
+| `policy` | Optional info policy dict. |
+
+:::note
+
+Raises `IndexFoundError` An index with that name already exists.
+
+:::
+
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
@@ -648,6 +949,20 @@ await client.index_string_create("test", "demo", "name", "name_idx")
 
 Create a geospatial secondary index.
 
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | Target namespace. |
+| `set_name` | Target set. |
+| `bin_name` | Bin to index (must contain GeoJSON values). |
+| `index_name` | Name for the new index. |
+| `policy` | Optional info policy dict. |
+
+:::note
+
+Raises `IndexFoundError` An index with that name already exists.
+
+:::
+
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
@@ -659,7 +974,9 @@ client.index_geo2dsphere_create("test", "demo", "location", "geo_idx")
   <TabItem value="async" label="Async Client">
 
 ```python
-await client.index_geo2dsphere_create("test", "demo", "location", "geo_idx")
+await client.index_geo2dsphere_create(
+    "test", "demo", "location", "geo_idx"
+)
 ```
 
   </TabItem>
@@ -668,6 +985,18 @@ await client.index_geo2dsphere_create("test", "demo", "location", "geo_idx")
 ### `index_remove(namespace, index_name, policy=None)`
 
 Remove a secondary index.
+
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | Target namespace. |
+| `index_name` | Name of the index to remove. |
+| `policy` | Optional info policy dict. |
+
+:::note
+
+Raises `IndexNotFound` The index does not exist.
+
+:::
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -692,6 +1021,13 @@ await client.index_remove("test", "age_idx")
 
 Remove all records in a namespace/set.
 
+| Parameter | Description |
+|-----------|-------------|
+| `namespace` | Target namespace. |
+| `set_name` | Target set. |
+| `nanos` | Optional last-update cutoff in nanoseconds. |
+| `policy` | Optional info policy dict. |
+
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
@@ -713,7 +1049,13 @@ await client.truncate("test", "demo")
 
 ### `udf_put(filename, udf_type=0, policy=None)`
 
-Register a Lua UDF module.
+Register a Lua UDF module on the cluster.
+
+| Parameter | Description |
+|-----------|-------------|
+| `filename` | Path to the Lua source file. |
+| `udf_type` | UDF language type (only Lua ``0`` is supported). |
+| `policy` | Optional info policy dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -736,6 +1078,11 @@ await client.udf_put("my_udf.lua")
 
 Remove a registered UDF module.
 
+| Parameter | Description |
+|-----------|-------------|
+| `module` | Module name to remove (without ``.lua`` extension). |
+| `policy` | Optional info policy dict. |
+
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
@@ -755,205 +1102,178 @@ await client.udf_remove("my_udf")
 
 ### `apply(key, module, function, args=None, policy=None)`
 
-Execute a UDF on a record.
+Execute a UDF on a single record.
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
+| `module` | Name of the registered UDF module. |
+| `function` | Name of the function within the module. |
+| `args` | Optional list of arguments to pass to the function. |
+| `policy` | Optional apply policy dict. |
+
+**Returns:** The return value of the UDF function.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-result = client.apply(key, "my_udf", "my_function", [1, "hello"])
+result = client.apply(
+    ("test", "demo", "key1"),
+    "my_udf",
+    "my_function",
+    [1, "hello"],
+)
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-result = await client.apply(key, "my_udf", "my_function", [1, "hello"])
+result = await client.apply(
+    ("test", "demo", "key1"),
+    "my_udf",
+    "my_function",
+    [1, "hello"],
+)
 ```
 
   </TabItem>
 </Tabs>
 
-## Concurrency Patterns (Async)
+## Query Object
 
-### Parallel Writes with `asyncio.gather`
+Secondary index query object.
 
-```python
-keys = [("test", "demo", f"item_{i}") for i in range(100)]
-tasks = [client.put(k, {"idx": i}) for i, k in enumerate(keys)]
-await asyncio.gather(*tasks)
-```
-
-### Parallel Reads
+Created via ``Client.query(namespace, set_name)``. Use ``where()``
+to set a predicate filter, ``select()`` to choose bins, then
+``results()`` or ``foreach()`` to execute.
 
 ```python
-keys = [("test", "demo", f"item_{i}") for i in range(100)]
-tasks = [client.get(k) for k in keys]
-results = await asyncio.gather(*tasks, return_exceptions=True)
-```
+from aerospike_py import predicates
 
-### Mixed Operations
-
-```python
-async def process_user(client, user_id):
-    key = ("test", "users", user_id)
-    _, _, bins = await client.get(key)
-    bins["visits"] = bins.get("visits", 0) + 1
-    await client.put(key, bins)
-    return bins
-
-results = await asyncio.gather(*[
-    process_user(client, f"user_{i}")
-    for i in range(10)
-])
-```
-
-## Admin Operations
-
-### User Management
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-| Method | Description |
-|--------|-------------|
-| `admin_create_user(username, password, roles)` | Create a user |
-| `admin_drop_user(username)` | Delete a user |
-| `admin_change_password(username, password)` | Change password |
-| `admin_grant_roles(username, roles)` | Grant roles |
-| `admin_revoke_roles(username, roles)` | Revoke roles |
-| `admin_query_user(username)` | Get user info |
-| `admin_query_users()` | List all users |
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-| Method | Description |
-|--------|-------------|
-| `async admin_create_user(username, password, roles)` | Create a user |
-| `async admin_drop_user(username)` | Delete a user |
-| `async admin_change_password(username, password)` | Change password |
-| `async admin_grant_roles(username, roles)` | Grant roles |
-| `async admin_revoke_roles(username, roles)` | Revoke roles |
-| `async admin_query_user(username)` | Get user info |
-| `async admin_query_users()` | List all users |
-
-  </TabItem>
-</Tabs>
-
-### Role Management
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-| Method | Description |
-|--------|-------------|
-| `admin_create_role(role, privileges, ...)` | Create a role |
-| `admin_drop_role(role)` | Delete a role |
-| `admin_grant_privileges(role, privileges)` | Grant privileges |
-| `admin_revoke_privileges(role, privileges)` | Revoke privileges |
-| `admin_query_role(role)` | Get role info |
-| `admin_query_roles()` | List all roles |
-| `admin_set_whitelist(role, whitelist)` | Set IP whitelist |
-| `admin_set_quotas(role, read_quota, write_quota)` | Set quotas |
-
-```python
-# Create user
-client.admin_create_user("new_user", "password", ["read-write"])
-
-# Create role with privileges
-client.admin_create_role("custom_role", [
-    {"code": aerospike.PRIV_READ, "ns": "test", "set": "demo"}
-])
-```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-| Method | Description |
-|--------|-------------|
-| `async admin_create_role(role, privileges, ...)` | Create a role |
-| `async admin_drop_role(role)` | Delete a role |
-| `async admin_grant_privileges(role, privileges)` | Grant privileges |
-| `async admin_revoke_privileges(role, privileges)` | Revoke privileges |
-| `async admin_query_role(role)` | Get role info |
-| `async admin_query_roles()` | List all roles |
-| `async admin_set_whitelist(role, whitelist)` | Set IP whitelist |
-| `async admin_set_quotas(role, read_quota, write_quota)` | Set quotas |
-
-```python
-# Create user
-await client.admin_create_user("new_user", "password", ["read-write"])
-
-# Grant roles
-await client.admin_grant_roles("new_user", ["sys-admin"])
-
-# Create role with privileges
-await client.admin_create_role("custom_role", [
-    {"code": aerospike.PRIV_READ, "ns": "test", "set": "demo"}
-])
-```
-
-  </TabItem>
-</Tabs>
-
-## Expression Filters
-
-All read/write/batch operations that accept a `policy` parameter support the `filter_expression` key for server-side filtering (requires Server 5.2+):
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-```python
-from aerospike_py import exp
-
-expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
-
-# Get with filter
-_, _, bins = client.get(key, policy={"filter_expression": expr})
-
-# Put with filter (only update if filter matches)
-expr = exp.eq(exp.string_bin("status"), exp.string_val("active"))
-client.put(key, {"visits": 1}, policy={"filter_expression": expr})
-
-# Query with filter
 query = client.query("test", "demo")
-records = query.results(policy={"filter_expression": expr})
-
-# Scan with filter
-scan = client.scan("test", "demo")
-records = scan.results(policy={"filter_expression": expr})
-
-# Batch with filter
-ops = [{"op": aerospike.OPERATOR_READ, "bin": "status", "val": None}]
-records = client.batch_operate(keys, ops, policy={"filter_expression": expr})
+query.select("name", "age")
+query.where(predicates.between("age", 20, 30))
+records = query.results()
 ```
 
-  </TabItem>
-  <TabItem value="async" label="Async Client">
+### `select()`
+
+Select specific bins to return in query results.
 
 ```python
-from aerospike_py import exp
-
-expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
-
-# Get with filter
-_, _, bins = await client.get(key, policy={"filter_expression": expr})
-
-# Scan with filter
-records = await client.scan("test", "demo", policy={"filter_expression": expr})
-
-# Batch with filter
-ops = [{"op": aerospike.OPERATOR_READ, "bin": "age", "val": None}]
-records = await client.batch_operate(keys, ops, policy={"filter_expression": expr})
+query = client.query("test", "demo")
+query.select("name", "age")
 ```
 
-  </TabItem>
-</Tabs>
+### `where(predicate)`
 
-:::tip
+Set a predicate filter for the query.
 
-If a record does not match the filter expression, the operation raises `FilteredOut`.
-See the [Expression Filters Guide](../guides/expression-filters.md) for detailed documentation.
+Requires a matching secondary index on the filtered bin.
 
-:::
+| Parameter | Description |
+|-----------|-------------|
+| `predicate` | A predicate tuple created by ``aerospike_py.predicates`` helper functions. |
+
+```python
+from aerospike_py import predicates
+
+query = client.query("test", "demo")
+query.where(predicates.equals("name", "Alice"))
+```
+
+### `results(policy=None)`
+
+Execute the query and return all matching records.
+
+| Parameter | Description |
+|-----------|-------------|
+| `policy` | Optional query policy dict. |
+
+**Returns:** A list of ``(key, meta, bins)`` tuples.
+
+```python
+records = query.results()
+for key, meta, bins in records:
+    print(bins)
+```
+
+### `foreach(callback, policy=None)`
+
+Execute the query and invoke a callback for each record.
+
+The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+from the callback to stop iteration early.
+
+| Parameter | Description |
+|-----------|-------------|
+| `callback` | Function called with each record. Return ``False`` to stop. |
+| `policy` | Optional query policy dict. |
+
+```python
+def process(record):
+    key, meta, bins = record
+    print(bins)
+
+query.foreach(process)
+```
+
+## Scan Object
+
+Full namespace/set scan object.
+
+Created via ``Client.scan(namespace, set_name)``. Use ``select()``
+to choose bins, then ``results()`` or ``foreach()`` to execute.
+
+```python
+scan = client.scan("test", "demo")
+scan.select("name", "age")
+records = scan.results()
+```
+
+### `select()`
+
+Select specific bins to return in scan results.
+
+```python
+scan = client.scan("test", "demo")
+scan.select("name", "age")
+```
+
+### `results(policy=None)`
+
+Execute the scan and return all records.
+
+| Parameter | Description |
+|-----------|-------------|
+| `policy` | Optional scan policy dict. |
+
+**Returns:** A list of ``(key, meta, bins)`` tuples.
+
+```python
+records = scan.results()
+for key, meta, bins in records:
+    print(bins)
+```
+
+### `foreach(callback, policy=None)`
+
+Execute the scan and invoke a callback for each record.
+
+The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+from the callback to stop iteration early.
+
+| Parameter | Description |
+|-----------|-------------|
+| `callback` | Function called with each record. Return ``False`` to stop. |
+| `policy` | Optional scan policy dict. |
+
+```python
+def process(record):
+    key, meta, bins = record
+    print(bins)
+
+scan.foreach(process)
+```
