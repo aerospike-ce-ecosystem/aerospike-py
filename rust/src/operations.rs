@@ -135,7 +135,7 @@ fn get_val_end(dict: &Bound<'_, PyDict>) -> PyResult<Value> {
         .and_then(|v| if v.is_none() { None } else { Some(v) })
         .map(|v| py_to_value(&v))
         .transpose()
-        .map(|v| v.unwrap_or(Value::Nil))
+        .map(|v| v.unwrap_or(Value::Infinity))
 }
 
 fn int_to_list_return_type(v: i32) -> ListReturnType {
