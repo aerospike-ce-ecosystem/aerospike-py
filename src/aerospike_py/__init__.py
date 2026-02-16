@@ -249,22 +249,53 @@ class Client(_NativeClient):
     def connect(self, username: str | None = None, password: str | None = None) -> "Client":
         """Connect to the Aerospike cluster.
 
-        Returns self for method chaining:
-            client = aerospike_py.client({...}).connect()
+        Returns ``self`` for method chaining.
+
+        Args:
+            username: Optional username for authentication.
+            password: Optional password for authentication.
+
+        Returns:
+            The connected client instance.
+
+        Raises:
+            ClusterError: Failed to connect to any cluster node.
+
+        Example:
+            ```python
+            client = aerospike_py.client(config).connect()
+
+            # With authentication
+            client = aerospike_py.client(config).connect("admin", "admin")
+            ```
         """
         logger.info("Connecting to Aerospike cluster")
         super().connect(username, password)
         return self
 
     def batch_read(self, keys, bins=None, policy=None, _dtype=None):
-        """Batch read records.
+        """Read multiple records in a single batch call.
 
         Args:
-            keys: List of (namespace, set, primary_key) tuples.
-            bins: Optional list of bin names to read.
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            bins: Optional list of bin names to read. ``None`` reads all bins;
+                an empty list performs an existence check only.
             policy: Optional batch policy dict.
-            _dtype: Optional numpy dtype. When provided, returns
-                NumpyBatchRecords instead of BatchRecords.
+            _dtype: Optional NumPy dtype. When provided, returns
+                ``NumpyBatchRecords`` instead of ``BatchRecords``.
+
+        Returns:
+            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+
+        Example:
+            ```python
+            keys = [("test", "demo", f"user_{i}") for i in range(10)]
+            batch = client.batch_read(keys, bins=["name", "age"])
+            for br in batch.batch_records:
+                if br.record:
+                    key, meta, bins = br.record
+                    print(bins)
+            ```
         """
         return super().batch_read(keys, bins, policy, _dtype)
 
@@ -307,26 +338,60 @@ class AsyncClient:
         return False
 
     async def connect(self, username: str | None = None, password: str | None = None) -> None:
-        """Connect to the Aerospike cluster."""
+        """Connect to the Aerospike cluster.
+
+        Args:
+            username: Optional username for authentication.
+            password: Optional password for authentication.
+
+        Raises:
+            ClusterError: Failed to connect to any cluster node.
+
+        Example:
+            ```python
+            await client.connect()
+            await client.connect("admin", "admin")
+            ```
+        """
         logger.info("Async client connecting")
         return await self._inner.connect(username, password)
 
     async def close(self) -> None:
-        """Close the connection."""
+        """Close the connection to the cluster.
+
+        Example:
+            ```python
+            await client.close()
+            ```
+        """
         logger.debug("Async client closing")
         return await self._inner.close()
 
     async def batch_read(
         self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None, _dtype: Any = None
     ) -> Any:
-        """Batch read records asynchronously.
+        """Read multiple records in a single batch call.
 
         Args:
-            keys: List of (namespace, set, primary_key) tuples.
-            bins: Optional list of bin names to read.
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            bins: Optional list of bin names to read. ``None`` reads all bins;
+                an empty list performs an existence check only.
             policy: Optional batch policy dict.
-            _dtype: Optional numpy dtype. When provided, returns
-                NumpyBatchRecords instead of BatchRecords.
+            _dtype: Optional NumPy dtype. When provided, returns
+                ``NumpyBatchRecords`` instead of ``BatchRecords``.
+
+        Returns:
+            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+
+        Example:
+            ```python
+            keys = [("test", "demo", f"user_{i}") for i in range(10)]
+            batch = await client.batch_read(keys, bins=["name", "age"])
+            for br in batch.batch_records:
+                if br.record:
+                    key, meta, bins = br.record
+                    print(bins)
+            ```
         """
         return await self._inner.batch_read(keys, bins, policy, _dtype)
 
@@ -334,8 +399,20 @@ class AsyncClient:
 def set_log_level(level: int) -> None:
     """Set the aerospike_py log level.
 
-    Accepts LOG_LEVEL_* constants or standard Python logging levels.
-    Controls both Rust internal logs and Python logs.
+    Accepts ``LOG_LEVEL_*`` constants. Controls both Rust-internal
+    and Python-side logging.
+
+    Args:
+        level: One of ``LOG_LEVEL_OFF`` (-1), ``LOG_LEVEL_ERROR`` (0),
+            ``LOG_LEVEL_WARN`` (1), ``LOG_LEVEL_INFO`` (2),
+            ``LOG_LEVEL_DEBUG`` (3), ``LOG_LEVEL_TRACE`` (4).
+
+    Example:
+        ```python
+        import aerospike_py
+
+        aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
+        ```
     """
     _LEVEL_MAP = {
         -1: logging.CRITICAL + 1,  # OFF
@@ -356,15 +433,20 @@ def client(config: dict) -> Client:
     """Create a new Aerospike client instance.
 
     Args:
-        config: Configuration dictionary. Must contain 'hosts' key
-                with a list of (host, port) tuples.
+        config: Configuration dictionary. Must contain a ``"hosts"`` key
+            with a list of ``(host, port)`` tuples.
 
     Returns:
-        A new Client instance (not yet connected).
+        A new ``Client`` instance (not yet connected).
 
     Example:
-        >>> client = aerospike_py.client({'hosts': [('127.0.0.1', 3000)]})
-        >>> client.connect()
+        ```python
+        import aerospike_py
+
+        client = aerospike_py.client({
+            "hosts": [("127.0.0.1", 3000)],
+        }).connect()
+        ```
     """
     return Client(config)
 
