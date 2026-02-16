@@ -1017,49 +1017,6 @@ impl PyAsyncClient {
         })
     }
 
-    /// Read multiple records by key (async). Returns list of (key, meta, bins) tuples.
-    #[pyo3(signature = (keys, policy=None))]
-    fn get_many<'py>(
-        &self,
-        py: Python<'py>,
-        keys: &Bound<'_, PyList>,
-        policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        debug!("async get_many: keys_count={}", keys.len());
-        let client = self.get_client()?;
-        let batch_policy = parse_batch_policy(policy)?;
-        let read_policy = BatchReadPolicy::default();
-
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        let (batch_ns, batch_set) = rust_keys
-            .first()
-            .map(|k| (k.namespace.clone(), k.set_name.clone()))
-            .unwrap_or_default();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
-
-        future_into_py(py, async move {
-            let ops: Vec<BatchOperation> = rust_keys
-                .iter()
-                .map(|k| BatchOperation::read(&read_policy, k.clone(), Bins::All))
-                .collect();
-
-            let results = traced_op!("get_many", &batch_ns, &batch_set, parent_ctx, conn_info, {
-                client.batch(&batch_policy, &ops).await
-            })?;
-
-            Python::attach(|py| batch_records_to_py(py, &results))
-        })
-    }
-
     /// Perform operations on multiple records (async).
     #[pyo3(signature = (keys, ops, policy=None))]
     fn batch_operate<'py>(
