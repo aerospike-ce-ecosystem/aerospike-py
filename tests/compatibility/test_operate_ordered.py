@@ -21,10 +21,17 @@ from aerospike_helpers.operations import operations as off_ops  # noqa: E402
 NS = "test"
 SET = "compat_oo"
 
+# Upstream aerospike-client-rust uses HashMap for Record.bins,
+# which loses insertion order and collapses duplicate keys.
+# See: https://github.com/aerospike/aerospike-client-rust/issues/183
+#      https://github.com/aerospike/aerospike-client-rust/pull/184
+_SKIP_UPSTREAM = "upstream aerospike-client-rust HashMap bin ordering issue (aerospike-client-rust#183)"
+
 
 class TestOperateOrderedBinOrdering:
     """Verify that READ operations return in the correct order."""
 
+    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_multiple_reads_preserve_order(self, rust_client, official_client, cleanup):
         """Multiple READ ops should return in operation order."""
         key = (NS, SET, "oo_read_order")
@@ -63,6 +70,7 @@ class TestOperateOrderedBinOrdering:
         o_values = [val for _, val in o_ordered]
         assert r_values == o_values
 
+    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_same_bin_multiple_reads(self, rust_client, official_client, cleanup):
         """BUG: Reading the same bin multiple times should appear as separate entries.
 
@@ -201,6 +209,7 @@ class TestOperateOrderedReturnTypes:
 class TestOperateOrderedWithCDT:
     """CDT operations within operate_ordered."""
 
+    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_list_ops_in_ordered(self, rust_client, official_client, cleanup):
         """BUG: CDT list operations same-bin results should be separate entries.
 
@@ -234,6 +243,7 @@ class TestOperateOrderedWithCDT:
             f"Entry count mismatch: rust={r_ordered}, official={o_ordered}. Rust collapses same-bin results."
         )
 
+    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_map_ops_in_ordered(self, rust_client, official_client, cleanup):
         """BUG: CDT map operations same-bin results should be separate entries."""
         key_r = (NS, SET, "oo_cdt_map_r")
