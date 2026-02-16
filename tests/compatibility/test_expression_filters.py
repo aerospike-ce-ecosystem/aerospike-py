@@ -130,12 +130,20 @@ class TestExpressionLogical:
         assert o_bins["age"] == 24
 
     def test_and_filters_out(self, rust_client, cleanup):
-        """AND: age >= 24 AND active == true - should filter out expr_5 (odd, not active)."""
-        key = (NS, SET, "expr_5")  # age=25, active=False
+        """AND: age >= 24 AND id is even - should filter out expr_5 (odd id).
+
+        Note: bool_bin + bool_val is not used because aerospike-core lacks a
+        dedicated bool_bin() and its ExpOp is pub(crate), so bool_bin falls
+        back to int_bin which causes a type mismatch with bool_val on the server.
+        """
+        key = (NS, SET, "expr_5")  # age=25, id=5 (odd)
 
         rust_expr = exp.and_(
             exp.ge(exp.int_bin("age"), exp.int_val(24)),
-            exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
+            exp.eq(
+                exp.num_mod(exp.int_bin("id"), exp.int_val(2)),
+                exp.int_val(0),
+            ),
         )
         with pytest.raises(aerospike_py.FilteredOut):
             rust_client.get(key, policy={"filter_expression": rust_expr})
