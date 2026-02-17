@@ -9,7 +9,7 @@ Aerospike NoSQL 데이터베이스를 위한 Python 클라이언트 라이브러
 pip install aerospike-py
 ```
 
-> Python >= 3.10, CPython 전용. macOS(arm64, x86_64) 및 Linux(x86_64, aarch64) 지원.
+> Python 3.10~3.14 (3.14t free-threaded 포함), CPython 전용. macOS(arm64, x86_64) 및 Linux(x86_64, aarch64) 지원.
 
 ## 프로젝트 구조
 
@@ -38,26 +38,56 @@ aerospike-py/
 │   └── numpy_batch.py      # NumPy 기반 배치 결과
 ├── tests/
 │   ├── unit/               # 유닛 테스트 (서버 불필요)
-│   └── integration/        # 통합 테스트 (Aerospike 서버 필요)
+│   ├── integration/        # 통합 테스트 (Aerospike 서버 필요)
+│   ├── concurrency/        # 스레드 안전성 테스트
+│   ├── compatibility/      # 공식 C 클라이언트 호환성 테스트
+│   └── feasibility/        # 프레임워크 통합 테스트 (FastAPI, Gunicorn)
 └── pyproject.toml          # 빌드 설정 (maturin)
 ```
 
-## 빌드 명령어
+## 개발 환경
+
+패키지 매니저로 **uv**를 사용한다. Makefile에 주요 명령어가 정의되어 있다.
 
 ```bash
-# Rust 컴파일 체크 (링킹 없이)
-cargo check --manifest-path rust/Cargo.toml
+# 의존성 설치
+make install                        # uv sync --all-groups
 
-# Python 패키지 빌드 및 설치 (개발용)
-maturin develop --manifest-path rust/Cargo.toml
-
-# OpenTelemetry 트레이싱 포함 빌드
-maturin develop --manifest-path rust/Cargo.toml --features otel
+# Rust 빌드
+make build                          # uv run maturin develop --release
+cargo check --manifest-path rust/Cargo.toml  # 컴파일 체크만 (빠름)
 
 # 테스트
-pytest tests/unit/                  # 유닛 테스트 (서버 불필요)
-pytest tests/integration/           # 통합 테스트 (Aerospike 서버 필요)
+make test-unit                      # 유닛 테스트 (서버 불필요)
+make test-integration               # 통합 테스트 (Aerospike 서버 필요)
+make test-concurrency               # 스레드 안전성 테스트
+make test-compat                    # 공식 클라이언트 호환성 테스트
+make test-all                       # 전체 테스트
+make test-matrix                    # Python 3.10~3.14 매트릭스 테스트 (tox)
+
+# 린트 & 포맷
+make lint                           # ruff check + clippy
+make fmt                            # ruff format + cargo fmt
+
+# 로컬 Aerospike 서버
+make run-aerospike-ce               # Docker로 Aerospike CE 실행 (port 3000)
+
+# 벤치마크
+make run-benchmark                  # aerospike-py vs 공식 클라이언트 비교
+make run-numpy-benchmark            # NumPy 배치 벤치마크
 ```
+
+### Pre-commit Hooks
+
+커밋 시 자동 실행: trailing-whitespace, ruff format/lint, pyright, cargo fmt, cargo clippy (-D warnings)
+
+### 주의사항
+
+- OpenTelemetry(`otel`)은 기본 빌드에 항상 포함됨 (별도 feature flag 불필요)
+- 통합 테스트 실행 전 `make run-aerospike-ce`로 로컬 서버 필요
+- maturin 버전 `>=1.9,<2.0`으로 고정
+- `AEROSPIKE_HOST`, `AEROSPIKE_PORT` 환경변수로 서버 주소 변경 가능
+- `RUNTIME` 환경변수로 docker/podman 선택 가능 (기본: docker)
 
 ## 핵심 타입
 
@@ -450,7 +480,15 @@ AerospikeError
 AEROSPIKE_CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
 ```
 
-Docker로 로컬 서버 실행:
 ```bash
-docker run -d --name aerospike -p 3000:3000 aerospike/aerospike-server
+make run-aerospike-ce               # 로컬 Aerospike 서버 실행
+make test-unit                      # 서버 없이 실행 가능
+make test-integration               # 서버 필요
 ```
+
+주요 fixture (`tests/conftest.py`):
+- `client` — module-scoped sync 클라이언트
+- `async_client` — function-scoped async 클라이언트
+- `cleanup` / `async_cleanup` — 테스트 후 자동 레코드 정리
+
+pytest 설정: `asyncio_mode = "auto"` (async 테스트 자동 감지)
