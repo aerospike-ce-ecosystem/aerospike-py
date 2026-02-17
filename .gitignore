@@ -27,6 +27,15 @@ rust/target/
 *.swp
 *.swo
 
+# Claude Code
+.claude/
+
+# Sisyphus
+.sisyphus/
+
+# Playwright
+.playwright-cli/
+
 # Docusaurus
 docs/node_modules/
 docs/build/

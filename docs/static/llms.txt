@@ -11,7 +11,7 @@
 
 ## API Reference
 
-- [Client](https://kimsoungryoul.github.io/aerospike-py/docs/api/client): Complete API reference for the synchronous Client and asynchronous AsyncClient classes.
+- [api-client](https://kimsoungryoul.github.io/aerospike-py/docs/api/client)
 - [Constants](https://kimsoungryoul.github.io/aerospike-py/docs/api/constants): Policy, TTL, operator, index type, and other constants used across the aerospike-py API.
 - [Exceptions](https://kimsoungryoul.github.io/aerospike-py/docs/api/exceptions): Exception hierarchy and error handling patterns for aerospike-py.
 - [Query & Scan](https://kimsoungryoul.github.io/aerospike-py/docs/api/query-scan): API reference for Query and Scan classes including predicates and result iteration.

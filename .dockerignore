@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+*.pyc
+target/
+node_modules/
+aerospike-desktop-manager/frontend/node_modules/
+aerospike-desktop-manager/frontend/.vite/
+docs/
+benchmark/
+tests/
+.tox/
+.ruff_cache/
+.pytest_cache/
+*.egg-info
