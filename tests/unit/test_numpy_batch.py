@@ -719,3 +719,60 @@ class TestTypeConversionErrors:
         assert "count" in msg
         assert "bad_key" in msg
         assert "index 0" in msg
+
+
+# ── NumpyBatchRecords protocol 메서드 테스트 ──────────────────
+
+
+class TestNumpyBatchRecordsProtocol:
+    def _make_result(self, n=3):
+        dtype = np.dtype([("val", "i4")])
+        records = [
+            _make_batch_record(
+                ("test", "demo", f"k{i}"),
+                0 if i != 1 else 2,
+                (None, {"gen": 1, "ttl": 0}, {"val": i * 10}) if i != 1 else None,
+            )
+            for i in range(n)
+        ]
+        keys = [("test", "demo", f"k{i}") for i in range(n)]
+        batch = _make_batch_records(records)
+        return _batch_records_to_numpy(batch, dtype, keys)
+
+    def test_len(self):
+        result = self._make_result()
+        assert len(result) == 3
+
+    def test_iter(self):
+        result = self._make_result()
+        items = list(result)
+        assert len(items) == 3
+        assert items[0]["val"] == 0
+        assert items[2]["val"] == 20
+
+    def test_contains(self):
+        result = self._make_result()
+        assert "k0" in result
+        assert "k2" in result
+        assert "nonexistent" not in result
+
+    def test_repr(self):
+        result = self._make_result()
+        r = repr(result)
+        assert "NumpyBatchRecords" in r
+        assert "count=3" in r
+        assert "ok=2" in r
+        assert "val" in r
+
+    def test_repr_empty(self):
+        dtype = np.dtype([("val", "i4")])
+        batch = _make_batch_records([])
+        result = _batch_records_to_numpy(batch, dtype, [])
+        r = repr(result)
+        assert "count=0" in r
+        assert "ok=0" in r
+
+    def test_get_improved_error_message(self):
+        result = self._make_result()
+        with pytest.raises(KeyError, match="not found in NumpyBatchRecords"):
+            result.get("nonexistent")

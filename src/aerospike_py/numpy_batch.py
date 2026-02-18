@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Iterator, Union
 
 if TYPE_CHECKING:
     import numpy as np
@@ -12,7 +12,18 @@ __all__ = ["NumpyBatchRecords"]
 
 
 class NumpyBatchRecords:
-    """Holds batch_read results as a numpy structured array."""
+    """Holds batch_read results as a numpy structured array.
+
+    Provides indexed, keyed, and iteration-based access to batch results
+    stored in contiguous numpy arrays for efficient vectorized operations.
+
+    Attributes:
+        batch_records: Structured numpy array containing bin data.
+        meta: Structured numpy array with ``(gen, ttl)`` per record.
+        result_codes: int32 array of Aerospike result codes (0 = success).
+    """
+
+    __slots__ = ("_map", "batch_records", "meta", "result_codes")
 
     def __init__(
         self,
@@ -29,13 +40,36 @@ class NumpyBatchRecords:
     def get(self, key: Union[str, int, bytes]) -> "np.void":
         """Retrieve a single record by primary key.
 
+        Args:
+            key: The primary key (string, int, or bytes) used during batch_read.
+
         Returns:
-            np.void: A single row of the structured array (numpy scalar record).
+            A single row of the structured array (numpy scalar record).
 
         Raises:
-            KeyError: When the key does not exist in the map.
+            KeyError: When the key does not exist in the result set.
         """
-        return self.batch_records[self._map[key]]
+        try:
+            return self.batch_records[self._map[key]]
+        except KeyError:
+            raise KeyError(f"key {key!r} not found in NumpyBatchRecords (available keys: {len(self._map)})") from None
+
+    def __len__(self) -> int:
+        """Return the number of records in the batch result."""
+        return len(self.batch_records)
+
+    def __iter__(self) -> "Iterator[np.void]":
+        """Iterate over individual records in the batch result."""
+        return iter(self.batch_records)
+
+    def __contains__(self, key: Union[str, int, bytes]) -> bool:
+        """Check whether a primary key exists in the result set."""
+        return key in self._map
+
+    def __repr__(self) -> str:
+        ok_count = int((self.result_codes == 0).sum()) if len(self.result_codes) > 0 else 0
+        fields = list(self.batch_records.dtype.names) if self.batch_records.dtype.names else []
+        return f"NumpyBatchRecords(count={len(self)}, ok={ok_count}, fields={fields})"
 
 
 # int, uint, float, bytes, void

@@ -590,6 +590,43 @@ class Client:
         """
         ...
 
+    def batch_write_numpy(
+        self,
+        data: np.ndarray,
+        namespace: str,
+        set_name: str,
+        _dtype: np.dtype,
+        key_field: str = "_key",
+        policy: Optional[dict[str, Any]] = None,
+    ) -> list[Record]:
+        """Write multiple records from a numpy structured array.
+
+        Each row of the structured array becomes a separate write operation.
+        The dtype must contain a key field (default ``_key``) for the record key.
+        Remaining non-underscore-prefixed fields become bins.
+
+        Args:
+            data: numpy structured array with record data.
+            namespace: Target namespace.
+            set_name: Target set.
+            _dtype: numpy dtype describing the array layout.
+            key_field: Name of the dtype field to use as the user key (default ``"_key"``).
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+
+        Returns:
+            A list of ``Record`` NamedTuples with write results.
+
+        Example:
+            ```python
+            import numpy as np
+
+            dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
+            data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
+            results = client.batch_write_numpy(data, "test", "demo", dtype)
+            ```
+        """
+        ...
+
     def batch_operate(
         self,
         keys: list[Key],
@@ -1443,6 +1480,43 @@ class AsyncClient:
             for br in batch.batch_records:
                 if br.record:
                     print(br.record.bins)
+            ```
+        """
+        ...
+
+    async def batch_write_numpy(
+        self,
+        data: np.ndarray,
+        namespace: str,
+        set_name: str,
+        _dtype: np.dtype,
+        key_field: str = "_key",
+        policy: Optional[dict[str, Any]] = None,
+    ) -> list[Record]:
+        """Write multiple records from a numpy structured array (async).
+
+        Each row of the structured array becomes a separate write operation.
+        The dtype must contain a key field (default ``_key``) for the record key.
+        Remaining non-underscore-prefixed fields become bins.
+
+        Args:
+            data: numpy structured array with record data.
+            namespace: Target namespace.
+            set_name: Target set.
+            _dtype: numpy dtype describing the array layout.
+            key_field: Name of the dtype field to use as the user key (default ``"_key"``).
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+
+        Returns:
+            A list of ``Record`` NamedTuples with write results.
+
+        Example:
+            ```python
+            import numpy as np
+
+            dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
+            data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
+            results = await client.batch_write_numpy(data, "test", "demo", dtype)
             ```
         """
         ...
