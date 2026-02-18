@@ -1,9 +1,9 @@
 ---
-title: Query & Scan Guide
-sidebar_label: Query & Scan
+title: Query Guide
+sidebar_label: Query
 sidebar_position: 1
 slug: /guides/query-scan
-description: 보조 인덱스 쿼리, 전체 네임스페이스 스캔 가이드
+description: 보조 인덱스 쿼리 가이드
 ---
 
 ## Secondary Index Query
@@ -100,68 +100,6 @@ query.foreach(limited)
 ```python
 client.index_remove("test", "users_age_idx")
 client.index_remove("test", "users_city_idx")
-```
-
-## Full Namespace Scan
-
-스캔은 Secondary Index 없이 namespace/set의 모든 record를 읽습니다.
-
-### 기본 스캔
-
-```python
-scan = client.scan("test", "users")
-records = scan.results()
-
-for key, meta, bins in records:
-    print(bins)
-```
-
-### Scan with Selected Bins
-
-```python
-scan = client.scan("test", "users")
-scan.select("name")
-records = scan.results()
-```
-
-### Scan with Callback
-
-```python
-scan = client.scan("test", "users")
-
-total_age = 0
-count = 0
-
-def accumulate(record):
-    global total_age, count
-    _, _, bins = record
-    total_age += bins.get("age", 0)
-    count += 1
-
-scan.foreach(accumulate)
-print(f"Average age: {total_age / count:.1f}")
-```
-
-## Async Scan
-
-```python
-import asyncio
-from aerospike_py import AsyncClient
-
-async def main():
-    client = AsyncClient({
-        "hosts": [("127.0.0.1", 3000)],
-        "cluster_name": "docker",
-    })
-    await client.connect()
-
-    records = await client.scan("test", "users")
-    for _, _, bins in records:
-        print(bins)
-
-    await client.close()
-
-asyncio.run(main())
 ```
 
 ## Predicate Reference

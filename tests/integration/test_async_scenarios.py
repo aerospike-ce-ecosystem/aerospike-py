@@ -148,26 +148,6 @@ class TestAsyncErrorHandling:
             await c.connect()
 
 
-class TestAsyncScanWorkflow:
-    """Async scan scenario tests."""
-
-    async def test_scan_after_writes(self, async_client, async_cleanup):
-        ns = "test"
-        set_name = "async_scan_scen"
-        keys = [(ns, set_name, f"s_{i}") for i in range(5)]
-        async_cleanup.extend(keys)
-
-        for i, key in enumerate(keys):
-            await async_client.put(key, {"idx": i, "val": i * 10})
-
-        results = await async_client.scan(ns, set_name)
-        assert len(results) >= 5
-
-        idxs = [bins["idx"] for _, _, bins in results]
-        for i in range(5):
-            assert i in idxs
-
-
 class TestAsyncTruncate:
     """Async truncate scenario tests."""
 

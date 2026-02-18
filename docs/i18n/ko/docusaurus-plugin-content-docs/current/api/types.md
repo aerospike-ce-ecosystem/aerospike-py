@@ -28,7 +28,7 @@ NamedTuple 반환 타입은 속성 접근과 튜플 언패킹을 모두 지원�
 | `meta` | `RecordMetadata \| None` | 레코드 메타데이터 |
 | `bins` | `dict[str, Any] \| None` | 빈 이름-값 쌍 |
 
-**반환하는 메서드**: `get()`, `select()`, `operate()`, `batch_operate()`, `batch_remove()`, `Query.results()`, `Scan.results()`
+**반환하는 메서드**: `get()`, `select()`, `operate()`, `batch_operate()`, `batch_remove()`, `Query.results()`
 
 ```python
 record: Record = client.get(key)
@@ -149,8 +149,6 @@ for bin_tuple in result.ordered_bins:
 | `batch_operate()` | `list[Record]` |
 | `batch_remove()` | `list[Record]` |
 | `Query.results()` | `list[Record]` |
-| `Scan.results()` | `list[Record]` |
-| `scan()` (async) | `list[Record]` |
 
 ---
 
@@ -261,9 +259,9 @@ batch = client.batch_read(keys, policy=policy)
 
 ### `QueryPolicy`
 
-쿼리 및 스캔 작업을 위한 정책입니다.
+쿼리 작업을 위한 정책입니다.
 
-**사용하는 메서드**: `Query.results()`, `Query.foreach()`, `Scan.results()`, `Scan.foreach()`
+**사용하는 메서드**: `Query.results()`, `Query.foreach()`
 
 | 필드 | 타입 | 기본값 | 설명 |
 |------|------|--------|------|

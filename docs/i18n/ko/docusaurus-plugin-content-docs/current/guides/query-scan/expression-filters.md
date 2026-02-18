@@ -6,7 +6,7 @@ slug: /guides/expression-filters
 description: 서버 측 레코드 필터링을 위한 Expression 필터 가이드
 ---
 
-Expression 필터를 사용하면 읽기, 쓰기, 쿼리, 스캔 작업 중에 서버 측에서 record를 필터링할 수 있습니다. 서버가 expression을 평가하고 일치하는 record만 반환(또는 수정)합니다.
+Expression 필터를 사용하면 읽기, 쓰기, 쿼리 작업 중에 서버 측에서 record를 필터링할 수 있습니다. 서버가 expression을 평가하고 일치하는 record만 반환(또는 수정)합니다.
 
 :::note[서버 요구 사항]
 
@@ -272,18 +272,6 @@ expr = exp.eq(exp.string_bin("region"), exp.string_val("US"))
 records = query.results(policy={"filter_expression": expr})
 ```
 
-### Scan with Filter
-
-```python
-# 필터를 적용한 스캔: 활성 사용자 중 TTL > 1시간인 record만
-expr = exp.and_(
-    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
-    exp.gt(exp.ttl(), exp.int_val(3600)),
-)
-scan = client.scan("test", "demo")
-records = scan.results(policy={"filter_expression": expr})
-```
-
 ### Batch with Filter
 
 ```python
@@ -306,8 +294,8 @@ expr = exp.and_(
     exp.ge(exp.int_bin("age"), exp.int_val(18)),
 )
 
-scan = client.scan("test", "users")
-records = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "users")
+records = query.results(policy={"filter_expression": expr})
 ```
 
 ### Records Expiring Soon
@@ -318,8 +306,8 @@ expr = exp.and_(
     exp.gt(exp.ttl(), exp.int_val(0)),       # 영구 보존이 아닌 record
     exp.lt(exp.ttl(), exp.int_val(3600)),     # 1시간 이내에 만료
 )
-scan = client.scan("test", "cache")
-expiring = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "cache")
+expiring = query.results(policy={"filter_expression": expr})
 ```
 
 ### High-Value Transactions
@@ -330,6 +318,6 @@ expr = exp.gt(
     exp.num_mul(exp.float_bin("amount"), exp.int_bin("quantity")),
     exp.float_val(10000.0),
 )
-scan = client.scan("test", "transactions")
-records = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "transactions")
+records = query.results(policy={"filter_expression": expr})
 ```

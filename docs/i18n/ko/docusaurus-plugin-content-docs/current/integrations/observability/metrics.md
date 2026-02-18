@@ -76,7 +76,6 @@ flowchart TB
 | `batch_operate` | `batch_operate` |
 | `batch_remove` | `batch_remove` |
 | `Query.results()` | `query` |
-| `Scan.results()` / `Scan.foreach()` | `scan` |
 
 **에러 타입:**
 

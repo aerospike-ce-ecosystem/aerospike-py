@@ -634,7 +634,7 @@ class Client:
         """
         ...
 
-    # -- Query / Scan --
+    # -- Query --
 
     def query(self, namespace: str, set_name: str) -> "Query":
         """Create a Query object for secondary index queries.
@@ -653,25 +653,6 @@ class Client:
             query.select("name", "age")
             query.where(predicates.between("age", 20, 30))
             records = query.results()
-            ```
-        """
-        ...
-
-    def scan(self, namespace: str, set_name: str) -> "Scan":
-        """Create a Scan object for full namespace/set scans.
-
-        Args:
-            namespace: The namespace to scan.
-            set_name: The set to scan.
-
-        Returns:
-            A ``Scan`` object. Use ``results()`` or ``foreach()`` to execute.
-
-        Example:
-            ```python
-            scan = client.scan("test", "demo")
-            scan.select("name", "age")
-            records = scan.results()
             ```
         """
         ...
@@ -1505,37 +1486,6 @@ class AsyncClient:
         """
         ...
 
-    # -- Scan --
-
-    async def scan(
-        self,
-        namespace: str,
-        set_name: str,
-        policy: Optional[dict[str, Any]] = None,
-    ) -> list[Record]:
-        """Scan all records in a namespace/set.
-
-        Returns a list of records directly (unlike the sync client which
-        returns a ``Scan`` object).
-
-        Args:
-            namespace: The namespace to scan.
-            set_name: The set to scan.
-            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict. Supports ``"filter_expression"``
-                for server-side filtering.
-
-        Returns:
-            A list of ``Record`` NamedTuples.
-
-        Example:
-            ```python
-            records = await client.scan("test", "demo")
-            for record in records:
-                print(record.bins)
-            ```
-        """
-        ...
-
     # -- Index --
 
     async def index_integer_create(
@@ -1888,76 +1838,6 @@ class Query:
                 print(record.bins)
 
             query.foreach(process)
-            ```
-        """
-        ...
-
-class Scan:
-    """Full namespace/set scan object.
-
-    Created via ``Client.scan(namespace, set_name)``. Use ``select()``
-    to choose bins, then ``results()`` or ``foreach()`` to execute.
-
-    Example:
-        ```python
-        scan = client.scan("test", "demo")
-        scan.select("name", "age")
-        records = scan.results()
-        ```
-    """
-
-    def select(self, *bins: str) -> None:
-        """Select specific bins to return in scan results.
-
-        Args:
-            *bins: Bin names to include in the results.
-
-        Example:
-            ```python
-            scan = client.scan("test", "demo")
-            scan.select("name", "age")
-            ```
-        """
-        ...
-
-    def results(self, policy: Optional[dict[str, Any]] = None) -> list[Record]:
-        """Execute the scan and return all records.
-
-        Args:
-            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
-
-        Returns:
-            A list of ``Record`` NamedTuples.
-
-        Example:
-            ```python
-            records = scan.results()
-            for record in records:
-                print(record.bins)
-            ```
-        """
-        ...
-
-    def foreach(
-        self,
-        callback: Callable[[Record], Optional[bool]],
-        policy: Optional[dict[str, Any]] = None,
-    ) -> None:
-        """Execute the scan and invoke a callback for each record.
-
-        The callback receives a ``Record`` NamedTuple. Return ``False``
-        from the callback to stop iteration early.
-
-        Args:
-            callback: Function called with each record. Return ``False`` to stop.
-            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
-
-        Example:
-            ```python
-            def process(record):
-                print(record.bins)
-
-            scan.foreach(process)
             ```
         """
         ...

@@ -93,13 +93,10 @@ async def delete_user(user_id: str, request: Request):
 
 @router.get("", response_model=list[UserResponse])
 async def list_users(request: Request):
-    """List all users via scan."""
-    client = _get_client(request)
-    records = await client.scan(NS, SET)
+    """List all users via batch read of known keys.
 
-    users = []
-    for key, meta, bins in records:
-        if key and meta and bins:
-            user_id = key[2]  # primary key
-            users.append(_to_response(str(user_id), meta, bins))
-    return users
+    Note: Full namespace scan is no longer supported.
+    This endpoint returns an empty list as a placeholder.
+    In production, maintain a separate index of user IDs.
+    """
+    return []

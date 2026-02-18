@@ -1,4 +1,4 @@
-"""Integration tests for query/scan operations (requires Aerospike server)."""
+"""Integration tests for query operations (requires Aerospike server)."""
 
 import time
 
@@ -36,47 +36,6 @@ def seed_data(client):
         client.index_remove("test", "idx_query_age")
     except Exception:
         pass
-
-
-class TestScan:
-    def test_scan_all(self, client, seed_data):
-        s = client.scan("test", "query_test")
-        results = s.results()
-        assert len(results) >= 10
-        for key, meta, bins in results:
-            assert meta is not None
-            assert "name" in bins
-            assert "age" in bins
-
-    def test_scan_select(self, client, seed_data):
-        s = client.scan("test", "query_test")
-        s.select("name")
-        results = s.results()
-        assert len(results) >= 10
-        for _, _, bins in results:
-            assert "name" in bins
-
-    def test_scan_foreach(self, client, seed_data):
-        s = client.scan("test", "query_test")
-        collected = []
-
-        def callback(record):
-            collected.append(record)
-
-        s.foreach(callback)
-        assert len(collected) >= 10
-
-    def test_scan_foreach_stop(self, client, seed_data):
-        s = client.scan("test", "query_test")
-        collected = []
-
-        def callback(record):
-            collected.append(record)
-            if len(collected) >= 3:
-                return False
-
-        s.foreach(callback)
-        assert len(collected) == 3
 
 
 class TestQuery:

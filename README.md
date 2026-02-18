@@ -12,7 +12,7 @@ Aerospike Python Client built with PyO3 + Rust. Drop-in replacement for [aerospi
 ## Features
 
 - Sync and Async (`AsyncClient`) API
-- CRUD, Batch, Query/Scan, UDF, Admin, Index, Truncate
+- CRUD, Batch, Query, UDF, Admin, Index, Truncate
 - CDT List/Map Operations, Expression Filters
 - Full type stubs (`.pyi`) for IDE autocompletion
 

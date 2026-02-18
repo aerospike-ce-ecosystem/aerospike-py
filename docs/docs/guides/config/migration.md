@@ -161,7 +161,7 @@ policy = {"filter_expression": expr}
 client.get(key, policy=policy)
 ```
 
-## Query / Scan
+## Query
 
 ```python
 query = client.query("test", "demo")

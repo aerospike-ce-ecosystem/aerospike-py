@@ -821,7 +821,7 @@ results = await client.batch_remove(keys)
   </TabItem>
 </Tabs>
 
-## Query & Scan
+## Query
 
 ### `query(namespace, set_name)`
 
@@ -841,38 +841,6 @@ query.select("name", "age")
 query.where(predicates.between("age", 20, 30))
 records = query.results()
 ```
-
-### `scan(namespace, set_name)`
-
-Create a Scan object for full namespace/set scans.
-
-| Parameter | Description |
-|-----------|-------------|
-| `namespace` | The namespace to scan. |
-| `set_name` | The set to scan. |
-
-**Returns:** A ``Scan`` object. Use ``results()`` or ``foreach()`` to execute.
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-```python
-scan = client.scan("test", "demo")
-scan.select("name", "age")
-records = scan.results()
-```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-records = await client.scan("test", "demo")
-for record in records:
-    print(record.bins)
-```
-
-  </TabItem>
-</Tabs>
 
 ## Index Management
 
@@ -1218,61 +1186,4 @@ def process(record):
     print(record.bins)
 
 query.foreach(process)
-```
-
-## Scan Object
-
-Full namespace/set scan object.
-
-Created via ``Client.scan(namespace, set_name)``. Use ``select()``
-to choose bins, then ``results()`` or ``foreach()`` to execute.
-
-```python
-scan = client.scan("test", "demo")
-scan.select("name", "age")
-records = scan.results()
-```
-
-### `select()`
-
-Select specific bins to return in scan results.
-
-```python
-scan = client.scan("test", "demo")
-scan.select("name", "age")
-```
-
-### `results(policy=None)`
-
-Execute the scan and return all records.
-
-| Parameter | Description |
-|-----------|-------------|
-| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
-
-**Returns:** A list of ``Record`` NamedTuples.
-
-```python
-records = scan.results()
-for record in records:
-    print(record.bins)
-```
-
-### `foreach(callback, policy=None)`
-
-Execute the scan and invoke a callback for each record.
-
-The callback receives a ``Record`` NamedTuple. Return ``False``
-from the callback to stop iteration early.
-
-| Parameter | Description |
-|-----------|-------------|
-| `callback` | Function called with each record. Return ``False`` to stop. |
-| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
-
-```python
-def process(record):
-    print(record.bins)
-
-scan.foreach(process)
 ```

@@ -150,7 +150,6 @@ aerospike_py.shutdown_tracing()
 | `batch_operate` | `BATCH_OPERATE` |
 | `batch_remove` | `BATCH_REMOVE` |
 | `Query.results()` | `QUERY` |
-| `Scan.results()` / `Scan.foreach()` | `SCAN` |
 
 :::info[Admin 작업 제외]
 `connect()`, `close()`, `info()` 등 관리 작업은 tracing 대상에서 제외됩니다.

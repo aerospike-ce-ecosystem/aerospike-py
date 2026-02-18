@@ -6,7 +6,7 @@ slug: /guides/expression-filters
 description: Use 104+ composable expression filter functions for server-side record filtering.
 ---
 
-Expression Filters allow server-side filtering of records during read, write, query, and scan operations. The server evaluates the expression and only returns (or modifies) records that match.
+Expression Filters allow server-side filtering of records during read, write, and query operations. The server evaluates the expression and only returns (or modifies) records that match.
 
 :::note[Server Requirement]
 
@@ -272,18 +272,6 @@ expr = exp.eq(exp.string_bin("region"), exp.string_val("US"))
 records = query.results(policy={"filter_expression": expr})
 ```
 
-### Scan with Filter
-
-```python
-# Scan with filter: only active users with TTL > 1 hour
-expr = exp.and_(
-    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
-    exp.gt(exp.ttl(), exp.int_val(3600)),
-)
-scan = client.scan("test", "demo")
-records = scan.results(policy={"filter_expression": expr})
-```
-
 ### Batch with Filter
 
 ```python
@@ -306,8 +294,8 @@ expr = exp.and_(
     exp.ge(exp.int_bin("age"), exp.int_val(18)),
 )
 
-scan = client.scan("test", "users")
-records = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "users")
+records = query.results(policy={"filter_expression": expr})
 ```
 
 ### Records Expiring Soon
@@ -318,8 +306,8 @@ expr = exp.and_(
     exp.gt(exp.ttl(), exp.int_val(0)),       # not immortal
     exp.lt(exp.ttl(), exp.int_val(3600)),     # expiring within 1hr
 )
-scan = client.scan("test", "cache")
-expiring = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "cache")
+expiring = query.results(policy={"filter_expression": expr})
 ```
 
 ### High-Value Transactions
@@ -330,6 +318,6 @@ expr = exp.gt(
     exp.num_mul(exp.float_bin("amount"), exp.int_bin("quantity")),
     exp.float_val(10000.0),
 )
-scan = client.scan("test", "transactions")
-records = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "transactions")
+records = query.results(policy={"filter_expression": expr})
 ```

@@ -576,17 +576,6 @@ class TestConnectionInfoAllOperations:
         finally:
             aerospike_py.shutdown_tracing()
 
-    def test_scan_creation_with_connection_info(self, monkeypatch):
-        """Scan creation requires connected client; verify error propagation with tracing."""
-        monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
-        aerospike_py.init_tracing()
-        try:
-            c = self._make_client()
-            with pytest.raises(aerospike_py.ClientError):
-                c.scan("test", "demo")
-        finally:
-            aerospike_py.shutdown_tracing()
-
 
 class TestAsyncConnectionInfoOperations:
     """Verify connection info propagation for async client operations."""

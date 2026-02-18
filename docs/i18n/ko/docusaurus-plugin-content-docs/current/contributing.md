@@ -81,7 +81,7 @@ aerospike-py/
 ├── rust/src/              # PyO3 Rust Bindings
 │   ├── client.rs          # Sync Client
 │   ├── async_client.rs    # Async Client
-│   ├── query.rs           # Query / Scan
+│   ├── query.rs           # Query
 │   ├── operations.rs      # 연산 매핑 (CDT list/map 포함)
 │   ├── expressions.rs     # Expression 필터 컴파일
 │   ├── errors.rs          # Error → Exception 매핑

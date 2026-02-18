@@ -33,7 +33,6 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<client::PyClient>()?;
     m.add_class::<async_client::PyAsyncClient>()?;
     m.add_class::<query::PyQuery>()?;
-    m.add_class::<query::PyScan>()?;
     m.add_class::<batch_types::PyBatchRecord>()?;
     m.add_class::<batch_types::PyBatchRecords>()?;
 
