@@ -9,7 +9,7 @@ Aerospike Rust Client(`aerospike-rust` crate)를 PyO3로 래핑하여, Python에
 ### 1. Sync / Async Client
 
 - Rust 네이티브 클라이언트를 기반으로 **동기(`Client`) + 비동기(`AsyncClient`)** 양쪽 API를 제공한다.
-- 공식 C 클라이언트(`aerospike` PyPI 패키지)와 **API 호환성**을 유지하여 마이그레이션 비용을 최소화한다.
+- 공식 C 클라이언트(`aerospike` PyPI 패키지)와 **API 호환성**을 유지하면 좋지만 Rust 네이티브 클라이언트 API 스펙을 더 우선한다
 - Python 3.10~3.14 (3.14t free-threaded 포함) 지원.
 
 ### 2. NumPy 통합
@@ -54,14 +54,12 @@ Aerospike Rust Client(`aerospike-rust` crate)를 PyO3로 래핑하여, Python에
 - Logging (Rust → Python 레벨 연동)
 - Expression 필터
 - List/Map CDT 연산 헬퍼
-- 공식 C 클라이언트 호환성 테스트
+- 공식 C 클라이언트 호환성 테스트 (완벽하게 호환할 필요 없음)
 
 ### 미구현 / 향후 과제
 
-- Scan 연산 (제거됨 — Aerospike 서버 변경에 따라 query로 통합 검토)
 - Batch write (batch_operate로 대체 가능하나 별도 API 검토)
+- batch write numpy (numpy structued array로 주어진 데이터를 records list로 batch_write하는 API 스펙)
 - HyperLogLog / Bitwise 연산 헬퍼
-- GeoJSON 쿼리 헬퍼
 - Connection pool 세부 설정
-- TLS/mTLS 연결
 - Rack-aware 읽기 최적화
