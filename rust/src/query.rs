@@ -1,3 +1,9 @@
+//! Query and scan support for the Aerospike Python client.
+//!
+//! Provides [`PyQuery`], a Python-visible class that collects predicates and
+//! selected bins, then executes them against the cluster as either a secondary
+//! index query or a full scan (when no predicates are set).
+
 use std::sync::Arc;
 
 #[allow(unused_imports)]
@@ -17,7 +23,10 @@ use crate::runtime::RUNTIME;
 use crate::types::record::record_to_py;
 use crate::types::value::py_to_value;
 
-/// Stored predicate info (reconstructed into Filter at execution time)
+/// Stored predicate info, reconstructed into an `aerospike_core::Filter` at execution time.
+///
+/// Predicates are collected from Python `where()` calls and applied to the
+/// [`Statement`] just before query execution.
 #[derive(Clone)]
 enum Predicate {
     Equals {
@@ -58,6 +67,7 @@ enum Predicate {
     },
 }
 
+/// Parse a Python predicate tuple (from `aerospike_py.predicates`) into a [`Predicate`].
 fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
     let kind: String = pred.get_item(0)?.extract()?;
     let bin: String = pred.get_item(1)?.extract()?;
@@ -116,6 +126,7 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
     }
 }
 
+/// Build an `aerospike_core::Statement` from namespace, set, bins, and predicates.
 fn build_statement(
     namespace: &str,
     set_name: &str,
@@ -161,6 +172,7 @@ fn build_statement(
     Ok(stmt)
 }
 
+/// Map a Python integer to a [`CollectionIndexType`] for contains-predicates.
 fn int_to_collection_index_type(val: i32) -> CollectionIndexType {
     match val {
         1 => CollectionIndexType::List,
@@ -288,6 +300,11 @@ fn execute_foreach(
 
 // ── Query class ──────────────────────────────────────────
 
+/// Python-visible query builder exposed as `Query`.
+///
+/// Created by `Client.query()` / `AsyncClient.query()`. Users add predicates
+/// via `where()`, select bins via `select()`, then execute via `results()` or
+/// `foreach()`.
 #[pyclass(name = "Query")]
 pub struct PyQuery {
     client: Arc<AsClient>,

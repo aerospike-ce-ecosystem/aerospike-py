@@ -1,3 +1,5 @@
+//! Helpers for converting Aerospike records and batch results to Python objects.
+
 use aerospike_core::BatchRecord;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};

@@ -1,3 +1,9 @@
+//! Native Aerospike client for Python, implemented in Rust via PyO3.
+//!
+//! This crate provides both synchronous ([`client::PyClient`]) and asynchronous
+//! ([`async_client::PyAsyncClient`]) wrappers around `aerospike_core`, exposing
+//! them as Python classes through the `_aerospike` native module.
+
 use log::info;
 use pyo3::prelude::*;
 

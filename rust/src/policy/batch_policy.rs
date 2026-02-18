@@ -1,3 +1,5 @@
+//! Batch policy parsing from Python dicts.
+
 use aerospike_core::BatchPolicy;
 use log::trace;
 use pyo3::prelude::*;

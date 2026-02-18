@@ -1,3 +1,5 @@
+//! Query/scan policy parsing from Python dicts.
+
 use aerospike_core::QueryPolicy;
 use log::trace;
 use pyo3::prelude::*;

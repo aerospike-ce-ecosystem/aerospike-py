@@ -1,3 +1,5 @@
+//! Host configuration parsing from Python config dicts to connection strings.
+
 use log::debug;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};

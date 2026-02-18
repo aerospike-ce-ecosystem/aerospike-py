@@ -1,3 +1,9 @@
+//! Aerospike operation codes and Python-visible constants.
+//!
+//! Internal operation codes (`OP_*`) are used by [`crate::operations`] to
+//! dispatch Python operation dicts. Public constants (policy, index, result
+//! codes, etc.) are registered on the native module for use from Python.
+
 use pyo3::prelude::*;
 
 // ── Basic operation type constants ──────────────────────────────
@@ -71,7 +77,11 @@ pub const OP_MAP_GET_BY_RANK_RANGE: i32 = 2025;
 pub const OP_MAP_GET_BY_KEY_LIST: i32 = 2026;
 pub const OP_MAP_GET_BY_VALUE_LIST: i32 = 2027;
 
-/// Register all constants into the module
+/// Register all Aerospike constants onto the native Python module.
+///
+/// Groups: policy keys/exists/gen/replica/commit, TTL, auth mode, operators,
+/// index types, log levels, serializers, list/map return types and flags,
+/// privilege codes, and server result codes.
 pub fn register_constants(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // --- Policy Key ---
     m.add("POLICY_KEY_DIGEST", 0)?;

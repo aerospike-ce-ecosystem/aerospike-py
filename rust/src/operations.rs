@@ -1,3 +1,9 @@
+//! Conversion of Python operation dicts to `aerospike_core::Operation` values.
+//!
+//! Each operation is represented as a Python dict with at minimum an `"op"` key
+//! (integer operation code). This module dispatches on that code to construct
+//! the corresponding Rust `Operation` for basic CRUD, List CDT, and Map CDT ops.
+
 use aerospike_core::{
     operations,
     operations::lists::{
@@ -16,6 +22,7 @@ use crate::types::value::py_to_value;
 
 // ── Helper functions ────────────────────────────────────────────
 
+/// Require a bin name, returning a descriptive error if absent.
 fn require_bin(bin_name: &Option<String>, op_name: &str) -> PyResult<String> {
     bin_name.clone().ok_or_else(|| {
         pyo3::exceptions::PyValueError::new_err(format!("{op_name} operation requires 'bin'"))
@@ -68,6 +75,7 @@ fn get_val_end(dict: &Bound<'_, PyDict>) -> PyResult<Value> {
         .map(|v| v.unwrap_or(Value::Infinity))
 }
 
+/// Map a Python integer to a [`ListReturnType`] enum variant.
 fn int_to_list_return_type(v: i32) -> ListReturnType {
     match v {
         0 => ListReturnType::None,
@@ -82,6 +90,7 @@ fn int_to_list_return_type(v: i32) -> ListReturnType {
     }
 }
 
+/// Map a Python integer to a [`MapReturnType`] enum variant.
 fn int_to_map_return_type(v: i32) -> MapReturnType {
     match v {
         0 => MapReturnType::None,
@@ -98,6 +107,7 @@ fn int_to_map_return_type(v: i32) -> MapReturnType {
     }
 }
 
+/// Parse an optional `list_policy` sub-dict from an operation dict.
 fn parse_list_policy(dict: &Bound<'_, PyDict>) -> PyResult<ListPolicy> {
     if let Some(policy_obj) = dict.get_item("list_policy")? {
         if policy_obj.is_none() {
@@ -127,6 +137,7 @@ fn parse_list_policy(dict: &Bound<'_, PyDict>) -> PyResult<ListPolicy> {
     }
 }
 
+/// Parse an optional `map_policy` sub-dict from an operation dict.
 fn parse_map_policy(dict: &Bound<'_, PyDict>) -> PyResult<MapPolicy> {
     if let Some(policy_obj) = dict.get_item("map_policy")? {
         if policy_obj.is_none() {
@@ -159,6 +170,7 @@ fn parse_map_policy(dict: &Bound<'_, PyDict>) -> PyResult<MapPolicy> {
     }
 }
 
+/// Unwrap a `Value::List` into its inner `Vec`, or wrap a single value in a `Vec`.
 fn values_from_list(val: &Value) -> Vec<Value> {
     match val {
         Value::List(v) => v.clone(),
