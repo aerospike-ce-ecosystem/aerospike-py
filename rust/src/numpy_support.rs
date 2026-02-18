@@ -1,7 +1,21 @@
+//! NumPy structured-array support for batch operations.
+//!
+//! Converts `Vec<BatchRecord>` directly into a NumPy structured array by
+//! writing Aerospike values into a raw buffer obtained via `__array_interface__`.
+//! This avoids per-element Python object creation and is significantly faster
+//! than building Python dicts for large batch reads.
+//!
+//! # Safety
+//!
+//! This module contains `unsafe` code that writes to raw pointers obtained from
+//! NumPy arrays. Safety invariants are documented on each `unsafe` function and
+//! are upheld by the bounds checks in [`parse_dtype_fields`] and the allocation
+//! in [`batch_to_numpy_py`] (via `np.zeros`).
+
 use std::collections::HashMap;
 use std::ptr;
 
-use aerospike_core::{BatchRecord, FloatValue, Value};
+use aerospike_core::{BatchRecord, Bin, FloatValue, Key, Value};
 use half::f16;
 use log::{debug, warn};
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -13,6 +27,7 @@ use crate::types::value::value_to_py;
 
 // ── dtype field descriptor ──────────────────────────────────────
 
+/// The kind of a NumPy dtype field, determining how Aerospike values are written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DtypeKind {
     Int,
@@ -22,17 +37,28 @@ pub enum DtypeKind {
     VoidBytes,
 }
 
+/// Metadata for a single field within a NumPy structured dtype.
+///
+/// Used to locate and write values into the correct position within a row buffer.
 #[derive(Debug, Clone)]
 pub struct FieldInfo {
+    /// Field name, matching an Aerospike bin name.
     pub name: String,
+    /// Byte offset of this field within a row.
     pub offset: usize,
+    /// Total byte size of this field (may be larger than `base_itemsize` for sub-arrays).
     pub itemsize: usize,
+    /// Byte size of the base scalar element.
     pub base_itemsize: usize,
+    /// The kind of the base dtype element.
     pub kind: DtypeKind,
 }
 
 // ── dtype parsing ───────────────────────────────────────────────
 
+/// Parse a NumPy structured dtype into field descriptors and the row stride.
+///
+/// Validates that every field fits within the row stride (no buffer overrun).
 fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usize)> {
     let names = dtype.getattr("names")?;
     let names: Vec<String> = names.extract()?;
@@ -109,15 +135,18 @@ fn get_array_data_ptr(array: &Bound<'_, PyAny>) -> PyResult<*mut u8> {
 }
 
 // ── buffer write helpers (all unsafe) ───────────────────────────
-//
-// # Safety (applies to all write_* functions below)
-//
-// - `row_ptr` must point to a valid, writable buffer of at least
-//   `field.offset + field.itemsize` bytes.
-// - The buffer must remain valid for the duration of the write.
-// - These invariants are upheld by `batch_to_numpy_py`, which allocates
-//   the buffer via `np.zeros` and validates field bounds in `parse_dtype_fields`.
 
+/// Write a signed integer value into the row buffer at the field's offset.
+///
+/// # Safety
+///
+/// - `row_ptr` must point to a valid, writable buffer of at least
+///   `field.offset + field.itemsize` bytes.
+/// - The buffer must remain valid for the duration of the write.
+/// - No other thread may concurrently write to the same memory region.
+///
+/// These invariants are upheld by [`batch_to_numpy_py`], which allocates
+/// the buffer via `np.zeros` and validates field bounds in [`parse_dtype_fields`].
 unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> PyResult<()> {
     debug_assert!(!row_ptr.is_null());
     let dst = row_ptr.add(field.offset);
@@ -136,6 +165,11 @@ unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> 
     Ok(())
 }
 
+/// Write an unsigned integer value into the row buffer at the field's offset.
+///
+/// # Safety
+///
+/// Same preconditions as [`write_int_to_buffer`].
 unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) -> PyResult<()> {
     debug_assert!(!row_ptr.is_null());
     let dst = row_ptr.add(field.offset);
@@ -154,6 +188,13 @@ unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) ->
     Ok(())
 }
 
+/// Write a floating-point value into the row buffer at the field's offset.
+///
+/// Supports f16 (via the `half` crate), f32, and f64.
+///
+/// # Safety
+///
+/// Same preconditions as [`write_int_to_buffer`].
 unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -> PyResult<()> {
     debug_assert!(!row_ptr.is_null());
     let dst = row_ptr.add(field.offset);
@@ -176,6 +217,14 @@ unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -
     Ok(())
 }
 
+/// Write a byte slice into the row buffer at the field's offset.
+///
+/// Copies at most `field.itemsize` bytes (truncating longer data).
+/// The remaining space is left zero-initialized from `np.zeros`.
+///
+/// # Safety
+///
+/// Same preconditions as [`write_int_to_buffer`].
 unsafe fn write_bytes_to_buffer(row_ptr: *mut u8, field: &FieldInfo, data: &[u8]) {
     debug_assert!(!row_ptr.is_null());
     let dst = row_ptr.add(field.offset);
@@ -189,6 +238,13 @@ unsafe fn write_bytes_to_buffer(row_ptr: *mut u8, field: &FieldInfo, data: &[u8]
 
 // ── value → buffer dispatch ─────────────────────────────────────
 
+/// Dispatch an Aerospike [`Value`] to the appropriate buffer write function.
+///
+/// `Value::Nil` is a no-op (buffer is already zero-initialized).
+///
+/// # Safety
+///
+/// Same preconditions as [`write_int_to_buffer`].
 unsafe fn write_value_to_buffer(
     row_ptr: *mut u8,
     field: &FieldInfo,
@@ -263,6 +319,7 @@ unsafe fn write_value_to_buffer(
     }
 }
 
+/// Convert an `aerospike_core::FloatValue` (stored as raw bits) to `f64`.
 fn float_value_to_f64(fv: &FloatValue) -> f64 {
     match fv {
         FloatValue::F64(bits) => f64::from_bits(*bits),
@@ -272,6 +329,11 @@ fn float_value_to_f64(fv: &FloatValue) -> f64 {
 
 // ── main entry point ────────────────────────────────────────────
 
+/// Convert batch results into a `NumpyBatchRecords` Python object.
+///
+/// Allocates three NumPy arrays (data, meta, result_codes) and writes
+/// Aerospike values directly into the data buffer via raw pointers,
+/// avoiding per-element Python object allocation.
 pub fn batch_to_numpy_py(
     py: Python<'_>,
     results: &[BatchRecord],
@@ -380,6 +442,205 @@ pub fn batch_to_numpy_py(
     let result = cls.call1((&data_array, &meta_array, &result_codes_array, &key_map))?;
 
     Ok(result.unbind())
+}
+
+// ── numpy → records (for batch_write) ───────────────────────────
+
+/// Read a single value from a numpy buffer row at the given field offset.
+///
+/// # Safety
+///
+/// - `row_ptr` must point to a valid, readable buffer of at least
+///   `field.offset + field.itemsize` bytes.
+/// - The buffer must remain valid for the duration of the read.
+unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyResult<Value> {
+    debug_assert!(!row_ptr.is_null());
+    let src = row_ptr.add(field.offset);
+    match field.kind {
+        DtypeKind::Int => {
+            let v = match field.base_itemsize {
+                1 => ptr::read_unaligned(src as *const i8) as i64,
+                2 => ptr::read_unaligned(src as *const i16) as i64,
+                4 => ptr::read_unaligned(src as *const i32) as i64,
+                8 => ptr::read_unaligned(src as *const i64),
+                s => {
+                    return Err(PyTypeError::new_err(format!(
+                        "unsupported int size: {} bytes",
+                        s
+                    )));
+                }
+            };
+            Ok(Value::Int(v))
+        }
+        DtypeKind::Uint => {
+            let v = match field.base_itemsize {
+                1 => ptr::read_unaligned(src) as i64,
+                2 => ptr::read_unaligned(src as *const u16) as i64,
+                4 => ptr::read_unaligned(src as *const u32) as i64,
+                8 => ptr::read_unaligned(src as *const u64) as i64,
+                s => {
+                    return Err(PyTypeError::new_err(format!(
+                        "unsupported uint size: {} bytes",
+                        s
+                    )));
+                }
+            };
+            Ok(Value::Int(v))
+        }
+        DtypeKind::Float => {
+            let v = match field.base_itemsize {
+                2 => {
+                    let bits = ptr::read_unaligned(src as *const u16);
+                    f16::from_bits(bits).to_f64()
+                }
+                4 => ptr::read_unaligned(src as *const f32) as f64,
+                8 => ptr::read_unaligned(src as *const f64),
+                s => {
+                    return Err(PyTypeError::new_err(format!(
+                        "unsupported float size: {} bytes",
+                        s
+                    )));
+                }
+            };
+            Ok(Value::Float(FloatValue::F64(v.to_bits())))
+        }
+        DtypeKind::FixedBytes | DtypeKind::VoidBytes => {
+            let mut buf = vec![0u8; field.itemsize];
+            ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), field.itemsize);
+            Ok(Value::Blob(buf))
+        }
+    }
+}
+
+/// Extract the raw data pointer from a **read-only** numpy array via `__array_interface__`.
+///
+/// # Safety contract for callers
+///
+/// The returned pointer is only valid while the numpy array is alive and not
+/// reallocated. Callers must ensure:
+/// - The array outlives all reads through the returned pointer.
+/// - No concurrent Python code resizes or replaces the array's buffer.
+fn get_array_data_ptr_readonly(array: &Bound<'_, PyAny>) -> PyResult<*const u8> {
+    let iface = array.getattr("__array_interface__")?;
+    let data_tuple = iface.get_item("data")?;
+    let ptr_int: usize = data_tuple.get_item(0)?.extract()?;
+    debug_assert!(ptr_int != 0, "numpy array data pointer is null");
+    Ok(ptr_int as *const u8)
+}
+
+/// Convert a numpy structured array into a list of ``(Key, Vec<Bin>)`` pairs
+/// suitable for batch_write operations.
+///
+/// The dtype must contain special fields named ``_namespace``, ``_set``, and ``_key``
+/// for key construction, plus any number of bin data fields.
+/// Alternatively, ``namespace``, ``set_name``, and ``key`` can be passed as
+/// separate arguments when all rows share the same namespace/set.
+///
+/// # Arguments
+///
+/// * `py` - Python GIL token
+/// * `data_array` - numpy structured array with record data
+/// * `dtype_obj` - the numpy dtype describing the array layout
+/// * `namespace` - default namespace (used when ``_namespace`` field is absent)
+/// * `set_name` - default set name (used when ``_set`` field is absent)
+/// * `key_field` - name of the dtype field to use as the user key (default: ``"_key"``)
+pub fn numpy_to_records(
+    py: Python<'_>,
+    data_array: &Bound<'_, PyAny>,
+    dtype_obj: &Bound<'_, PyAny>,
+    namespace: &str,
+    set_name: &str,
+    key_field: &str,
+) -> PyResult<Vec<(Key, Vec<Bin>)>> {
+    let np = py.import("numpy")?;
+    let n: usize = data_array.len()?;
+    debug!(
+        "numpy_to_records: converting {} rows, key_field='{}'",
+        n, key_field
+    );
+
+    let (fields, row_stride) = parse_dtype_fields(dtype_obj)?;
+    let data_ptr = get_array_data_ptr_readonly(data_array)?;
+
+    // Partition fields into key-fields and bin-fields
+    let key_field_info = fields.iter().find(|f| f.name == key_field);
+    let bin_fields: Vec<&FieldInfo> = fields
+        .iter()
+        .filter(|f| f.name != key_field && !f.name.starts_with('_'))
+        .collect();
+
+    if key_field_info.is_none() {
+        return Err(PyValueError::new_err(format!(
+            "dtype must contain a '{}' field for the record key",
+            key_field
+        )));
+    }
+    let key_fi = key_field_info.unwrap();
+
+    // Check for optional _namespace and _set fields
+    let ns_field = fields.iter().find(|f| f.name == "_namespace");
+    let set_field = fields.iter().find(|f| f.name == "_set");
+
+    // Validate key field type
+    let _ = np; // keep numpy import alive
+
+    let mut result = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let row_ptr = unsafe { data_ptr.add(i * row_stride) };
+
+        // Extract key value
+        let key_value = unsafe { read_value_from_buffer(row_ptr, key_fi)? };
+
+        // Extract namespace (from field or default)
+        let ns = if let Some(ns_fi) = ns_field {
+            match unsafe { read_value_from_buffer(row_ptr, ns_fi)? } {
+                Value::Blob(b) => {
+                    // Trim trailing null bytes for fixed-length fields
+                    let trimmed = &b[..b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1)];
+                    String::from_utf8_lossy(trimmed).to_string()
+                }
+                Value::String(s) => s,
+                _ => namespace.to_string(),
+            }
+        } else {
+            namespace.to_string()
+        };
+
+        // Extract set name (from field or default)
+        let set = if let Some(set_fi) = set_field {
+            match unsafe { read_value_from_buffer(row_ptr, set_fi)? } {
+                Value::Blob(b) => {
+                    let trimmed = &b[..b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1)];
+                    String::from_utf8_lossy(trimmed).to_string()
+                }
+                Value::String(s) => s,
+                _ => set_name.to_string(),
+            }
+        } else {
+            set_name.to_string()
+        };
+
+        // Build the Key
+        let key = Key {
+            namespace: ns,
+            set_name: set,
+            user_key: Some(key_value),
+            digest: [0u8; 20],
+        };
+
+        // Extract bin values
+        let mut bins = Vec::with_capacity(bin_fields.len());
+        for field in &bin_fields {
+            let value = unsafe { read_value_from_buffer(row_ptr, field)? };
+            bins.push(Bin::new(field.name.clone(), value));
+        }
+
+        result.push((key, bins));
+    }
+
+    debug!("numpy_to_records: converted {} records", result.len());
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -629,6 +890,98 @@ mod tests {
             write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Nil).unwrap();
             let val = ptr::read_unaligned(buf.as_ptr() as *const i32);
             assert_eq!(val, 0);
+        }
+    }
+
+    // ── read_value_from_buffer tests ────────────────────────────
+
+    #[test]
+    fn test_read_int_i32() {
+        let mut buf = [0u8; 16];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 4,
+            itemsize: 4,
+            base_itemsize: 4,
+            kind: DtypeKind::Int,
+        };
+        unsafe {
+            ptr::write_unaligned(buf.as_mut_ptr().add(4) as *mut i32, 42);
+            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            assert_eq!(val, Value::Int(42));
+        }
+    }
+
+    #[test]
+    fn test_read_uint_u16() {
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 2,
+            itemsize: 2,
+            base_itemsize: 2,
+            kind: DtypeKind::Uint,
+        };
+        unsafe {
+            ptr::write_unaligned(buf.as_mut_ptr().add(2) as *mut u16, 65535);
+            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            assert_eq!(val, Value::Int(65535));
+        }
+    }
+
+    #[test]
+    fn test_read_float_f64() {
+        let mut buf = [0u8; 16];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 8,
+            base_itemsize: 8,
+            kind: DtypeKind::Float,
+        };
+        unsafe {
+            ptr::write_unaligned(buf.as_mut_ptr() as *mut f64, 3.14);
+            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            match val {
+                Value::Float(FloatValue::F64(bits)) => {
+                    assert!((f64::from_bits(bits) - 3.14).abs() < 1e-10);
+                }
+                _ => panic!("expected Float"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_read_bytes() {
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 4,
+            base_itemsize: 4,
+            kind: DtypeKind::FixedBytes,
+        };
+        buf[0..4].copy_from_slice(b"abcd");
+        unsafe {
+            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            assert_eq!(val, Value::Blob(b"abcd".to_vec()));
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_write_read_int() {
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 4,
+            base_itemsize: 4,
+            kind: DtypeKind::Int,
+        };
+        unsafe {
+            write_int_to_buffer(buf.as_mut_ptr(), &field, -123).unwrap();
+            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            assert_eq!(val, Value::Int(-123));
         }
     }
 }

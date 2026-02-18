@@ -3,7 +3,9 @@ use std::sync::Arc;
 use crate::client_common::{self, PutPolicy};
 use crate::traced_exists_op;
 use crate::traced_op;
-use aerospike_core::{Bins, Client as AsClient, Error as AsError, ResultCode, Task};
+use aerospike_core::{
+    BatchOperation, BatchWritePolicy, Bins, Client as AsClient, Error as AsError, ResultCode, Task,
+};
 use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
@@ -20,10 +22,19 @@ use crate::types::key::key_to_py;
 use crate::types::record::record_to_py;
 use crate::types::value::value_to_py;
 
+/// Synchronous Aerospike client exposed to Python as `Client`.
+///
+/// Wraps `aerospike_core::Client` and uses a shared Tokio runtime
+/// ([`crate::runtime::RUNTIME`]) to block on async operations while
+/// releasing the GIL via `py.detach()`.
 #[pyclass(name = "Client", subclass)]
 pub struct PyClient {
+    /// The underlying async client, wrapped in `Arc` for cheap cloning.
+    /// `None` before `connect()` is called.
     inner: Option<Arc<AsClient>>,
+    /// Python config dict, retained for potential reconnection.
     config: Py<PyAny>,
+    /// Connection metadata used for OTel span attributes.
     connection_info: crate::tracing::ConnectionInfo,
 }
 
@@ -1365,6 +1376,63 @@ impl PyClient {
         batch_records_to_py(py, &results)
     }
 
+    /// Write multiple records from a numpy structured array.
+    ///
+    /// Each row becomes a separate write operation in the batch.
+    /// The dtype must contain a `_key` field (or custom key_field) for the record key,
+    /// and remaining non-underscore-prefixed fields become bins.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (data, namespace, set_name, _dtype, key_field="_key", policy=None))]
+    fn batch_write_numpy(
+        &self,
+        py: Python<'_>,
+        data: &Bound<'_, PyAny>,
+        namespace: &str,
+        set_name: &str,
+        _dtype: &Bound<'_, PyAny>,
+        key_field: &str,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        debug!(
+            "batch_write_numpy: namespace={}, set={}",
+            namespace, set_name
+        );
+        let client = self.get_client()?.clone();
+        let batch_policy = crate::policy::batch_policy::parse_batch_policy(policy)?;
+        #[allow(clippy::let_unit_value)]
+        let parent_ctx = client_common::extract_parent_context(py);
+        let conn_info = self.connection_info.clone();
+
+        let records = crate::numpy_support::numpy_to_records(
+            py, data, _dtype, namespace, set_name, key_field,
+        )?;
+
+        let write_policy = BatchWritePolicy::default();
+        let batch_ops: Vec<BatchOperation> = records
+            .iter()
+            .map(|(key, bins)| {
+                let ops: Vec<aerospike_core::operations::Operation> =
+                    bins.iter().map(aerospike_core::operations::put).collect();
+                BatchOperation::write(&write_policy, key.clone(), ops)
+            })
+            .collect();
+
+        let results = py.detach(|| {
+            RUNTIME.block_on(async {
+                traced_op!(
+                    "batch_write_numpy",
+                    namespace,
+                    set_name,
+                    parent_ctx,
+                    conn_info,
+                    { client.batch(&batch_policy, &batch_ops).await }
+                )
+            })
+        })?;
+
+        batch_records_to_py(py, &results)
+    }
+
     /// Remove multiple records.
     #[pyo3(signature = (keys, policy=None))]
     fn batch_remove(
@@ -1397,6 +1465,7 @@ impl PyClient {
 }
 
 impl PyClient {
+    /// Returns a reference to the connected client, or an error if not yet connected.
     fn get_client(&self) -> PyResult<&Arc<AsClient>> {
         self.inner.as_ref().ok_or_else(|| {
             crate::errors::ClientError::new_err("Client is not connected. Call connect() first.")
