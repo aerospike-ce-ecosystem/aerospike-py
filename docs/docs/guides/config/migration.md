@@ -1,7 +1,8 @@
 ---
 title: Migration from Official Client
 sidebar_label: Migration Guide
-sidebar_position: 9
+sidebar_position: 3
+slug: /guides/migration
 description: Migrate from the official aerospike-client-python (C-based) to aerospike-py (Rust-based).
 ---
 

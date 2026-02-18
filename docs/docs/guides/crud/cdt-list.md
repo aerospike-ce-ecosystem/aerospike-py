@@ -1,11 +1,12 @@
 ---
 title: List CDT Operations
 sidebar_label: List Operations
-sidebar_position: 4
-description: List bin에 대한 31가지 원자적 작업 가이드
+sidebar_position: 2
+slug: /guides/cdt-list
+description: 31 atomic list operations for append, insert, remove, sort, and advanced queries on list bins.
 ---
 
-List CDT (Collection Data Type) 작업은 list bin에 대해 31가지 원자적 작업을 제공합니다. 이 작업들은 `client.operate()`의 일부로 서버 측에서 실행되며, list 데이터에 대한 원자적 다중 작업 트랜잭션을 가능하게 합니다.
+List CDT (Collection Data Type) operations provide 31 atomic operations on list bins. These are executed server-side as part of `client.operate()`, enabling atomic multi-operation transactions on list data.
 
 ## Import
 
@@ -16,7 +17,7 @@ import aerospike_py as aerospike
 
 ## Overview
 
-각 `list_ops.*` 함수는 `client.operate()` 또는 `client.operate_ordered()`에 전달하는 작업 dict를 반환합니다:
+Each `list_ops.*` function returns an operation dict that you pass to `client.operate()` or `client.operate_ordered()`:
 
 ```python
 ops = [
@@ -30,7 +31,7 @@ _, _, bins = client.operate(key, ops)
 
 ### `list_append(bin, val, policy=None)`
 
-리스트 끝에 값을 추가합니다.
+Append a value to the end of a list.
 
 ```python
 ops = [list_ops.list_append("colors", "red")]
@@ -39,7 +40,7 @@ client.operate(key, ops)
 
 ### `list_append_items(bin, values, policy=None)`
 
-리스트에 여러 값을 추가합니다.
+Append multiple values to a list.
 
 ```python
 ops = [list_ops.list_append_items("colors", ["green", "blue"])]
@@ -48,7 +49,7 @@ client.operate(key, ops)
 
 ### `list_insert(bin, index, val, policy=None)`
 
-지정한 인덱스에 값을 삽입합니다.
+Insert a value at the given index.
 
 ```python
 ops = [list_ops.list_insert("colors", 0, "yellow")]
@@ -57,7 +58,7 @@ client.operate(key, ops)
 
 ### `list_insert_items(bin, index, values, policy=None)`
 
-지정한 인덱스에 여러 값을 삽입합니다.
+Insert multiple values at the given index.
 
 ```python
 ops = [list_ops.list_insert_items("colors", 1, ["cyan", "magenta"])]
@@ -66,7 +67,7 @@ client.operate(key, ops)
 
 ### `list_set(bin, index, val)`
 
-특정 인덱스의 값을 설정합니다.
+Set the value at a specific index.
 
 ```python
 ops = [list_ops.list_set("colors", 0, "orange")]
@@ -75,7 +76,7 @@ client.operate(key, ops)
 
 ### `list_increment(bin, index, val, policy=None)`
 
-지정한 인덱스의 숫자 값을 증가시킵니다.
+Increment the numeric value at a given index.
 
 ```python
 ops = [list_ops.list_increment("scores", 0, 10)]
@@ -86,7 +87,7 @@ client.operate(key, ops)
 
 ### `list_get(bin, index)`
 
-특정 인덱스의 항목을 가져옵니다.
+Get the item at a specific index.
 
 ```python
 ops = [list_ops.list_get("scores", 0)]
@@ -96,7 +97,7 @@ print(bins["scores"])  # first element
 
 ### `list_get_range(bin, index, count)`
 
-`index`부터 `count`개의 항목을 가져옵니다.
+Get `count` items starting at `index`.
 
 ```python
 ops = [list_ops.list_get_range("scores", 0, 3)]
@@ -106,7 +107,7 @@ print(bins["scores"])  # first 3 elements
 
 ### `list_size(bin)`
 
-리스트의 항목 수를 반환합니다.
+Return the number of items in a list.
 
 ```python
 ops = [list_ops.list_size("scores")]
@@ -114,11 +115,11 @@ _, _, bins = client.operate(key, ops)
 print(bins["scores"])  # e.g., 5
 ```
 
-## Delete Operations
+## Remove Operations
 
 ### `list_remove(bin, index)`
 
-지정한 인덱스의 항목을 삭제합니다.
+Remove the item at the given index.
 
 ```python
 ops = [list_ops.list_remove("colors", 0)]
@@ -127,7 +128,7 @@ client.operate(key, ops)
 
 ### `list_remove_range(bin, index, count)`
 
-`index`부터 `count`개의 항목을 삭제합니다.
+Remove `count` items starting at `index`.
 
 ```python
 ops = [list_ops.list_remove_range("colors", 1, 2)]
@@ -136,7 +137,7 @@ client.operate(key, ops)
 
 ### `list_pop(bin, index)`
 
-지정한 인덱스의 항목을 삭제하고 반환합니다.
+Remove and return the item at the given index.
 
 ```python
 ops = [list_ops.list_pop("colors", 0)]
@@ -146,7 +147,7 @@ print(bins["colors"])  # the removed item
 
 ### `list_pop_range(bin, index, count)`
 
-`index`부터 `count`개의 항목을 삭제하고 반환합니다.
+Remove and return `count` items starting at `index`.
 
 ```python
 ops = [list_ops.list_pop_range("colors", 0, 2)]
@@ -156,17 +157,17 @@ print(bins["colors"])  # list of removed items
 
 ### `list_trim(bin, index, count)`
 
-지정한 범위 `[index, index+count)` 밖의 항목을 삭제합니다.
+Remove items outside the specified range `[index, index+count)`.
 
 ```python
-# 인덱스 1..3의 항목만 유지
+# Keep only items at index 1..3
 ops = [list_ops.list_trim("scores", 1, 3)]
 client.operate(key, ops)
 ```
 
 ### `list_clear(bin)`
 
-리스트의 모든 항목을 삭제합니다.
+Remove all items from a list.
 
 ```python
 ops = [list_ops.list_clear("scores")]
@@ -177,44 +178,44 @@ client.operate(key, ops)
 
 ### `list_sort(bin, sort_flags=0)`
 
-리스트를 제자리에서 정렬합니다.
+Sort the list in place.
 
 ```python
 ops = [list_ops.list_sort("scores")]
 client.operate(key, ops)
 
-# 정렬 시 중복 제거
+# Drop duplicates while sorting
 ops = [list_ops.list_sort("scores", aerospike.LIST_SORT_DROP_DUPLICATES)]
 client.operate(key, ops)
 ```
 
 ### `list_set_order(bin, list_order=0)`
 
-리스트 정렬 타입을 설정합니다.
+Set the list ordering type.
 
 ```python
-# 정렬 유지 설정 (이후 쓰기 시 정렬 순서 유지)
+# Set to ordered (maintains sort order on future writes)
 ops = [list_ops.list_set_order("scores", aerospike.LIST_ORDERED)]
 client.operate(key, ops)
 ```
 
-## Advanced Read Operations (Value/Index/Rank)
+## Advanced Read Operations (by Value/Index/Rank)
 
-이 작업들은 반환 내용을 제어하는 `return_type` 매개변수가 필요합니다.
+These operations require a `return_type` parameter that controls what is returned.
 
 ### `list_get_by_value(bin, val, return_type)`
 
-지정한 값과 일치하는 항목을 가져옵니다.
+Get items matching the given value.
 
 ```python
 ops = [list_ops.list_get_by_value("tags", "urgent", aerospike.LIST_RETURN_INDEX)]
 _, _, bins = client.operate(key, ops)
-# 모든 "urgent" 항목의 인덱스를 반환
+# Returns indices of all "urgent" items
 ```
 
 ### `list_get_by_value_list(bin, values, return_type)`
 
-지정한 값 중 하나와 일치하는 항목을 가져옵니다.
+Get items matching any of the given values.
 
 ```python
 ops = [list_ops.list_get_by_value_list(
@@ -225,7 +226,7 @@ _, _, bins = client.operate(key, ops)
 
 ### `list_get_by_value_range(bin, begin, end, return_type)`
 
-`[begin, end)` 범위의 값을 가진 항목을 가져옵니다.
+Get items with values in the range `[begin, end)`.
 
 ```python
 ops = [list_ops.list_get_by_value_range(
@@ -236,7 +237,7 @@ _, _, bins = client.operate(key, ops)
 
 ### `list_get_by_index(bin, index, return_type)`
 
-지정한 반환 타입으로 인덱스 기반 항목을 가져옵니다.
+Get item by index with specified return type.
 
 ```python
 ops = [list_ops.list_get_by_index("scores", 0, aerospike.LIST_RETURN_VALUE)]
@@ -245,10 +246,10 @@ _, _, bins = client.operate(key, ops)
 
 ### `list_get_by_index_range(bin, index, return_type, count=None)`
 
-인덱스 범위로 항목을 가져옵니다.
+Get items by index range.
 
 ```python
-# 인덱스 2부터 3개 항목 가져오기
+# Get 3 items starting at index 2
 ops = [list_ops.list_get_by_index_range(
     "scores", 2, aerospike.LIST_RETURN_VALUE, count=3
 )]
@@ -257,31 +258,31 @@ _, _, bins = client.operate(key, ops)
 
 ### `list_get_by_rank(bin, rank, return_type)`
 
-랭크 기반으로 항목을 가져옵니다 (0 = 최솟값).
+Get item by rank (0 = smallest).
 
 ```python
-# 가장 작은 값 가져오기
+# Get the smallest value
 ops = [list_ops.list_get_by_rank("scores", 0, aerospike.LIST_RETURN_VALUE)]
 _, _, bins = client.operate(key, ops)
 ```
 
 ### `list_get_by_rank_range(bin, rank, return_type, count=None)`
 
-랭크 범위로 항목을 가져옵니다.
+Get items by rank range.
 
 ```python
-# 상위 3개 값 가져오기 (가장 높은 랭크)
+# Get top 3 values (highest rank)
 ops = [list_ops.list_get_by_rank_range(
     "scores", -3, aerospike.LIST_RETURN_VALUE, count=3
 )]
 _, _, bins = client.operate(key, ops)
 ```
 
-## Advanced Delete Operations (Value/Index/Rank)
+## Advanced Remove Operations (by Value/Index/Rank)
 
 ### `list_remove_by_value(bin, val, return_type)`
 
-지정한 값과 일치하는 항목을 삭제합니다.
+Remove items matching the given value.
 
 ```python
 ops = [list_ops.list_remove_by_value("tags", "temp", aerospike.LIST_RETURN_COUNT)]
@@ -291,7 +292,7 @@ print(f"Removed {bins['tags']} items")
 
 ### `list_remove_by_value_list(bin, values, return_type)`
 
-지정한 값 중 하나와 일치하는 항목을 삭제합니다.
+Remove items matching any of the given values.
 
 ```python
 ops = [list_ops.list_remove_by_value_list(
@@ -302,7 +303,7 @@ client.operate(key, ops)
 
 ### `list_remove_by_value_range(bin, begin, end, return_type)`
 
-`[begin, end)` 범위의 값을 가진 항목을 삭제합니다.
+Remove items with values in the range `[begin, end)`.
 
 ```python
 ops = [list_ops.list_remove_by_value_range(
@@ -313,7 +314,7 @@ _, _, bins = client.operate(key, ops)
 
 ### `list_remove_by_index(bin, index, return_type)`
 
-인덱스 기반으로 항목을 삭제합니다.
+Remove item by index.
 
 ```python
 ops = [list_ops.list_remove_by_index("scores", 0, aerospike.LIST_RETURN_VALUE)]
@@ -322,7 +323,7 @@ _, _, bins = client.operate(key, ops)
 
 ### `list_remove_by_index_range(bin, index, return_type, count=None)`
 
-인덱스 범위로 항목을 삭제합니다.
+Remove items by index range.
 
 ```python
 ops = [list_ops.list_remove_by_index_range(
@@ -333,20 +334,20 @@ client.operate(key, ops)
 
 ### `list_remove_by_rank(bin, rank, return_type)`
 
-랭크 기반으로 항목을 삭제합니다.
+Remove item by rank.
 
 ```python
-# 가장 작은 값 삭제
+# Remove smallest value
 ops = [list_ops.list_remove_by_rank("scores", 0, aerospike.LIST_RETURN_VALUE)]
 _, _, bins = client.operate(key, ops)
 ```
 
 ### `list_remove_by_rank_range(bin, rank, return_type, count=None)`
 
-랭크 범위로 항목을 삭제합니다.
+Remove items by rank range.
 
 ```python
-# 가장 작은 값 2개 삭제
+# Remove 2 smallest values
 ops = [list_ops.list_remove_by_rank_range(
     "scores", 0, aerospike.LIST_RETURN_NONE, count=2
 )]
@@ -355,32 +356,32 @@ client.operate(key, ops)
 
 ## Return Type Constants
 
-`aerospike_py`의 다음 상수를 사용하여 서버가 반환하는 내용을 제어합니다:
+Use these constants from `aerospike_py` to control what the server returns:
 
-| 상수 | 설명 |
-|------|------|
-| `LIST_RETURN_NONE` | 아무것도 반환하지 않음 |
-| `LIST_RETURN_INDEX` | 인덱스 반환 |
-| `LIST_RETURN_REVERSE_INDEX` | 역순 인덱스 반환 |
-| `LIST_RETURN_RANK` | 랭크 반환 |
-| `LIST_RETURN_REVERSE_RANK` | 역순 랭크 반환 |
-| `LIST_RETURN_COUNT` | 일치한 항목 수 반환 |
-| `LIST_RETURN_VALUE` | 값 반환 |
-| `LIST_RETURN_EXISTS` | 존재 여부 불리언 반환 |
+| Constant | Description |
+|----------|-------------|
+| `LIST_RETURN_NONE` | Return nothing |
+| `LIST_RETURN_INDEX` | Return index(es) |
+| `LIST_RETURN_REVERSE_INDEX` | Return reverse index(es) |
+| `LIST_RETURN_RANK` | Return rank(s) |
+| `LIST_RETURN_REVERSE_RANK` | Return reverse rank(s) |
+| `LIST_RETURN_COUNT` | Return count of matched items |
+| `LIST_RETURN_VALUE` | Return value(s) |
+| `LIST_RETURN_EXISTS` | Return boolean existence |
 
 ## List Order Constants
 
-| 상수 | 설명 |
-|------|------|
-| `LIST_UNORDERED` | 비정렬 리스트 (기본값) |
-| `LIST_ORDERED` | 정렬된 리스트 (정렬 순서 유지) |
+| Constant | Description |
+|----------|-------------|
+| `LIST_UNORDERED` | Unordered list (default) |
+| `LIST_ORDERED` | Ordered list (maintains sort order) |
 
 ## List Sort Flags
 
-| 상수 | 설명 |
-|------|------|
-| `LIST_SORT_DEFAULT` | 기본 정렬 |
-| `LIST_SORT_DROP_DUPLICATES` | 정렬 시 중복 제거 |
+| Constant | Description |
+|----------|-------------|
+| `LIST_SORT_DEFAULT` | Default sort |
+| `LIST_SORT_DROP_DUPLICATES` | Drop duplicates during sort |
 
 ## Complete Example
 
@@ -395,10 +396,10 @@ with aerospike.client({
 
     key = ("test", "demo", "player1")
 
-    # scores 리스트 초기화
+    # Initialize a scores list
     client.put(key, {"scores": [85, 92, 78, 95, 88]})
 
-    # 원자적 작업: 정렬, 상위 3개 가져오기, 크기 확인
+    # Atomic: sort, get top 3, and get size
     ops = [
         list_ops.list_sort("scores"),
         list_ops.list_get_by_rank_range(
@@ -408,7 +409,7 @@ with aerospike.client({
     _, _, bins = client.operate(key, ops)
     print(f"Top 3 scores: {bins['scores']}")
 
-    # 80점 미만 점수 삭제
+    # Remove scores below 80
     ops = [
         list_ops.list_remove_by_value_range(
             "scores", 0, 80, aerospike.LIST_RETURN_COUNT
@@ -417,7 +418,7 @@ with aerospike.client({
     _, _, bins = client.operate(key, ops)
     print(f"Removed {bins['scores']} low scores")
 
-    # 새로운 점수 추가 및 업데이트된 크기 확인
+    # Append a new score and get updated size
     ops = [
         list_ops.list_append("scores", 97),
         list_ops.list_size("scores"),

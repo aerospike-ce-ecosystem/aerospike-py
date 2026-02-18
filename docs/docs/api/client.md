@@ -20,7 +20,7 @@ Create a new Aerospike client instance.
 
 | Parameter | Description |
 |-----------|-------------|
-| `config` | Configuration dictionary. Must contain a ``"hosts"`` key with a list of ``(host, port)`` tuples. |
+| `config` | [`ClientConfig`](types.md#clientconfig) dictionary. Must contain a ``"hosts"`` key with a list of ``(host, port)`` tuples. |
 
 **Returns:** A new ``Client`` instance (not yet connected).
 
@@ -203,9 +203,9 @@ Send an info command to all cluster nodes.
 | Parameter | Description |
 |-----------|-------------|
 | `command` | The info command string (e.g. ``"namespaces"``). |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
-**Returns:** A list of ``(node_name, error_code, response)`` tuples.
+**Returns:** A list of ``InfoNodeResult(node_name, error_code, response)`` tuples.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -235,7 +235,7 @@ Send an info command to a random cluster node.
 | Parameter | Description |
 |-----------|-------------|
 | `command` | The info command string. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 **Returns:** The info response string.
 
@@ -266,8 +266,8 @@ Write a record to the Aerospike cluster.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bins` | Dictionary of bin name-value pairs to write. |
-| `meta` | Optional metadata dict with ``"ttl"`` and ``"gen"`` keys. |
-| `policy` | Optional write policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``). |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 :::note
 
@@ -321,9 +321,9 @@ Read a record from the cluster.
 | Parameter | Description |
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
-| `policy` | Optional read policy dict. |
+| `policy` | Optional [`ReadPolicy`](types.md#readpolicy) dict. |
 
-**Returns:** A ``(key, meta, bins)`` tuple.
+**Returns:** A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
 :::note
 
@@ -335,16 +335,16 @@ Raises `RecordNotFound` The record does not exist.
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-key, meta, bins = client.get(("test", "demo", "user1"))
-print(bins)  # {"name": "Alice", "age": 30}
+record = client.get(("test", "demo", "user1"))
+print(record.bins)  # {"name": "Alice", "age": 30}
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-key, meta, bins = await client.get(("test", "demo", "user1"))
-print(bins)  # {"name": "Alice", "age": 30}
+record = await client.get(("test", "demo", "user1"))
+print(record.bins)  # {"name": "Alice", "age": 30}
 ```
 
   </TabItem>
@@ -358,9 +358,9 @@ Read specific bins from a record.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bins` | List of bin names to retrieve. |
-| `policy` | Optional read policy dict. |
+| `policy` | Optional [`ReadPolicy`](types.md#readpolicy) dict. |
 
-**Returns:** A ``(key, meta, bins)`` tuple containing only the requested bins.
+**Returns:** A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
 :::note
 
@@ -372,16 +372,16 @@ Raises `RecordNotFound` The record does not exist.
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-_, meta, bins = client.select(("test", "demo", "user1"), ["name"])
-# bins = {"name": "Alice"}
+record = client.select(("test", "demo", "user1"), ["name"])
+# record.bins = {"name": "Alice"}
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-_, meta, bins = await client.select(("test", "demo", "user1"), ["name"])
-# bins = {"name": "Alice"}
+record = await client.select(("test", "demo", "user1"), ["name"])
+# record.bins = {"name": "Alice"}
 ```
 
   </TabItem>
@@ -394,27 +394,27 @@ Check whether a record exists.
 | Parameter | Description |
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
-| `policy` | Optional read policy dict. |
+| `policy` | Optional [`ReadPolicy`](types.md#readpolicy) dict. |
 
-**Returns:** A ``(key, meta)`` tuple. ``meta`` is ``None`` if the record
-    does not exist.
+**Returns:** An ``ExistsResult`` NamedTuple with ``key``, ``meta`` fields.
+    ``meta`` is ``None`` if the record does not exist.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-_, meta = client.exists(("test", "demo", "user1"))
-if meta is not None:
-    print(f"Found, gen={meta.gen}")
+result = client.exists(("test", "demo", "user1"))
+if result.meta is not None:
+    print(f"Found, gen={result.meta.gen}")
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-_, meta = await client.exists(("test", "demo", "user1"))
-if meta is not None:
-    print(f"Found, gen={meta.gen}")
+result = await client.exists(("test", "demo", "user1"))
+if result.meta is not None:
+    print(f"Found, gen={result.meta.gen}")
 ```
 
   </TabItem>
@@ -427,8 +427,8 @@ Delete a record from the cluster.
 | Parameter | Description |
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
-| `meta` | Optional metadata dict for generation check. |
-| `policy` | Optional remove policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict for generation check. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 :::note
 
@@ -469,8 +469,8 @@ Reset the TTL of a record.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `val` | New TTL value in seconds. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 :::note
 
@@ -506,8 +506,8 @@ Append a string to a bin value.
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bin` | Target bin name. |
 | `val` | String value to append. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -535,8 +535,8 @@ Prepend a string to a bin value.
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bin` | Target bin name. |
 | `val` | String value to prepend. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -564,8 +564,8 @@ Increment a numeric bin value.
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bin` | Target bin name. |
 | `offset` | Integer or float amount to add (use negative to decrement). |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -594,8 +594,8 @@ Remove specific bins from a record by setting them to nil.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bin_names` | List of bin names to remove. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional write policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -624,10 +624,10 @@ Execute multiple operations atomically on a single record.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
-**Returns:** A ``(key, meta, bins)`` tuple with the results of read operations.
+**Returns:** A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -639,7 +639,8 @@ ops = [
     {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, bins = client.operate(("test", "demo", "key1"), ops)
+record = client.operate(("test", "demo", "key1"), ops)
+print(record.bins)
 ```
 
   </TabItem>
@@ -652,7 +653,8 @@ ops = [
     {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, bins = await client.operate(("test", "demo", "key1"), ops)
+record = await client.operate(("test", "demo", "key1"), ops)
+print(record.bins)
 ```
 
   </TabItem>
@@ -669,11 +671,11 @@ the operation order.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
-**Returns:** A ``(key, meta, results)`` tuple where ``results`` is a list of
-    ``(bin_name, value)`` tuples in operation order.
+**Returns:** An ``OperateOrderedResult`` NamedTuple with ``key``, ``meta``,
+    ``ordered_bins`` fields.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -685,8 +687,8 @@ ops = [
     {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, results = client.operate_ordered(("test", "demo", "key1"), ops)
-# results = [("counter", 2)]
+result = client.operate_ordered(("test", "demo", "key1"), ops)
+# result.ordered_bins = [BinTuple("counter", 2)]
 ```
 
   </TabItem>
@@ -699,9 +701,10 @@ ops = [
     {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, results = await client.operate_ordered(
+result = await client.operate_ordered(
     ("test", "demo", "key1"), ops
 )
+# result.ordered_bins = [BinTuple("counter", 2)]
 ```
 
   </TabItem>
@@ -717,7 +720,7 @@ Read multiple records in a single batch call.
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `bins` | Optional list of bin names to read. ``None`` reads all bins; an empty list performs an existence check only. |
-| `policy` | Optional batch policy dict. |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 | `_dtype` | Optional NumPy dtype. When provided, returns ``NumpyBatchRecords`` instead of ``BatchRecords``. |
 
 **Returns:** ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
@@ -731,8 +734,7 @@ keys = [("test", "demo", f"user_{i}") for i in range(10)]
 batch = client.batch_read(keys)
 for br in batch.batch_records:
     if br.record:
-        key, meta, bins = br.record
-        print(bins)
+        print(br.record.bins)
 
 # Read specific bins
 batch = client.batch_read(keys, bins=["name", "age"])
@@ -746,8 +748,7 @@ keys = [("test", "demo", f"user_{i}") for i in range(10)]
 batch = await client.batch_read(keys, bins=["name", "age"])
 for br in batch.batch_records:
     if br.record:
-        key, meta, bins = br.record
-        print(bins)
+        print(br.record.bins)
 ```
 
   </TabItem>
@@ -761,9 +762,9 @@ Execute operations on multiple records in a single batch call.
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `ops` | List of operation dicts to apply to each record. |
-| `policy` | Optional batch policy dict. |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** A list of ``(key, meta, bins)`` result tuples.
+**Returns:** A list of ``Record`` NamedTuples.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -797,9 +798,9 @@ Delete multiple records in a single batch call.
 | Parameter | Description |
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
-| `policy` | Optional batch policy dict. |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** A list of ``(key, meta, bins)`` result tuples.
+**Returns:** A list of ``Record`` NamedTuples.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -866,8 +867,8 @@ records = scan.results()
 
 ```python
 records = await client.scan("test", "demo")
-for key, meta, bins in records:
-    print(bins)
+for record in records:
+    print(record.bins)
 ```
 
   </TabItem>
@@ -885,7 +886,7 @@ Create a numeric secondary index.
 | `set_name` | Target set. |
 | `bin_name` | Bin to index. |
 | `index_name` | Name for the new index. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 :::note
 
@@ -920,7 +921,7 @@ Create a string secondary index.
 | `set_name` | Target set. |
 | `bin_name` | Bin to index. |
 | `index_name` | Name for the new index. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 :::note
 
@@ -955,7 +956,7 @@ Create a geospatial secondary index.
 | `set_name` | Target set. |
 | `bin_name` | Bin to index (must contain GeoJSON values). |
 | `index_name` | Name for the new index. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 :::note
 
@@ -990,7 +991,7 @@ Remove a secondary index.
 |-----------|-------------|
 | `namespace` | Target namespace. |
 | `index_name` | Name of the index to remove. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 :::note
 
@@ -1026,7 +1027,7 @@ Remove all records in a namespace/set.
 | `namespace` | Target namespace. |
 | `set_name` | Target set. |
 | `nanos` | Optional last-update cutoff in nanoseconds. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -1055,7 +1056,7 @@ Register a Lua UDF module on the cluster.
 |-----------|-------------|
 | `filename` | Path to the Lua source file. |
 | `udf_type` | UDF language type (only Lua ``0`` is supported). |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -1081,7 +1082,7 @@ Remove a registered UDF module.
 | Parameter | Description |
 |-----------|-------------|
 | `module` | Module name to remove (without ``.lua`` extension). |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -1110,7 +1111,7 @@ Execute a UDF on a single record.
 | `module` | Name of the registered UDF module. |
 | `function` | Name of the function within the module. |
 | `args` | Optional list of arguments to pass to the function. |
-| `policy` | Optional apply policy dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 **Returns:** The return value of the UDF function.
 
@@ -1190,32 +1191,31 @@ Execute the query and return all matching records.
 
 | Parameter | Description |
 |-----------|-------------|
-| `policy` | Optional query policy dict. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
-**Returns:** A list of ``(key, meta, bins)`` tuples.
+**Returns:** A list of ``Record`` NamedTuples.
 
 ```python
 records = query.results()
-for key, meta, bins in records:
-    print(bins)
+for record in records:
+    print(record.bins)
 ```
 
 ### `foreach(callback, policy=None)`
 
 Execute the query and invoke a callback for each record.
 
-The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+The callback receives a ``Record`` NamedTuple. Return ``False``
 from the callback to stop iteration early.
 
 | Parameter | Description |
 |-----------|-------------|
 | `callback` | Function called with each record. Return ``False`` to stop. |
-| `policy` | Optional query policy dict. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
 ```python
 def process(record):
-    key, meta, bins = record
-    print(bins)
+    print(record.bins)
 
 query.foreach(process)
 ```
@@ -1248,32 +1248,31 @@ Execute the scan and return all records.
 
 | Parameter | Description |
 |-----------|-------------|
-| `policy` | Optional scan policy dict. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
-**Returns:** A list of ``(key, meta, bins)`` tuples.
+**Returns:** A list of ``Record`` NamedTuples.
 
 ```python
 records = scan.results()
-for key, meta, bins in records:
-    print(bins)
+for record in records:
+    print(record.bins)
 ```
 
 ### `foreach(callback, policy=None)`
 
 Execute the scan and invoke a callback for each record.
 
-The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+The callback receives a ``Record`` NamedTuple. Return ``False``
 from the callback to stop iteration early.
 
 | Parameter | Description |
 |-----------|-------------|
 | `callback` | Function called with each record. Return ``False`` to stop. |
-| `policy` | Optional scan policy dict. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
 ```python
 def process(record):
-    key, meta, bins = record
-    print(bins)
+    print(record.bins)
 
 scan.foreach(process)
 ```

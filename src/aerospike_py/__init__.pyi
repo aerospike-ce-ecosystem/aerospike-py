@@ -161,7 +161,7 @@ class Client:
 
         Args:
             command: The info command string (e.g. ``"namespaces"``).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Returns:
             A list of ``InfoNodeResult(node_name, error_code, response)`` tuples.
@@ -184,7 +184,7 @@ class Client:
 
         Args:
             command: The info command string.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Returns:
             The info response string.
@@ -210,8 +210,8 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bins: Dictionary of bin name-value pairs to write.
-            meta: Optional metadata dict (e.g. ``{"ttl": 300, "gen": 2}``).
-            policy: Optional write policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``).
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordExistsError: Record already exists (with CREATE_ONLY policy).
@@ -241,7 +241,7 @@ class Client:
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
             A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
@@ -268,7 +268,7 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bins: List of bin names to retrieve.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
             A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
@@ -293,7 +293,7 @@ class Client:
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
             An ``ExistsResult`` NamedTuple with ``key``, ``meta`` fields.
@@ -318,8 +318,8 @@ class Client:
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            meta: Optional metadata dict for generation check.
-            policy: Optional remove policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict for generation check.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordNotFound: The record does not exist.
@@ -351,8 +351,8 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             val: New TTL value in seconds.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordNotFound: The record does not exist.
@@ -380,8 +380,8 @@ class Client:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             val: String value to append.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -404,8 +404,8 @@ class Client:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             val: String value to prepend.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -428,8 +428,8 @@ class Client:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             offset: Integer or float amount to add (use negative to decrement).
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -451,8 +451,8 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin_names: List of bin names to remove.
-            meta: Optional metadata dict.
-            policy: Optional write policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -475,8 +475,8 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
             A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
@@ -510,8 +510,8 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
             An ``OperateOrderedResult`` NamedTuple with ``key``, ``meta``,
@@ -563,7 +563,7 @@ class Client:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             bins: Optional list of bin names to read. ``None`` reads all bins;
                 an empty list performs an existence check only.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             _dtype: Optional NumPy dtype. When provided, returns
                 ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
@@ -596,7 +596,7 @@ class Client:
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             ops: List of operation dicts to apply to each record.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
 
         Returns:
             A list of ``Record`` NamedTuples.
@@ -621,7 +621,7 @@ class Client:
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
 
         Returns:
             A list of ``Record`` NamedTuples.
@@ -693,7 +693,7 @@ class Client:
             set_name: Target set.
             bin_name: Bin to index.
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Raises:
             IndexFoundError: An index with that name already exists.
@@ -720,7 +720,7 @@ class Client:
             set_name: Target set.
             bin_name: Bin to index.
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Raises:
             IndexFoundError: An index with that name already exists.
@@ -747,7 +747,7 @@ class Client:
             set_name: Target set.
             bin_name: Bin to index (must contain GeoJSON values).
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Raises:
             IndexFoundError: An index with that name already exists.
@@ -770,7 +770,7 @@ class Client:
         Args:
             namespace: Target namespace.
             index_name: Name of the index to remove.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Raises:
             IndexNotFound: The index does not exist.
@@ -797,7 +797,7 @@ class Client:
             namespace: Target namespace.
             set_name: Target set.
             nanos: Optional last-update cutoff in nanoseconds.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -819,7 +819,7 @@ class Client:
         Args:
             filename: Path to the Lua source file.
             udf_type: UDF language type (only Lua ``0`` is supported).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -837,7 +837,7 @@ class Client:
 
         Args:
             module: Module name to remove (without ``.lua`` extension).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -861,7 +861,7 @@ class Client:
             module: Name of the registered UDF module.
             function: Name of the function within the module.
             args: Optional list of arguments to pass to the function.
-            policy: Optional apply policy dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
             The return value of the UDF function.
@@ -1050,7 +1050,7 @@ class AsyncClient:
 
         Args:
             command: The info command string (e.g. ``"namespaces"``).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Returns:
             A list of ``InfoNodeResult(node_name, error_code, response)`` tuples.
@@ -1073,7 +1073,7 @@ class AsyncClient:
 
         Args:
             command: The info command string.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Returns:
             The info response string.
@@ -1099,8 +1099,8 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bins: Dictionary of bin name-value pairs to write.
-            meta: Optional metadata dict (e.g. ``{"ttl": 300, "gen": 2}``).
-            policy: Optional write policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``).
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordExistsError: Record already exists (with CREATE_ONLY policy).
@@ -1122,7 +1122,7 @@ class AsyncClient:
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
             A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
@@ -1149,7 +1149,7 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bins: List of bin names to retrieve.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
             A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
@@ -1174,7 +1174,7 @@ class AsyncClient:
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
             An ``ExistsResult`` NamedTuple with ``key``, ``meta`` fields.
@@ -1199,8 +1199,8 @@ class AsyncClient:
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            meta: Optional metadata dict for generation check.
-            policy: Optional remove policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict for generation check.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordNotFound: The record does not exist.
@@ -1224,8 +1224,8 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             val: New TTL value in seconds.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordNotFound: The record does not exist.
@@ -1253,8 +1253,8 @@ class AsyncClient:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             val: String value to append.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -1277,8 +1277,8 @@ class AsyncClient:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             val: String value to prepend.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -1301,8 +1301,8 @@ class AsyncClient:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             offset: Integer or float amount to add (use negative to decrement).
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -1324,8 +1324,8 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin_names: List of bin names to remove.
-            meta: Optional metadata dict.
-            policy: Optional write policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -1348,8 +1348,8 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
             A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
@@ -1383,8 +1383,8 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
             An ``OperateOrderedResult`` NamedTuple with ``key``, ``meta``,
@@ -1438,7 +1438,7 @@ class AsyncClient:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             bins: Optional list of bin names to read. ``None`` reads all bins;
                 an empty list performs an existence check only.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             _dtype: Optional NumPy dtype. When provided, returns
                 ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
@@ -1467,7 +1467,7 @@ class AsyncClient:
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             ops: List of operation dicts to apply to each record.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
 
         Returns:
             A list of ``Record`` NamedTuples.
@@ -1492,7 +1492,7 @@ class AsyncClient:
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
 
         Returns:
             A list of ``Record`` NamedTuples.
@@ -1521,7 +1521,7 @@ class AsyncClient:
         Args:
             namespace: The namespace to scan.
             set_name: The set to scan.
-            policy: Optional scan policy dict. Supports ``"filter_expression"``
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict. Supports ``"filter_expression"``
                 for server-side filtering.
 
         Returns:
@@ -1553,7 +1553,7 @@ class AsyncClient:
             set_name: Target set.
             bin_name: Bin to index.
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1577,7 +1577,7 @@ class AsyncClient:
             set_name: Target set.
             bin_name: Bin to index.
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1601,7 +1601,7 @@ class AsyncClient:
             set_name: Target set.
             bin_name: Bin to index (must contain GeoJSON values).
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1623,7 +1623,7 @@ class AsyncClient:
         Args:
             namespace: Target namespace.
             index_name: Name of the index to remove.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1647,7 +1647,7 @@ class AsyncClient:
             namespace: Target namespace.
             set_name: Target set.
             nanos: Optional last-update cutoff in nanoseconds.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1669,7 +1669,7 @@ class AsyncClient:
         Args:
             filename: Path to the Lua source file.
             udf_type: UDF language type (only Lua ``0`` is supported).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1687,7 +1687,7 @@ class AsyncClient:
 
         Args:
             module: Module name to remove (without ``.lua`` extension).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1711,7 +1711,7 @@ class AsyncClient:
             module: Name of the registered UDF module.
             function: Name of the function within the module.
             args: Optional list of arguments to pass to the function.
-            policy: Optional apply policy dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
             The return value of the UDF function.
@@ -1854,7 +1854,7 @@ class Query:
         """Execute the query and return all matching records.
 
         Args:
-            policy: Optional query policy dict.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
 
         Returns:
             A list of ``Record`` NamedTuples.
@@ -1880,7 +1880,7 @@ class Query:
 
         Args:
             callback: Function called with each record. Return ``False`` to stop.
-            policy: Optional query policy dict.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
 
         Example:
             ```python
@@ -1924,7 +1924,7 @@ class Scan:
         """Execute the scan and return all records.
 
         Args:
-            policy: Optional scan policy dict.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
 
         Returns:
             A list of ``Record`` NamedTuples.
@@ -1950,7 +1950,7 @@ class Scan:
 
         Args:
             callback: Function called with each record. Return ``False`` to stop.
-            policy: Optional scan policy dict.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
 
         Example:
             ```python
@@ -1968,7 +1968,7 @@ def client(config: dict[str, Any]) -> Client:
     """Create a new Aerospike client instance.
 
     Args:
-        config: Configuration dictionary. Must contain a ``"hosts"`` key
+        config: [`ClientConfig`](types.md#clientconfig) dictionary. Must contain a ``"hosts"`` key
             with a list of ``(host, port)`` tuples.
 
     Returns:

@@ -1,7 +1,8 @@
 ---
 title: NumPy Batch Read Guide
 sidebar_label: NumPy Batch Read
-sidebar_position: 8
+sidebar_position: 4
+slug: /guides/numpy-batch
 description: Use batch_read with numpy structured arrays for high-performance columnar analytics directly from Aerospike.
 ---
 
