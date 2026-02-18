@@ -5,13 +5,14 @@ import os
 import pytest
 
 import aerospike_py
+from tests import AEROSPIKE_CONFIG
 
 UDF_FILE = os.path.join(os.path.dirname(__file__), "..", "test_udf.lua")
 
 
 @pytest.fixture(scope="module")
 def client():
-    config = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
+    config = AEROSPIKE_CONFIG
     try:
         c = aerospike_py.client(config).connect()
     except Exception:

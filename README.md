@@ -128,6 +128,7 @@ Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to und
 
 | Skill | 명령어 | 설명 |
 |-------|--------|------|
+| **run-tests** | `/run-tests [type]` | 빌드 → Aerospike 서버 보장 → 테스트 실행 (unit/integration/concurrency/compat/all/matrix) |
 | **release-check** | `/release-check` | 릴리스 전 검증 (lint, unit test, pyright, type stub 일관성, 버전 확인) |
 | **bench-compare** | `/bench-compare` | aerospike-py vs 공식 C 클라이언트 벤치마크 비교 |
 | **test-sample-fastapi** | `/test-sample-fastapi` | aerospike-py 빌드 → sample-fastapi 설치 → 통합 테스트 실행 |

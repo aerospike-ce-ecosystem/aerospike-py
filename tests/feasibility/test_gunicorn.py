@@ -23,7 +23,7 @@ import os
 
 import aerospike_py
 
-CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
+CONFIG = {{"hosts": [("127.0.0.1", int(os.environ.get("AEROSPIKE_PORT", "18710")))], "cluster_name": "docker"}}
 NS = "test"
 SET_NAME = "feasibility_gunicorn"
 

@@ -5,7 +5,7 @@ import socket
 import pytest
 
 
-def _server_available(host: str = "127.0.0.1", port: int = 3000) -> bool:
+def _server_available(host: str = "127.0.0.1", port: int = 18710) -> bool:
     try:
         s = socket.socket()
         s.settimeout(1)

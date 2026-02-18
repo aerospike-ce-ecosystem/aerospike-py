@@ -3,6 +3,7 @@
 import pytest
 
 import aerospike_py
+from tests import AEROSPIKE_CONFIG
 
 
 class TestCRUDWorkflow:
@@ -469,7 +470,7 @@ class TestErrorHandling:
 
     def test_operations_after_close(self, client):
         """Create a separate client, close it, then try operations."""
-        c2 = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}).connect()
+        c2 = aerospike_py.client(AEROSPIKE_CONFIG).connect()
         c2.close()
 
         with pytest.raises(aerospike_py.AerospikeError):
@@ -487,7 +488,7 @@ class TestErrorHandling:
 
     def test_double_close_is_safe(self, client):
         """Closing a client twice should not crash."""
-        c2 = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}).connect()
+        c2 = aerospike_py.client(AEROSPIKE_CONFIG).connect()
         c2.close()
         c2.close()  # Should not raise
 
@@ -641,7 +642,7 @@ class TestMultiClientScenario:
 
     def test_two_clients_same_record(self, client, cleanup):
         """Two clients can read/write the same record."""
-        c2 = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}).connect()
+        c2 = aerospike_py.client(AEROSPIKE_CONFIG).connect()
         try:
             key = ("test", "scenario", "multi_client")
             cleanup.append(key)
@@ -658,7 +659,7 @@ class TestMultiClientScenario:
 
     def test_reconnect_after_close(self, cleanup):
         """Client can reconnect after close."""
-        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}).connect()
+        c = aerospike_py.client(AEROSPIKE_CONFIG).connect()
         key = ("test", "scenario", "reconnect")
         cleanup.append(key)
 
@@ -666,7 +667,7 @@ class TestMultiClientScenario:
         c.close()
 
         # Reconnect
-        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}).connect()
+        c = aerospike_py.client(AEROSPIKE_CONFIG).connect()
         try:
             _, _, bins = c.get(key)
             assert bins["val"] == 1

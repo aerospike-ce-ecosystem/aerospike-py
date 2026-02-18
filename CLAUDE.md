@@ -70,7 +70,7 @@ make lint                           # ruff check + clippy
 make fmt                            # ruff format + cargo fmt
 
 # 로컬 Aerospike 서버
-make run-aerospike-ce               # Docker로 Aerospike CE 실행 (port 3000)
+make run-aerospike-ce               # compose.local.yaml로 Aerospike CE 실행 (port 18710)
 
 # 벤치마크
 make run-benchmark                  # aerospike-py vs 공식 클라이언트 비교
@@ -86,8 +86,10 @@ make run-numpy-benchmark            # NumPy 배치 벤치마크
 - OpenTelemetry(`otel`)은 기본 빌드에 항상 포함됨 (별도 feature flag 불필요)
 - 통합 테스트 실행 전 `make run-aerospike-ce`로 로컬 서버 필요
 - maturin 버전 `>=1.9,<2.0`으로 고정
-- `AEROSPIKE_HOST`, `AEROSPIKE_PORT` 환경변수로 서버 주소 변경 가능
-- `RUNTIME` 환경변수로 docker/podman 선택 가능 (기본: docker)
+- `AEROSPIKE_HOST`, `AEROSPIKE_PORT` 환경변수로 서버 주소 변경 가능 (기본: `127.0.0.1:18710`)
+- `RUNTIME` 환경변수로 docker/podman 선택 가능 (기본: podman)
+- 컨테이너 설정은 프로젝트 루트의 compose 파일로 관리: `compose.local.yaml` (개발용), `compose.sample-fastapi.yaml` (FastAPI 예제용)
+- CI는 자체 서비스 컨테이너(port 3000)를 사용하며 `AEROSPIKE_PORT=3000` 환경변수로 설정됨
 
 ## 핵심 타입
 
@@ -126,7 +128,7 @@ record.bins["name"]   # bin 값
 ```python
 import aerospike_py
 
-client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
+client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()
 ```
 
 ### Connection
@@ -258,7 +260,7 @@ Context manager 지원: `with aerospike_py.client(config).connect() as c: ...`
 import aerospike_py
 
 async def main():
-    client = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+    client = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 18710)]})
     await client.connect()
 
     await client.put(("test", "demo", "key1"), {"name": "Alice"})
@@ -496,7 +498,7 @@ AerospikeError
 통합 테스트에는 Aerospike 서버가 필요하다. `tests/__init__.py`에서 기본 설정:
 
 ```python
-AEROSPIKE_CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
+AEROSPIKE_CONFIG = {"hosts": [("127.0.0.1", 18710)], "cluster_name": "docker"}
 ```
 
 ```bash

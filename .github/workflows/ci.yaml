@@ -34,6 +34,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  AEROSPIKE_PORT: "3000"
 
 jobs:
   lint:

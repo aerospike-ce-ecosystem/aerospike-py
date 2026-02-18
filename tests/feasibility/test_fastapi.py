@@ -13,8 +13,9 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 import aerospike_py  # noqa: E402
+from tests import AEROSPIKE_CONFIG  # noqa: E402
 
-CONFIG = {"hosts": [("127.0.0.1", 3000)], "cluster_name": "docker"}
+CONFIG = AEROSPIKE_CONFIG
 NS = "test"
 SET_NAME = "feasibility_fastapi"
 SET_NAME_TRUNC = "feasibility_fastapi_trunc"

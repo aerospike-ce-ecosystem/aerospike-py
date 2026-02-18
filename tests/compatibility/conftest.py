@@ -1,5 +1,7 @@
 """Shared fixtures for official Aerospike client compatibility tests."""
 
+import os
+
 import pytest
 
 import aerospike_py
@@ -8,7 +10,14 @@ from tests import AEROSPIKE_CONFIG
 # Skip entire module if official client is not installed
 aerospike = pytest.importorskip("aerospike")
 
-OFFICIAL_CONFIG = {"hosts": [("127.0.0.1", 3000)]}
+OFFICIAL_CONFIG = {
+    "hosts": [
+        (
+            os.environ.get("AEROSPIKE_HOST", "127.0.0.1"),
+            int(os.environ.get("AEROSPIKE_PORT", "18710")),
+        )
+    ],
+}
 
 
 @pytest.fixture(scope="module")

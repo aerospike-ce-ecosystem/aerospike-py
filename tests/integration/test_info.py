@@ -3,6 +3,7 @@
 import pytest
 
 import aerospike_py
+from tests import AEROSPIKE_CONFIG
 
 
 class TestInfoAll:
@@ -37,7 +38,7 @@ class TestInfoAll:
 
     def test_info_all_not_connected(self):
         """info_all on unconnected client raises ClientError."""
-        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+        c = aerospike_py.client(AEROSPIKE_CONFIG)
         with pytest.raises(aerospike_py.ClientError):
             c.info_all("build")
 
@@ -62,7 +63,7 @@ class TestInfoRandomNode:
 
     def test_info_random_node_not_connected(self):
         """info_random_node on unconnected client raises ClientError."""
-        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+        c = aerospike_py.client(AEROSPIKE_CONFIG)
         with pytest.raises(aerospike_py.ClientError):
             c.info_random_node("build")
 
