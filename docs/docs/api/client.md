@@ -754,6 +754,48 @@ for br in batch.batch_records:
   </TabItem>
 </Tabs>
 
+### `batch_write_numpy(data, namespace, set_name, _dtype, key_field="_key", policy=None)`
+
+Write multiple records from a numpy structured array. Each row becomes a separate write operation.
+
+| Parameter | Description |
+|-----------|-------------|
+| `data` | Numpy structured array containing record data. |
+| `namespace` | Target Aerospike namespace. |
+| `set_name` | Target set name. |
+| `_dtype` | Numpy dtype describing the array layout. |
+| `key_field` | Name of the dtype field to use as the user key (default ``"_key"``). |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
+
+**Returns:** A list of ``Record`` NamedTuples with write results.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+import numpy as np
+
+dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
+data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
+results = client.batch_write_numpy(data, "test", "demo", dtype)
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+import numpy as np
+
+dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
+data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
+results = await client.batch_write_numpy(data, "test", "demo", dtype)
+```
+
+  </TabItem>
+</Tabs>
+
+See [NumPy Batch Write Guide](../guides/crud/numpy-batch-write.md) for detailed usage and examples.
+
 ### `batch_operate(keys, ops, policy=None)`
 
 Execute operations on multiple records in a single batch call.
