@@ -3,27 +3,10 @@ title: Error Handling
 sidebar_label: Error Handling
 sidebar_position: 3
 slug: /guides/error-handling
-description: Best practices for handling Aerospike errors in production applications.
+description: Production error handling patterns for aerospike-py.
 ---
 
-# Error Handling Guide
-
-## Exception Hierarchy
-
-All aerospike-py exceptions inherit from `AerospikeError`. See the
-[Exceptions API reference](../../api/exceptions.md) for the full hierarchy and
-descriptions.
-
-```python
-import aerospike_py as aerospike
-from aerospike_py import exception
-```
-
-## Recommended Patterns
-
-### Catch Specific, Then Broad
-
-Always catch the most specific exception first:
+## Catch Specific, Then Broad
 
 ```python
 from aerospike_py.exception import (
@@ -33,78 +16,70 @@ from aerospike_py.exception import (
 )
 
 try:
-    _, meta, bins = client.get(key)
+    record = client.get(key)
 except RecordNotFound:
-    # Handle missing record (e.g., return default)
     bins = {}
 except AerospikeTimeoutError:
-    # Retry or circuit-break
-    raise
+    raise  # retry or circuit-break
 except AerospikeError as e:
-    # Unexpected Aerospike error
     logger.error("Aerospike error: %s", e)
     raise
 ```
 
-### Retry with Backoff
-
-Timeout and cluster errors are often transient:
+## Retry with Backoff
 
 ```python
 import time
 from aerospike_py.exception import AerospikeTimeoutError, ClusterError
 
-def get_with_retry(client, key, max_retries=3):
+def get_with_retry(client, key, max_retries: int = 3):
     for attempt in range(max_retries):
         try:
             return client.get(key)
         except (AerospikeTimeoutError, ClusterError):
             if attempt == max_retries - 1:
                 raise
-            time.sleep(0.1 * (2 ** attempt))  # exponential backoff
+            time.sleep(0.1 * (2 ** attempt))
 ```
 
-### Optimistic Locking (Check-and-Set)
-
-Use generation checks to detect concurrent modifications:
+## Optimistic Locking (CAS)
 
 ```python
+import aerospike_py as aerospike
 from aerospike_py.exception import RecordGenerationError
 
-def increment_counter(client, key, bin_name):
+def increment_counter(client, key, bin_name: str) -> int:
     while True:
         try:
-            _, meta, bins = client.get(key)
-            new_val = bins.get(bin_name, 0) + 1
+            record = client.get(key)
+            new_val = record.bins.get(bin_name, 0) + 1
             client.put(
                 key,
                 {bin_name: new_val},
-                meta={"gen": meta.gen},
+                meta={"gen": record.meta.gen},
                 policy={"gen": aerospike.POLICY_GEN_EQ},
             )
             return new_val
         except RecordGenerationError:
-            continue  # retry with fresh data
+            continue
 ```
 
-### Upsert vs Create-Only
+## Create-Only vs Upsert
 
 ```python
 from aerospike_py.exception import RecordExistsError
 
-# Create-only: fail if record exists
+# Create-only
 try:
     client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 except RecordExistsError:
-    print("Record already exists, skipping")
+    pass  # already exists
 
-# Upsert (default): create or update
-client.put(key, bins)  # never raises RecordExistsError
+# Upsert (default) -- never raises RecordExistsError
+client.put(key, bins)
 ```
 
-### Batch Error Handling
-
-Batch operations return results per-key. Check individual record status:
+## Batch Error Handling
 
 ```python
 batch = client.batch_read(keys)
@@ -114,47 +89,41 @@ for br in batch.batch_records:
     elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
         handle_missing(br.key)
     else:
-        logger.warning("Batch key error: code=%d", br.result)
+        logger.warning("Batch error: code=%d", br.result)
 ```
 
-### Connection Lifecycle
+## Connection Lifecycle
 
 ```python
-from aerospike_py.exception import ClientError, ClusterError
+from aerospike_py.exception import ClusterError
 
-client = aerospike.client(config)
 try:
-    client.connect()
+    client = aerospike.client(config).connect()
 except ClusterError as e:
     print(f"Cannot reach cluster: {e}")
     raise SystemExit(1)
 
 try:
-    # ... application logic ...
+    # application logic
     pass
 finally:
     client.close()
 ```
 
-### Async Error Handling
+## Async
 
-Async errors work the same way, just with `await`:
+Error handling is identical, just add `await`:
 
 ```python
-from aerospike_py.exception import RecordNotFound
-
-async def get_user(client, user_id):
-    key = ("app", "users", user_id)
+async def get_user(client, user_id: str) -> dict | None:
     try:
-        _, _, bins = await client.get(key)
-        return bins
+        record = await client.get(("app", "users", user_id))
+        return record.bins
     except RecordNotFound:
         return None
 ```
 
-## Result Codes
-
-Common Aerospike result codes mapped to exceptions:
+## Result Code Reference
 
 | Code | Constant | Exception |
 |------|----------|-----------|
@@ -162,8 +131,8 @@ Common Aerospike result codes mapped to exceptions:
 | 2 | `AEROSPIKE_ERR_RECORD_NOT_FOUND` | `RecordNotFound` |
 | 5 | `AEROSPIKE_ERR_RECORD_EXISTS` | `RecordExistsError` |
 | 9 | `AEROSPIKE_ERR_TIMEOUT` | `AerospikeTimeoutError` |
-| 3 | (generation error) | `RecordGenerationError` |
-| 13 | (record too big) | `RecordTooBig` |
-| 27 | (filtered out) | `FilteredOut` |
+| 3 | `AEROSPIKE_ERR_RECORD_GENERATION` | `RecordGenerationError` |
+| 13 | `AEROSPIKE_ERR_RECORD_TOO_BIG` | `RecordTooBig` |
+| 27 | `AEROSPIKE_ERR_FILTERED_OUT` | `FilteredOut` |
 
-See the [Constants reference](../../api/constants.md) for the full list.
+See [Exceptions](../../api/exceptions.md) and [Constants](../../api/constants.md) for full lists.

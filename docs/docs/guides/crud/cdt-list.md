@@ -6,7 +6,7 @@ slug: /guides/cdt-list
 description: 31 atomic list operations for append, insert, remove, sort, and advanced queries on list bins.
 ---
 
-List CDT (Collection Data Type) operations provide 31 atomic operations on list bins. These are executed server-side as part of `client.operate()`, enabling atomic multi-operation transactions on list data.
+Atomic server-side list operations via `client.operate()`.
 
 ## Import
 

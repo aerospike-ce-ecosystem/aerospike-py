@@ -6,7 +6,7 @@ slug: /guides/cdt-map
 description: 27 atomic map operations for put, get, remove, and advanced queries on map bins.
 ---
 
-Map CDT (Collection Data Type) operations provide 27 atomic operations on map bins. These are executed server-side as part of `client.operate()`, enabling atomic multi-operation transactions on map data.
+Atomic server-side map operations via `client.operate()`.
 
 ## Import
 

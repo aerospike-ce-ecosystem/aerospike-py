@@ -9,18 +9,14 @@ description: Use batch_read with numpy structured arrays for high-performance co
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-## Overview
+`batch_read()` with `_dtype` returns a **numpy structured array** instead of Python objects:
 
-`batch_read()` supports an optional `_dtype` parameter that returns results as a **numpy structured array** instead of Python objects. This enables:
-
-- **Zero-copy columnar access** — `batch.batch_records["temperature"]` returns a numpy array
-- **Vectorized computation** — use numpy/pandas operations directly on query results
-- **Memory efficiency** — bin values are written directly into a numpy buffer in Rust, bypassing intermediate Python objects
+- **Zero-copy columnar access** -- `batch.batch_records["temperature"]` returns a numpy array
+- **Vectorized computation** -- use numpy/pandas directly on results
+- **Memory efficiency** -- Rust writes directly into numpy buffer, bypassing Python objects
 
 :::tip[Performance]
-
-With the `_dtype` parameter, Rust writes Aerospike values directly into the numpy buffer via raw pointer operations. For 10K records with 5 bins, this eliminates ~60K intermediate Python objects compared to the standard `BatchRecords` path.
-
+For 10K records with 5 bins, this eliminates ~60K intermediate Python objects compared to the standard `BatchRecords` path.
 :::
 
 ## Installation

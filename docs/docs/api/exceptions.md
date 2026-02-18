@@ -2,17 +2,14 @@
 title: Exceptions
 sidebar_label: Exceptions
 sidebar_position: 3
-description: Exception hierarchy and error handling patterns for aerospike-py.
+description: Exception hierarchy and error handling patterns.
 ---
 
-All exceptions are available from `aerospike` and `aerospike.exception`.
-
 ```python
-import aerospike_py as aerospike
-from aerospike_py.exception import RecordNotFound
+from aerospike_py.exception import RecordNotFound, AerospikeError
 ```
 
-## Exception Hierarchy
+## Hierarchy
 
 ```
 Exception
@@ -41,96 +38,86 @@ Exception
         └── FilteredOut
 ```
 
-## Base Exceptions
+## Reference
+
+### Base
 
 | Exception | Description |
 |-----------|-------------|
 | `AerospikeError` | Base for all Aerospike exceptions |
 | `ClientError` | Client-side errors (connection, config) |
 | `ClusterError` | Cluster connection/discovery errors |
-| `InvalidArgError` | Invalid argument passed to a method |
-| `AerospikeTimeoutError` | Operation timed out (alias: `TimeoutError`, deprecated) |
+| `InvalidArgError` | Invalid argument |
+| `AerospikeTimeoutError` | Operation timed out |
 | `ServerError` | Server-side errors |
-| `RecordError` | Record-level operation errors |
+| `RecordError` | Record-level errors |
 
-## Record Exceptions
+### Record
 
 | Exception | Description |
 |-----------|-------------|
 | `RecordNotFound` | Record does not exist |
-| `RecordExistsError` | Record already exists (CREATE_ONLY policy) |
-| `RecordGenerationError` | Generation mismatch (optimistic locking) |
+| `RecordExistsError` | Record already exists (`CREATE_ONLY`) |
+| `RecordGenerationError` | Generation mismatch (optimistic lock) |
 | `RecordTooBig` | Record exceeds size limit |
-| `BinNameError` | Invalid bin name (too long, invalid chars) |
+| `BinNameError` | Invalid bin name |
 | `BinExistsError` | Bin already exists |
 | `BinNotFound` | Bin does not exist |
 | `BinTypeError` | Bin type mismatch |
-| `FilteredOut` | Record filtered by expression |
+| `FilteredOut` | Excluded by expression filter |
 
-## Server Exceptions
+### Server
 
 | Exception | Description |
 |-----------|-------------|
-| `AerospikeIndexError` | Secondary index operation error (alias: `IndexError`, deprecated) |
+| `AerospikeIndexError` | Secondary index error |
 | `IndexNotFound` | Index does not exist |
 | `IndexFoundError` | Index already exists |
 | `QueryError` | Query execution error |
-| `QueryAbortedError` | Query was aborted |
+| `QueryAbortedError` | Query aborted |
 | `AdminError` | Admin operation error |
-| `UDFError` | UDF registration/execution error |
+| `UDFError` | UDF error |
 
-## Error Handling Examples
+:::note
+`TimeoutError` and `IndexError` are deprecated aliases for `AerospikeTimeoutError` and `AerospikeIndexError` to avoid shadowing Python builtins.
+:::
 
-### Basic Error Handling
+## Examples
 
 ```python
-import aerospike_py as aerospike
-from aerospike_py.exception import RecordNotFound, AerospikeError
+from aerospike_py.exception import (
+    RecordNotFound,
+    RecordExistsError,
+    RecordGenerationError,
+    AerospikeTimeoutError,
+    AerospikeError,
+)
 
+# Basic error handling
 try:
-    _, meta, bins = client.get(("test", "demo", "nonexistent"))
+    record = client.get(("test", "demo", "nonexistent"))
 except RecordNotFound:
-    print("Record not found")
+    print("Not found")
 except AerospikeError as e:
-    print(f"Aerospike error: {e}")
-```
+    print(f"Error: {e}")
 
-### Optimistic Locking
-
-```python
-from aerospike_py.exception import RecordGenerationError
-
+# Optimistic locking
 try:
-    _, meta, bins = client.get(key)
-    client.put(key, {"val": bins["val"] + 1},
-               meta={"gen": meta.gen},
-               policy={"gen": aerospike.POLICY_GEN_EQ})
+    record = client.get(key)
+    client.put(
+        key,
+        {"val": record.bins["val"] + 1},
+        meta={"gen": record.meta.gen},
+        policy={"gen": aerospike.POLICY_GEN_EQ},
+    )
 except RecordGenerationError:
-    print("Record was modified by another client")
-```
+    print("Concurrent modification detected")
 
-### Create-Only
-
-```python
-from aerospike_py.exception import RecordExistsError
-
+# Create-only
 try:
     client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 except RecordExistsError:
-    print("Record already exists")
+    print("Already exists")
 ```
 
-### Connection Errors
-
-```python
-from aerospike_py.exception import ClientError, ClusterError, AerospikeTimeoutError
-
-try:
-    client = aerospike.client(config).connect()
-except ClusterError:
-    print("Cannot connect to cluster")
-except AerospikeTimeoutError:
-    print("Connection timed out")
-except ClientError as e:
-    print(f"Client error: {e}")
-```
+See the [Error Handling Guide](../guides/admin/error-handling.md) for production patterns.
