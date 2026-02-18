@@ -167,8 +167,8 @@ nodes = await client.get_node_names()
 |-----------|------|-------------|
 | `key` | `tuple[str, str, str\|int\|bytes]` | `(namespace, set, pk)` |
 | `bins` | `dict[str, Any]` | 빈 이름-값 쌍 |
-| `meta` | `dict` | 선택: `{"ttl": int, "gen": int}` |
-| `policy` | `dict` | 선택: `{"key", "exists", "gen", "timeout", ...}` |
+| `meta` | [`WriteMeta`](types.md#writemeta) | 선택: `{"ttl": int, "gen": int}` |
+| `policy` | [`WritePolicy`](types.md#writepolicy) | 선택: `{"key", "exists", "gen", "timeout", ...}` |
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -195,7 +195,7 @@ await client.put(key, {"x": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE
 
 ### `get(key, policy=None)`
 
-레코드를 읽습니다. `(key, meta, bins)`를 반환합니다.
+레코드를 읽습니다. [`Record`](types.md#record) NamedTuple `(key, meta, bins)`를 반환합니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -246,7 +246,7 @@ _, meta, bins = await client.select(key, ["name"])
 
 ### `exists(key, policy=None)`
 
-레코드 존재 여부를 확인합니다. `(key, meta)`를 반환하며, 레코드가 없으면 `meta`가 `None`입니다.
+레코드 존재 여부를 확인합니다. [`ExistsResult`](types.md#existsresult) NamedTuple `(key, meta)`를 반환하며, 레코드가 없으면 `meta`가 `None`입니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -435,7 +435,7 @@ _, meta, bins = await client.operate(key, ops)
 
 ### `operate_ordered(key, ops, meta=None, policy=None)`
 
-`operate`와 동일하지만 결과를 `(bin, value)` 튜플의 정렬된 리스트로 반환합니다.
+`operate`와 동일하지만 결과를 [`OperateOrderedResult`](types.md#operateorderedresult) NamedTuple의 `ordered_bins` 필드에 `BinTuple(name, value)` 리스트로 반환합니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>

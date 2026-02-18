@@ -111,8 +111,11 @@ await client.put(key, {"val": 1}, meta={"ttl": aerospike.TTL_NEVER_EXPIRE})
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
+from aerospike_py import WritePolicy
+
 # Create only (fails if record exists)
-client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
+policy: WritePolicy = {"exists": aerospike.POLICY_EXISTS_CREATE_ONLY}
+client.put(key, bins, policy=policy)
 
 # Replace only (fails if record doesn't exist)
 client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_REPLACE_ONLY})
@@ -139,8 +142,15 @@ await client.put(key, bins, policy={"key": aerospike.POLICY_KEY_SEND})
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
+from aerospike_py import Record
+
+record: Record = client.get(("test", "demo", "user1"))
+# record.key  → AerospikeKey | None
+# record.meta → RecordMetadata | None (meta.gen, meta.ttl)
+# record.bins → dict[str, Any] | None
+
+# Tuple unpacking also works (backward compat)
 key, meta, bins = client.get(("test", "demo", "user1"))
-# key  = ("test", "demo", "user1") or None
 # meta.gen == 1, meta.ttl == 2591998
 # bins = {"name": "Alice", "age": 30}
 ```
@@ -149,6 +159,10 @@ key, meta, bins = client.get(("test", "demo", "user1"))
   <TabItem value="async" label="Async Client">
 
 ```python
+from aerospike_py import Record
+
+record: Record = await client.get(("test", "demo", "user1"))
+# or tuple unpacking
 key, meta, bins = await client.get(("test", "demo", "user1"))
 ```
 
@@ -181,20 +195,27 @@ _, meta, bins = await client.select(key, ["name"])
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-_, meta = client.exists(key)
-if meta is not None:
-    print(f"Record exists, gen={meta.gen}")
+from aerospike_py import ExistsResult
+
+result: ExistsResult = client.exists(key)
+if result.meta is not None:
+    print(f"Record exists, gen={result.meta.gen}")
 else:
     print("Record not found")
+
+# Tuple unpacking also works
+_, meta = client.exists(key)
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
-_, meta = await client.exists(key)
-if meta is not None:
-    print(f"Record exists, gen={meta.gen}")
+from aerospike_py import ExistsResult
+
+result: ExistsResult = await client.exists(key)
+if result.meta is not None:
+    print(f"Record exists, gen={result.meta.gen}")
 else:
     print("Record not found")
 ```
@@ -406,32 +427,36 @@ Execute operations on multiple records:
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
+from aerospike_py import Record
+
 keys = [("test", "demo", f"counter_{i}") for i in range(10)]
 ops = [
     {"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1},
     {"op": aerospike.OPERATOR_READ, "bin": "views", "val": None},
 ]
-results = client.batch_operate(keys, ops)
+results: list[Record] = client.batch_operate(keys, ops)
 
-for _, _, bins in results:
-    if bins:
-        print(f"views: {bins['views']}")
+for record in results:
+    if record.bins:
+        print(f"views: {record.bins['views']}")
 ```
 
   </TabItem>
   <TabItem value="async" label="Async Client">
 
 ```python
+from aerospike_py import Record
+
 keys = [("test", "demo", f"counter_{i}") for i in range(10)]
 ops = [
     {"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1},
     {"op": aerospike.OPERATOR_READ, "bin": "views", "val": None},
 ]
-results = await client.batch_operate(keys, ops)
+results: list[Record] = await client.batch_operate(keys, ops)
 
-for _, _, bins in results:
-    if bins:
-        print(f"views: {bins['views']}")
+for record in results:
+    if record.bins:
+        print(f"views: {record.bins['views']}")
 ```
 
   </TabItem>

@@ -45,6 +45,7 @@ For contributors or development builds, see the [Contributing Guide](contributin
 
 ```python
 import aerospike_py as aerospike
+from aerospike_py import Record
 
 # Create and connect (with context manager)
 with aerospike.client({
@@ -56,9 +57,12 @@ with aerospike.client({
     key = ("test", "demo", "user1")
     client.put(key, {"name": "Alice", "age": 30})
 
-    # Read a record
+    # Read a record — returns Record NamedTuple
+    record: Record = client.get(key)
+    print(f"bins={record.bins}, gen={record.meta.gen}, ttl={record.meta.ttl}")
+
+    # Tuple unpacking also works (backward compat)
     _, meta, bins = client.get(key)
-    print(f"bins={bins}, gen={meta.gen}, ttl={meta.ttl}")
 
     # Update with increment
     client.increment(key, "age", 1)
@@ -68,7 +72,8 @@ with aerospike.client({
         {"op": aerospike.OPERATOR_INCR, "bin": "age", "val": 1},
         {"op": aerospike.OPERATOR_READ, "bin": "age", "val": None},
     ]
-    _, _, bins = client.operate(key, ops)
+    record = client.operate(key, ops)
+    print(record.bins)
 
     # Delete
     client.remove(key)
@@ -93,7 +98,7 @@ client.close()
 ```python
 import asyncio
 import aerospike_py as aerospike
-from aerospike_py import AsyncClient
+from aerospike_py import AsyncClient, Record
 
 async def main():
     client = AsyncClient({
@@ -106,9 +111,12 @@ async def main():
     key = ("test", "demo", "user1")
     await client.put(key, {"name": "Bob", "age": 25})
 
-    # Read a record
+    # Read a record — returns Record NamedTuple
+    record: Record = await client.get(key)
+    print(f"bins={record.bins}, gen={record.meta.gen}, ttl={record.meta.ttl}")
+
+    # Tuple unpacking also works (backward compat)
     _, meta, bins = await client.get(key)
-    print(f"bins={bins}, gen={meta.gen}, ttl={meta.ttl}")
 
     # Update with increment
     await client.increment(key, "age", 1)
@@ -118,7 +126,8 @@ async def main():
         {"op": aerospike.OPERATOR_INCR, "bin": "age", "val": 1},
         {"op": aerospike.OPERATOR_READ, "bin": "age", "val": None},
     ]
-    _, _, bins = await client.operate(key, ops)
+    record = await client.operate(key, ops)
+    print(record.bins)
 
     # Concurrent writes with asyncio.gather
     keys = [("test", "demo", f"item_{i}") for i in range(10)]
@@ -138,7 +147,7 @@ asyncio.run(main())
 
 ## Configuration
 
-The `config` dictionary supports:
+The `config` dictionary accepts a [`ClientConfig`](api/types.md#clientconfig) TypedDict. Key options:
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -148,6 +157,8 @@ The `config` dictionary supports:
 | `auth_mode` | `int` | `AUTH_INTERNAL`, `AUTH_EXTERNAL`, or `AUTH_PKI` |
 
 ## Policies and Metadata
+
+Use [`WritePolicy`](api/types.md#writepolicy) for write policies, [`WriteMeta`](api/types.md#writemeta) for metadata, and [`ReadPolicy`](api/types.md#readpolicy) for read policies. See [Types Reference](api/types.md) for all available fields.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -200,3 +211,4 @@ await client.put(key, {"val": bins["val"] + 1},
 - [List CDT Operations Guide](guides/cdt-list.md) - Atomic list operations
 - [Map CDT Operations Guide](guides/cdt-map.md) - Atomic map operations
 - [API Reference](api/client.md) - Full API documentation
+- [Types Reference](api/types.md) - NamedTuple and TypedDict type definitions

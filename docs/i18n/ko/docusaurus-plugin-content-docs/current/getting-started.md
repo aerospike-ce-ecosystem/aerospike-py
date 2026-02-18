@@ -45,6 +45,7 @@ python -c "import aerospike_py as aerospike; print(aerospike.__version__)"
 
 ```python
 import aerospike_py as aerospike
+from aerospike_py import Record
 
 # 생성 및 연결 (Context Manager 사용)
 with aerospike.client({
@@ -56,9 +57,12 @@ with aerospike.client({
     key = ("test", "demo", "user1")
     client.put(key, {"name": "Alice", "age": 30})
 
-    # 레코드 읽기
+    # 레코드 읽기 — Record NamedTuple 반환
+    record: Record = client.get(key)
+    print(f"bins={record.bins}, gen={record.meta.gen}, ttl={record.meta.ttl}")
+
+    # 튜플 언패킹도 가능 (하위 호환)
     _, meta, bins = client.get(key)
-    print(f"bins={bins}, gen={meta.gen}, ttl={meta.ttl}")
 
     # 증분 업데이트
     client.increment(key, "age", 1)
@@ -68,7 +72,8 @@ with aerospike.client({
         {"op": aerospike.OPERATOR_INCR, "bin": "age", "val": 1},
         {"op": aerospike.OPERATOR_READ, "bin": "age", "val": None},
     ]
-    _, _, bins = client.operate(key, ops)
+    record = client.operate(key, ops)
+    print(record.bins)
 
     # 삭제
     client.remove(key)
@@ -93,7 +98,7 @@ client.close()
 ```python
 import asyncio
 import aerospike_py as aerospike
-from aerospike_py import AsyncClient
+from aerospike_py import AsyncClient, Record
 
 async def main():
     client = AsyncClient({
@@ -106,9 +111,12 @@ async def main():
     key = ("test", "demo", "user1")
     await client.put(key, {"name": "Bob", "age": 25})
 
-    # 레코드 읽기
+    # 레코드 읽기 — Record NamedTuple 반환
+    record: Record = await client.get(key)
+    print(f"bins={record.bins}, gen={record.meta.gen}, ttl={record.meta.ttl}")
+
+    # 튜플 언패킹도 가능 (하위 호환)
     _, meta, bins = await client.get(key)
-    print(f"bins={bins}, gen={meta.gen}, ttl={meta.ttl}")
 
     # 증분 업데이트
     await client.increment(key, "age", 1)
@@ -118,7 +126,8 @@ async def main():
         {"op": aerospike.OPERATOR_INCR, "bin": "age", "val": 1},
         {"op": aerospike.OPERATOR_READ, "bin": "age", "val": None},
     ]
-    _, _, bins = await client.operate(key, ops)
+    record = await client.operate(key, ops)
+    print(record.bins)
 
     # asyncio.gather를 사용한 동시 쓰기
     keys = [("test", "demo", f"item_{i}") for i in range(10)]
@@ -138,7 +147,7 @@ asyncio.run(main())
 
 ## Configuration
 
-`config` 딕셔너리가 지원하는 옵션:
+`config` 딕셔너리는 [`ClientConfig`](api/types.md#clientconfig) TypedDict를 받습니다. 주요 옵션:
 
 | 키 | 타입 | 설명 |
 |-----|------|-------------|
@@ -148,6 +157,8 @@ asyncio.run(main())
 | `auth_mode` | `int` | `AUTH_INTERNAL`, `AUTH_EXTERNAL`, 또는 `AUTH_PKI` |
 
 ## Policies & Metadata
+
+쓰기 정책에는 [`WritePolicy`](api/types.md#writepolicy), 메타데이터에는 [`WriteMeta`](api/types.md#writemeta), 읽기 정책에는 [`ReadPolicy`](api/types.md#readpolicy)를 사용합니다. 전체 필드는 [Types Reference](api/types.md)를 참조하세요.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -200,3 +211,4 @@ await client.put(key, {"val": bins["val"] + 1},
 - [List CDT Operations Guide](guides/cdt-list.md) - 원자적 리스트 연산
 - [Map CDT Operations Guide](guides/cdt-map.md) - 원자적 맵 연산
 - [API Reference](api/client.md) - 전체 API 문서
+- [Types Reference](api/types.md) - NamedTuple 및 TypedDict 타입 정의

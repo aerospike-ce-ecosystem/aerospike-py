@@ -15,6 +15,7 @@
 - [Constants](https://kimsoungryoul.github.io/aerospike-py/docs/api/constants): Policy, TTL, operator, index type, and other constants used across the aerospike-py API.
 - [Exceptions](https://kimsoungryoul.github.io/aerospike-py/docs/api/exceptions): Exception hierarchy and error handling patterns for aerospike-py.
 - [Query & Scan](https://kimsoungryoul.github.io/aerospike-py/docs/api/query-scan): API reference for Query and Scan classes including predicates and result iteration.
+- [Types](https://kimsoungryoul.github.io/aerospike-py/docs/api/types): NamedTuple return types and TypedDict input types for aerospike-py.
 
 ## Guides
 
