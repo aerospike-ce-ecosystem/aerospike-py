@@ -1,26 +1,10 @@
 """Integration tests for query operations (requires Aerospike server)."""
 
-import time
-
 import pytest
 
 import aerospike_py
 from aerospike_py import predicates as p
-
-
-def _wait_for_index(client, ns, set_name, bin_name, timeout=5.0, interval=0.2):
-    """Poll until a secondary index query on *bin_name* returns without error."""
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            q = client.query(ns, set_name)
-            q.where(p.equals(bin_name, 0))
-            q.results()
-            return
-        except aerospike_py.AerospikeError:
-            if time.monotonic() >= deadline:
-                return  # best-effort; let the real test fail if needed
-            time.sleep(interval)
+from tests.helpers import wait_for_index
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +22,7 @@ def seed_data(client):
     except aerospike_py.ServerError:
         pass  # Index may already exist
 
-    _wait_for_index(client, "test", "query_test", "age")
+    wait_for_index(client, "test", "query_test", "age")
     yield keys
 
     # Cleanup
@@ -95,7 +79,7 @@ class TestIndex:
     def test_index_string_create_remove(self, client, seed_data):
         try:
             client.index_string_create("test", "query_test", "name", "idx_query_name")
-            _wait_for_index(client, "test", "query_test", "name")
+            wait_for_index(client, "test", "query_test", "name")
         except aerospike_py.ServerError:
             pass  # May already exist
 

@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 mod async_client;
 mod batch_types;
 mod client;
+mod client_common;
 mod constants;
 mod errors;
 pub mod expressions;

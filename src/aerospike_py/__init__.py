@@ -591,6 +591,119 @@ class AsyncClient:
     async def batch_remove(self, keys, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in await self._inner.batch_remove(keys, policy)]
 
+    def is_connected(self) -> bool:
+        return self._inner.is_connected()
+
+    async def get_node_names(self) -> list[str]:
+        return await self._inner.get_node_names()
+
+    async def info_random_node(self, command, policy=None) -> str:
+        return await self._inner.info_random_node(command, policy)
+
+    async def put(self, key, bins, meta=None, policy=None) -> None:
+        return await self._inner.put(key, bins, meta=meta, policy=policy)
+
+    async def remove(self, key, meta=None, policy=None) -> None:
+        return await self._inner.remove(key, meta=meta, policy=policy)
+
+    async def touch(self, key, val=0, meta=None, policy=None) -> None:
+        return await self._inner.touch(key, val=val, meta=meta, policy=policy)
+
+    async def append(self, key, bin, val, meta=None, policy=None) -> None:
+        return await self._inner.append(key, bin, val, meta=meta, policy=policy)
+
+    async def prepend(self, key, bin, val, meta=None, policy=None) -> None:
+        return await self._inner.prepend(key, bin, val, meta=meta, policy=policy)
+
+    async def increment(self, key, bin, offset, meta=None, policy=None) -> None:
+        return await self._inner.increment(key, bin, offset, meta=meta, policy=policy)
+
+    async def remove_bin(self, key, bin_names, meta=None, policy=None) -> None:
+        return await self._inner.remove_bin(key, bin_names, meta=meta, policy=policy)
+
+    # -- Index --
+
+    async def index_integer_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return await self._inner.index_integer_create(namespace, set_name, bin_name, index_name, policy)
+
+    async def index_string_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return await self._inner.index_string_create(namespace, set_name, bin_name, index_name, policy)
+
+    async def index_geo2dsphere_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return await self._inner.index_geo2dsphere_create(namespace, set_name, bin_name, index_name, policy)
+
+    async def index_remove(self, namespace, index_name, policy=None) -> None:
+        return await self._inner.index_remove(namespace, index_name, policy)
+
+    # -- Truncate --
+
+    async def truncate(self, namespace, set_name, nanos=0, policy=None) -> None:
+        return await self._inner.truncate(namespace, set_name, nanos, policy)
+
+    # -- UDF --
+
+    async def udf_put(self, filename, udf_type=0, policy=None) -> None:
+        return await self._inner.udf_put(filename, udf_type, policy)
+
+    async def udf_remove(self, module, policy=None) -> None:
+        return await self._inner.udf_remove(module, policy)
+
+    async def apply(self, key, module, function, args=None, policy=None):
+        return await self._inner.apply(key, module, function, args, policy)
+
+    # -- Admin: User --
+
+    async def admin_create_user(self, username, password, roles, policy=None) -> None:
+        return await self._inner.admin_create_user(username, password, roles, policy)
+
+    async def admin_drop_user(self, username, policy=None) -> None:
+        return await self._inner.admin_drop_user(username, policy)
+
+    async def admin_change_password(self, username, password, policy=None) -> None:
+        return await self._inner.admin_change_password(username, password, policy)
+
+    async def admin_grant_roles(self, username, roles, policy=None) -> None:
+        return await self._inner.admin_grant_roles(username, roles, policy)
+
+    async def admin_revoke_roles(self, username, roles, policy=None) -> None:
+        return await self._inner.admin_revoke_roles(username, roles, policy)
+
+    async def admin_query_user_info(self, username, policy=None):
+        return await self._inner.admin_query_user_info(username, policy)
+
+    async def admin_query_users_info(self, policy=None):
+        return await self._inner.admin_query_users_info(policy)
+
+    # -- Admin: Role --
+
+    async def admin_create_role(
+        self, role, privileges, policy=None, whitelist=None, read_quota=0, write_quota=0
+    ) -> None:
+        return await self._inner.admin_create_role(role, privileges, policy, whitelist, read_quota, write_quota)
+
+    async def admin_drop_role(self, role, policy=None) -> None:
+        return await self._inner.admin_drop_role(role, policy)
+
+    async def admin_grant_privileges(self, role, privileges, policy=None) -> None:
+        return await self._inner.admin_grant_privileges(role, privileges, policy)
+
+    async def admin_revoke_privileges(self, role, privileges, policy=None) -> None:
+        return await self._inner.admin_revoke_privileges(role, privileges, policy)
+
+    async def admin_query_role(self, role, policy=None):
+        return await self._inner.admin_query_role(role, policy)
+
+    async def admin_query_roles(self, policy=None):
+        return await self._inner.admin_query_roles(policy)
+
+    async def admin_set_whitelist(self, role, whitelist, policy=None) -> None:
+        return await self._inner.admin_set_whitelist(role, whitelist, policy)
+
+    async def admin_set_quotas(self, role, read_quota=0, write_quota=0, policy=None) -> None:
+        return await self._inner.admin_set_quotas(role, read_quota, write_quota, policy)
+
+    # -- Query --
+
     def query(self, namespace: str, set_name: str) -> AsyncQuery:
         """Create a query object for the given namespace and set.
 
