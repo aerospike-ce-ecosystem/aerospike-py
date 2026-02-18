@@ -89,7 +89,7 @@ pub(crate) mod otel_impl {
 
         global::set_tracer_provider(provider.clone());
 
-        let mut guard = TRACER_PROVIDER.lock().unwrap();
+        let mut guard = TRACER_PROVIDER.lock().unwrap_or_else(|e| e.into_inner());
         *guard = Some(provider);
 
         log::info!("OTel tracer provider initialised");
@@ -97,7 +97,7 @@ pub(crate) mod otel_impl {
 
     /// Shut down the tracer provider, flushing any pending spans.
     pub fn shutdown_tracer_provider() {
-        let mut guard = TRACER_PROVIDER.lock().unwrap();
+        let mut guard = TRACER_PROVIDER.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(provider) = guard.take() {
             // Shutdown flushes pending spans via the batch exporter which needs Tokio.
             let _rt_guard = crate::runtime::RUNTIME.enter();
@@ -246,5 +246,91 @@ macro_rules! traced_op {
         let _ = $parent_ctx;
         let _ = &$conn_info;
         $crate::timed_op!($op, $ns, $set, $body)
+    }};
+}
+
+// ── traced_exists_op! macro ─────────────────────────────────────────────────
+
+/// Like `traced_op!` but treats `KeyNotFoundError` as a non-error for both
+/// metrics and OTel spans. Returns `Result<T, aerospike_core::Error>` (NOT PyErr).
+#[cfg(feature = "otel")]
+#[macro_export]
+macro_rules! traced_exists_op {
+    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {{
+        use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
+        use opentelemetry::KeyValue;
+
+        let tracer = $crate::tracing::otel_impl::get_tracer();
+        let span_name = format!("{} {}.{}", $op.to_uppercase(), $ns, $set);
+        let conn = &$conn_info;
+        let span = tracer
+            .span_builder(span_name)
+            .with_kind(SpanKind::Client)
+            .with_attributes(vec![
+                KeyValue::new("db.system.name", "aerospike"),
+                KeyValue::new("db.namespace", $ns.to_string()),
+                KeyValue::new("db.collection.name", $set.to_string()),
+                KeyValue::new("db.operation.name", $op.to_uppercase()),
+                KeyValue::new("server.address", conn.server_address.clone()),
+                KeyValue::new("server.port", conn.server_port),
+                KeyValue::new("db.aerospike.cluster_name", conn.cluster_name.clone()),
+            ])
+            .start_with_context(&tracer, &$parent_ctx);
+        let _cx = $parent_ctx.with_span(span);
+
+        let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
+        let result = $body;
+
+        // KeyNotFoundError is NOT an error for exists — record it as success
+        match &result {
+            Ok(_) => timer.finish(""),
+            Err(aerospike_core::Error::ServerError(
+                aerospike_core::ResultCode::KeyNotFoundError,
+                _,
+                _,
+            )) => timer.finish(""),
+            Err(e) => timer.finish(&$crate::metrics::error_type_from_aerospike_error(e)),
+        }
+
+        {
+            let span_ref = opentelemetry::trace::TraceContextExt::span(&_cx);
+            match &result {
+                Ok(_) => {}
+                Err(aerospike_core::Error::ServerError(
+                    aerospike_core::ResultCode::KeyNotFoundError,
+                    _,
+                    _,
+                )) => {}
+                Err(e) => {
+                    $crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
+                }
+            }
+            span_ref.end();
+        }
+
+        result
+    }};
+}
+
+/// When compiled without `otel`, fall back to plain metrics with exists handling.
+#[cfg(not(feature = "otel"))]
+#[macro_export]
+macro_rules! traced_exists_op {
+    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {{
+        let _ = $parent_ctx;
+        let _ = &$conn_info;
+
+        let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
+        let result = $body;
+        match &result {
+            Ok(_) => timer.finish(""),
+            Err(aerospike_core::Error::ServerError(
+                aerospike_core::ResultCode::KeyNotFoundError,
+                _,
+                _,
+            )) => timer.finish(""),
+            Err(e) => timer.finish(&$crate::metrics::error_type_from_aerospike_error(e)),
+        }
+        result
     }};
 }

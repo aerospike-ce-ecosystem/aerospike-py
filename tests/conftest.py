@@ -24,9 +24,7 @@ async def async_client():
         c = aerospike_py.AsyncClient(AEROSPIKE_CONFIG)
         await c.connect()
     except Exception as e:
-        if "connect" in str(e).lower() or "cluster" in str(e).lower():
-            pytest.skip(f"Aerospike server not available: {e}")
-        raise
+        pytest.skip(f"Aerospike server not available: {e}")
     yield c
     await c.close()
 

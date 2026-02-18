@@ -9,6 +9,7 @@ Usage:
     query.where(p.between("age", 18, 65))
 """
 
+import warnings
 from typing import Any
 
 __all__ = [
@@ -49,6 +50,11 @@ def geo_within_geojson_region(bin_name: str, geojson: str) -> tuple[str, str, st
         Geo filters are not yet supported in this version.
         Using this predicate in a query will raise ``ClientError`` at execution time.
     """
+    warnings.warn(
+        "Geo filters are not yet supported; query execution will raise ClientError",
+        FutureWarning,
+        stacklevel=2,
+    )
     return ("geo_within_geojson_region", bin_name, geojson)
 
 
@@ -59,6 +65,11 @@ def geo_within_radius(bin_name: str, lat: float, lng: float, radius: float) -> t
         Geo filters are not yet supported in this version.
         Using this predicate in a query will raise ``ClientError`` at execution time.
     """
+    warnings.warn(
+        "Geo filters are not yet supported; query execution will raise ClientError",
+        FutureWarning,
+        stacklevel=2,
+    )
     return ("geo_within_radius", bin_name, lat, lng, radius)
 
 
@@ -69,4 +80,9 @@ def geo_contains_geojson_point(bin_name: str, geojson: str) -> tuple[str, str, s
         Geo filters are not yet supported in this version.
         Using this predicate in a query will raise ``ClientError`` at execution time.
     """
+    warnings.warn(
+        "Geo filters are not yet supported; query execution will raise ClientError",
+        FutureWarning,
+        stacklevel=2,
+    )
     return ("geo_contains_geojson_point", bin_name, geojson)

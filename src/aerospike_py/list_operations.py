@@ -6,7 +6,7 @@ and ``client.operate_ordered()``.
 
 from typing import Any, Optional
 
-from aerospike_py._types import Operation
+from aerospike_py._types import ListPolicy, Operation
 
 __all__ = [
     "Operation",
@@ -77,7 +77,7 @@ _OP_LIST_SORT = 1030
 _OP_LIST_SET_ORDER = 1031
 
 
-def list_append(bin: str, val: Any, policy: Optional[Operation] = None) -> Operation:
+def list_append(bin: str, val: Any, policy: Optional[ListPolicy] = None) -> Operation:
     """Append a value to a list bin."""
     op = {"op": _OP_LIST_APPEND, "bin": bin, "val": val}
     if policy:
@@ -85,7 +85,7 @@ def list_append(bin: str, val: Any, policy: Optional[Operation] = None) -> Opera
     return op
 
 
-def list_append_items(bin: str, values: list[Any], policy: Optional[Operation] = None) -> Operation:
+def list_append_items(bin: str, values: list[Any], policy: Optional[ListPolicy] = None) -> Operation:
     """Append multiple values to a list bin."""
     op = {"op": _OP_LIST_APPEND_ITEMS, "bin": bin, "val": values}
     if policy:
@@ -93,7 +93,7 @@ def list_append_items(bin: str, values: list[Any], policy: Optional[Operation] =
     return op
 
 
-def list_insert(bin: str, index: int, val: Any, policy: Optional[Operation] = None) -> Operation:
+def list_insert(bin: str, index: int, val: Any, policy: Optional[ListPolicy] = None) -> Operation:
     """Insert a value at the given index."""
     op = {"op": _OP_LIST_INSERT, "bin": bin, "index": index, "val": val}
     if policy:
@@ -101,7 +101,7 @@ def list_insert(bin: str, index: int, val: Any, policy: Optional[Operation] = No
     return op
 
 
-def list_insert_items(bin: str, index: int, values: list[Any], policy: Optional[Operation] = None) -> Operation:
+def list_insert_items(bin: str, index: int, values: list[Any], policy: Optional[ListPolicy] = None) -> Operation:
     """Insert multiple values at the given index."""
     op = {"op": _OP_LIST_INSERT_ITEMS, "bin": bin, "index": index, "val": values}
     if policy:
@@ -313,7 +313,7 @@ def list_remove_by_rank_range(bin: str, rank: int, return_type: int, count: Opti
     return op
 
 
-def list_increment(bin: str, index: int, val: int, policy: Optional[Operation] = None) -> Operation:
+def list_increment(bin: str, index: int, val: int, policy: Optional[ListPolicy] = None) -> Operation:
     """Increment the value at the given index."""
     op = {"op": _OP_LIST_INCREMENT, "bin": bin, "index": index, "val": val}
     if policy:

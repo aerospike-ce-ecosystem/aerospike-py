@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import aerospike_py
 from tests import AEROSPIKE_CONFIG
+from tests.concurrency.utils import _drain
 
 NS = "test"
 SET_NAME = "conc_thread"
@@ -125,11 +126,3 @@ class TestThreadSafety:
             t.join()
 
         assert errors.empty(), f"Errors with per-thread clients: {list(_drain(errors))}"
-
-
-def _drain(q):
-    """Drain all items from a SimpleQueue for error reporting."""
-    items = []
-    while not q.empty():
-        items.append(q.get_nowait())
-    return items

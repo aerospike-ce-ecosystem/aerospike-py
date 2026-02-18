@@ -3,7 +3,10 @@
 Drop-in compatible replacement for the aerospike-client-python package.
 """
 
+import asyncio
 import logging
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 from aerospike_py._aerospike import Client as _NativeClient
@@ -250,6 +253,7 @@ from aerospike_py.types import (  # noqa: F401
     UserInfo,
     RoleInfo,
 )
+from aerospike_py._types import ListPolicy, MapPolicy, Operation  # noqa: F401
 
 try:
     from importlib.metadata import PackageNotFoundError
@@ -321,6 +325,37 @@ class Query:
             return callback(_wrap_record(raw))
 
         self._inner.foreach(_cb, policy)
+
+
+class AsyncQuery:
+    """Async Python wrapper around the native Query object that returns typed records.
+
+    ``select()`` and ``where()`` are synchronous setup methods.
+    ``results()`` and ``foreach()`` are async and run the blocking native
+    query in a thread pool to avoid blocking the event loop.
+    """
+
+    def __init__(self, inner: _NativeQuery):
+        self._inner = inner
+
+    def select(self, *bins: str) -> None:
+        self._inner.select(*bins)
+
+    def where(self, predicate) -> None:
+        self._inner.where(predicate)
+
+    async def results(self, policy=None) -> list[Record]:
+        raw = await asyncio.to_thread(self._inner.results, policy)
+        return [_wrap_record(r) for r in raw]
+
+    async def foreach(self, callback, policy=None) -> None:
+        def _sync_foreach():
+            def _cb(raw):
+                return callback(_wrap_record(raw))
+
+            self._inner.foreach(_cb, policy)
+
+        await asyncio.to_thread(_sync_foreach)
 
 
 # ---------------------------------------------------------------------------
@@ -463,24 +498,30 @@ class AsyncClient:
         await self.close()
         return False
 
-    async def connect(self, username: str | None = None, password: str | None = None) -> None:
+    async def connect(self, username: str | None = None, password: str | None = None) -> "AsyncClient":
         """Connect to the Aerospike cluster.
+
+        Returns ``self`` for method chaining.
 
         Args:
             username: Optional username for authentication.
             password: Optional password for authentication.
+
+        Returns:
+            The connected client instance.
 
         Raises:
             ClusterError: Failed to connect to any cluster node.
 
         Example:
             ```python
-            await client.connect()
+            client = await aerospike_py.AsyncClient(config).connect()
             await client.connect("admin", "admin")
             ```
         """
         logger.info("Async client connecting")
-        return await self._inner.connect(username, password)
+        await self._inner.connect(username, password)
+        return self
 
     async def close(self) -> None:
         """Close the connection to the cluster.
@@ -550,6 +591,28 @@ class AsyncClient:
     async def batch_remove(self, keys, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in await self._inner.batch_remove(keys, policy)]
 
+    def query(self, namespace: str, set_name: str) -> AsyncQuery:
+        """Create a query object for the given namespace and set.
+
+        Returns an ``AsyncQuery`` whose ``results()`` and ``foreach()``
+        methods are coroutines.
+
+        Args:
+            namespace: The namespace to query.
+            set_name: The set name to query.
+
+        Returns:
+            An ``AsyncQuery`` instance.
+
+        Example:
+            ```python
+            query = client.query("test", "demo")
+            query.where(predicates.between("age", 20, 30))
+            records = await query.results()
+            ```
+        """
+        return AsyncQuery(self._inner.query(namespace, set_name))
+
 
 def set_log_level(level: int) -> None:
     """Set the aerospike_py log level.
@@ -613,49 +676,54 @@ def get_metrics() -> str:
 
 _metrics_server = None
 _metrics_server_thread = None
+_metrics_lock = threading.Lock()
+
+
+class _MetricsHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/metrics":
+            body = _get_metrics_text().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
 
 
 def start_metrics_server(port: int = 9464) -> None:
     """Start a background HTTP server serving /metrics for Prometheus scraping."""
     global _metrics_server, _metrics_server_thread
-    import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    class _MetricsHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path == "/metrics":
-                body = _get_metrics_text().encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            else:
-                self.send_response(404)
-                self.end_headers()
+    with _metrics_lock:
+        new_server = HTTPServer(("", port), _MetricsHandler)
 
-        def log_message(self, format, *args):
-            pass
+        if _metrics_server is not None:
+            _metrics_server.shutdown()
 
-    new_server = HTTPServer(("", port), _MetricsHandler)
-
-    if _metrics_server is not None:
-        _metrics_server.shutdown()
-
-    _metrics_server = new_server
-    _metrics_server_thread = threading.Thread(target=_metrics_server.serve_forever, daemon=True)
-    _metrics_server_thread.start()
+        _metrics_server = new_server
+        _metrics_server_thread = threading.Thread(target=_metrics_server.serve_forever, daemon=True)
+        _metrics_server_thread.start()
 
 
 def stop_metrics_server() -> None:
     """Stop the background metrics HTTP server."""
     global _metrics_server, _metrics_server_thread
-    if _metrics_server is not None:
-        try:
-            _metrics_server.shutdown()
-        finally:
-            _metrics_server = None
-            _metrics_server_thread = None
+
+    with _metrics_lock:
+        if _metrics_server is not None:
+            try:
+                _metrics_server.shutdown()
+                if _metrics_server_thread is not None:
+                    _metrics_server_thread.join(timeout=5)
+            finally:
+                _metrics_server = None
+                _metrics_server_thread = None
 
 
 def init_tracing() -> None:
@@ -684,6 +752,7 @@ __all__ = [
     "Client",
     "AsyncClient",
     "Query",
+    "AsyncQuery",
     "BatchRecord",
     "BatchRecords",
     "NumpyBatchRecords",
@@ -714,6 +783,9 @@ __all__ = [
     "Privilege",
     "UserInfo",
     "RoleInfo",
+    "ListPolicy",
+    "MapPolicy",
+    "Operation",
     # Submodules
     "exception",
     "predicates",

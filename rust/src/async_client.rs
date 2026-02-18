@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
+use crate::traced_exists_op;
 use crate::traced_op;
 use aerospike_core::{
     BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
@@ -16,8 +17,8 @@ use crate::operations::py_ops_to_rust;
 use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_py, user_to_py};
 use crate::policy::batch_policy::parse_batch_policy;
 use crate::policy::client_policy::parse_client_policy;
-use crate::policy::read_policy::parse_read_policy;
-use crate::policy::write_policy::parse_write_policy;
+use crate::policy::read_policy::{parse_read_policy, DEFAULT_READ_POLICY};
+use crate::policy::write_policy::{parse_write_policy, DEFAULT_WRITE_POLICY};
 use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::types::bin::py_dict_to_bins;
 use crate::types::host::parse_hosts_from_config;
@@ -263,7 +264,6 @@ impl PyAsyncClient {
             "async put: ns={} set={}",
             rust_key.namespace, rust_key.set_name
         );
-        let write_policy = parse_write_policy(policy, meta)?;
 
         #[cfg(feature = "otel")]
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
@@ -271,6 +271,21 @@ impl PyAsyncClient {
         let parent_ctx = ();
         let conn_info = self.connection_info.clone();
 
+        if policy.is_none() && meta.is_none() {
+            let wp = DEFAULT_WRITE_POLICY.clone();
+            return future_into_py(py, async move {
+                traced_op!(
+                    "put",
+                    &rust_key.namespace,
+                    &rust_key.set_name,
+                    parent_ctx,
+                    conn_info,
+                    { client.put(&wp, &rust_key, &rust_bins).await }
+                )
+            });
+        }
+
+        let write_policy = parse_write_policy(policy, meta)?;
         future_into_py(py, async move {
             traced_op!(
                 "put",
@@ -297,7 +312,6 @@ impl PyAsyncClient {
             "async get: ns={} set={}",
             rust_key.namespace, rust_key.set_name
         );
-        let read_policy = parse_read_policy(policy)?;
 
         #[cfg(feature = "otel")]
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
@@ -305,6 +319,23 @@ impl PyAsyncClient {
         let parent_ctx = ();
         let conn_info = self.connection_info.clone();
 
+        if policy.is_none() {
+            let rp = DEFAULT_READ_POLICY.clone();
+            return future_into_py(py, async move {
+                let record = traced_op!(
+                    "get",
+                    &rust_key.namespace,
+                    &rust_key.set_name,
+                    parent_ctx,
+                    conn_info,
+                    { client.get(&rp, &rust_key, Bins::All).await }
+                )?;
+
+                Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
+            });
+        }
+
+        let read_policy = parse_read_policy(policy)?;
         future_into_py(py, async move {
             let record = traced_op!(
                 "get",
@@ -334,7 +365,6 @@ impl PyAsyncClient {
             "async select: ns={} set={}",
             rust_key.namespace, rust_key.set_name
         );
-        let read_policy = parse_read_policy(policy)?;
         let bin_names: Vec<String> = bins.extract()?;
 
         #[cfg(feature = "otel")]
@@ -343,6 +373,25 @@ impl PyAsyncClient {
         let parent_ctx = ();
         let conn_info = self.connection_info.clone();
 
+        if policy.is_none() {
+            let rp = DEFAULT_READ_POLICY.clone();
+            return future_into_py(py, async move {
+                let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
+                let bins_selector = Bins::from(bin_refs.as_slice());
+                let record = traced_op!(
+                    "select",
+                    &rust_key.namespace,
+                    &rust_key.set_name,
+                    parent_ctx,
+                    conn_info,
+                    { client.get(&rp, &rust_key, bins_selector).await }
+                )?;
+
+                Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
+            });
+        }
+
+        let read_policy = parse_read_policy(policy)?;
         future_into_py(py, async move {
             let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
             let bins_selector = Bins::from(bin_refs.as_slice());
@@ -373,57 +422,28 @@ impl PyAsyncClient {
             "async exists: ns={} set={}",
             rust_key.namespace, rust_key.set_name
         );
-        let read_policy = parse_read_policy(policy)?;
+
+        let read_policy = if policy.is_none() {
+            DEFAULT_READ_POLICY.clone()
+        } else {
+            parse_read_policy(policy)?
+        };
 
         #[cfg(feature = "otel")]
         let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[allow(unused)]
+        #[cfg(not(feature = "otel"))]
+        let parent_ctx = ();
         let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
-            let timer = crate::metrics::OperationTimer::start(
+            let result = traced_exists_op!(
                 "exists",
                 &rust_key.namespace,
                 &rust_key.set_name,
+                parent_ctx,
+                conn_info,
+                { client.get(&read_policy, &rust_key, Bins::None).await }
             );
-            let result = client.get(&read_policy, &rust_key, Bins::None).await;
-
-            match &result {
-                Ok(_) => timer.finish(""),
-                Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => timer.finish(""),
-                Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
-            }
-
-            // OTel span for exists
-            #[cfg(feature = "otel")]
-            {
-                use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
-                use opentelemetry::KeyValue;
-                let tracer = crate::tracing::otel_impl::get_tracer();
-                let span_name = format!("EXISTS {}.{}", rust_key.namespace, rust_key.set_name);
-                let span = tracer
-                    .span_builder(span_name)
-                    .with_kind(SpanKind::Client)
-                    .with_attributes(vec![
-                        KeyValue::new("db.system.name", "aerospike"),
-                        KeyValue::new("db.namespace", rust_key.namespace.clone()),
-                        KeyValue::new("db.collection.name", rust_key.set_name.clone()),
-                        KeyValue::new("db.operation.name", "EXISTS"),
-                        KeyValue::new("server.address", conn_info.server_address.clone()),
-                        KeyValue::new("server.port", conn_info.server_port),
-                        KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
-                    ])
-                    .start_with_context(&tracer, &parent_ctx);
-                let cx = parent_ctx.with_span(span);
-                let span_ref = opentelemetry::trace::TraceContextExt::span(&cx);
-                match &result {
-                    Ok(_) | Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => {}
-                    Err(e) => {
-                        crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
-                    }
-                }
-                span_ref.end();
-            }
 
             Python::attach(|py| {
                 let key_py = key_to_py(py, &rust_key)?;
@@ -1106,6 +1126,20 @@ impl PyAsyncClient {
             )?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
+    }
+
+    // ── Query ─────────────────────────────────────────────────
+
+    /// Create a Query object for the given namespace and set (shared with sync client).
+    fn query(&self, namespace: &str, set_name: &str) -> PyResult<crate::query::PyQuery> {
+        debug!("Creating async query: ns={} set={}", namespace, set_name);
+        let client = self.get_client()?.clone();
+        Ok(crate::query::PyQuery::new(
+            client,
+            namespace.to_string(),
+            set_name.to_string(),
+            self.connection_info.clone(),
+        ))
     }
 
     // ── Index ─────────────────────────────────────────────────

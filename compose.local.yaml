@@ -11,6 +11,7 @@ services:
     shm_size: 1g
     environment:
       NAMESPACE: test
+      CLUSTER_NAME: docker
       DEFAULT_TTL: "2592000"
       ACCESS_PORT: "18710"
     volumes:

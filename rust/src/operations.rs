@@ -11,78 +11,8 @@ use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
+use crate::constants::*;
 use crate::types::value::py_to_value;
-
-// ── Basic operation type constants ──────────────────────────────
-const OP_READ: i32 = 1;
-const OP_WRITE: i32 = 2;
-const OP_INCR: i32 = 5;
-const OP_APPEND: i32 = 9;
-const OP_PREPEND: i32 = 10;
-const OP_TOUCH: i32 = 11;
-const OP_DELETE: i32 = 12;
-
-// ── List CDT operation codes ────────────────────────────────────
-const OP_LIST_APPEND: i32 = 1001;
-const OP_LIST_APPEND_ITEMS: i32 = 1002;
-const OP_LIST_INSERT: i32 = 1003;
-const OP_LIST_INSERT_ITEMS: i32 = 1004;
-const OP_LIST_POP: i32 = 1005;
-const OP_LIST_POP_RANGE: i32 = 1006;
-const OP_LIST_REMOVE: i32 = 1007;
-const OP_LIST_REMOVE_RANGE: i32 = 1008;
-const OP_LIST_SET: i32 = 1009;
-const OP_LIST_TRIM: i32 = 1010;
-const OP_LIST_CLEAR: i32 = 1011;
-const OP_LIST_SIZE: i32 = 1012;
-const OP_LIST_GET: i32 = 1013;
-const OP_LIST_GET_RANGE: i32 = 1014;
-const OP_LIST_GET_BY_VALUE: i32 = 1015;
-const OP_LIST_GET_BY_INDEX: i32 = 1016;
-const OP_LIST_GET_BY_INDEX_RANGE: i32 = 1017;
-const OP_LIST_GET_BY_RANK: i32 = 1018;
-const OP_LIST_GET_BY_RANK_RANGE: i32 = 1019;
-const OP_LIST_GET_BY_VALUE_LIST: i32 = 1020;
-const OP_LIST_GET_BY_VALUE_RANGE: i32 = 1021;
-const OP_LIST_REMOVE_BY_VALUE: i32 = 1022;
-const OP_LIST_REMOVE_BY_VALUE_LIST: i32 = 1023;
-const OP_LIST_REMOVE_BY_VALUE_RANGE: i32 = 1024;
-const OP_LIST_REMOVE_BY_INDEX: i32 = 1025;
-const OP_LIST_REMOVE_BY_INDEX_RANGE: i32 = 1026;
-const OP_LIST_REMOVE_BY_RANK: i32 = 1027;
-const OP_LIST_REMOVE_BY_RANK_RANGE: i32 = 1028;
-const OP_LIST_INCREMENT: i32 = 1029;
-const OP_LIST_SORT: i32 = 1030;
-const OP_LIST_SET_ORDER: i32 = 1031;
-
-// ── Map CDT operation codes ─────────────────────────────────────
-const OP_MAP_SET_ORDER: i32 = 2001;
-const OP_MAP_PUT: i32 = 2002;
-const OP_MAP_PUT_ITEMS: i32 = 2003;
-const OP_MAP_INCREMENT: i32 = 2004;
-const OP_MAP_DECREMENT: i32 = 2005;
-const OP_MAP_CLEAR: i32 = 2006;
-const OP_MAP_REMOVE_BY_KEY: i32 = 2007;
-const OP_MAP_REMOVE_BY_KEY_LIST: i32 = 2008;
-const OP_MAP_REMOVE_BY_KEY_RANGE: i32 = 2009;
-const OP_MAP_REMOVE_BY_VALUE: i32 = 2010;
-const OP_MAP_REMOVE_BY_VALUE_LIST: i32 = 2011;
-const OP_MAP_REMOVE_BY_VALUE_RANGE: i32 = 2012;
-const OP_MAP_REMOVE_BY_INDEX: i32 = 2013;
-const OP_MAP_REMOVE_BY_INDEX_RANGE: i32 = 2014;
-const OP_MAP_REMOVE_BY_RANK: i32 = 2015;
-const OP_MAP_REMOVE_BY_RANK_RANGE: i32 = 2016;
-const OP_MAP_SIZE: i32 = 2017;
-const OP_MAP_GET_BY_KEY: i32 = 2018;
-const OP_MAP_GET_BY_KEY_RANGE: i32 = 2019;
-const OP_MAP_GET_BY_VALUE: i32 = 2020;
-const OP_MAP_GET_BY_VALUE_RANGE: i32 = 2021;
-const OP_MAP_GET_BY_INDEX: i32 = 2022;
-const OP_MAP_GET_BY_INDEX_RANGE: i32 = 2023;
-const OP_MAP_GET_BY_RANK: i32 = 2024;
-const OP_MAP_GET_BY_RANK_RANGE: i32 = 2025;
-const OP_MAP_GET_BY_KEY_LIST: i32 = 2026;
-const OP_MAP_GET_BY_VALUE_LIST: i32 = 2027;
 
 // ── Helper functions ────────────────────────────────────────────
 

@@ -190,6 +190,249 @@ class TestAsyncUDF:
                 pass
 
 
+class TestAsyncTTLScenarios:
+    """Async TTL (time-to-live) scenarios."""
+
+    async def test_ttl_set_and_verify(self, async_client, async_cleanup):
+        """Set TTL and verify it's within expected range."""
+        key = ("test", "async_scen", "ttl_1")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1}, meta={"ttl": 600})
+        _, meta, _ = await async_client.get(key)
+        assert 0 < meta.ttl <= 600
+
+    async def test_ttl_touch_extends(self, async_client, async_cleanup):
+        """Touch should extend TTL."""
+        key = ("test", "async_scen", "ttl_touch")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1}, meta={"ttl": 100})
+        _, meta1, _ = await async_client.get(key)
+        original_ttl = meta1.ttl
+
+        await async_client.touch(key, 1000)
+        _, meta2, _ = await async_client.get(key)
+        assert meta2.ttl > original_ttl
+
+    async def test_ttl_never_expire(self, async_client, async_cleanup):
+        """Set TTL to never expire."""
+        key = ("test", "async_scen", "ttl_never")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1}, meta={"ttl": aerospike_py.TTL_NEVER_EXPIRE})
+        _, meta, _ = await async_client.get(key)
+        assert meta.ttl > 0
+
+
+class TestAsyncGenerationPolicy:
+    """Async generation (optimistic locking) scenarios."""
+
+    async def test_generation_increments(self, async_client, async_cleanup):
+        """Each write should increment generation."""
+        key = ("test", "async_scen", "gen_inc")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1})
+        _, meta1, _ = await async_client.get(key)
+        assert meta1.gen == 1
+
+        await async_client.put(key, {"val": 2})
+        _, meta2, _ = await async_client.get(key)
+        assert meta2.gen == 2
+
+        await async_client.put(key, {"val": 3})
+        _, meta3, _ = await async_client.get(key)
+        assert meta3.gen == 3
+
+    async def test_generation_eq_policy_success(self, async_client, async_cleanup):
+        """Write with gen=current should succeed."""
+        key = ("test", "async_scen", "gen_eq_ok")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1})
+        _, meta, _ = await async_client.get(key)
+
+        await async_client.put(
+            key,
+            {"val": 2},
+            meta={"gen": meta.gen},
+            policy={"gen": aerospike_py.POLICY_GEN_EQ},
+        )
+        _, meta2, bins = await async_client.get(key)
+        assert bins["val"] == 2
+
+    async def test_generation_eq_policy_failure(self, async_client, async_cleanup):
+        """Write with stale generation should fail."""
+        key = ("test", "async_scen", "gen_eq_fail")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1})
+
+        with pytest.raises(aerospike_py.RecordGenerationError):
+            await async_client.put(
+                key,
+                {"val": 2},
+                meta={"gen": 999},
+                policy={"gen": aerospike_py.POLICY_GEN_EQ},
+            )
+
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == 1
+
+
+class TestAsyncExistsPolicy:
+    """Async record-exists policy scenarios."""
+
+    async def test_create_only_success(self, async_client, async_cleanup):
+        """CREATE_ONLY should succeed when record doesn't exist."""
+        key = ("test", "async_scen", "create_only_ok")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1}, policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == 1
+
+    async def test_create_only_failure(self, async_client, async_cleanup):
+        """CREATE_ONLY should fail when record already exists."""
+        key = ("test", "async_scen", "create_only_fail")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1})
+
+        with pytest.raises(aerospike_py.RecordExistsError):
+            await async_client.put(
+                key,
+                {"val": 2},
+                policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+            )
+
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == 1
+
+    async def test_update_only_success(self, async_client, async_cleanup):
+        """UPDATE_ONLY should succeed when record exists."""
+        key = ("test", "async_scen", "update_only_ok")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1})
+        await async_client.put(key, {"val": 2}, policy={"exists": aerospike_py.POLICY_EXISTS_UPDATE})
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == 2
+
+    async def test_update_only_failure(self, async_client):
+        """UPDATE_ONLY should fail when record doesn't exist."""
+        key = ("test", "async_scen", "update_only_fail")
+
+        with pytest.raises(aerospike_py.AerospikeError):
+            await async_client.put(key, {"val": 1}, policy={"exists": aerospike_py.POLICY_EXISTS_UPDATE})
+
+
+class TestAsyncSelectVariations:
+    """Async select operation scenarios."""
+
+    async def test_select_nonexistent_bin(self, async_client, async_cleanup):
+        """Selecting a bin that doesn't exist should return without it."""
+        key = ("test", "async_scen", "select_missing")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"a": 1, "b": 2})
+        _, _, bins = await async_client.select(key, ["a", "nonexistent"])
+        assert bins["a"] == 1
+        assert "nonexistent" not in bins
+
+    async def test_select_all_bins(self, async_client, async_cleanup):
+        """Selecting all existing bins returns all."""
+        key = ("test", "async_scen", "select_all")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"x": 10, "y": 20, "z": 30})
+        _, _, bins = await async_client.select(key, ["x", "y", "z"])
+        assert bins == {"x": 10, "y": 20, "z": 30}
+
+    async def test_select_single_bin(self, async_client, async_cleanup):
+        """Selecting a single bin from many."""
+        key = ("test", "async_scen", "select_single")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5})
+        _, _, bins = await async_client.select(key, ["c"])
+        assert bins == {"c": 3}
+
+
+class TestAsyncOperateOrdered:
+    """Async operate_ordered scenarios."""
+
+    async def test_ordered_multiple_reads(self, async_client, async_cleanup):
+        key = ("test", "async_scen", "ordered_reads")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"a": 1, "b": 2, "c": 3})
+        ops = [
+            {"op": aerospike_py.OPERATOR_READ, "bin": "c", "val": None},
+            {"op": aerospike_py.OPERATOR_READ, "bin": "a", "val": None},
+            {"op": aerospike_py.OPERATOR_READ, "bin": "b", "val": None},
+        ]
+        _, meta, ordered = await async_client.operate_ordered(key, ops)
+        assert isinstance(ordered, list)
+        assert meta.gen >= 1
+        for item in ordered:
+            assert isinstance(item, tuple)
+            assert len(item) == 2
+
+    async def test_ordered_write_then_read(self, async_client, async_cleanup):
+        key = ("test", "async_scen", "ordered_wr")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"counter": 0})
+        ops = [
+            {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 10},
+            {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+        ]
+        _, _, ordered = await async_client.operate_ordered(key, ops)
+        found = False
+        for name, val in ordered:
+            if name == "counter":
+                assert val == 10
+                found = True
+        assert found
+
+
+class TestAsyncDataTypeEdgeCases:
+    """Async edge cases for various data types."""
+
+    async def test_empty_string(self, async_client, async_cleanup):
+        key = ("test", "async_scen", "empty_str")
+        async_cleanup.append(key)
+        await async_client.put(key, {"val": ""})
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == ""
+
+    async def test_large_string(self, async_client, async_cleanup):
+        key = ("test", "async_scen", "large_str")
+        async_cleanup.append(key)
+        large = "x" * 100_000
+        await async_client.put(key, {"val": large})
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == large
+        assert len(bins["val"]) == 100_000
+
+    async def test_unicode_string(self, async_client, async_cleanup):
+        key = ("test", "async_scen", "unicode_str")
+        async_cleanup.append(key)
+        await async_client.put(key, {"val": "한글 테스트 🎉 日本語 العربية"})
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == "한글 테스트 🎉 日本語 العربية"
+
+    async def test_bytes_key(self, async_client, async_cleanup):
+        """Test bytes primary key."""
+        key = ("test", "async_scen", b"\x01\x02\x03\x04")
+        async_cleanup.append(key)
+        await async_client.put(key, {"val": "bytes_key"})
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == "bytes_key"
+
+
 class TestAsyncConcurrentOps:
     """Test concurrent async operations."""
 

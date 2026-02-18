@@ -16,6 +16,7 @@ pip install aerospike-py
 ```
 aerospike-py/
 ├── rust/src/               # Rust 네이티브 모듈 (PyO3 바인딩)
+│   ├── lib.rs              # 모듈 엔트리포인트
 │   ├── client.rs           # Sync Client 구현
 │   ├── async_client.rs     # Async Client 구현
 │   ├── errors.rs           # 에러 매핑 (Aerospike → Python 예외)
@@ -23,19 +24,32 @@ aerospike-py/
 │   ├── query.rs            # Query 객체
 │   ├── constants.rs        # 상수 정의
 │   ├── expressions.rs      # Expression 필터 파싱
+│   ├── batch_types.rs      # 배치 연산 타입 정의
+│   ├── numpy_support.rs    # NumPy 배열 변환 지원
+│   ├── record_helpers.rs   # 레코드 변환 헬퍼
+│   ├── runtime.rs          # Tokio 런타임 관리
+│   ├── logging.rs          # 로깅 설정
 │   ├── metrics.rs          # Prometheus 메트릭 수집
 │   ├── tracing.rs          # OpenTelemetry 트레이싱
 │   ├── policy/             # 정책 파싱 (read, write, admin, batch, query, client)
 │   └── types/              # 타입 변환 (key, value, record, bin, host)
 ├── src/aerospike_py/       # Python 패키지
 │   ├── __init__.py         # Client/AsyncClient 래퍼, 팩토리 함수, 상수 re-export
-│   ├── __init__.pyi        # Type stubs
+│   ├── __init__.pyi        # Type stubs (메인)
+│   ├── _types.py           # 내부 타입 정의
+│   ├── types.py            # 공개 타입 정의
 │   ├── exception.py        # 예외 클래스 re-export
+│   ├── exception.pyi       # 예외 타입 stubs
 │   ├── predicates.py       # 쿼리 프레디케이트 헬퍼
+│   ├── predicates.pyi      # 프레디케이트 타입 stubs
 │   ├── list_operations.py  # List CDT 연산 헬퍼
+│   ├── list_operations.pyi # List 연산 타입 stubs
 │   ├── map_operations.py   # Map CDT 연산 헬퍼
+│   ├── map_operations.pyi  # Map 연산 타입 stubs
 │   ├── exp.py              # Expression 필터 빌더
-│   └── numpy_batch.py      # NumPy 기반 배치 결과
+│   ├── exp.pyi             # Expression 타입 stubs
+│   ├── numpy_batch.py      # NumPy 기반 배치 결과
+│   └── py.typed            # PEP 561 타입 마커
 ├── tests/
 │   ├── unit/               # 유닛 테스트 (서버 불필요)
 │   ├── integration/        # 통합 테스트 (Aerospike 서버 필요)
@@ -51,7 +65,7 @@ aerospike-py/
 
 ```bash
 # 의존성 설치
-make install                        # uv sync --all-groups
+make install                        # uv sync --group dev --group bench
 
 # Rust 빌드
 make build                          # uv run maturin develop --release

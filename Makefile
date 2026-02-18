@@ -4,8 +4,6 @@ AEROSPIKE_HOST ?= 127.0.0.1
 AEROSPIKE_PORT ?= 18710
 
 RUNTIME ?= podman
-AEROSPIKE_CPUS ?= 2
-AEROSPIKE_MEMORY ?= 2g
 BENCH_COUNT ?= 5000
 BENCH_ROUNDS ?= 20
 BENCH_CONCURRENCY ?= 50
@@ -112,7 +110,7 @@ run-numpy-benchmark-report: build run-aerospike-ce ## Run numpy batch benchmark 
 lint: ## Run all linters (ruff + clippy)
 	uv run ruff check src/ tests/ benchmark/
 	uv run ruff format --check src/ tests/ benchmark/
-	cargo clippy --manifest-path rust/Cargo.toml -- -D warnings
+	cargo clippy --manifest-path rust/Cargo.toml --features otel -- -D warnings
 
 .PHONY: fmt
 fmt: ## Auto-format Python (ruff) and Rust (cargo fmt)

@@ -29,6 +29,11 @@ from aerospike_py.types import (
     WriteMeta as WriteMeta,
     WritePolicy as WritePolicy,
 )
+from aerospike_py._types import (
+    ListPolicy as ListPolicy,
+    MapPolicy as MapPolicy,
+    Operation as Operation,
+)
 
 __version__: str
 
@@ -42,7 +47,7 @@ class BatchRecord:
 
     key: Key
     result: int
-    record: Optional[Record]
+    record: Optional[tuple[Any, ...]]
 
 class BatchRecords:
     """Container for batch read results."""
@@ -965,19 +970,24 @@ class AsyncClient:
         self,
         username: Optional[str] = None,
         password: Optional[str] = None,
-    ) -> None:
+    ) -> "AsyncClient":
         """Connect to the Aerospike cluster.
+
+        Returns ``self`` for method chaining.
 
         Args:
             username: Optional username for authentication.
             password: Optional password for authentication.
+
+        Returns:
+            The connected client instance.
 
         Raises:
             ClusterError: Failed to connect to any cluster node.
 
         Example:
             ```python
-            await client.connect()
+            client = await aerospike_py.AsyncClient(config).connect()
             await client.connect("admin", "admin")
             ```
         """
@@ -1486,6 +1496,30 @@ class AsyncClient:
         """
         ...
 
+    # -- Query --
+
+    def query(self, namespace: str, set_name: str) -> "AsyncQuery":
+        """Create a query object for the given namespace and set.
+
+        Returns an ``AsyncQuery`` whose ``results()`` and ``foreach()``
+        methods are coroutines.
+
+        Args:
+            namespace: The namespace to query.
+            set_name: The set name to query.
+
+        Returns:
+            An ``AsyncQuery`` instance.
+
+        Example:
+            ```python
+            query = client.query("test", "demo")
+            query.where(predicates.between("age", 20, 30))
+            records = await query.results()
+            ```
+        """
+        ...
+
     # -- Index --
 
     async def index_integer_create(
@@ -1838,6 +1872,83 @@ class Query:
                 print(record.bins)
 
             query.foreach(process)
+            ```
+        """
+        ...
+
+class AsyncQuery:
+    """Async secondary index query object.
+
+    Created via ``AsyncClient.query(namespace, set_name)``. Use ``where()``
+    to set a predicate filter, ``select()`` to choose bins, then
+    ``await results()`` or ``await foreach()`` to execute.
+
+    Example:
+        ```python
+        from aerospike_py import predicates
+
+        query = client.query("test", "demo")
+        query.select("name", "age")
+        query.where(predicates.between("age", 20, 30))
+        records = await query.results()
+        ```
+    """
+
+    def select(self, *bins: str) -> None:
+        """Select specific bins to return in query results.
+
+        Args:
+            *bins: Bin names to include in the results.
+        """
+        ...
+
+    def where(self, predicate: tuple[str, ...]) -> None:
+        """Set a predicate filter for the query.
+
+        Args:
+            predicate: A predicate tuple created by ``aerospike_py.predicates``
+                helper functions.
+        """
+        ...
+
+    async def results(self, policy: Optional[dict[str, Any]] = None) -> list[Record]:
+        """Execute the query and return all matching records.
+
+        Args:
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
+
+        Returns:
+            A list of ``Record`` NamedTuples.
+
+        Example:
+            ```python
+            records = await query.results()
+            for record in records:
+                print(record.bins)
+            ```
+        """
+        ...
+
+    async def foreach(
+        self,
+        callback: Callable[[Record], Optional[bool]],
+        policy: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Execute the query and invoke a callback for each record.
+
+        The callback receives a ``Record`` NamedTuple. Return ``False``
+        from the callback to stop iteration early.
+
+        Args:
+            callback: Function called with each record. Return ``False`` to stop.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
+
+        Example:
+            ```python
+            def process(record):
+                print(record.bins)
+
+            await query.foreach(process)
             ```
         """
         ...

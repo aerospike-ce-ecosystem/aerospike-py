@@ -1,0 +1,61 @@
+name: Extract version and update Cargo.toml
+description: Extract version from git tag/ref and update rust/Cargo.toml
+
+inputs:
+  event_name:
+    description: 'GitHub event name (github.event_name)'
+    required: true
+  tag_name:
+    description: 'Release tag name (github.event.release.tag_name)'
+    required: false
+    default: ''
+  ref_name:
+    description: 'Git ref name (github.ref_name)'
+    required: false
+    default: ''
+  ref:
+    description: 'Git ref (github.ref)'
+    required: false
+    default: ''
+  run_number:
+    description: 'GitHub run number (github.run_number)'
+    required: false
+    default: '0'
+
+outputs:
+  version:
+    description: 'Extracted version string'
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Extract version from git tag
+      id: version
+      shell: bash
+      run: |
+        if [[ "${{ inputs.event_name }}" == "release" ]]; then
+          VERSION="${{ inputs.tag_name }}"
+          VERSION="${VERSION#v}"
+        elif [[ "${{ inputs.ref }}" == refs/tags/* ]]; then
+          VERSION="${{ inputs.ref_name }}"
+          VERSION="${VERSION#v}"
+        else
+          VERSION="0.0.0-dev${{ inputs.run_number }}"
+        fi
+        # Convert PEP 440 pre-release suffixes to Cargo semver format
+        # e.g. "0.0.1alpha4" / "0.0.1.alpha4" / "0.0.1a4" -> "0.0.1-alpha.4"
+        VERSION=$(echo "$VERSION" | sed -E 's/\.?(alpha|beta|rc|dev|a|b)\.?([0-9]+)/-\1.\2/g')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Using version: $VERSION"
+
+    - name: Update Cargo.toml version
+      shell: bash
+      run: |
+        python3 -c "
+        import re, pathlib
+        p = pathlib.Path('rust/Cargo.toml')
+        text = p.read_text()
+        text = re.sub(r'^version = \".*\"', 'version = \"${{ steps.version.outputs.version }}\"', text, count=1, flags=re.MULTILINE)
+        p.write_text(text)
+        " && head -10 rust/Cargo.toml

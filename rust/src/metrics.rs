@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
@@ -11,11 +12,11 @@ const HISTOGRAM_BUCKETS: &[f64] = &[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct OperationLabels {
-    db_system_name: String,
-    db_namespace: String,
-    db_collection_name: String,
-    db_operation_name: String,
-    error_type: String,
+    db_system_name: Cow<'static, str>,
+    db_namespace: Cow<'static, str>,
+    db_collection_name: Cow<'static, str>,
+    db_operation_name: Cow<'static, str>,
+    error_type: Cow<'static, str>,
 }
 
 struct MetricsState {
@@ -59,11 +60,15 @@ impl OperationTimer {
     pub fn finish(self, error_type: &str) {
         let duration = self.start.elapsed().as_secs_f64();
         let labels = OperationLabels {
-            db_system_name: "aerospike".to_string(),
-            db_namespace: self.namespace,
-            db_collection_name: self.set_name,
-            db_operation_name: self.op_name,
-            error_type: error_type.to_string(),
+            db_system_name: Cow::Borrowed("aerospike"),
+            db_namespace: Cow::Owned(self.namespace),
+            db_collection_name: Cow::Owned(self.set_name),
+            db_operation_name: Cow::Owned(self.op_name),
+            error_type: if error_type.is_empty() {
+                Cow::Borrowed("")
+            } else {
+                Cow::Owned(error_type.to_string())
+            },
         };
         METRICS.op_duration.get_or_create(&labels).observe(duration);
     }
@@ -93,8 +98,10 @@ pub fn error_type_from_aerospike_error(err: &AsError) -> String {
 
 pub fn get_text() -> String {
     let mut buf = String::new();
-    let registry = METRICS.registry.lock().unwrap();
-    prometheus_client::encoding::text::encode(&mut buf, &registry).unwrap();
+    let registry = METRICS.registry.lock().unwrap_or_else(|e| e.into_inner());
+    if let Err(e) = prometheus_client::encoding::text::encode(&mut buf, &registry) {
+        log::warn!("Failed to encode Prometheus metrics: {e}");
+    }
     buf
 }
 
