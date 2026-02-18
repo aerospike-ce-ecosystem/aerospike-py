@@ -39,7 +39,6 @@ sample-fastapi/
 │   ├── test_cluster.py
 │   ├── test_admin_users.py  # CE에서는 skip
 │   └── test_admin_roles.py  # CE에서는 skip
-├── docker-compose.yaml      # 로컬 Aerospike 서버 (CE 8.x)
 └── pyproject.toml
 ```
 
@@ -48,7 +47,8 @@ sample-fastapi/
 ### 1. Aerospike 서버 시작
 
 ```bash
-podman compose up -d
+# 프로젝트 루트에서
+podman compose -f compose.sample-fastapi.yaml up -d
 ```
 
 ### 2. 의존성 설치 및 서버 실행

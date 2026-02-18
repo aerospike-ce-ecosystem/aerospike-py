@@ -11,7 +11,7 @@ services:
       NAMESPACE: test
       DEFAULT_TTL: "2592000"
     volumes:
-      - ../../scripts/aerospike.template.conf:/etc/aerospike/aerospike.template.conf
+      - ./scripts/aerospike.template.conf:/etc/aerospike/aerospike.template.conf
 
   jaeger:
     image: jaegertracing/jaeger:latest
