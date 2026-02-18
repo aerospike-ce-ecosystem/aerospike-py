@@ -205,10 +205,11 @@ await client.put(key, {"val": bins["val"] + 1},
 
 ## Next Steps
 
-- [CRUD & Batch Guide](guides/crud.md) - CRUD and batch operations
-- [Query & Scan Guide](guides/query-scan.md) - Secondary index queries and scans
-- [Expression Filters Guide](guides/expression-filters.md) - Server-side filtering
-- [List CDT Operations Guide](guides/cdt-list.md) - Atomic list operations
-- [Map CDT Operations Guide](guides/cdt-map.md) - Atomic map operations
+- [CRUD & Batch Guide](guides/crud/crud.md) - CRUD and batch operations
+- [Query & Scan Guide](guides/query-scan/query-scan.md) - Secondary index queries and scans
+- [Expression Filters Guide](guides/query-scan/expression-filters.md) - Server-side filtering
+- [List CDT Operations Guide](guides/crud/cdt-list.md) - Atomic list operations
+- [Map CDT Operations Guide](guides/crud/cdt-map.md) - Atomic map operations
+- [Client Config Guide](guides/config/client-config.md) - Connection and configuration
 - [API Reference](api/client.md) - Full API documentation
 - [Types Reference](api/types.md) - NamedTuple and TypedDict type definitions

@@ -2,7 +2,8 @@
 title: CRUD & Batch Operations Guide
 sidebar_label: CRUD & Batch
 sidebar_position: 1
-description: Step-by-step guide covering put, get, remove, batch operations, and optimistic locking.
+slug: /guides/crud
+description: put, get, remove, batch 작업 및 낙관적 잠금 가이드
 ---
 
 import Tabs from '@theme/Tabs';
@@ -10,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 ## Keys
 
-Every record is identified by a key tuple: `(namespace, set, primary_key)`.
+모든 record는 key 튜플로 식별됩니다: `(namespace, set, primary_key)`.
 
 ```python
 key = ("test", "demo", "user1")      # string PK
@@ -30,10 +31,10 @@ client = aerospike.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 
 key = ("test", "demo", "user1")
 
-# Simple write
+# 단순 쓰기
 client.put(key, {"name": "Alice", "age": 30})
 
-# Supported bin value types
+# 지원되는 bin 값 타입
 client.put(key, {
     "str_bin": "hello",
     "int_bin": 42,
@@ -60,10 +61,10 @@ async def main():
 
     key = ("test", "demo", "user1")
 
-    # Simple write
+    # 단순 쓰기
     await client.put(key, {"name": "Alice", "age": 30})
 
-    # Supported bin value types
+    # 지원되는 bin 값 타입
     await client.put(key, {
         "str_bin": "hello",
         "int_bin": 42,
@@ -87,10 +88,10 @@ asyncio.run(main())
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-# TTL in seconds
+# TTL (초 단위)
 client.put(key, {"val": 1}, meta={"ttl": 300})
 
-# Never expire
+# 만료하지 않음
 client.put(key, {"val": 1}, meta={"ttl": aerospike.TTL_NEVER_EXPIRE})
 ```
 
@@ -113,14 +114,14 @@ await client.put(key, {"val": 1}, meta={"ttl": aerospike.TTL_NEVER_EXPIRE})
 ```python
 from aerospike_py import WritePolicy
 
-# Create only (fails if record exists)
+# 생성 전용 (record가 이미 존재하면 실패)
 policy: WritePolicy = {"exists": aerospike.POLICY_EXISTS_CREATE_ONLY}
 client.put(key, bins, policy=policy)
 
-# Replace only (fails if record doesn't exist)
+# 교체 전용 (record가 존재하지 않으면 실패)
 client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_REPLACE_ONLY})
 
-# Send key to server (stored with record)
+# key를 서버로 전송 (record와 함께 저장)
 client.put(key, bins, policy={"key": aerospike.POLICY_KEY_SEND})
 ```
 
@@ -149,7 +150,7 @@ record: Record = client.get(("test", "demo", "user1"))
 # record.meta → RecordMetadata | None (meta.gen, meta.ttl)
 # record.bins → dict[str, Any] | None
 
-# Tuple unpacking also works (backward compat)
+# 튜플 언패킹도 가능 (하위 호환)
 key, meta, bins = client.get(("test", "demo", "user1"))
 # meta.gen == 1, meta.ttl == 2591998
 # bins = {"name": "Alice", "age": 30}
@@ -162,7 +163,7 @@ key, meta, bins = client.get(("test", "demo", "user1"))
 from aerospike_py import Record
 
 record: Record = await client.get(("test", "demo", "user1"))
-# or tuple unpacking
+# 또는 튜플 언패킹
 key, meta, bins = await client.get(("test", "demo", "user1"))
 ```
 
@@ -203,7 +204,7 @@ if result.meta is not None:
 else:
     print("Record not found")
 
-# Tuple unpacking also works
+# 튜플 언패킹도 가능
 _, meta = client.exists(key)
 ```
 
@@ -229,16 +230,16 @@ else:
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-# Increment integer bin
+# 정수 bin 증가
 client.increment(key, "age", 1)
 
-# Increment float bin
+# 실수 bin 증가
 client.increment(key, "score", 0.5)
 
-# Append to string
+# 문자열에 추가
 client.append(key, "name", " Smith")
 
-# Prepend to string
+# 문자열 앞에 추가
 client.prepend(key, "greeting", "Hello, ")
 ```
 
@@ -261,10 +262,10 @@ await client.prepend(key, "greeting", "Hello, ")
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-# Simple delete
+# 단순 삭제
 client.remove(key)
 
-# Delete with generation check
+# generation 확인 후 삭제
 client.remove(key, meta={"gen": 5}, policy={"gen": aerospike.POLICY_GEN_EQ})
 ```
 
@@ -304,7 +305,7 @@ await client.remove_bin(key, ["temp_bin", "debug_bin"])
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
-client.touch(key, val=600)  # reset TTL to 600 seconds
+client.touch(key, val=600)  # TTL을 600초로 재설정
 ```
 
   </TabItem>
@@ -319,7 +320,7 @@ await client.touch(key, val=600)
 
 ## Multi-Operation (Operate)
 
-Execute multiple operations atomically on a single record:
+단일 record에서 여러 작업을 원자적으로 실행합니다:
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -366,11 +367,11 @@ _, meta, results = await client.operate_ordered(key, ops)
 
 ## Batch Read
 
-Read multiple records in a single network call. Returns a `BatchRecords` object.
+단일 네트워크 호출로 여러 record를 읽습니다. `BatchRecords` 객체를 반환합니다.
 
-- `bins=None` - Read all bins
-- `bins=["a", "b"]` - Read specific bins
-- `bins=[]` - Existence check only
+- `bins=None` - 모든 bin 읽기
+- `bins=["a", "b"]` - 특정 bin만 읽기
+- `bins=[]` - 존재 여부만 확인
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -378,17 +379,17 @@ Read multiple records in a single network call. Returns a `BatchRecords` object.
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# Read all bins
+# 모든 bin 읽기
 batch = client.batch_read(keys)
 for br in batch.batch_records:
     if br.record:
         key, meta, bins = br.record
         print(f"{key} → {bins}")
 
-# Read specific bins
+# 특정 bin만 읽기
 batch = client.batch_read(keys, bins=["name", "age"])
 
-# Existence check
+# 존재 여부만 확인
 batch = client.batch_read(keys, bins=[])
 for br in batch.batch_records:
     print(f"{br.key}: exists={br.record is not None}")
@@ -400,17 +401,17 @@ for br in batch.batch_records:
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# Read all bins
+# 모든 bin 읽기
 batch = await client.batch_read(keys)
 for br in batch.batch_records:
     if br.record:
         key, meta, bins = br.record
         print(f"{key} → {bins}")
 
-# Read specific bins
+# 특정 bin만 읽기
 batch = await client.batch_read(keys, bins=["name", "age"])
 
-# Existence check
+# 존재 여부만 확인
 batch = await client.batch_read(keys, bins=[])
 for br in batch.batch_records:
     print(f"{br.key}: exists={br.record is not None}")
@@ -421,7 +422,7 @@ for br in batch.batch_records:
 
 ## Batch Operate
 
-Execute operations on multiple records:
+여러 record에 대해 작업을 실행합니다:
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -485,7 +486,7 @@ await client.batch_remove(keys)
 
 ## Optimistic Locking
 
-Use generation-based conflict resolution:
+generation 기반 충돌 해결을 사용합니다:
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -493,11 +494,11 @@ Use generation-based conflict resolution:
 ```python
 from aerospike_py.exception import RecordGenerationError
 
-# Read current state
+# 현재 상태 읽기
 _, meta, bins = client.get(key)
 
 try:
-    # Update only if generation matches
+    # generation이 일치하는 경우에만 업데이트
     client.put(
         key,
         {"val": bins["val"] + 1},
@@ -549,6 +550,6 @@ except AerospikeError as e:
 
 ## Best Practices
 
-- **Batch size**: Keep batch sizes reasonable (100-5000 keys). Very large batches may timeout.
-- **Timeouts**: Set appropriate timeouts for large batch operations via policy.
-- **Error handling**: Individual records in a batch can fail independently. Check each result for `None` bins.
+- **배치 크기**: 배치 크기를 적절하게 유지하세요 (100-5000 keys). 매우 큰 배치는 타임아웃이 발생할 수 있습니다.
+- **타임아웃**: 대규모 배치 작업에 대해 policy를 통해 적절한 타임아웃을 설정하세요.
+- **오류 처리**: 배치 내의 개별 record는 독립적으로 실패할 수 있습니다. 각 결과의 bin이 `None`인지 확인하세요.

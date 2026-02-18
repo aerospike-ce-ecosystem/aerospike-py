@@ -20,16 +20,17 @@
 ## Guides
 
 - [Admin Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/admin): User and role management operations for security-enabled Aerospike clusters.
+- [Error Handling](https://kimsoungryoul.github.io/aerospike-py/docs/guides/error-handling): Best practices for handling Aerospike errors in production applications.
+- [UDF Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/udf): Register, execute, and remove User Defined Functions (Lua scripts) on the Aerospike server.
+- [Client Configuration](https://kimsoungryoul.github.io/aerospike-py/docs/guides/client-config): Complete guide for configuring aerospike-py client connections, timeouts, and connection pools.
+- [Migration from Official Client](https://kimsoungryoul.github.io/aerospike-py/docs/guides/migration): Migrate from the official aerospike-client-python (C-based) to aerospike-py (Rust-based).
+- [Performance Tuning](https://kimsoungryoul.github.io/aerospike-py/docs/guides/performance-tuning): Tips for optimizing aerospike-py throughput and latency.
 - [List CDT Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/cdt-list): 31 atomic list operations for append, insert, remove, sort, and advanced queries on list bins.
 - [Map CDT Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/cdt-map): 27 atomic map operations for put, get, remove, and advanced queries on map bins.
 - [CRUD & Batch Operations Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/crud): Step-by-step guide covering put, get, remove, batch operations, and optimistic locking.
-- [Error Handling](https://kimsoungryoul.github.io/aerospike-py/docs/guides/error-handling): Best practices for handling Aerospike errors in production applications.
-- [Expression Filters](https://kimsoungryoul.github.io/aerospike-py/docs/guides/expression-filters): Use 104+ composable expression filter functions for server-side record filtering.
-- [Migration from Official Client](https://kimsoungryoul.github.io/aerospike-py/docs/guides/migration): Migrate from the official aerospike-client-python (C-based) to aerospike-py (Rust-based).
 - [NumPy Batch Read Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/numpy-batch): Use batch_read with numpy structured arrays for high-performance columnar analytics directly from Aerospike.
-- [Performance Tuning](https://kimsoungryoul.github.io/aerospike-py/docs/guides/performance-tuning): Tips for optimizing aerospike-py throughput and latency.
+- [Expression Filters](https://kimsoungryoul.github.io/aerospike-py/docs/guides/expression-filters): Use 104+ composable expression filter functions for server-side record filtering.
 - [Query & Scan Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/query-scan): Learn how to create secondary index queries, full namespace scans, and use predicates.
-- [UDF Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/udf): Register, execute, and remove User Defined Functions (Lua scripts) on the Aerospike server.
 
 ## Integrations
 

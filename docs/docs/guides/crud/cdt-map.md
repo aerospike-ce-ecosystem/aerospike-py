@@ -1,7 +1,8 @@
 ---
 title: Map CDT Operations
 sidebar_label: Map Operations
-sidebar_position: 5
+sidebar_position: 3
+slug: /guides/cdt-map
 description: 27 atomic map operations for put, get, remove, and advanced queries on map bins.
 ---
 

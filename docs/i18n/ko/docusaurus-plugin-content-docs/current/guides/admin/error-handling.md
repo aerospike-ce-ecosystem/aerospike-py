@@ -1,7 +1,8 @@
 ---
 title: 에러 처리
 sidebar_label: 에러 처리
-sidebar_position: 7
+sidebar_position: 3
+slug: /guides/error-handling
 description: 프로덕션 애플리케이션에서 Aerospike 에러를 처리하는 모범 사례
 ---
 
@@ -10,7 +11,7 @@ description: 프로덕션 애플리케이션에서 Aerospike 에러를 처리하
 ## 예외 계층 구조
 
 모든 aerospike-py 예외는 `AerospikeError`를 상속합니다. 전체 계층 구조와
-설명은 [Exceptions API 레퍼런스](../api/exceptions.md)를 참고하세요.
+설명은 [Exceptions API 레퍼런스](../../api/exceptions.md)를 참고하세요.
 
 ```python
 import aerospike_py as aerospike
@@ -164,4 +165,4 @@ async def get_user(client, user_id):
 | 13 | (레코드 너무 큼) | `RecordTooBig` |
 | 27 | (필터링됨) | `FilteredOut` |
 
-전체 목록은 [상수 레퍼런스](../api/constants.md)를 참고하세요.
+전체 목록은 [상수 레퍼런스](../../api/constants.md)를 참고하세요.

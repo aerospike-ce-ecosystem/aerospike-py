@@ -1,7 +1,8 @@
 ---
 title: Expression Filters
 sidebar_label: Expression Filters
-sidebar_position: 3
+sidebar_position: 2
+slug: /guides/expression-filters
 description: Use 104+ composable expression filter functions for server-side record filtering.
 ---
 

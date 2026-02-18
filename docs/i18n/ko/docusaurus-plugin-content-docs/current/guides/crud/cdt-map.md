@@ -1,7 +1,8 @@
 ---
 title: Map CDT Operations
 sidebar_label: Map Operations
-sidebar_position: 5
+sidebar_position: 3
+slug: /guides/cdt-map
 description: Map bin에 대한 27가지 원자적 작업 가이드
 ---
 

@@ -1,7 +1,8 @@
 ---
 title: Error Handling
 sidebar_label: Error Handling
-sidebar_position: 7
+sidebar_position: 3
+slug: /guides/error-handling
 description: Best practices for handling Aerospike errors in production applications.
 ---
 
@@ -10,7 +11,7 @@ description: Best practices for handling Aerospike errors in production applicat
 ## Exception Hierarchy
 
 All aerospike-py exceptions inherit from `AerospikeError`. See the
-[Exceptions API reference](../api/exceptions.md) for the full hierarchy and
+[Exceptions API reference](../../api/exceptions.md) for the full hierarchy and
 descriptions.
 
 ```python
@@ -165,4 +166,4 @@ Common Aerospike result codes mapped to exceptions:
 | 13 | (record too big) | `RecordTooBig` |
 | 27 | (filtered out) | `FilteredOut` |
 
-See the [Constants reference](../api/constants.md) for the full list.
+See the [Constants reference](../../api/constants.md) for the full list.
