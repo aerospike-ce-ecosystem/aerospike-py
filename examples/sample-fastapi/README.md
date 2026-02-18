@@ -1,6 +1,6 @@
 # sample-fastapi
 
-FastAPI + `aerospike-py` AsyncClient를 사용한 예제 프로젝트입니다. aerospike-py의 모든 주요 기능(CRUD, Batch, NumPy, Query/Scan, UDF, Admin 등)을 REST API로 제공합니다.
+FastAPI + `aerospike-py` AsyncClient를 사용한 예제 프로젝트입니다. aerospike-py의 모든 주요 기능(CRUD, Batch, NumPy, Query, UDF, Admin 등)을 REST API로 제공합니다.
 
 ## 구조
 
@@ -12,7 +12,7 @@ sample-fastapi/
 │   ├── models.py            # Pydantic 요청/응답 모델
 │   ├── dependencies.py      # FastAPI 의존성 주입 (get_client)
 │   └── routers/
-│       ├── users.py         # User CRUD (scan 포함)
+│       ├── users.py         # User CRUD
 │       ├── records.py       # Record 개별 조작 (select, exists, touch, append, increment 등)
 │       ├── operations.py    # Multi-operation (operate, operate_ordered)
 │       ├── batch.py         # Batch read/operate/remove
@@ -89,7 +89,7 @@ uv run --project examples/sample-fastapi pytest
 | Method | Path | 설명 |
 |--------|------|------|
 | `POST` | `/users` | 유저 생성 |
-| `GET` | `/users` | 전체 유저 조회 (scan) |
+| `GET` | `/users` | 전체 유저 조회 |
 | `GET` | `/users/{user_id}` | 유저 단건 조회 |
 | `PUT` | `/users/{user_id}` | 유저 수정 (partial update) |
 | `DELETE` | `/users/{user_id}` | 유저 삭제 |

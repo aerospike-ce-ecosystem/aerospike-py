@@ -28,7 +28,7 @@ Full record returned by read and operate methods.
 | `meta` | `RecordMetadata \| None` | Record metadata |
 | `bins` | `dict[str, Any] \| None` | Bin name-value pairs |
 
-**Returned by**: `get()`, `select()`, `operate()`, `batch_operate()`, `batch_remove()`, `Query.results()`, `Scan.results()`
+**Returned by**: `get()`, `select()`, `operate()`, `batch_operate()`, `batch_remove()`, `Query.results()`
 
 ```python
 record: Record = client.get(key)
@@ -149,8 +149,6 @@ Single bin name-value pair used in ordered results.
 | `batch_operate()` | `list[Record]` |
 | `batch_remove()` | `list[Record]` |
 | `Query.results()` | `list[Record]` |
-| `Scan.results()` | `list[Record]` |
-| `scan()` (async) | `list[Record]` |
 
 ---
 
@@ -261,9 +259,9 @@ batch = client.batch_read(keys, policy=policy)
 
 ### `QueryPolicy`
 
-Policy for query and scan operations.
+Policy for query operations.
 
-**Used by**: `Query.results()`, `Query.foreach()`, `Scan.results()`, `Scan.foreach()`
+**Used by**: `Query.results()`, `Query.foreach()`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

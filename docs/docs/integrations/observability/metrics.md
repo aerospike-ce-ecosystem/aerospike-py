@@ -76,7 +76,6 @@ A **histogram** tracking the duration of every data operation.
 | `batch_operate` | `batch_operate` |
 | `batch_remove` | `batch_remove` |
 | `Query.results()` | `query` |
-| `Scan.results()` / `Scan.foreach()` | `scan` |
 
 **Error types:**
 

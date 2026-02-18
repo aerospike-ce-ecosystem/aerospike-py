@@ -1,8 +1,8 @@
 ---
-title: Query & Scan
-sidebar_label: Query & Scan
+title: Query
+sidebar_label: Query
 sidebar_position: 2
-description: API reference for Query and Scan classes including predicates and result iteration.
+description: API reference for the Query class including predicates and result iteration.
 ---
 
 ## Query
@@ -67,42 +67,6 @@ def limited(record):
         return False
 
 query.foreach(limited)
-```
-
-## Scan
-
-`Scan` reads all records in a namespace/set.
-
-### Creating a Scan
-
-```python
-scan = client.scan("test", "demo")
-```
-
-### `select(*bins)`
-
-Select specific bins to return.
-
-```python
-scan.select("name", "age")
-```
-
-### `results(policy=None)`
-
-Execute the scan and return all records.
-
-```python
-records = scan.results()
-for key, meta, bins in records:
-    print(bins)
-```
-
-### `foreach(callback, policy=None)`
-
-Execute the scan and call `callback` for each record.
-
-```python
-scan.foreach(lambda rec: print(rec[2]))
 ```
 
 ## Predicates

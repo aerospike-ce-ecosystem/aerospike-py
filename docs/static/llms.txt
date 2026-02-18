@@ -14,7 +14,7 @@
 - [api-client](https://kimsoungryoul.github.io/aerospike-py/docs/api/client)
 - [Constants](https://kimsoungryoul.github.io/aerospike-py/docs/api/constants): Policy, TTL, operator, index type, and other constants used across the aerospike-py API.
 - [Exceptions](https://kimsoungryoul.github.io/aerospike-py/docs/api/exceptions): Exception hierarchy and error handling patterns for aerospike-py.
-- [Query & Scan](https://kimsoungryoul.github.io/aerospike-py/docs/api/query-scan): API reference for Query and Scan classes including predicates and result iteration.
+- [Query](https://kimsoungryoul.github.io/aerospike-py/docs/api/query-scan): API reference for the Query class including predicates and result iteration.
 - [Types](https://kimsoungryoul.github.io/aerospike-py/docs/api/types): NamedTuple return types and TypedDict input types for aerospike-py.
 
 ## Guides
@@ -30,7 +30,7 @@
 - [CRUD & Batch Operations Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/crud): Step-by-step guide covering put, get, remove, batch operations, and optimistic locking.
 - [NumPy Batch Read Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/numpy-batch): Use batch_read with numpy structured arrays for high-performance columnar analytics directly from Aerospike.
 - [Expression Filters](https://kimsoungryoul.github.io/aerospike-py/docs/guides/expression-filters): Use 104+ composable expression filter functions for server-side record filtering.
-- [Query & Scan Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/query-scan): Learn how to create secondary index queries, full namespace scans, and use predicates.
+- [Query Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/query-scan): Learn how to create secondary index queries and use predicates.
 
 ## Integrations
 

@@ -557,48 +557,15 @@ await client.batch_remove(keys)
   </TabItem>
 </Tabs>
 
-## Query & Scan
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+## Query
 
 ### `query(namespace, set_name)`
 
-Secondary Index 쿼리를 위한 `Query` 객체를 생성합니다. [Query & Scan API](query-scan.md)를 참조하세요.
+Secondary Index 쿼리를 위한 `Query` 객체를 생성합니다. [Query API](query-scan.md)를 참조하세요.
 
 ```python
 query = client.query("test", "demo")
 ```
-
-### `scan(namespace, set_name)`
-
-전체 네임스페이스/세트 스캔을 위한 `Scan` 객체를 생성합니다. [Query & Scan API](query-scan.md)를 참조하세요.
-
-```python
-scan = client.scan("test", "demo")
-```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-### `async scan(namespace, set_name, policy=None)`
-
-네임스페이스/세트의 모든 레코드를 스캔합니다. 결과 리스트를 직접 반환합니다.
-
-```python
-records = await client.scan("test", "demo")
-for key, meta, bins in records:
-    print(bins)
-```
-
-:::note
-
-AsyncClient에는 `query()` 메서드가 없습니다. 서버사이드 필터링은 `scan()`과 [Expression Filters](../guides/query-scan/expression-filters.md)를 조합하여 사용하세요.
-
-:::
-
-  </TabItem>
-</Tabs>
 
 ## Index Management
 
@@ -920,10 +887,6 @@ client.put(key, {"visits": 1}, policy={"filter_expression": expr})
 query = client.query("test", "demo")
 records = query.results(policy={"filter_expression": expr})
 
-# 필터와 함께 Scan
-scan = client.scan("test", "demo")
-records = scan.results(policy={"filter_expression": expr})
-
 # 필터와 함께 Batch
 ops = [{"op": aerospike.OPERATOR_READ, "bin": "status", "val": None}]
 records = client.batch_operate(keys, ops, policy={"filter_expression": expr})
@@ -939,9 +902,6 @@ expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
 
 # 필터와 함께 Get
 _, _, bins = await client.get(key, policy={"filter_expression": expr})
-
-# 필터와 함께 Scan
-records = await client.scan("test", "demo", policy={"filter_expression": expr})
 
 # 필터와 함께 Batch
 ops = [{"op": aerospike.OPERATOR_READ, "bin": "age", "val": None}]

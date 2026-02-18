@@ -36,7 +36,7 @@ aerospike-py/
 │   ├── lib.rs         # Module entry point
 │   ├── client.rs      # Sync Client
 │   ├── async_client.rs# Async Client
-│   ├── query.rs       # Query / Scan
+│   ├── query.rs       # Query
 │   ├── operations.rs  # Operation mapping
 │   ├── errors.rs      # Error → Exception
 │   ├── constants.rs   # 130+ constants

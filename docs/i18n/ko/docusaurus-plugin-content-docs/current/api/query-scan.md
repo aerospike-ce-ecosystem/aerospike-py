@@ -1,8 +1,8 @@
 ---
-title: Query & Scan
-sidebar_label: Query & Scan
+title: Query
+sidebar_label: Query
 sidebar_position: 2
-description: Query 및 Scan 클래스 API 레퍼런스
+description: Query 클래스 API 레퍼런스
 ---
 
 ## Query
@@ -67,42 +67,6 @@ def limited(record):
         return False
 
 query.foreach(limited)
-```
-
-## Scan
-
-`Scan`은 네임스페이스/세트의 모든 레코드를 읽습니다.
-
-### Creating a Scan
-
-```python
-scan = client.scan("test", "demo")
-```
-
-### `select(*bins)`
-
-반환할 특정 빈을 선택합니다.
-
-```python
-scan.select("name", "age")
-```
-
-### `results(policy=None)`
-
-스캔을 실행하고 모든 레코드를 반환합니다.
-
-```python
-records = scan.results()
-for key, meta, bins in records:
-    print(bins)
-```
-
-### `foreach(callback, policy=None)`
-
-스캔을 실행하고 각 레코드에 대해 `callback`을 호출합니다.
-
-```python
-scan.foreach(lambda rec: print(rec[2]))
 ```
 
 ## Predicates

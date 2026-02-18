@@ -206,7 +206,7 @@ await client.put(key, {"val": bins["val"] + 1},
 ## Next Steps
 
 - [CRUD & Batch Guide](guides/crud/crud.md) - CRUD and batch operations
-- [Query & Scan Guide](guides/query-scan/query-scan.md) - Secondary index queries and scans
+- [Query Guide](guides/query-scan/query-scan.md) - Secondary index queries
 - [Expression Filters Guide](guides/query-scan/expression-filters.md) - Server-side filtering
 - [List CDT Operations Guide](guides/crud/cdt-list.md) - Atomic list operations
 - [Map CDT Operations Guide](guides/crud/cdt-map.md) - Atomic map operations

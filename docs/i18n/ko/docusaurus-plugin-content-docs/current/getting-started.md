@@ -206,7 +206,7 @@ await client.put(key, {"val": bins["val"] + 1},
 ## Next Steps
 
 - [CRUD & Batch Guide](guides/crud/crud.md) - CRUD 및 배치 작업
-- [Query & Scan Guide](guides/query-scan/query-scan.md) - Secondary Index 쿼리와 스캔
+- [Query Guide](guides/query-scan/query-scan.md) - Secondary Index 쿼리
 - [Expression Filters Guide](guides/query-scan/expression-filters.md) - 서버사이드 필터링
 - [List CDT Operations Guide](guides/crud/cdt-list.md) - 원자적 리스트 연산
 - [Map CDT Operations Guide](guides/crud/cdt-map.md) - 원자적 맵 연산

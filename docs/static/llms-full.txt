@@ -39,7 +39,7 @@ aerospike-py/
 │   ├── lib.rs         # Module entry point
 │   ├── client.rs      # Sync Client
 │   ├── async_client.rs# Async Client
-│   ├── query.rs       # Query / Scan
+│   ├── query.rs       # Query
 │   ├── operations.rs  # Operation mapping
 │   ├── errors.rs      # Error → Exception
 │   ├── constants.rs   # 130+ constants
@@ -313,7 +313,7 @@ await client.put(key, {"val": bins["val"] + 1},
 #### Next Steps
 
 - [CRUD & Batch Guide](/docs/guides/crud/crud) - CRUD and batch operations
-- [Query & Scan Guide](/docs/guides/query-scan/query-scan) - Secondary index queries and scans
+- [Query Guide](/docs/guides/query-scan/query-scan) - Secondary index queries
 - [Expression Filters Guide](/docs/guides/query-scan/expression-filters) - Server-side filtering
 - [List CDT Operations Guide](/docs/guides/crud/cdt-list) - Atomic list operations
 - [Map CDT Operations Guide](/docs/guides/crud/cdt-map) - Atomic map operations
@@ -1015,7 +1015,7 @@ keys = [("test", "demo", f"user_{i}") for i in range(10)]
 results = await client.batch_remove(keys)
 ```
 
-#### Query & Scan
+#### Query
 
 ##### `query(namespace, set_name)`
 
@@ -1034,33 +1034,6 @@ query = client.query("test", "demo")
 query.select("name", "age")
 query.where(predicates.between("age", 20, 30))
 records = query.results()
-```
-
-##### `scan(namespace, set_name)`
-
-Create a Scan object for full namespace/set scans.
-
-| Parameter | Description |
-|-----------|-------------|
-| `namespace` | The namespace to scan. |
-| `set_name` | The set to scan. |
-
-**Returns:** A ``Scan`` object. Use ``results()`` or ``foreach()`` to execute.
-
-##### Sync Client
-
-```python
-scan = client.scan("test", "demo")
-scan.select("name", "age")
-records = scan.results()
-```
-
-##### Async Client
-
-```python
-records = await client.scan("test", "demo")
-for record in records:
-    print(record.bins)
 ```
 
 #### Index Management
@@ -1351,63 +1324,6 @@ def process(record):
     print(record.bins)
 
 query.foreach(process)
-```
-
-#### Scan Object
-
-Full namespace/set scan object.
-
-Created via ``Client.scan(namespace, set_name)``. Use ``select()``
-to choose bins, then ``results()`` or ``foreach()`` to execute.
-
-```python
-scan = client.scan("test", "demo")
-scan.select("name", "age")
-records = scan.results()
-```
-
-##### `select()`
-
-Select specific bins to return in scan results.
-
-```python
-scan = client.scan("test", "demo")
-scan.select("name", "age")
-```
-
-##### `results(policy=None)`
-
-Execute the scan and return all records.
-
-| Parameter | Description |
-|-----------|-------------|
-| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
-
-**Returns:** A list of ``Record`` NamedTuples.
-
-```python
-records = scan.results()
-for record in records:
-    print(record.bins)
-```
-
-##### `foreach(callback, policy=None)`
-
-Execute the scan and invoke a callback for each record.
-
-The callback receives a ``Record`` NamedTuple. Return ``False``
-from the callback to stop iteration early.
-
-| Parameter | Description |
-|-----------|-------------|
-| `callback` | Function called with each record. Return ``False`` to stop. |
-| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
-
-```python
-def process(record):
-    print(record.bins)
-
-scan.foreach(process)
 ```
 
 
@@ -1854,9 +1770,9 @@ except ClientError as e:
 
 ---
 
-### Query & Scan
+### Query
 
-> API reference for Query and Scan classes including predicates and result iteration.
+> API reference for the Query class including predicates and result iteration.
 
 #### Query
 
@@ -1920,42 +1836,6 @@ def limited(record):
         return False
 
 query.foreach(limited)
-```
-
-#### Scan
-
-`Scan` reads all records in a namespace/set.
-
-##### Creating a Scan
-
-```python
-scan = client.scan("test", "demo")
-```
-
-##### `select(*bins)`
-
-Select specific bins to return.
-
-```python
-scan.select("name", "age")
-```
-
-##### `results(policy=None)`
-
-Execute the scan and return all records.
-
-```python
-records = scan.results()
-for key, meta, bins in records:
-    print(bins)
-```
-
-##### `foreach(callback, policy=None)`
-
-Execute the scan and call `callback` for each record.
-
-```python
-scan.foreach(lambda rec: print(rec[2]))
 ```
 
 #### Predicates
@@ -2085,7 +1965,7 @@ Full record returned by read and operate methods.
 | `meta` | `RecordMetadata \| None` | Record metadata |
 | `bins` | `dict[str, Any] \| None` | Bin name-value pairs |
 
-**Returned by**: `get()`, `select()`, `operate()`, `batch_operate()`, `batch_remove()`, `Query.results()`, `Scan.results()`
+**Returned by**: `get()`, `select()`, `operate()`, `batch_operate()`, `batch_remove()`, `Query.results()`
 
 ```python
 record: Record = client.get(key)
@@ -2206,8 +2086,6 @@ Single bin name-value pair used in ordered results.
 | `batch_operate()` | `list[Record]` |
 | `batch_remove()` | `list[Record]` |
 | `Query.results()` | `list[Record]` |
-| `Scan.results()` | `list[Record]` |
-| `scan()` (async) | `list[Record]` |
 
 ---
 
@@ -2318,9 +2196,9 @@ batch = client.batch_read(keys, policy=policy)
 
 ##### `QueryPolicy`
 
-Policy for query and scan operations.
+Policy for query operations.
 
-**Used by**: `Query.results()`, `Query.foreach()`, `Scan.results()`, `Scan.foreach()`
+**Used by**: `Query.results()`, `Query.foreach()`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -3286,7 +3164,7 @@ policy = {"filter_expression": expr}
 client.get(key, policy=policy)
 ```
 
-#### Query / Scan
+#### Query
 
 ```python
 query = client.query("test", "demo")
@@ -5447,18 +5325,6 @@ expr = exp.eq(exp.string_bin("region"), exp.string_val("US"))
 records = query.results(policy={"filter_expression": expr})
 ```
 
-##### Scan with Filter
-
-```python
-# Scan with filter: only active users with TTL > 1 hour
-expr = exp.and_(
-    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
-    exp.gt(exp.ttl(), exp.int_val(3600)),
-)
-scan = client.scan("test", "demo")
-records = scan.results(policy={"filter_expression": expr})
-```
-
 ##### Batch with Filter
 
 ```python
@@ -5481,8 +5347,8 @@ expr = exp.and_(
     exp.ge(exp.int_bin("age"), exp.int_val(18)),
 )
 
-scan = client.scan("test", "users")
-records = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "users")
+records = query.results(policy={"filter_expression": expr})
 ```
 
 ##### Records Expiring Soon
@@ -5493,8 +5359,8 @@ expr = exp.and_(
     exp.gt(exp.ttl(), exp.int_val(0)),       # not immortal
     exp.lt(exp.ttl(), exp.int_val(3600)),     # expiring within 1hr
 )
-scan = client.scan("test", "cache")
-expiring = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "cache")
+expiring = query.results(policy={"filter_expression": expr})
 ```
 
 ##### High-Value Transactions
@@ -5505,16 +5371,16 @@ expr = exp.gt(
     exp.num_mul(exp.float_bin("amount"), exp.int_bin("quantity")),
     exp.float_val(10000.0),
 )
-scan = client.scan("test", "transactions")
-records = scan.results(policy={"filter_expression": expr})
+query = client.query("test", "transactions")
+records = query.results(policy={"filter_expression": expr})
 ```
 
 
 ---
 
-### Query & Scan Guide
+### Query Guide
 
-> Learn how to create secondary index queries, full namespace scans, and use predicates.
+> Learn how to create secondary index queries and use predicates.
 
 #### Secondary Index Queries
 
@@ -5610,68 +5476,6 @@ query.foreach(limited)
 ```python
 client.index_remove("test", "users_age_idx")
 client.index_remove("test", "users_city_idx")
-```
-
-#### Full Namespace Scan
-
-Scans read all records in a namespace/set without requiring a secondary index.
-
-##### Basic Scan
-
-```python
-scan = client.scan("test", "users")
-records = scan.results()
-
-for key, meta, bins in records:
-    print(bins)
-```
-
-##### Scan with Selected Bins
-
-```python
-scan = client.scan("test", "users")
-scan.select("name")
-records = scan.results()
-```
-
-##### Scan with Callback
-
-```python
-scan = client.scan("test", "users")
-
-total_age = 0
-count = 0
-
-def accumulate(record):
-    global total_age, count
-    _, _, bins = record
-    total_age += bins.get("age", 0)
-    count += 1
-
-scan.foreach(accumulate)
-print(f"Average age: {total_age / count:.1f}")
-```
-
-#### Async Scan
-
-```python
-import asyncio
-from aerospike_py import AsyncClient
-
-async def main():
-    client = AsyncClient({
-        "hosts": [("127.0.0.1", 3000)],
-        "cluster_name": "docker",
-    })
-    await client.connect()
-
-    records = await client.scan("test", "users")
-    for _, _, bins in records:
-        print(bins)
-
-    await client.close()
-
-asyncio.run(main())
 ```
 
 #### Predicate Reference
@@ -6158,7 +5962,6 @@ A **histogram** tracking the duration of every data operation.
 | `batch_operate` | `batch_operate` |
 | `batch_remove` | `batch_remove` |
 | `Query.results()` | `query` |
-| `Scan.results()` / `Scan.foreach()` | `scan` |
 
 **Error types:**
 
@@ -6506,7 +6309,6 @@ aerospike_py.shutdown_tracing()
 | `batch_operate` | `BATCH_OPERATE` |
 | `batch_remove` | `BATCH_REMOVE` |
 | `Query.results()` | `QUERY` |
-| `Scan.results()` / `Scan.foreach()` | `SCAN` |
 
 > **Admin 작업 제외:**
 > `connect()`, `close()`, `info()` 등 관리 작업은 tracing 대상에서 제외됩니다.
