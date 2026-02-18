@@ -132,6 +132,7 @@ Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to und
 | **release-check** | `/release-check` | 릴리스 전 검증 (lint, unit test, pyright, type stub 일관성, 버전 확인) |
 | **bench-compare** | `/bench-compare` | aerospike-py vs 공식 C 클라이언트 벤치마크 비교 |
 | **test-sample-fastapi** | `/test-sample-fastapi` | aerospike-py 빌드 → sample-fastapi 설치 → 통합 테스트 실행 |
+| **new-api** | `/new-api [method] [desc]` | 새 Client/AsyncClient API 메서드 추가 가이드 (Rust → Python 래퍼 → 타입 스텁 → 테스트) |
 
 ### Subagents
 
