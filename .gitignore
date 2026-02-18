@@ -28,7 +28,7 @@ rust/target/
 *.swo
 
 # Claude Code
-.claude/
+.claude/settings.local.json
 
 # Sisyphus
 .sisyphus/
