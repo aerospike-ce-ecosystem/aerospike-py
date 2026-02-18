@@ -1,25 +1,7 @@
 """Integration tests for Admin operations (requires Aerospike server with security enabled)."""
 
-import functools
-
-import pytest
-
 import aerospike_py
-
-
-def skip_if_no_security(func):
-    """Decorator to skip tests if security is not enabled on the server."""
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except aerospike_py.AerospikeError as e:
-            if "security" in str(e).lower() or "not supported" in str(e).lower():
-                pytest.skip("Security not enabled on this server")
-            raise
-
-    return wrapper
+from tests.helpers import skip_if_no_security
 
 
 class TestAdminUser:

@@ -107,14 +107,14 @@ client.put(key, bins)  # never raises RecordExistsError
 Batch operations return results per-key. Check individual record status:
 
 ```python
-results = client.batch_read(keys)
-for result in results:
-    if result.result_code == aerospike.AEROSPIKE_OK:
-        process(result.bins)
-    elif result.result_code == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
-        handle_missing(result.key)
+batch = client.batch_read(keys)
+for br in batch.batch_records:
+    if br.result == aerospike.AEROSPIKE_OK and br.record:
+        process(br.record.bins)
+    elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
+        handle_missing(br.key)
     else:
-        logger.warning("Batch key error: code=%d", result.result_code)
+        logger.warning("Batch key error: code=%d", br.result)
 ```
 
 ### Connection Lifecycle

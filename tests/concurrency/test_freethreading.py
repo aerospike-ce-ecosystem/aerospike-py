@@ -6,6 +6,8 @@ import threading
 
 import pytest
 
+from tests.concurrency.utils import _drain
+
 NS = "test"
 SET_NAME = "conc_ft"
 
@@ -106,11 +108,3 @@ class TestFreeThreading:
         if sys._is_gil_enabled():
             pytest.skip("GIL is enabled — not a free-threaded build")
         assert sys._is_gil_enabled() is False
-
-
-def _drain(q):
-    """Drain all items from a SimpleQueue for error reporting."""
-    items = []
-    while not q.empty():
-        items.append(q.get_nowait())
-    return items

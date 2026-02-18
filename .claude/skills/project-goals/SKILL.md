@@ -55,6 +55,7 @@ Aerospike Rust Client(`aerospike-rust` crate)를 PyO3로 래핑하여, Python에
 - Expression 필터
 - List/Map CDT 연산 헬퍼
 - 공식 C 클라이언트 호환성 테스트 (완벽하게 호환할 필요 없음)
+- scan 함수는 deprecated 되었어 구현하지마
 
 ### 미구현 / 향후 과제
 

@@ -11,18 +11,37 @@ description: Development setup, build instructions, testing, and code style guid
 git clone https://github.com/KimSoungRyoul/aerospike-py.git
 cd aerospike-py
 
+# Install dependencies (requires uv)
+make install          # uv sync --all-groups
+
+# Build native module
+make build            # uv run maturin develop --release
+```
+
+:::tip[Alternative: manual setup]
+
+If you prefer not to use `uv` and `make`:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
-
 pip install maturin pytest pytest-asyncio
 maturin develop
 ```
 
+:::
+
 ## Start Aerospike Server
 
 ```bash
+make run-aerospike-ce   # starts Aerospike CE on port 18710
+```
+
+Or manually with Docker/Podman:
+
+```bash
 docker run -d --name aerospike \
-  -p 3000:3000 -p 3001:3001 -p 3002:3002 \
+  -p 18710:3000 -p 3001:3001 -p 3002:3002 \
   -e "NAMESPACE=test" \
   -e "CLUSTER_NAME=docker" \
   aerospike/aerospike-server
@@ -32,52 +51,61 @@ docker run -d --name aerospike \
 
 ```
 aerospike-py/
-├── rust/src/          # PyO3 Rust bindings
-│   ├── lib.rs         # Module entry point
-│   ├── client.rs      # Sync Client
-│   ├── async_client.rs# Async Client
-│   ├── query.rs       # Query
-│   ├── operations.rs  # Operation mapping
-│   ├── errors.rs      # Error → Exception
-│   ├── constants.rs   # 130+ constants
-│   ├── types/         # Type converters
-│   └── policy/        # Policy parsers
-├── src/aerospike_py/  # Python package
-├── tests/             # Test suite
-├── docs/              # Documentation (MkDocs)
-└── benchmark/         # Benchmark scripts
+├── rust/src/               # PyO3 Rust bindings
+│   ├── lib.rs              # Module entry point
+│   ├── client.rs           # Sync Client
+│   ├── async_client.rs     # Async Client
+│   ├── query.rs            # Query
+│   ├── operations.rs       # Operation mapping
+│   ├── errors.rs           # Error → Exception
+│   ├── constants.rs        # 130+ constants
+│   ├── expressions.rs      # Expression filter parsing
+│   ├── metrics.rs          # Prometheus metrics
+│   ├── tracing.rs          # OpenTelemetry tracing
+│   ├── types/              # Type converters
+│   └── policy/             # Policy parsers
+├── src/aerospike_py/       # Python package
+├── tests/                  # Test suite
+│   ├── unit/               # Unit tests (no server needed)
+│   ├── integration/        # Integration tests (server needed)
+│   ├── concurrency/        # Thread safety tests
+│   └── compatibility/      # Official C client compat tests
+├── docs/                   # Documentation (Docusaurus)
+└── benchmark/              # Benchmark scripts
 ```
 
 ## Building
 
 ```bash
-# Development build (debug, fast compile)
-maturin develop
+# Recommended: use make
+make build              # uv run maturin develop --release
 
-# Release build (optimized)
-maturin develop --release
-
-# Build wheel
-maturin build --release
+# Or manually:
+maturin develop         # Development build (debug, fast compile)
+maturin develop --release  # Release build (optimized)
+maturin build --release    # Build wheel
 ```
 
 ## Running Tests
 
 ```bash
-# All tests
-pytest tests/ -v
+# Using make (recommended)
+make test-unit          # Unit tests (no server needed)
+make test-integration   # Integration tests (server needed)
+make test-all           # All tests
 
-# Unit tests only (no server needed)
+# Or manually with pytest
 pytest tests/unit/ -v
-
-# Integration tests
 pytest tests/integration/ -v
-
-# Specific test file
 pytest tests/integration/test_crud.py -v
 ```
 
 ## Code Style
+
+```bash
+make lint     # ruff check + cargo clippy
+make fmt      # ruff format + cargo fmt
+```
 
 ### Python
 
@@ -114,7 +142,7 @@ pre-commit install
 1. **Rust code** (`rust/src/`): Edit, then `maturin develop` to rebuild.
 2. **Python code** (`src/aerospike_py/`): Changes apply immediately.
 3. **Tests**: Add to `tests/unit/` or `tests/integration/`.
-4. **Docs**: Edit files in `docs/`, preview with `mkdocs serve`.
+4. **Docs**: Edit files in `docs/docs/`, preview with `cd docs && npm start`.
 
 ## Architecture Notes
 

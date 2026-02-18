@@ -170,9 +170,9 @@ fn int_to_collection_index_type(val: i32) -> CollectionIndexType {
     }
 }
 
-/// Execute a query/scan and collect all results
+/// Execute a query/scan, collect all records, with metrics and OTel span.
 #[allow(unused, clippy::too_many_arguments)]
-fn execute_query(
+fn execute_query_collect(
     py: Python<'_>,
     client: &Arc<AsClient>,
     statement: Statement,
@@ -181,7 +181,7 @@ fn execute_query(
     namespace: &str,
     set_name: &str,
     conn_info: &crate::tracing::ConnectionInfo,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<Vec<aerospike_core::Record>> {
     let client = client.clone();
     let query_policy = parse_query_policy(policy)?;
     debug!("Executing {}", op_name);
@@ -206,7 +206,6 @@ fn execute_query(
         Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
     }
 
-    // OTel span for query/scan
     #[cfg(feature = "otel")]
     {
         use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
@@ -234,7 +233,24 @@ fn execute_query(
         span_ref.end();
     }
 
-    let records = result.map_err(as_to_pyerr)?;
+    result.map_err(as_to_pyerr)
+}
+
+/// Execute a query/scan and collect all results as a Python list.
+#[allow(unused, clippy::too_many_arguments)]
+fn execute_query(
+    py: Python<'_>,
+    client: &Arc<AsClient>,
+    statement: Statement,
+    policy: Option<&Bound<'_, PyDict>>,
+    op_name: &str,
+    namespace: &str,
+    set_name: &str,
+    conn_info: &crate::tracing::ConnectionInfo,
+) -> PyResult<Py<PyAny>> {
+    let records = execute_query_collect(
+        py, client, statement, policy, op_name, namespace, set_name, conn_info,
+    )?;
     debug!("{} returned {} records", op_name, records.len());
     let py_list = PyList::empty(py);
     for record in &records {
@@ -243,7 +259,7 @@ fn execute_query(
     Ok(py_list.into_any().unbind())
 }
 
-/// Execute a query/scan and call a callback for each record
+/// Execute a query/scan and call a callback for each record.
 #[allow(clippy::too_many_arguments, unused)]
 fn execute_foreach(
     py: Python<'_>,
@@ -256,59 +272,9 @@ fn execute_foreach(
     set_name: &str,
     conn_info: &crate::tracing::ConnectionInfo,
 ) -> PyResult<()> {
-    let client = client.clone();
-    let query_policy = parse_query_policy(policy)?;
-    debug!("Executing {} foreach", op_name);
-
-    let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
-    let result: Result<Vec<_>, AsError> = py.detach(|| {
-        RUNTIME.block_on(async {
-            let rs = client
-                .query(&query_policy, PartitionFilter::all(), statement)
-                .await?;
-            let mut stream = rs.into_stream();
-            let mut results = Vec::new();
-            while let Some(result) = stream.next().await {
-                results.push(result?);
-            }
-            Ok(results)
-        })
-    });
-
-    match &result {
-        Ok(_) => timer.finish(""),
-        Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
-    }
-
-    // OTel span for query/scan foreach
-    #[cfg(feature = "otel")]
-    {
-        use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
-        use opentelemetry::KeyValue;
-        let tracer = crate::tracing::otel_impl::get_tracer();
-        let span_name = format!("{} {}.{}", op_name.to_uppercase(), namespace, set_name);
-        let span = tracer
-            .span_builder(span_name)
-            .with_kind(SpanKind::Client)
-            .with_attributes(vec![
-                KeyValue::new("db.system.name", "aerospike"),
-                KeyValue::new("db.namespace", namespace.to_string()),
-                KeyValue::new("db.collection.name", set_name.to_string()),
-                KeyValue::new("db.operation.name", op_name.to_uppercase()),
-                KeyValue::new("server.address", conn_info.server_address.clone()),
-                KeyValue::new("server.port", conn_info.server_port),
-                KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
-            ])
-            .start(&tracer);
-        let cx = opentelemetry::Context::current().with_span(span);
-        let span_ref = opentelemetry::trace::TraceContextExt::span(&cx);
-        if let Err(e) = &result {
-            crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
-        }
-        span_ref.end();
-    }
-
-    let records = result.map_err(as_to_pyerr)?;
+    let records = execute_query_collect(
+        py, client, statement, policy, op_name, namespace, set_name, conn_info,
+    )?;
     for record in &records {
         let py_record = record_to_py(py, record, None)?;
         let result = callback.call1((py_record,))?;

@@ -1,10 +1,9 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
+use crate::client_common::{self, PutPolicy};
+use crate::traced_exists_op;
 use crate::traced_op;
-use aerospike_core::{
-    BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
-    Client as AsClient, Error as AsError, ResultCode, Task, UDFLang, Value,
-};
+use aerospike_core::{Bins, Client as AsClient, Error as AsError, ResultCode, Task};
 use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
@@ -12,26 +11,16 @@ use pyo3_async_runtimes::tokio::future_into_py;
 
 use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
-use crate::operations::py_ops_to_rust;
-use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_py, user_to_py};
-use crate::policy::batch_policy::parse_batch_policy;
+use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::parse_client_policy;
-use crate::policy::read_policy::parse_read_policy;
-use crate::policy::write_policy::parse_write_policy;
+use crate::policy::write_policy::DEFAULT_WRITE_POLICY;
 use crate::record_helpers::{batch_records_to_py, record_to_meta};
-use crate::types::bin::py_dict_to_bins;
 use crate::types::host::parse_hosts_from_config;
-use crate::types::key::{key_to_py, py_to_key};
+use crate::types::key::key_to_py;
 use crate::types::record::record_to_py;
-use crate::types::value::{py_to_value, value_to_py};
+use crate::types::value::value_to_py;
 
 /// Shared async client state.
-///
-/// The triple wrapping is required by PyO3 async constraints:
-/// - outer `Arc`: allows cloning into `future_into_py` closures (connect/close)
-/// - `Mutex`: interior mutability for connect/close state changes
-/// - `Option`: represents connected (Some) vs disconnected (None)
-/// - inner `Arc<AsClient>`: cheap cloning per-operation without holding the Mutex lock
 type SharedClientState = Arc<Mutex<Option<Arc<AsClient>>>>;
 
 fn lock_err<T>(e: PoisonError<T>) -> PyErr {
@@ -71,8 +60,6 @@ impl PyAsyncClient {
         }
 
         let config_dict = self.config.bind(py).cast::<PyDict>()?;
-
-        // Copy the config dict so we don't mutate the caller's original
         let effective_config = config_dict.copy()?;
 
         if let (Some(user), Some(pass)) = (username, password) {
@@ -84,7 +71,6 @@ impl PyAsyncClient {
         let client_policy = parse_client_policy(&effective_config)?;
         let inner = self.inner.clone();
 
-        // Build connection info for span attributes
         let cluster_name = effective_config
             .get_item("cluster_name")?
             .and_then(|v| {
@@ -147,7 +133,6 @@ impl PyAsyncClient {
     // ── Info ─────────────────────────────────────────────────────
 
     /// Send an info command to all nodes in the cluster (async).
-    /// Returns a list of (node_name, error_code, response) tuples.
     #[pyo3(signature = (command, policy=None))]
     fn info_all<'py>(
         &self,
@@ -156,35 +141,20 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let cmd = command.to_string();
+        let args = client_common::prepare_info_args(command, policy)?;
 
         future_into_py(py, async move {
             let nodes = client.nodes().await;
             let mut results: Vec<(String, i32, String)> = Vec::new();
             for node in &nodes {
-                match node.info(&admin_policy, &[&cmd]).await {
-                    Ok(map) => {
-                        let response = map.get(&cmd).cloned().unwrap_or_default();
-                        results.push((node.name().to_string(), 0, response));
-                    }
-                    Err(e) => {
-                        let code = match &e {
-                            aerospike_core::Error::ServerError(rc, _, _) => {
-                                crate::errors::result_code_to_int(rc)
-                            }
-                            _ => -1,
-                        };
-                        results.push((node.name().to_string(), code, e.to_string()));
-                    }
-                }
+                let r = node.info(&args.admin_policy, &[&args.command]).await;
+                results.push(client_common::info_node_result(node, &args.command, r));
             }
             Ok(results)
         })
     }
 
     /// Send an info command to a random node in the cluster (async).
-    /// Returns the response string.
     #[pyo3(signature = (command, policy=None))]
     fn info_random_node<'py>(
         &self,
@@ -193,8 +163,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let cmd = command.to_string();
+        let args = client_common::prepare_info_args(command, policy)?;
 
         future_into_py(py, async move {
             let node = client
@@ -203,19 +172,19 @@ impl PyAsyncClient {
                 .await
                 .map_err(as_to_pyerr)?;
             let map = node
-                .info(&admin_policy, &[&cmd])
+                .info(&args.admin_policy, &[&args.command])
                 .await
                 .map_err(as_to_pyerr)?;
-            Ok(map.get(&cmd).cloned().unwrap_or_default())
+            Ok(map.get(&args.command).cloned().unwrap_or_default())
         })
     }
 
-    /// Async context manager entry: `async with client as c:`
+    /// Async context manager entry.
     fn __aenter__<'py>(slf: Py<Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         future_into_py(py, async move { Ok(slf) })
     }
 
-    /// Async context manager exit: closes the client.
+    /// Async context manager exit.
     #[pyo3(signature = (_exc_type=None, _exc_val=None, _exc_tb=None))]
     fn __aexit__<'py>(
         &self,
@@ -245,42 +214,39 @@ impl PyAsyncClient {
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        // Validate bins argument before checking connection
-        let type_name = bins
-            .get_type()
-            .name()
-            .map(|n| n.to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
-        let bins_dict = bins.cast::<PyDict>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
-                "bins argument must be a dict, got {type_name}"
-            ))
-        })?;
-        let rust_bins = py_dict_to_bins(bins_dict)?;
+        let args =
+            client_common::prepare_put_args(py, key, bins, meta, policy, &self.connection_info)?;
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
         debug!(
             "async put: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
-        let write_policy = parse_write_policy(policy, meta)?;
 
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
-
-        future_into_py(py, async move {
-            traced_op!(
-                "put",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.put(&write_policy, &rust_key, &rust_bins).await }
-            )
-        })
+        match args.policy {
+            PutPolicy::Default => {
+                let wp = DEFAULT_WRITE_POLICY.clone();
+                future_into_py(py, async move {
+                    traced_op!(
+                        "put",
+                        &args.key.namespace,
+                        &args.key.set_name,
+                        args.parent_ctx,
+                        args.conn_info,
+                        { client.put(&wp, &args.key, &args.bins).await }
+                    )
+                })
+            }
+            PutPolicy::Custom(wp) => future_into_py(py, async move {
+                traced_op!(
+                    "put",
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.put(&wp, &args.key, &args.bins).await }
+                )
+            }),
+        }
     }
 
     /// Read a record (async).
@@ -292,30 +258,24 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
         debug!(
             "async get: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
-        let read_policy = parse_read_policy(policy)?;
 
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
-
+        let rp = args.read_policy().clone();
         future_into_py(py, async move {
             let record = traced_op!(
                 "get",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.get(&read_policy, &rust_key, Bins::All).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                { client.get(&rp, &args.key, Bins::All).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
+            Python::attach(|py| record_to_py(py, &record, Some(&args.key)))
         })
     }
 
@@ -329,33 +289,27 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args =
+            client_common::prepare_select_args(py, key, bins, policy, &self.connection_info)?;
         debug!(
             "async select: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
-        let read_policy = parse_read_policy(policy)?;
-        let bin_names: Vec<String> = bins.extract()?;
 
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
-
+        let rp = args.read_policy().clone();
         future_into_py(py, async move {
-            let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
+            let bin_refs: Vec<&str> = args.bin_names.iter().map(|s| s.as_str()).collect();
             let bins_selector = Bins::from(bin_refs.as_slice());
             let record = traced_op!(
                 "select",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.get(&read_policy, &rust_key, bins_selector).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                { client.get(&rp, &args.key, bins_selector).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
+            Python::attach(|py| record_to_py(py, &record, Some(&args.key)))
         })
     }
 
@@ -368,65 +322,24 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_exists_args(py, key, policy, &self.connection_info)?;
         debug!(
             "async exists: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
-        let read_policy = parse_read_policy(policy)?;
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[allow(unused)]
-        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
-            let timer = crate::metrics::OperationTimer::start(
+            let result = traced_exists_op!(
                 "exists",
-                &rust_key.namespace,
-                &rust_key.set_name,
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                { client.get(&args.read_policy, &args.key, Bins::None).await }
             );
-            let result = client.get(&read_policy, &rust_key, Bins::None).await;
-
-            match &result {
-                Ok(_) => timer.finish(""),
-                Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => timer.finish(""),
-                Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
-            }
-
-            // OTel span for exists
-            #[cfg(feature = "otel")]
-            {
-                use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
-                use opentelemetry::KeyValue;
-                let tracer = crate::tracing::otel_impl::get_tracer();
-                let span_name = format!("EXISTS {}.{}", rust_key.namespace, rust_key.set_name);
-                let span = tracer
-                    .span_builder(span_name)
-                    .with_kind(SpanKind::Client)
-                    .with_attributes(vec![
-                        KeyValue::new("db.system.name", "aerospike"),
-                        KeyValue::new("db.namespace", rust_key.namespace.clone()),
-                        KeyValue::new("db.collection.name", rust_key.set_name.clone()),
-                        KeyValue::new("db.operation.name", "EXISTS"),
-                        KeyValue::new("server.address", conn_info.server_address.clone()),
-                        KeyValue::new("server.port", conn_info.server_port),
-                        KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
-                    ])
-                    .start_with_context(&tracer, &parent_ctx);
-                let cx = parent_ctx.with_span(span);
-                let span_ref = opentelemetry::trace::TraceContextExt::span(&cx);
-                match &result {
-                    Ok(_) | Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => {}
-                    Err(e) => {
-                        crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
-                    }
-                }
-                span_ref.end();
-            }
 
             Python::attach(|py| {
-                let key_py = key_to_py(py, &rust_key)?;
+                let key_py = key_to_py(py, &args.key)?;
                 match result {
                     Ok(record) => {
                         let meta = record_to_meta(py, &record)?;
@@ -453,27 +366,21 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args =
+            client_common::prepare_remove_args(py, key, meta, policy, &self.connection_info)?;
         debug!(
             "async remove: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
-        let write_policy = parse_write_policy(policy, meta)?;
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let existed = traced_op!(
                 "delete",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.delete(&write_policy, &rust_key).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                { client.delete(&args.write_policy, &args.key).await }
             )?;
 
             if !existed {
@@ -496,30 +403,21 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args =
+            client_common::prepare_touch_args(py, key, val, meta, policy, &self.connection_info)?;
         debug!(
             "async touch: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
-        let mut write_policy = parse_write_policy(policy, meta)?;
-        if val > 0 {
-            write_policy.expiration = aerospike_core::Expiration::Seconds(val);
-        }
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
                 "touch",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.touch(&write_policy, &rust_key).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                { client.touch(&args.write_policy, &args.key).await }
             )
         })
     }
@@ -536,29 +434,28 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_increment_args(
+            py,
+            key,
+            bin,
+            offset,
+            meta,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "async increment: ns={} set={} bin={}",
-            rust_key.namespace, rust_key.set_name, bin
+            args.key.namespace, args.key.set_name, bin
         );
-        let write_policy = parse_write_policy(policy, meta)?;
-        let value = py_to_value(offset)?;
-        let bins = vec![Bin::new(bin.to_string(), value)];
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
                 "increment",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.add(&write_policy, &rust_key, &bins).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                { client.add(&args.write_policy, &args.key, &args.bins).await }
             )
         })
     }
@@ -574,33 +471,30 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        let write_policy = parse_write_policy(policy, meta)?;
-        let rust_ops = py_ops_to_rust(ops)?;
+        let args =
+            client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
             "async operate: ns={} set={} ops_count={}",
-            rust_key.namespace,
-            rust_key.set_name,
-            rust_ops.len()
+            args.key.namespace,
+            args.key.set_name,
+            args.ops.len()
         );
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let record = traced_op!(
                 "operate",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.operate(&write_policy, &rust_key, &rust_ops).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                {
+                    client
+                        .operate(&args.write_policy, &args.key, &args.ops)
+                        .await
+                }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record, Some(&rust_key)))
+            Python::attach(|py| record_to_py(py, &record, Some(&args.key)))
         })
     }
 
@@ -618,29 +512,32 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_single_bin_write_args(
+            py,
+            key,
+            bin,
+            val,
+            meta,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "async append: ns={} set={} bin={}",
-            rust_key.namespace, rust_key.set_name, bin
+            args.key.namespace, args.key.set_name, bin
         );
-        let write_policy = parse_write_policy(policy, meta)?;
-        let value = py_to_value(val)?;
-        let bins = vec![Bin::new(bin.to_string(), value)];
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
                 "append",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.append(&write_policy, &rust_key, &bins).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                {
+                    client
+                        .append(&args.write_policy, &args.key, &args.bins)
+                        .await
+                }
             )
         })
     }
@@ -657,29 +554,32 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_single_bin_write_args(
+            py,
+            key,
+            bin,
+            val,
+            meta,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "async prepend: ns={} set={} bin={}",
-            rust_key.namespace, rust_key.set_name, bin
+            args.key.namespace, args.key.set_name, bin
         );
-        let write_policy = parse_write_policy(policy, meta)?;
-        let value = py_to_value(val)?;
-        let bins = vec![Bin::new(bin.to_string(), value)];
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             traced_op!(
                 "prepend",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.prepend(&write_policy, &rust_key, &bins).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                {
+                    client
+                        .prepend(&args.write_policy, &args.key, &args.bins)
+                        .await
+                }
             )
         })
     }
@@ -695,25 +595,23 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        let write_policy = parse_write_policy(policy, meta)?;
-        let names: Vec<String> = bin_names.extract()?;
-        let bins: Vec<Bin> = names.into_iter().map(|n| Bin::new(n, Value::Nil)).collect();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
+        let args = client_common::prepare_remove_bin_args(
+            py,
+            key,
+            bin_names,
+            meta,
+            policy,
+            &self.connection_info,
+        )?;
 
         future_into_py(py, async move {
             traced_op!(
                 "remove_bin",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.put(&write_policy, &rust_key, &bins).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                { client.put(&args.write_policy, &args.key, &args.bins).await }
             )
         })
     }
@@ -731,36 +629,33 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        let write_policy = parse_write_policy(policy, meta)?;
-        let rust_ops = py_ops_to_rust(ops)?;
+        let args =
+            client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
             "async operate_ordered: ns={} set={} ops_count={}",
-            rust_key.namespace,
-            rust_key.set_name,
-            rust_ops.len()
+            args.key.namespace,
+            args.key.set_name,
+            args.ops.len()
         );
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         future_into_py(py, async move {
             let record = traced_op!(
                 "operate_ordered",
-                &rust_key.namespace,
-                &rust_key.set_name,
-                parent_ctx,
-                conn_info,
-                { client.operate(&write_policy, &rust_key, &rust_ops).await }
+                &args.key.namespace,
+                &args.key.set_name,
+                args.parent_ctx,
+                args.conn_info,
+                {
+                    client
+                        .operate(&args.write_policy, &args.key, &args.ops)
+                        .await
+                }
             )?;
 
             Python::attach(|py| {
                 let key_py = match &record.key {
                     Some(k) => key_to_py(py, k)?,
-                    None => key_to_py(py, &rust_key)?,
+                    None => key_to_py(py, &args.key)?,
                 };
                 let meta_dict_obj = record_to_meta(py, &record)?;
                 let ordered_bins = PyList::empty(py);
@@ -797,13 +692,16 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         warn!("Async truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let namespace = namespace.to_string();
-        let set_name = set_name.to_string();
+        let args = client_common::prepare_truncate_args(namespace, set_name, nanos, policy)?;
 
         future_into_py(py, async move {
             client
-                .truncate(&admin_policy, &namespace, &set_name, nanos)
+                .truncate(
+                    &args.admin_policy,
+                    &args.namespace,
+                    &args.set_name,
+                    args.nanos,
+                )
                 .await
                 .map_err(as_to_pyerr)
         })
@@ -822,32 +720,16 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async registering UDF: filename={}", filename);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let language = match udf_type {
-            0 => UDFLang::Lua,
-            _ => {
-                return Err(crate::errors::InvalidArgError::new_err(
-                    "Only Lua UDF (udf_type=0) is supported.",
-                ))
-            }
-        };
-
-        let udf_body = std::fs::read(filename).map_err(|e| {
-            crate::errors::ClientError::new_err(format!(
-                "Failed to read UDF file '{}': {}",
-                filename, e
-            ))
-        })?;
-
-        let server_path = std::path::Path::new(filename)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(filename)
-            .to_string();
+        let args = client_common::prepare_udf_put_args(filename, udf_type, policy)?;
 
         future_into_py(py, async move {
             let task = client
-                .register_udf(&admin_policy, &udf_body, &server_path, language)
+                .register_udf(
+                    &args.admin_policy,
+                    &args.udf_body,
+                    &args.server_path,
+                    args.language,
+                )
                 .await
                 .map_err(as_to_pyerr)?;
             task.wait_till_complete(None::<std::time::Duration>)
@@ -867,16 +749,11 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async removing UDF: module={}", module);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let server_path = if module.ends_with(".lua") {
-            module.to_string()
-        } else {
-            format!("{}.lua", module)
-        };
+        let args = client_common::prepare_udf_remove_args(module, policy)?;
 
         future_into_py(py, async move {
             let task = client
-                .remove_udf(&admin_policy, &server_path)
+                .remove_udf(&args.admin_policy, &args.server_path)
                 .await
                 .map_err(as_to_pyerr)?;
             task.wait_till_complete(None::<std::time::Duration>)
@@ -898,35 +775,20 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let a = client_common::prepare_apply_args(key, module, function, args, policy)?;
         debug!(
             "async apply UDF: ns={} set={} module={} function={}",
-            rust_key.namespace, rust_key.set_name, module, function
+            a.key.namespace, a.key.set_name, a.module, a.function
         );
-        let write_policy = parse_write_policy(policy, None)?;
-
-        let rust_args: Option<Vec<Value>> = match args {
-            Some(list) => {
-                let mut v = Vec::new();
-                for item in list.iter() {
-                    v.push(py_to_value(&item)?);
-                }
-                Some(v)
-            }
-            None => None,
-        };
-
-        let module = module.to_string();
-        let function = function.to_string();
 
         future_into_py(py, async move {
             let result = client
                 .execute_udf(
-                    &write_policy,
-                    &rust_key,
-                    &module,
-                    &function,
-                    rust_args.as_deref(),
+                    &a.write_policy,
+                    &a.key,
+                    &a.module,
+                    &a.function,
+                    a.args.as_deref(),
                 )
                 .await
                 .map_err(as_to_pyerr)?;
@@ -940,8 +802,7 @@ impl PyAsyncClient {
 
     // ── Batch ─────────────────────────────────────────────────
 
-    /// Read multiple records (async). Returns BatchRecords, or NumpyBatchRecords when dtype is provided.
-    /// bins=None → read all bins; bins=["a","b"] → specific bins; bins=[] → existence check.
+    /// Read multiple records (async).
     #[pyo3(signature = (keys, bins=None, policy=None, _dtype=None))]
     fn batch_read<'py>(
         &self,
@@ -953,50 +814,21 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_read: keys_count={}", keys.len());
         let client = self.get_client()?;
-        let batch_policy = parse_batch_policy(policy)?;
-        let read_policy = BatchReadPolicy::default();
-
-        let bins_selector = match &bins {
-            None => Bins::All,
-            Some(b) if b.is_empty() => Bins::None,
-            Some(b) => {
-                let refs: Vec<&str> = b.iter().map(|s| s.as_str()).collect();
-                Bins::from(refs.as_slice())
-            }
-        };
-
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
+        let args =
+            client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?;
 
         let use_numpy = _dtype.is_some();
         let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
 
-        let (batch_ns, batch_set) = rust_keys
-            .first()
-            .map(|k| (k.namespace.clone(), k.set_name.clone()))
-            .unwrap_or_default();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
-
         future_into_py(py, async move {
-            let ops: Vec<BatchOperation> = rust_keys
-                .iter()
-                .map(|k| BatchOperation::read(&read_policy, k.clone(), bins_selector.clone()))
-                .collect();
-
+            let ops = args.to_batch_ops();
             let results = traced_op!(
                 "batch_read",
-                &batch_ns,
-                &batch_set,
-                parent_ctx,
-                conn_info,
-                { client.batch(&batch_policy, &ops).await }
+                &args.batch_ns,
+                &args.batch_set,
+                args.parent_ctx,
+                args.conn_info,
+                { client.batch(&args.batch_policy, &ops).await }
             )?;
 
             Python::attach(|py| {
@@ -1025,38 +857,23 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_operate: keys_count={}", keys.len());
         let client = self.get_client()?;
-        let batch_policy = parse_batch_policy(policy)?;
-        let write_policy = BatchWritePolicy::default();
-        let rust_ops = py_ops_to_rust(ops)?;
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        let (batch_ns, batch_set) = rust_keys
-            .first()
-            .map(|k| (k.namespace.clone(), k.set_name.clone()))
-            .unwrap_or_default();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
+        let args = client_common::prepare_batch_operate_args(
+            py,
+            keys,
+            ops,
+            policy,
+            &self.connection_info,
+        )?;
 
         future_into_py(py, async move {
-            let batch_ops: Vec<BatchOperation> = rust_keys
-                .iter()
-                .map(|k| BatchOperation::write(&write_policy, k.clone(), rust_ops.clone()))
-                .collect();
-
+            let batch_ops = args.to_batch_ops();
             let results = traced_op!(
                 "batch_operate",
-                &batch_ns,
-                &batch_set,
-                parent_ctx,
-                conn_info,
-                { client.batch(&batch_policy, &batch_ops).await }
+                &args.batch_ns,
+                &args.batch_set,
+                args.parent_ctx,
+                args.conn_info,
+                { client.batch(&args.batch_policy, &batch_ops).await }
             )?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
@@ -1072,40 +889,35 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_remove: keys_count={}", keys.len());
         let client = self.get_client()?;
-        let batch_policy = parse_batch_policy(policy)?;
-        let delete_policy = BatchDeletePolicy::default();
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        let (batch_ns, batch_set) = rust_keys
-            .first()
-            .map(|k| (k.namespace.clone(), k.set_name.clone()))
-            .unwrap_or_default();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
+        let args =
+            client_common::prepare_batch_remove_args(py, keys, policy, &self.connection_info)?;
 
         future_into_py(py, async move {
-            let ops: Vec<BatchOperation> = rust_keys
-                .iter()
-                .map(|k| BatchOperation::delete(&delete_policy, k.clone()))
-                .collect();
-
+            let ops = args.to_batch_ops();
             let results = traced_op!(
                 "batch_remove",
-                &batch_ns,
-                &batch_set,
-                parent_ctx,
-                conn_info,
-                { client.batch(&batch_policy, &ops).await }
+                &args.batch_ns,
+                &args.batch_set,
+                args.parent_ctx,
+                args.conn_info,
+                { client.batch(&args.batch_policy, &ops).await }
             )?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
+    }
+
+    // ── Query ─────────────────────────────────────────────────
+
+    /// Create a Query object.
+    fn query(&self, namespace: &str, set_name: &str) -> PyResult<crate::query::PyQuery> {
+        debug!("Creating async query: ns={} set={}", namespace, set_name);
+        let client = self.get_client()?.clone();
+        Ok(crate::query::PyQuery::new(
+            client,
+            namespace.to_string(),
+            set_name.to_string(),
+            self.connection_info.clone(),
+        ))
     }
 
     // ── Index ─────────────────────────────────────────────────
@@ -1190,13 +1002,11 @@ impl PyAsyncClient {
             namespace, index_name
         );
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let namespace = namespace.to_string();
-        let index_name = index_name.to_string();
+        let args = client_common::prepare_index_remove_args(namespace, index_name, policy)?;
 
         future_into_py(py, async move {
             client
-                .drop_index(&admin_policy, &namespace, "", &index_name)
+                .drop_index(&args.admin_policy, &args.namespace, "", &args.index_name)
                 .await
                 .map_err(as_to_pyerr)?;
             Ok(())
@@ -1217,7 +1027,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async creating user: username={}", username);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let username = username.to_string();
         let password = password.to_string();
 
@@ -1240,7 +1050,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async dropping user: username={}", username);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let username = username.to_string();
 
         future_into_py(py, async move {
@@ -1262,7 +1072,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async changing password for user: username={}", username);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let username = username.to_string();
         let password = password.to_string();
 
@@ -1285,7 +1095,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async granting roles to user: username={}", username);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let username = username.to_string();
 
         future_into_py(py, async move {
@@ -1308,7 +1118,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async revoking roles from user: username={}", username);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let username = username.to_string();
 
         future_into_py(py, async move {
@@ -1329,7 +1139,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let username = username.to_string();
 
         future_into_py(py, async move {
@@ -1359,7 +1169,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         future_into_py(py, async move {
             let users = client
@@ -1394,21 +1204,25 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async creating role: role={}", role);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let rust_privileges = parse_privileges(privileges)?;
-        let role = role.to_string();
-        let wl = whitelist.unwrap_or_default();
+        let args = client_common::prepare_create_role_args(
+            role,
+            privileges,
+            policy,
+            whitelist,
+            read_quota,
+            write_quota,
+        )?;
 
         future_into_py(py, async move {
-            let wl_refs: Vec<&str> = wl.iter().map(|s| s.as_str()).collect();
+            let wl_refs: Vec<&str> = args.whitelist.iter().map(|s| s.as_str()).collect();
             client
                 .create_role(
-                    &admin_policy,
-                    &role,
-                    &rust_privileges,
+                    &args.admin_policy,
+                    &args.role,
+                    &args.privileges,
                     &wl_refs,
-                    read_quota,
-                    write_quota,
+                    args.read_quota,
+                    args.write_quota,
                 )
                 .await
                 .map_err(as_to_pyerr)
@@ -1425,7 +1239,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         info!("Async dropping role: role={}", role);
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role = role.to_string();
 
         future_into_py(py, async move {
@@ -1446,7 +1260,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
         let role = role.to_string();
 
@@ -1468,7 +1282,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
         let role = role.to_string();
 
@@ -1489,7 +1303,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role_name = role.to_string();
 
         future_into_py(py, async move {
@@ -1519,7 +1333,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         future_into_py(py, async move {
             let roles = client
@@ -1547,7 +1361,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role = role.to_string();
 
         future_into_py(py, async move {
@@ -1570,7 +1384,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role = role.to_string();
 
         future_into_py(py, async move {
@@ -1613,21 +1427,19 @@ impl PyAsyncClient {
             namespace, set_name, bin_name, index_name
         );
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let namespace = namespace.to_string();
-        let set_name = set_name.to_string();
-        let bin_name = bin_name.to_string();
-        let index_name = index_name.to_string();
+        let args = client_common::prepare_index_create_args(
+            namespace, set_name, bin_name, index_name, index_type, policy,
+        )?;
 
         future_into_py(py, async move {
             let task = client
                 .create_index_on_bin(
-                    &admin_policy,
-                    &namespace,
-                    &set_name,
-                    &bin_name,
-                    &index_name,
-                    index_type,
+                    &args.admin_policy,
+                    &args.namespace,
+                    &args.set_name,
+                    &args.bin_name,
+                    &args.index_name,
+                    args.index_type,
                     aerospike_core::CollectionIndexType::Default,
                     None,
                 )

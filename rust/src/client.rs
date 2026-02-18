@@ -1,29 +1,22 @@
 use std::sync::Arc;
 
+use crate::client_common::{self, PutPolicy};
+use crate::traced_exists_op;
 use crate::traced_op;
-use aerospike_core::{
-    BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
-    Client as AsClient, Error as AsError, ResultCode, Task, UDFLang, Value,
-};
+use aerospike_core::{Bins, Client as AsClient, Error as AsError, ResultCode, Task};
 use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
-use crate::operations::py_ops_to_rust;
-use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_py, user_to_py};
-use crate::policy::batch_policy::parse_batch_policy;
+use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::parse_client_policy;
-use crate::policy::read_policy::parse_read_policy;
-use crate::policy::read_policy::DEFAULT_READ_POLICY;
-use crate::policy::write_policy::parse_write_policy;
 use crate::policy::write_policy::DEFAULT_WRITE_POLICY;
 use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::runtime::RUNTIME;
-use crate::types::bin::py_dict_to_bins;
 use crate::types::host::parse_hosts_from_config;
-use crate::types::key::{key_to_py, py_to_key};
+use crate::types::key::key_to_py;
 use crate::types::record::record_to_py;
 use crate::types::value::value_to_py;
 
@@ -53,7 +46,6 @@ impl PyClient {
         username: Option<&str>,
         password: Option<&str>,
     ) -> PyResult<()> {
-        // Validate: username requires password
         if username.is_some() && password.is_none() {
             return Err(crate::errors::ClientError::new_err(
                 "Password is required when username is provided.",
@@ -61,11 +53,8 @@ impl PyClient {
         }
 
         let config_dict = self.config.bind(py).cast::<PyDict>()?;
-
-        // Copy the config dict so we don't mutate the caller's original
         let effective_config = config_dict.copy()?;
 
-        // If username/password provided to connect(), override in the copy
         if let (Some(user), Some(pass)) = (username, password) {
             effective_config.set_item("user", user)?;
             effective_config.set_item("password", pass)?;
@@ -74,7 +63,6 @@ impl PyClient {
         let parsed = parse_hosts_from_config(&effective_config)?;
         let client_policy = parse_client_policy(&effective_config)?;
 
-        // Build connection info for span attributes
         let cluster_name = effective_config
             .get_item("cluster_name")?
             .and_then(|v| {
@@ -149,29 +137,15 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Vec<(String, i32, String)>> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let cmd = command.to_string();
+        let args = client_common::prepare_info_args(command, policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 let nodes = client.nodes().await;
                 let mut results = Vec::new();
                 for node in &nodes {
-                    match node.info(&admin_policy, &[&cmd]).await {
-                        Ok(map) => {
-                            let response = map.get(&cmd).cloned().unwrap_or_default();
-                            results.push((node.name().to_string(), 0, response));
-                        }
-                        Err(e) => {
-                            let code = match &e {
-                                aerospike_core::Error::ServerError(rc, _, _) => {
-                                    crate::errors::result_code_to_int(rc)
-                                }
-                                _ => -1,
-                            };
-                            results.push((node.name().to_string(), code, e.to_string()));
-                        }
-                    }
+                    let r = node.info(&args.admin_policy, &[&args.command]).await;
+                    results.push(client_common::info_node_result(node, &args.command, r));
                 }
                 Ok(results)
             })
@@ -188,8 +162,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<String> {
         let client = self.get_client()?;
-        let admin_policy = parse_admin_policy(policy)?;
-        let cmd = command.to_string();
+        let args = client_common::prepare_info_args(command, policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
@@ -199,10 +172,10 @@ impl PyClient {
                     .await
                     .map_err(as_to_pyerr)?;
                 let map = node
-                    .info(&admin_policy, &[&cmd])
+                    .info(&args.admin_policy, &[&args.command])
                     .await
                     .map_err(as_to_pyerr)?;
-                Ok(map.get(&cmd).cloned().unwrap_or_default())
+                Ok(map.get(&args.command).cloned().unwrap_or_default())
             })
         })
     }
@@ -217,57 +190,40 @@ impl PyClient {
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        // Validate bins argument before checking connection
-        let type_name = bins
-            .get_type()
-            .name()
-            .map(|n| n.to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
-        let bins_dict = bins.cast::<PyDict>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(format!(
-                "bins argument must be a dict, got {type_name}"
-            ))
-        })?;
-        let rust_bins = py_dict_to_bins(bins_dict)?;
+        let args =
+            client_common::prepare_put_args(py, key, bins, meta, policy, &self.connection_info)?;
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        debug!("put: ns={} set={}", rust_key.namespace, rust_key.set_name);
+        debug!("put: ns={} set={}", args.key.namespace, args.key.set_name);
 
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
-
-        if policy.is_none() && meta.is_none() {
-            let wp = &*DEFAULT_WRITE_POLICY;
-            return py.detach(|| {
+        match args.policy {
+            PutPolicy::Default => {
+                let wp = &*DEFAULT_WRITE_POLICY;
+                py.detach(|| {
+                    RUNTIME.block_on(async {
+                        traced_op!(
+                            "put",
+                            &args.key.namespace,
+                            &args.key.set_name,
+                            args.parent_ctx,
+                            args.conn_info,
+                            { client.put(wp, &args.key, &args.bins).await }
+                        )
+                    })
+                })
+            }
+            PutPolicy::Custom(ref wp) => py.detach(|| {
                 RUNTIME.block_on(async {
                     traced_op!(
                         "put",
-                        &rust_key.namespace,
-                        &rust_key.set_name,
-                        parent_ctx,
-                        conn_info,
-                        { client.put(wp, &rust_key, &rust_bins).await }
+                        &args.key.namespace,
+                        &args.key.set_name,
+                        args.parent_ctx,
+                        args.conn_info,
+                        { client.put(wp, &args.key, &args.bins).await }
                     )
                 })
-            });
+            }),
         }
-
-        let write_policy = parse_write_policy(policy, meta)?;
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "put",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.put(&write_policy, &rust_key, &rust_bins).await }
-                )
-            })
-        })
     }
 
     /// Read a record
@@ -279,47 +235,24 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        debug!("get: ns={} set={}", rust_key.namespace, rust_key.set_name);
+        let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
+        debug!("get: ns={} set={}", args.key.namespace, args.key.set_name);
 
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
-
-        if policy.is_none() {
-            let rp = &*DEFAULT_READ_POLICY;
-            let record = py.detach(|| {
-                RUNTIME.block_on(async {
-                    traced_op!(
-                        "get",
-                        &rust_key.namespace,
-                        &rust_key.set_name,
-                        parent_ctx,
-                        conn_info,
-                        { client.get(rp, &rust_key, Bins::All).await }
-                    )
-                })
-            })?;
-            return record_to_py(py, &record, Some(&rust_key));
-        }
-
-        let read_policy = parse_read_policy(policy)?;
+        let rp = args.read_policy();
         let record = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "get",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.get(&read_policy, &rust_key, Bins::All).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.get(rp, &args.key, Bins::All).await }
                 )
             })
         })?;
 
-        record_to_py(py, &record, Some(&rust_key))
+        record_to_py(py, &record, Some(&args.key))
     }
 
     /// Read specific bins of a record
@@ -332,54 +265,29 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args =
+            client_common::prepare_select_args(py, key, bins, policy, &self.connection_info)?;
         debug!(
             "select: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
 
-        let bin_names: Vec<String> = bins.extract()?;
-        let bin_refs: Vec<&str> = bin_names.iter().map(|s| s.as_str()).collect();
-        let bins_selector = Bins::from(bin_refs.as_slice());
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
-
-        if policy.is_none() {
-            let rp = &*DEFAULT_READ_POLICY;
-            let record = py.detach(|| {
-                RUNTIME.block_on(async {
-                    traced_op!(
-                        "select",
-                        &rust_key.namespace,
-                        &rust_key.set_name,
-                        parent_ctx,
-                        conn_info,
-                        { client.get(rp, &rust_key, bins_selector).await }
-                    )
-                })
-            })?;
-            return record_to_py(py, &record, Some(&rust_key));
-        }
-
-        let read_policy = parse_read_policy(policy)?;
+        let rp = args.read_policy();
+        let bins_selector = args.bins_selector();
         let record = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "select",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.get(&read_policy, &rust_key, bins_selector).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.get(rp, &args.key, bins_selector).await }
                 )
             })
         })?;
 
-        record_to_py(py, &record, Some(&rust_key))
+        record_to_py(py, &record, Some(&args.key))
     }
 
     /// Check if a record exists. Returns (key, meta) or (key, None)
@@ -391,70 +299,25 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_exists_args(py, key, policy, &self.connection_info)?;
         debug!(
             "exists: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
-        let key_py = key_to_py(py, &rust_key)?;
+        let key_py = key_to_py(py, &args.key)?;
 
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[allow(unused)]
-        let conn_info = &self.connection_info;
-
-        let timer = crate::metrics::OperationTimer::start(
-            "exists",
-            &rust_key.namespace,
-            &rust_key.set_name,
-        );
-
-        let result = if policy.is_none() {
-            let rp = &*DEFAULT_READ_POLICY;
-            py.detach(|| RUNTIME.block_on(async { client.get(rp, &rust_key, Bins::None).await }))
-        } else {
-            let read_policy = parse_read_policy(policy)?;
-            py.detach(|| {
-                RUNTIME.block_on(async { client.get(&read_policy, &rust_key, Bins::None).await })
+        let result = py.detach(|| {
+            RUNTIME.block_on(async {
+                traced_exists_op!(
+                    "exists",
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.get(&args.read_policy, &args.key, Bins::None).await }
+                )
             })
-        };
-
-        match &result {
-            Ok(_) => timer.finish(""),
-            Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => timer.finish(""),
-            Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
-        }
-
-        // OTel span for exists
-        #[cfg(feature = "otel")]
-        {
-            use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
-            use opentelemetry::KeyValue;
-            let tracer = crate::tracing::otel_impl::get_tracer();
-            let span_name = format!("EXISTS {}.{}", rust_key.namespace, rust_key.set_name);
-            let span = tracer
-                .span_builder(span_name)
-                .with_kind(SpanKind::Client)
-                .with_attributes(vec![
-                    KeyValue::new("db.system.name", "aerospike"),
-                    KeyValue::new("db.namespace", rust_key.namespace.clone()),
-                    KeyValue::new("db.collection.name", rust_key.set_name.clone()),
-                    KeyValue::new("db.operation.name", "EXISTS"),
-                    KeyValue::new("server.address", conn_info.server_address.clone()),
-                    KeyValue::new("server.port", conn_info.server_port),
-                    KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
-                ])
-                .start_with_context(&tracer, &parent_ctx);
-            let cx = parent_ctx.with_span(span);
-            let span_ref = opentelemetry::trace::TraceContextExt::span(&cx);
-            match &result {
-                Ok(_) | Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => {}
-                Err(e) => {
-                    crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
-                }
-            }
-            span_ref.end();
-        }
+        });
 
         match result {
             Ok(record) => {
@@ -480,28 +343,22 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args =
+            client_common::prepare_remove_args(py, key, meta, policy, &self.connection_info)?;
         debug!(
             "remove: ns={} set={}",
-            rust_key.namespace, rust_key.set_name
+            args.key.namespace, args.key.set_name
         );
-        let write_policy = parse_write_policy(policy, meta)?;
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         let existed = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "delete",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.delete(&write_policy, &rust_key).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.delete(&args.write_policy, &args.key).await }
                 )
             })
         })?;
@@ -525,29 +382,19 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        debug!("touch: ns={} set={}", rust_key.namespace, rust_key.set_name);
-        let mut write_policy = parse_write_policy(policy, meta)?;
-
-        if val > 0 {
-            write_policy.expiration = aerospike_core::Expiration::Seconds(val);
-        }
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
+        let args =
+            client_common::prepare_touch_args(py, key, val, meta, policy, &self.connection_info)?;
+        debug!("touch: ns={} set={}", args.key.namespace, args.key.set_name);
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "touch",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.touch(&write_policy, &rust_key).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.touch(&args.write_policy, &args.key).await }
                 )
             })
         })
@@ -565,30 +412,33 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_single_bin_write_args(
+            py,
+            key,
+            bin,
+            val,
+            meta,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "append: ns={} set={} bin={}",
-            rust_key.namespace, rust_key.set_name, bin
+            args.key.namespace, args.key.set_name, bin
         );
-        let write_policy = parse_write_policy(policy, meta)?;
-        let value = crate::types::value::py_to_value(val)?;
-        let bins = [Bin::new(bin.to_string(), value)];
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "append",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.append(&write_policy, &rust_key, &bins).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    {
+                        client
+                            .append(&args.write_policy, &args.key, &args.bins)
+                            .await
+                    }
                 )
             })
         })
@@ -606,30 +456,33 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_single_bin_write_args(
+            py,
+            key,
+            bin,
+            val,
+            meta,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "prepend: ns={} set={} bin={}",
-            rust_key.namespace, rust_key.set_name, bin
+            args.key.namespace, args.key.set_name, bin
         );
-        let write_policy = parse_write_policy(policy, meta)?;
-        let value = crate::types::value::py_to_value(val)?;
-        let bins = [Bin::new(bin.to_string(), value)];
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "prepend",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.prepend(&write_policy, &rust_key, &bins).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    {
+                        client
+                            .prepend(&args.write_policy, &args.key, &args.bins)
+                            .await
+                    }
                 )
             })
         })
@@ -647,30 +500,29 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
+        let args = client_common::prepare_increment_args(
+            py,
+            key,
+            bin,
+            offset,
+            meta,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "increment: ns={} set={} bin={}",
-            rust_key.namespace, rust_key.set_name, bin
+            args.key.namespace, args.key.set_name, bin
         );
-        let write_policy = parse_write_policy(policy, meta)?;
-        let value = crate::types::value::py_to_value(offset)?;
-        let bins = [Bin::new(bin.to_string(), value)];
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "increment",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.add(&write_policy, &rust_key, &bins).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.add(&args.write_policy, &args.key, &args.bins).await }
                 )
             })
         })
@@ -687,27 +539,24 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        let write_policy = parse_write_policy(policy, meta)?;
-
-        let names: Vec<String> = bin_names.extract()?;
-        let bins: Vec<Bin> = names.into_iter().map(|n| Bin::new(n, Value::Nil)).collect();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
+        let args = client_common::prepare_remove_bin_args(
+            py,
+            key,
+            bin_names,
+            meta,
+            policy,
+            &self.connection_info,
+        )?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "remove_bin",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.put(&write_policy, &rust_key, &bins).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.put(&args.write_policy, &args.key, &args.bins).await }
                 )
             })
         })
@@ -724,36 +573,33 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        let write_policy = parse_write_policy(policy, meta)?;
-        let rust_ops = py_ops_to_rust(ops)?;
+        let args =
+            client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
             "operate: ns={} set={} ops_count={}",
-            rust_key.namespace,
-            rust_key.set_name,
-            rust_ops.len()
+            args.key.namespace,
+            args.key.set_name,
+            args.ops.len()
         );
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         let record = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "operate",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.operate(&write_policy, &rust_key, &rust_ops).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    {
+                        client
+                            .operate(&args.write_policy, &args.key, &args.ops)
+                            .await
+                    }
                 )
             })
         })?;
 
-        record_to_py(py, &record, Some(&rust_key))
+        record_to_py(py, &record, Some(&args.key))
     }
 
     /// Perform multiple operations on a single record, returning ordered results
@@ -767,40 +613,35 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
-        let rust_key = py_to_key(key)?;
-        let write_policy = parse_write_policy(policy, meta)?;
-        let rust_ops = py_ops_to_rust(ops)?;
+        let args =
+            client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
             "operate_ordered: ns={} set={} ops_count={}",
-            rust_key.namespace,
-            rust_key.set_name,
-            rust_ops.len()
+            args.key.namespace,
+            args.key.set_name,
+            args.ops.len()
         );
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
 
         let record = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "operate_ordered",
-                    &rust_key.namespace,
-                    &rust_key.set_name,
-                    parent_ctx,
-                    conn_info,
-                    { client.operate(&write_policy, &rust_key, &rust_ops).await }
+                    &args.key.namespace,
+                    &args.key.set_name,
+                    args.parent_ctx,
+                    args.conn_info,
+                    {
+                        client
+                            .operate(&args.write_policy, &args.key, &args.ops)
+                            .await
+                    }
                 )
             })
         })?;
 
-        // For operate_ordered, return (key, meta, ordered_bins)
-        // where ordered_bins is a list of (bin_name, value) tuples
         let key_py = match &record.key {
             Some(k) => key_to_py(py, k)?,
-            None => key_to_py(py, &rust_key)?,
+            None => key_to_py(py, &args.key)?,
         };
 
         let meta_dict_obj = record_to_meta(py, &record)?;
@@ -915,12 +756,12 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Removing index: ns={} index={}", namespace, index_name);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let args = client_common::prepare_index_remove_args(namespace, index_name, policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 client
-                    .drop_index(&admin_policy, namespace, "", index_name)
+                    .drop_index(&args.admin_policy, &args.namespace, "", &args.index_name)
                     .await
                     .map_err(as_to_pyerr)?;
                 Ok(())
@@ -931,7 +772,6 @@ impl PyClient {
     // ── Truncate ──────────────────────────────────────────────────
 
     /// Remove records in specified namespace/set efficiently.
-    /// truncate(namespace, set_name, nanos, policy=None)
     #[pyo3(signature = (namespace, set_name, nanos=0, policy=None))]
     fn truncate(
         &self,
@@ -943,12 +783,17 @@ impl PyClient {
     ) -> PyResult<()> {
         warn!("Truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let args = client_common::prepare_truncate_args(namespace, set_name, nanos, policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 client
-                    .truncate(&admin_policy, namespace, set_name, nanos)
+                    .truncate(
+                        &args.admin_policy,
+                        &args.namespace,
+                        &args.set_name,
+                        args.nanos,
+                    )
                     .await
                     .map_err(as_to_pyerr)
             })
@@ -958,7 +803,6 @@ impl PyClient {
     // ── UDF ───────────────────────────────────────────────────────
 
     /// Register a UDF module from a file.
-    /// udf_put(filename, udf_type=0, policy=None)
     #[pyo3(signature = (filename, udf_type=0, policy=None))]
     fn udf_put(
         &self,
@@ -969,35 +813,17 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Registering UDF: filename={}", filename);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
-        let language = match udf_type {
-            0 => UDFLang::Lua,
-            _ => {
-                return Err(crate::errors::InvalidArgError::new_err(
-                    "Only Lua UDF (udf_type=0) is supported.",
-                ))
-            }
-        };
-
-        // Read the file contents
-        let udf_body = std::fs::read(filename).map_err(|e| {
-            crate::errors::ClientError::new_err(format!(
-                "Failed to read UDF file '{}': {}",
-                filename, e
-            ))
-        })?;
-
-        // Extract the server path (basename)
-        let server_path = std::path::Path::new(filename)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(filename);
-        let server_path = server_path.to_string();
+        let args = client_common::prepare_udf_put_args(filename, udf_type, policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 let task = client
-                    .register_udf(&admin_policy, &udf_body, &server_path, language)
+                    .register_udf(
+                        &args.admin_policy,
+                        &args.udf_body,
+                        &args.server_path,
+                        args.language,
+                    )
                     .await
                     .map_err(as_to_pyerr)?;
                 task.wait_till_complete(None::<std::time::Duration>)
@@ -1009,7 +835,6 @@ impl PyClient {
     }
 
     /// Remove a UDF module.
-    /// udf_remove(module, policy=None)
     #[pyo3(signature = (module, policy=None))]
     fn udf_remove(
         &self,
@@ -1019,17 +844,12 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Removing UDF: module={}", module);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
-        let server_path = if module.ends_with(".lua") {
-            module.to_string()
-        } else {
-            format!("{}.lua", module)
-        };
+        let args = client_common::prepare_udf_remove_args(module, policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 let task = client
-                    .remove_udf(&admin_policy, &server_path)
+                    .remove_udf(&args.admin_policy, &args.server_path)
                     .await
                     .map_err(as_to_pyerr)?;
                 task.wait_till_complete(None::<std::time::Duration>)
@@ -1041,7 +861,6 @@ impl PyClient {
     }
 
     /// Execute a UDF on a single record.
-    /// apply(key, module, function, args=None, policy=None)
     #[pyo3(signature = (key, module, function, args=None, policy=None))]
     fn apply(
         &self,
@@ -1053,37 +872,21 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
-        let rust_key = py_to_key(key)?;
+        let a = client_common::prepare_apply_args(key, module, function, args, policy)?;
         debug!(
             "apply UDF: ns={} set={} module={} function={}",
-            rust_key.namespace, rust_key.set_name, module, function
+            a.key.namespace, a.key.set_name, a.module, a.function
         );
-        let write_policy = parse_write_policy(policy, None)?;
-
-        // Convert args
-        let rust_args: Option<Vec<Value>> = match args {
-            Some(list) => {
-                let mut v = Vec::new();
-                for item in list.iter() {
-                    v.push(crate::types::value::py_to_value(&item)?);
-                }
-                Some(v)
-            }
-            None => None,
-        };
-
-        let module = module.to_string();
-        let function = function.to_string();
 
         let result = py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .execute_udf(
-                        &write_policy,
-                        &rust_key,
-                        &module,
-                        &function,
-                        rust_args.as_deref(),
+                        &a.write_policy,
+                        &a.key,
+                        &a.module,
+                        &a.function,
+                        a.args.as_deref(),
                     )
                     .await
                     .map_err(as_to_pyerr)
@@ -1110,7 +913,7 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Creating user: username={}", username);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
 
         py.detach(|| {
@@ -1133,7 +936,7 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Dropping user: username={}", username);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
@@ -1156,7 +959,7 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Changing password for user: username={}", username);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
@@ -1179,7 +982,7 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Granting roles to user: username={}", username);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
 
         py.detach(|| {
@@ -1203,7 +1006,7 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Revoking roles from user: username={}", username);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
 
         py.detach(|| {
@@ -1225,7 +1028,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let username = username.to_string();
 
         let users = py.detach(|| {
@@ -1255,7 +1058,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         let users = py.detach(|| {
             RUNTIME.block_on(async {
@@ -1288,21 +1091,26 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Creating role: role={}", role);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
-        let rust_privileges = parse_privileges(privileges)?;
-        let wl = whitelist.unwrap_or_default();
-        let wl_refs: Vec<&str> = wl.iter().map(|s| s.as_str()).collect();
+        let args = client_common::prepare_create_role_args(
+            role,
+            privileges,
+            policy,
+            whitelist,
+            read_quota,
+            write_quota,
+        )?;
+        let wl_refs: Vec<&str> = args.whitelist.iter().map(|s| s.as_str()).collect();
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 client
                     .create_role(
-                        &admin_policy,
-                        role,
-                        &rust_privileges,
+                        &args.admin_policy,
+                        &args.role,
+                        &args.privileges,
                         &wl_refs,
-                        read_quota,
-                        write_quota,
+                        args.read_quota,
+                        args.write_quota,
                     )
                     .await
                     .map_err(as_to_pyerr)
@@ -1320,7 +1128,7 @@ impl PyClient {
     ) -> PyResult<()> {
         info!("Dropping role: role={}", role);
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
@@ -1342,7 +1150,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
 
         py.detach(|| {
@@ -1365,7 +1173,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
 
         py.detach(|| {
@@ -1387,7 +1195,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role_name = role.to_string();
 
         let roles = py.detach(|| {
@@ -1417,7 +1225,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         let roles = py.detach(|| {
             RUNTIME.block_on(async {
@@ -1445,7 +1253,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
         let wl_refs: Vec<&str> = whitelist.iter().map(|s| s.as_str()).collect();
 
         py.detach(|| {
@@ -1469,7 +1277,7 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
@@ -1484,7 +1292,6 @@ impl PyClient {
     // ── Batch operations ──────────────────────────────────────────
 
     /// Read multiple records. Returns BatchRecords, or NumpyBatchRecords when dtype is provided.
-    /// bins=None → read all bins; bins=["a","b"] → specific bins; bins=[] → existence check.
     #[pyo3(signature = (keys, bins=None, policy=None, _dtype=None))]
     fn batch_read(
         &self,
@@ -1496,48 +1303,19 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         debug!("batch_read: keys_count={}", keys.len());
         let client = self.get_client()?.clone();
-        let batch_policy = parse_batch_policy(policy)?;
-        let read_policy = BatchReadPolicy::default();
-
-        let bins_selector = match &bins {
-            None => Bins::All,
-            Some(b) if b.is_empty() => Bins::None,
-            Some(b) => {
-                let refs: Vec<&str> = b.iter().map(|s| s.as_str()).collect();
-                Bins::from(refs.as_slice())
-            }
-        };
-
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        let ops: Vec<BatchOperation> = rust_keys
-            .iter()
-            .map(|k| BatchOperation::read(&read_policy, k.clone(), bins_selector.clone()))
-            .collect();
-
-        let (batch_ns, batch_set) = rust_keys
-            .first()
-            .map(|k| (k.namespace.clone(), k.set_name.clone()))
-            .unwrap_or_default();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
+        let args =
+            client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?;
+        let ops = args.to_batch_ops();
 
         let results = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "batch_read",
-                    &batch_ns,
-                    &batch_set,
-                    parent_ctx,
-                    conn_info,
-                    { client.batch(&batch_policy, &ops).await }
+                    &args.batch_ns,
+                    &args.batch_set,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.batch(&args.batch_policy, &ops).await }
                 )
             })
         })?;
@@ -1562,40 +1340,24 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         debug!("batch_operate: keys_count={}", keys.len());
         let client = self.get_client()?.clone();
-        let batch_policy = parse_batch_policy(policy)?;
-        let write_policy = BatchWritePolicy::default();
-        let rust_ops = py_ops_to_rust(ops)?;
-
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        let batch_ops: Vec<BatchOperation> = rust_keys
-            .iter()
-            .map(|k| BatchOperation::write(&write_policy, k.clone(), rust_ops.clone()))
-            .collect();
-
-        let (batch_ns, batch_set) = rust_keys
-            .first()
-            .map(|k| (k.namespace.clone(), k.set_name.clone()))
-            .unwrap_or_default();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
+        let args = client_common::prepare_batch_operate_args(
+            py,
+            keys,
+            ops,
+            policy,
+            &self.connection_info,
+        )?;
+        let batch_ops = args.to_batch_ops();
 
         let results = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "batch_operate",
-                    &batch_ns,
-                    &batch_set,
-                    parent_ctx,
-                    conn_info,
-                    { client.batch(&batch_policy, &batch_ops).await }
+                    &args.batch_ns,
+                    &args.batch_set,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.batch(&args.batch_policy, &batch_ops).await }
                 )
             })
         })?;
@@ -1613,39 +1375,19 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         debug!("batch_remove: keys_count={}", keys.len());
         let client = self.get_client()?.clone();
-        let batch_policy = parse_batch_policy(policy)?;
-        let delete_policy = BatchDeletePolicy::default();
-
-        let rust_keys: Vec<aerospike_core::Key> = keys
-            .iter()
-            .map(|k| py_to_key(&k))
-            .collect::<PyResult<_>>()?;
-
-        let ops: Vec<BatchOperation> = rust_keys
-            .iter()
-            .map(|k| BatchOperation::delete(&delete_policy, k.clone()))
-            .collect();
-
-        let (batch_ns, batch_set) = rust_keys
-            .first()
-            .map(|k| (k.namespace.clone(), k.set_name.clone()))
-            .unwrap_or_default();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[cfg(not(feature = "otel"))]
-        let parent_ctx = ();
-        let conn_info = self.connection_info.clone();
+        let args =
+            client_common::prepare_batch_remove_args(py, keys, policy, &self.connection_info)?;
+        let ops = args.to_batch_ops();
 
         let results = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
                     "batch_remove",
-                    &batch_ns,
-                    &batch_set,
-                    parent_ctx,
-                    conn_info,
-                    { client.batch(&batch_policy, &ops).await }
+                    &args.batch_ns,
+                    &args.batch_set,
+                    args.parent_ctx,
+                    args.conn_info,
+                    { client.batch(&args.batch_policy, &ops).await }
                 )
             })
         })?;
@@ -1678,24 +1420,25 @@ impl PyClient {
             namespace, set_name, bin_name, index_name
         );
         let client = self.get_client()?.clone();
-        let admin_policy = parse_admin_policy(policy)?;
+        let args = client_common::prepare_index_create_args(
+            namespace, set_name, bin_name, index_name, index_type, policy,
+        )?;
 
         py.detach(|| {
             RUNTIME.block_on(async {
                 let task = client
                     .create_index_on_bin(
-                        &admin_policy,
-                        namespace,
-                        set_name,
-                        bin_name,
-                        index_name,
-                        index_type,
+                        &args.admin_policy,
+                        &args.namespace,
+                        &args.set_name,
+                        &args.bin_name,
+                        &args.index_name,
+                        args.index_type,
                         aerospike_core::CollectionIndexType::Default,
                         None,
                     )
                     .await
                     .map_err(as_to_pyerr)?;
-                // Wait for index creation to complete
                 task.wait_till_complete(None::<std::time::Duration>)
                     .await
                     .map_err(as_to_pyerr)?;

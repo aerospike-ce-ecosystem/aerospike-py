@@ -24,96 +24,34 @@ pub fn py_to_expression(obj: &Bound<'_, PyAny>) -> PyResult<Expression> {
 
     match op.as_str() {
         // ── Value constructors ──
-        "int_val" => {
-            let val: i64 = get_required(dict, "val")?;
-            Ok(expressions::int_val(val))
-        }
-        "float_val" => {
-            let val: f64 = get_required(dict, "val")?;
-            Ok(expressions::float_val(val))
-        }
-        "string_val" => {
-            let val: String = get_required(dict, "val")?;
-            Ok(expressions::string_val(val))
-        }
-        "bool_val" => {
-            let val: bool = get_required(dict, "val")?;
-            Ok(expressions::bool_val(val))
-        }
-        "blob_val" => {
-            let val: Vec<u8> = get_required(dict, "val")?;
-            Ok(expressions::blob_val(val))
-        }
-        "list_val" => {
-            let py_list = get_required_any(dict, "val")?;
-            let values = py_list_to_values(&py_list)?;
-            Ok(expressions::list_val(values))
-        }
-        "map_val" => {
-            let py_dict = get_required_any(dict, "val")?;
-            let map = py_dict_to_hashmap(&py_dict)?;
-            Ok(expressions::map_val(map))
-        }
-        "geo_val" => {
-            let val: String = get_required(dict, "val")?;
-            Ok(expressions::geo_val(val))
-        }
+        "int_val" => Ok(expressions::int_val(get_required(dict, "val")?)),
+        "float_val" => Ok(expressions::float_val(get_required(dict, "val")?)),
+        "string_val" => Ok(expressions::string_val(get_required::<String>(
+            dict, "val",
+        )?)),
+        "bool_val" => Ok(expressions::bool_val(get_required(dict, "val")?)),
+        "blob_val" => Ok(expressions::blob_val(get_required::<Vec<u8>>(dict, "val")?)),
+        "list_val" => Ok(expressions::list_val(py_list_to_values(
+            &get_required_any(dict, "val")?,
+        )?)),
+        "map_val" => Ok(expressions::map_val(py_dict_to_hashmap(
+            &get_required_any(dict, "val")?,
+        )?)),
+        "geo_val" => Ok(expressions::geo_val(get_required::<String>(dict, "val")?)),
         "nil" => Ok(expressions::nil()),
         "infinity" => Ok(expressions::infinity()),
         "wildcard" => Ok(expressions::wildcard()),
 
         // ── Bin accessors ──
-        "int_bin" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::int_bin(name))
-        }
-        "float_bin" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::float_bin(name))
-        }
-        "string_bin" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::string_bin(name))
-        }
-        "bool_bin" => {
-            // aerospike-core doesn't have a dedicated bool_bin; use int_bin (booleans are stored as integers)
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::int_bin(name))
-        }
-        "blob_bin" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::blob_bin(name))
-        }
-        "list_bin" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::list_bin(name))
-        }
-        "map_bin" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::map_bin(name))
-        }
-        "geo_bin" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::geo_bin(name))
-        }
-        "hll_bin" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::hll_bin(name))
-        }
-        "bin_exists" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::bin_exists(name))
-        }
-        "bin_type" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::bin_type(name))
+        "int_bin" | "float_bin" | "string_bin" | "blob_bin" | "list_bin" | "map_bin"
+        | "geo_bin" | "hll_bin" | "bin_exists" | "bin_type" | "bool_bin" => {
+            convert_bin_accessor(op.as_str(), dict)
         }
 
         // ── Record metadata ──
-        "key" => {
-            let exp_type: i64 = get_required(dict, "exp_type")?;
-            Ok(expressions::key(int_to_exp_type(exp_type)?))
-        }
+        "key" => Ok(expressions::key(int_to_exp_type(get_required(
+            dict, "exp_type",
+        )?)?)),
         "key_exists" => Ok(expressions::key_exists()),
         "set_name" => Ok(expressions::set_name()),
         "record_size" => Ok(expressions::record_size()),
@@ -122,207 +60,30 @@ pub fn py_to_expression(obj: &Bound<'_, PyAny>) -> PyResult<Expression> {
         "void_time" => Ok(expressions::void_time()),
         "ttl" => Ok(expressions::ttl()),
         "is_tombstone" => Ok(expressions::is_tombstone()),
-        "digest_modulo" => {
-            let modulo: i64 = get_required(dict, "modulo")?;
-            Ok(expressions::digest_modulo(modulo))
-        }
+        "digest_modulo" => Ok(expressions::digest_modulo(get_required(dict, "modulo")?)),
 
-        // ── Comparison operations ──
-        "eq" => {
-            let left = parse_sub_expr(dict, "left")?;
-            let right = parse_sub_expr(dict, "right")?;
-            Ok(expressions::eq(left, right))
-        }
-        "ne" => {
-            let left = parse_sub_expr(dict, "left")?;
-            let right = parse_sub_expr(dict, "right")?;
-            Ok(expressions::ne(left, right))
-        }
-        "gt" => {
-            let left = parse_sub_expr(dict, "left")?;
-            let right = parse_sub_expr(dict, "right")?;
-            Ok(expressions::gt(left, right))
-        }
-        "ge" => {
-            let left = parse_sub_expr(dict, "left")?;
-            let right = parse_sub_expr(dict, "right")?;
-            Ok(expressions::ge(left, right))
-        }
-        "lt" => {
-            let left = parse_sub_expr(dict, "left")?;
-            let right = parse_sub_expr(dict, "right")?;
-            Ok(expressions::lt(left, right))
-        }
-        "le" => {
-            let left = parse_sub_expr(dict, "left")?;
-            let right = parse_sub_expr(dict, "right")?;
-            Ok(expressions::le(left, right))
+        // ── Comparison operations (binary: left + right) ──
+        "eq" | "ne" | "gt" | "ge" | "lt" | "le" | "geo_compare" => {
+            convert_binary_comparison(op.as_str(), dict)
         }
 
         // ── Logical operations ──
-        "and" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::and(exprs))
-        }
-        "or" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::or(exprs))
-        }
-        "not" => {
-            let expr = parse_sub_expr(dict, "expr")?;
-            Ok(expressions::not(expr))
-        }
-        "xor" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::xor(exprs))
+        "not" => Ok(expressions::not(parse_sub_expr(dict, "expr")?)),
+
+        // ── Variadic operations (take Vec<Expression>) ──
+        "and" | "or" | "xor" | "num_add" | "num_sub" | "num_mul" | "num_div" | "min" | "max"
+        | "int_and" | "int_or" | "int_xor" | "cond" | "let" => {
+            convert_variadic_op(op.as_str(), dict)
         }
 
-        // ── Numeric operations ──
-        "num_add" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::num_add(exprs))
-        }
-        "num_sub" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::num_sub(exprs))
-        }
-        "num_mul" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::num_mul(exprs))
-        }
-        "num_div" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::num_div(exprs))
-        }
-        "num_mod" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            if exprs.len() != 2 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "num_mod requires exactly 2 expressions (numerator, denominator)",
-                ));
-            }
-            let mut iter = exprs.into_iter();
-            Ok(expressions::num_mod(
-                iter.next().unwrap(),
-                iter.next().unwrap(),
-            ))
-        }
-        "num_pow" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            if exprs.len() != 2 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "num_pow requires exactly 2 expressions (base, exponent)",
-                ));
-            }
-            let mut iter = exprs.into_iter();
-            Ok(expressions::num_pow(
-                iter.next().unwrap(),
-                iter.next().unwrap(),
-            ))
-        }
-        "num_log" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            if exprs.len() != 2 {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "num_log requires exactly 2 expressions (num, base)",
-                ));
-            }
-            let mut iter = exprs.into_iter();
-            Ok(expressions::num_log(
-                iter.next().unwrap(),
-                iter.next().unwrap(),
-            ))
-        }
-        "num_abs" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::num_abs(exprs.into_iter().next().unwrap()))
-        }
-        "num_floor" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::num_floor(exprs.into_iter().next().unwrap()))
-        }
-        "num_ceil" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::num_ceil(exprs.into_iter().next().unwrap()))
-        }
-        "to_int" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::to_int(exprs.into_iter().next().unwrap()))
-        }
-        "to_float" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::to_float(exprs.into_iter().next().unwrap()))
-        }
-        "min" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::min(exprs))
-        }
-        "max" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::max(exprs))
+        // ── Unary operations (take single Expression from "exprs" list) ──
+        "num_abs" | "num_floor" | "num_ceil" | "to_int" | "to_float" | "int_not" | "int_count" => {
+            convert_unary_op(op.as_str(), dict)
         }
 
-        // ── Integer bitwise operations ──
-        "int_and" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::int_and(exprs))
-        }
-        "int_or" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::int_or(exprs))
-        }
-        "int_xor" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::int_xor(exprs))
-        }
-        "int_not" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::int_not(exprs.into_iter().next().unwrap()))
-        }
-        "int_lshift" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            let mut iter = exprs.into_iter();
-            Ok(expressions::int_lshift(
-                iter.next().unwrap(),
-                iter.next().unwrap(),
-            ))
-        }
-        "int_rshift" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            let mut iter = exprs.into_iter();
-            Ok(expressions::int_rshift(
-                iter.next().unwrap(),
-                iter.next().unwrap(),
-            ))
-        }
-        "int_arshift" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            let mut iter = exprs.into_iter();
-            Ok(expressions::int_arshift(
-                iter.next().unwrap(),
-                iter.next().unwrap(),
-            ))
-        }
-        "int_count" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::int_count(exprs.into_iter().next().unwrap()))
-        }
-        "int_lscan" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            let mut iter = exprs.into_iter();
-            Ok(expressions::int_lscan(
-                iter.next().unwrap(),
-                iter.next().unwrap(),
-            ))
-        }
-        "int_rscan" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            let mut iter = exprs.into_iter();
-            Ok(expressions::int_rscan(
-                iter.next().unwrap(),
-                iter.next().unwrap(),
-            ))
-        }
+        // ── Binary pair operations (take exactly 2 Expressions from "exprs" list) ──
+        "num_mod" | "num_pow" | "num_log" | "int_lshift" | "int_rshift" | "int_arshift"
+        | "int_lscan" | "int_rscan" => convert_binary_pair_op(op.as_str(), dict),
 
         // ── Pattern matching ──
         "regex_compare" => {
@@ -331,29 +92,13 @@ pub fn py_to_expression(obj: &Bound<'_, PyAny>) -> PyResult<Expression> {
             let bin_expr = parse_sub_expr(dict, "bin")?;
             Ok(expressions::regex_compare(regex, flags, bin_expr))
         }
-        "geo_compare" => {
-            let left = parse_sub_expr(dict, "left")?;
-            let right = parse_sub_expr(dict, "right")?;
-            Ok(expressions::geo_compare(left, right))
-        }
 
         // ── Control flow ──
-        "cond" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::cond(exprs))
-        }
-        "var" => {
-            let name: String = get_required(dict, "name")?;
-            Ok(expressions::var(name))
-        }
+        "var" => Ok(expressions::var(get_required::<String>(dict, "name")?)),
         "def" => {
             let name: String = get_required(dict, "name")?;
             let value = parse_sub_expr(dict, "value")?;
             Ok(expressions::def(name, value))
-        }
-        "let" => {
-            let exprs = parse_sub_expr_list(dict, "exprs")?;
-            Ok(expressions::exp_let(exprs))
         }
 
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
@@ -362,7 +107,115 @@ pub fn py_to_expression(obj: &Bound<'_, PyAny>) -> PyResult<Expression> {
     }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────
+// ── Dispatch helpers ──────────────────────────────────────────────
+
+/// Convert bin accessor operations that all take a single "name" field.
+fn convert_bin_accessor(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
+    let name: String = get_required(dict, "name")?;
+    match op {
+        "int_bin" => Ok(expressions::int_bin(name)),
+        "float_bin" => Ok(expressions::float_bin(name)),
+        "string_bin" => Ok(expressions::string_bin(name)),
+        "bool_bin" => Ok(expressions::int_bin(name)), // booleans are stored as integers
+        "blob_bin" => Ok(expressions::blob_bin(name)),
+        "list_bin" => Ok(expressions::list_bin(name)),
+        "map_bin" => Ok(expressions::map_bin(name)),
+        "geo_bin" => Ok(expressions::geo_bin(name)),
+        "hll_bin" => Ok(expressions::hll_bin(name)),
+        "bin_exists" => Ok(expressions::bin_exists(name)),
+        "bin_type" => Ok(expressions::bin_type(name)),
+        _ => unreachable!("convert_bin_accessor called with unexpected op: {op}"),
+    }
+}
+
+/// Convert binary comparison operations that take "left" and "right" sub-expressions.
+fn convert_binary_comparison(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
+    let left = parse_sub_expr(dict, "left")?;
+    let right = parse_sub_expr(dict, "right")?;
+    match op {
+        "eq" => Ok(expressions::eq(left, right)),
+        "ne" => Ok(expressions::ne(left, right)),
+        "gt" => Ok(expressions::gt(left, right)),
+        "ge" => Ok(expressions::ge(left, right)),
+        "lt" => Ok(expressions::lt(left, right)),
+        "le" => Ok(expressions::le(left, right)),
+        "geo_compare" => Ok(expressions::geo_compare(left, right)),
+        _ => unreachable!("convert_binary_comparison called with unexpected op: {op}"),
+    }
+}
+
+/// Convert variadic operations that take a Vec<Expression> from "exprs".
+fn convert_variadic_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
+    let exprs = parse_sub_expr_list(dict, "exprs")?;
+    match op {
+        "and" => Ok(expressions::and(exprs)),
+        "or" => Ok(expressions::or(exprs)),
+        "xor" => Ok(expressions::xor(exprs)),
+        "num_add" => Ok(expressions::num_add(exprs)),
+        "num_sub" => Ok(expressions::num_sub(exprs)),
+        "num_mul" => Ok(expressions::num_mul(exprs)),
+        "num_div" => Ok(expressions::num_div(exprs)),
+        "min" => Ok(expressions::min(exprs)),
+        "max" => Ok(expressions::max(exprs)),
+        "int_and" => Ok(expressions::int_and(exprs)),
+        "int_or" => Ok(expressions::int_or(exprs)),
+        "int_xor" => Ok(expressions::int_xor(exprs)),
+        "cond" => Ok(expressions::cond(exprs)),
+        "let" => Ok(expressions::exp_let(exprs)),
+        _ => unreachable!("convert_variadic_op called with unexpected op: {op}"),
+    }
+}
+
+/// Convert unary operations that take a single Expression from "exprs" list.
+fn convert_unary_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
+    let exprs = parse_sub_expr_list(dict, "exprs")?;
+    let expr = exprs.into_iter().next().ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "{op} requires at least 1 expression in 'exprs'"
+        ))
+    })?;
+    match op {
+        "num_abs" => Ok(expressions::num_abs(expr)),
+        "num_floor" => Ok(expressions::num_floor(expr)),
+        "num_ceil" => Ok(expressions::num_ceil(expr)),
+        "to_int" => Ok(expressions::to_int(expr)),
+        "to_float" => Ok(expressions::to_float(expr)),
+        "int_not" => Ok(expressions::int_not(expr)),
+        "int_count" => Ok(expressions::int_count(expr)),
+        _ => unreachable!("convert_unary_op called with unexpected op: {op}"),
+    }
+}
+
+/// Convert binary pair operations that take exactly 2 Expressions from "exprs" list.
+fn convert_binary_pair_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
+    let exprs = parse_sub_expr_list(dict, "exprs")?;
+    if exprs.len() != 2 {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{op} requires exactly 2 expressions, got {}",
+            exprs.len()
+        )));
+    }
+    let mut iter = exprs.into_iter();
+    let first = iter.next().ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("{op}: missing first expression"))
+    })?;
+    let second = iter.next().ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("{op}: missing second expression"))
+    })?;
+    match op {
+        "num_mod" => Ok(expressions::num_mod(first, second)),
+        "num_pow" => Ok(expressions::num_pow(first, second)),
+        "num_log" => Ok(expressions::num_log(first, second)),
+        "int_lshift" => Ok(expressions::int_lshift(first, second)),
+        "int_rshift" => Ok(expressions::int_rshift(first, second)),
+        "int_arshift" => Ok(expressions::int_arshift(first, second)),
+        "int_lscan" => Ok(expressions::int_lscan(first, second)),
+        "int_rscan" => Ok(expressions::int_rscan(first, second)),
+        _ => unreachable!("convert_binary_pair_op called with unexpected op: {op}"),
+    }
+}
+
+// ── Field extraction helpers ──────────────────────────────────────
 
 fn get_required<'py, T: for<'a> FromPyObject<'a, 'py, Error = PyErr>>(
     dict: &Bound<'py, PyDict>,

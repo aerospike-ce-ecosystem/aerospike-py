@@ -61,30 +61,15 @@ jobs:
             3.13
           allow-prereleases: true
 
-      - name: Extract version from git tag
+      - name: Extract version and update Cargo.toml
         id: version
-        run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"  # Remove 'v' prefix if present
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#v}"  # Remove 'v' prefix if present
-          else
-            VERSION="0.0.0-dev${{ github.run_number }}"
-          fi
-          # Convert PEP 440 pre-release suffixes to Cargo semver format
-          # e.g. "0.0.1alpha4" / "0.0.1.alpha4" / "0.0.1a4" → "0.0.1-alpha.4"
-          VERSION=$(echo "$VERSION" | sed -E 's/\.?(alpha|beta|rc|dev|a|b)\.?([0-9]+)/-\1.\2/g')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Using version: $VERSION"
-        shell: bash
-
-      - name: Update Cargo.toml version
-        run: |
-          sed -i.bak 's/^version = ".*"/version = "${{ steps.version.outputs.version }}"/' rust/Cargo.toml
-          cat rust/Cargo.toml | head -10
-        shell: bash
+        uses: ./.github/actions/extract-version
+        with:
+          event_name: ${{ github.event_name }}
+          tag_name: ${{ github.event.release.tag_name }}
+          ref_name: ${{ github.ref_name }}
+          ref: ${{ github.ref }}
+          run_number: ${{ github.run_number }}
 
       - name: Build wheels (Linux)
         if: runner.os == 'Linux'
@@ -132,28 +117,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract version from git tag
+      - name: Extract version and update Cargo.toml
         id: version
-        run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"  # Remove 'v' prefix if present
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#v}"  # Remove 'v' prefix if present
-          else
-            VERSION="0.0.0-dev${{ github.run_number }}"
-          fi
-          # Convert PEP 440 pre-release suffixes to Cargo semver format
-          # e.g. "0.0.1alpha4" / "0.0.1.alpha4" / "0.0.1a4" → "0.0.1-alpha.4"
-          VERSION=$(echo "$VERSION" | sed -E 's/\.?(alpha|beta|rc|dev|a|b)\.?([0-9]+)/-\1.\2/g')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Using version: $VERSION"
-
-      - name: Update Cargo.toml version
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.version }}"/' rust/Cargo.toml
-          cat rust/Cargo.toml | head -10
+        uses: ./.github/actions/extract-version
+        with:
+          event_name: ${{ github.event_name }}
+          tag_name: ${{ github.event.release.tag_name }}
+          ref_name: ${{ github.ref_name }}
+          ref: ${{ github.ref }}
+          run_number: ${{ github.run_number }}
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1

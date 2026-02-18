@@ -33,11 +33,11 @@ client.admin_revoke_roles("alice", ["read-write"])
 
 ```python
 # Single user
-user = client.admin_query_user("alice")
+user = client.admin_query_user_info("alice")
 print(user)  # {"user": "alice", "roles": ["sys-admin"]}
 
 # All users
-users = client.admin_query_users()
+users = client.admin_query_users_info()
 for u in users:
     print(f"{u['user']}: {u['roles']}")
 ```

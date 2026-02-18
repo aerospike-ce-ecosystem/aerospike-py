@@ -6,7 +6,7 @@ and ``client.operate_ordered()``.
 
 from typing import Any, Optional
 
-from aerospike_py._types import Operation
+from aerospike_py._types import MapPolicy, Operation
 
 __all__ = [
     "Operation",
@@ -74,7 +74,7 @@ def map_set_order(bin: str, map_order: int) -> Operation:
     return {"op": _OP_MAP_SET_ORDER, "bin": bin, "val": map_order}
 
 
-def map_put(bin: str, key: Any, val: Any, policy: Optional[Operation] = None) -> Operation:
+def map_put(bin: str, key: Any, val: Any, policy: Optional[MapPolicy] = None) -> Operation:
     """Put a key/value pair into a map bin."""
     op = {"op": _OP_MAP_PUT, "bin": bin, "map_key": key, "val": val}
     if policy:
@@ -82,7 +82,7 @@ def map_put(bin: str, key: Any, val: Any, policy: Optional[Operation] = None) ->
     return op
 
 
-def map_put_items(bin: str, items: dict[str, Any], policy: Optional[Operation] = None) -> Operation:
+def map_put_items(bin: str, items: dict[str, Any], policy: Optional[MapPolicy] = None) -> Operation:
     """Put multiple key/value pairs into a map bin."""
     op = {"op": _OP_MAP_PUT_ITEMS, "bin": bin, "val": items}
     if policy:
@@ -90,7 +90,7 @@ def map_put_items(bin: str, items: dict[str, Any], policy: Optional[Operation] =
     return op
 
 
-def map_increment(bin: str, key: Any, incr: Any, policy: Optional[Operation] = None) -> Operation:
+def map_increment(bin: str, key: Any, incr: Any, policy: Optional[MapPolicy] = None) -> Operation:
     """Increment a value in a map by key."""
     op = {"op": _OP_MAP_INCREMENT, "bin": bin, "map_key": key, "val": incr}
     if policy:
@@ -98,7 +98,7 @@ def map_increment(bin: str, key: Any, incr: Any, policy: Optional[Operation] = N
     return op
 
 
-def map_decrement(bin: str, key: Any, decr: Any, policy: Optional[Operation] = None) -> Operation:
+def map_decrement(bin: str, key: Any, decr: Any, policy: Optional[MapPolicy] = None) -> Operation:
     """Decrement a value in a map by key."""
     op = {"op": _OP_MAP_DECREMENT, "bin": bin, "map_key": key, "val": decr}
     if policy:

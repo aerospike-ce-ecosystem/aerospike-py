@@ -32,7 +32,7 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --manifest-path rust/Cargo.toml -- -D warnings
+        entry: cargo clippy --manifest-path rust/Cargo.toml --features otel -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false

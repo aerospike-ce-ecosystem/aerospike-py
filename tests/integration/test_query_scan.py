@@ -1,11 +1,10 @@
 """Integration tests for query operations (requires Aerospike server)."""
 
-import time
-
 import pytest
 
 import aerospike_py
 from aerospike_py import predicates as p
+from tests.helpers import wait_for_index
 
 
 @pytest.fixture(scope="module")
@@ -23,7 +22,7 @@ def seed_data(client):
     except aerospike_py.ServerError:
         pass  # Index may already exist
 
-    time.sleep(1)  # Wait for index to be ready
+    wait_for_index(client, "test", "query_test", "age")
     yield keys
 
     # Cleanup
@@ -80,7 +79,7 @@ class TestIndex:
     def test_index_string_create_remove(self, client, seed_data):
         try:
             client.index_string_create("test", "query_test", "name", "idx_query_name")
-            time.sleep(1)
+            wait_for_index(client, "test", "query_test", "name")
         except aerospike_py.ServerError:
             pass  # May already exist
 
