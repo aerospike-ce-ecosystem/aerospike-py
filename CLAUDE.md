@@ -118,3 +118,7 @@ make test-integration               # 서버 필요
 - `cleanup` / `async_cleanup` — 테스트 후 자동 레코드 정리
 
 pytest 설정: `asyncio_mode = "auto"` (async 테스트 자동 감지)
+
+## Planning
+
+plan mode 진입 시 `.claude/skills/project-goals/SKILL.md`를 반드시 읽을 것.
