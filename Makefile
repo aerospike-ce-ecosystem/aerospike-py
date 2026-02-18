@@ -3,7 +3,7 @@ SHELL := /bin/bash
 AEROSPIKE_HOST ?= 127.0.0.1
 AEROSPIKE_PORT ?= 3000
 
-RUNTIME ?= docker
+RUNTIME ?= podman
 AEROSPIKE_CPUS ?= 2
 AEROSPIKE_MEMORY ?= 2g
 BENCH_COUNT ?= 5000
@@ -36,22 +36,14 @@ run-aerospike-ce: ## Start Aerospike CE container (RUNTIME=docker|podman)
 	@if $(RUNTIME) ps --format '{{.Names}}' | grep -q '^aerospike$$'; then \
 		echo "aerospike container is already running ($(RUNTIME))"; \
 	else \
-		$(RUNTIME) run -d --name aerospike \
-			-p 3000:3000 -p 3001:3001 -p 3002:3002 \
-			--cpus=$(AEROSPIKE_CPUS) \
-			--memory=$(AEROSPIKE_MEMORY) \
-			--shm-size=1g \
-			-e "NAMESPACE=test" \
-			-e "DEFAULT_TTL=2592000" \
-			-v $(CURDIR)/scripts/aerospike.template.conf:/etc/aerospike/aerospike.template.conf \
-			aerospike:ce-8.1.0.3_1; \
+		$(RUNTIME) compose -f compose.local.yaml up -d; \
 		echo "Waiting for Aerospike to start..."; \
 		sleep 3; \
 	fi
 
 .PHONY: stop-aerospike-ce
 stop-aerospike-ce: ## Stop and remove Aerospike CE container
-	$(RUNTIME) rm -f aerospike 2>/dev/null || true
+	$(RUNTIME) compose -f compose.local.yaml down 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Benchmark

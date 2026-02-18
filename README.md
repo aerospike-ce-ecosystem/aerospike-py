@@ -118,6 +118,39 @@ Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to und
 - [`llms.txt`](https://kimsoungryoul.github.io/aerospike-py/llms.txt) — Documentation index for AI agents
 - [`llms-full.txt`](https://kimsoungryoul.github.io/aerospike-py/llms-full.txt) — Complete documentation in a single file
 
+## Claude Code Skills & Agents
+
+이 프로젝트는 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 자동화가 설정되어 있습니다.
+
+### Skills
+
+`/skill-name`으로 호출합니다.
+
+| Skill | 명령어 | 설명 |
+|-------|--------|------|
+| **release-check** | `/release-check` | 릴리스 전 검증 (lint, unit test, pyright, type stub 일관성, 버전 확인) |
+| **bench-compare** | `/bench-compare` | aerospike-py vs 공식 C 클라이언트 벤치마크 비교 |
+| **test-sample-fastapi** | `/test-sample-fastapi` | aerospike-py 빌드 → sample-fastapi 설치 → 통합 테스트 실행 |
+
+### Subagents
+
+코드 리뷰/분석 시 자동으로 활용됩니다.
+
+| Agent | 설명 |
+|-------|------|
+| **pyo3-reviewer** | PyO3 바인딩 리뷰 (GIL 관리, 타입 변환, async 안전성, 메모리 안전성) |
+| **type-stub-sync** | `__init__.pyi` stub과 Rust 소스 간 일관성 검증 |
+
+### Hooks
+
+파일 편집 시 자동 실행됩니다.
+
+| Hook | 트리거 | 동작 |
+|------|--------|------|
+| Python auto-format | `.py` 편집 후 | `ruff format` + `ruff check --fix` |
+| Rust auto-format | `.rs` 편집 후 | `cargo fmt` |
+| Binary/lock 보호 | `.so`, `.dylib`, `.whl`, `uv.lock` 편집 시 | 편집 차단 |
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and making changes.
