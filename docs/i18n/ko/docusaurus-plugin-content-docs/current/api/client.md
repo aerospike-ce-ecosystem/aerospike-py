@@ -202,7 +202,7 @@ await client.put(key, {"x": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE
 
 ```python
 key, meta, bins = client.get(("test", "demo", "user1"))
-# meta = {"gen": 1, "ttl": 2591998}
+# meta.gen == 1, meta.ttl == 2591998
 # bins = {"name": "Alice", "age": 30}
 ```
 
@@ -254,7 +254,7 @@ _, meta, bins = await client.select(key, ["name"])
 ```python
 _, meta = client.exists(key)
 if meta is not None:
-    print(f"Found, gen={meta['gen']}")
+    print(f"Found, gen={meta.gen}")
 ```
 
   </TabItem>
@@ -263,7 +263,7 @@ if meta is not None:
 ```python
 _, meta = await client.exists(key)
 if meta is not None:
-    print(f"Found, gen={meta['gen']}")
+    print(f"Found, gen={meta.gen}")
 ```
 
   </TabItem>

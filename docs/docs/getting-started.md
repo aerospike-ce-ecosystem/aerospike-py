@@ -58,7 +58,7 @@ with aerospike.client({
 
     # Read a record
     _, meta, bins = client.get(key)
-    print(f"bins={bins}, gen={meta['gen']}, ttl={meta['ttl']}")
+    print(f"bins={bins}, gen={meta.gen}, ttl={meta.ttl}")
 
     # Update with increment
     client.increment(key, "age", 1)
@@ -108,7 +108,7 @@ async def main():
 
     # Read a record
     _, meta, bins = await client.get(key)
-    print(f"bins={bins}, gen={meta['gen']}, ttl={meta['ttl']}")
+    print(f"bins={bins}, gen={meta.gen}, ttl={meta.ttl}")
 
     # Update with increment
     await client.increment(key, "age", 1)
@@ -165,7 +165,7 @@ client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 # Optimistic locking with generation check
 _, meta, bins = client.get(key)
 client.put(key, {"val": bins["val"] + 1},
-           meta={"gen": meta["gen"]},
+           meta={"gen": meta.gen},
            policy={"gen": aerospike.POLICY_GEN_EQ})
 ```
 
@@ -185,7 +185,7 @@ await client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONL
 # Optimistic locking with generation check
 _, meta, bins = await client.get(key)
 await client.put(key, {"val": bins["val"] + 1},
-                 meta={"gen": meta["gen"]},
+                 meta={"gen": meta.gen},
                  policy={"gen": aerospike.POLICY_GEN_EQ})
 ```
 

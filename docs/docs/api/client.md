@@ -405,7 +405,7 @@ Check whether a record exists.
 ```python
 _, meta = client.exists(("test", "demo", "user1"))
 if meta is not None:
-    print(f"Found, gen={meta['gen']}")
+    print(f"Found, gen={meta.gen}")
 ```
 
   </TabItem>
@@ -414,7 +414,7 @@ if meta is not None:
 ```python
 _, meta = await client.exists(("test", "demo", "user1"))
 if meta is not None:
-    print(f"Found, gen={meta['gen']}")
+    print(f"Found, gen={meta.gen}")
 ```
 
   </TabItem>

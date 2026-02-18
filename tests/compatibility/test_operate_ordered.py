@@ -171,10 +171,10 @@ class TestOperateOrderedReturnTypes:
         # Key should be a tuple
         assert isinstance(key_part, tuple)
 
-        # Meta should be a dict with gen and ttl
-        assert isinstance(meta_part, dict)
-        assert "gen" in meta_part
-        assert "ttl" in meta_part
+        # Meta should be a NamedTuple with gen and ttl
+        assert isinstance(meta_part, tuple)
+        assert hasattr(meta_part, "gen")
+        assert hasattr(meta_part, "ttl")
 
         # Ordered bins should be a list of tuples
         assert isinstance(ordered_part, list)
@@ -201,7 +201,7 @@ class TestOperateOrderedReturnTypes:
         o_key, o_meta, o_ordered = official_client.operate_ordered(key, off_op_list)
 
         # Meta generation should match
-        assert r_meta["gen"] == o_meta["gen"]
+        assert r_meta.gen == o_meta["gen"]
 
         # Ordered bins content should match
         assert r_ordered == o_ordered

@@ -178,7 +178,7 @@ with aerospike.client({
 
     # Read a record
     _, meta, bins = client.get(key)
-    print(f"bins={bins}, gen={meta['gen']}, ttl={meta['ttl']}")
+    print(f"bins={bins}, gen={meta.gen}, ttl={meta.ttl}")
 
     # Update with increment
     client.increment(key, "age", 1)
@@ -223,7 +223,7 @@ async def main():
 
     # Read a record
     _, meta, bins = await client.get(key)
-    print(f"bins={bins}, gen={meta['gen']}, ttl={meta['ttl']}")
+    print(f"bins={bins}, gen={meta.gen}, ttl={meta.ttl}")
 
     # Update with increment
     await client.increment(key, "age", 1)
@@ -276,7 +276,7 @@ client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 # Optimistic locking with generation check
 _, meta, bins = client.get(key)
 client.put(key, {"val": bins["val"] + 1},
-           meta={"gen": meta["gen"]},
+           meta={"gen": meta.gen},
            policy={"gen": aerospike.POLICY_GEN_EQ})
 ```
 
@@ -295,7 +295,7 @@ await client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONL
 # Optimistic locking with generation check
 _, meta, bins = await client.get(key)
 await client.put(key, {"val": bins["val"] + 1},
-                 meta={"gen": meta["gen"]},
+                 meta={"gen": meta.gen},
                  policy={"gen": aerospike.POLICY_GEN_EQ})
 ```
 
@@ -653,7 +653,7 @@ Check whether a record exists.
 ```python
 _, meta = client.exists(("test", "demo", "user1"))
 if meta is not None:
-    print(f"Found, gen={meta['gen']}")
+    print(f"Found, gen={meta.gen}")
 ```
 
 ##### Async Client
@@ -661,7 +661,7 @@ if meta is not None:
 ```python
 _, meta = await client.exists(("test", "demo", "user1"))
 if meta is not None:
-    print(f"Found, gen={meta['gen']}")
+    print(f"Found, gen={meta.gen}")
 ```
 
 ##### `remove(key, meta=None, policy=None)`
@@ -1807,7 +1807,7 @@ from aerospike_py.exception import RecordGenerationError
 try:
     _, meta, bins = client.get(key)
     client.put(key, {"val": bins["val"] + 1},
-               meta={"gen": meta["gen"]},
+               meta={"gen": meta.gen},
                policy={"gen": aerospike.POLICY_GEN_EQ})
 except RecordGenerationError:
     print("Record was modified by another client")
@@ -3133,7 +3133,7 @@ await client.put(key, bins, policy={"key": aerospike.POLICY_KEY_SEND})
 ```python
 key, meta, bins = client.get(("test", "demo", "user1"))
 # key  = ("test", "demo", "user1") or None
-# meta = {"gen": 1, "ttl": 2591998}
+# meta.gen == 1, meta.ttl == 2591998
 # bins = {"name": "Alice", "age": 30}
 ```
 
@@ -3165,7 +3165,7 @@ _, meta, bins = await client.select(key, ["name"])
 ```python
 _, meta = client.exists(key)
 if meta is not None:
-    print(f"Record exists, gen={meta['gen']}")
+    print(f"Record exists, gen={meta.gen}")
 else:
     print("Record not found")
 ```
@@ -3175,7 +3175,7 @@ else:
 ```python
 _, meta = await client.exists(key)
 if meta is not None:
-    print(f"Record exists, gen={meta['gen']}")
+    print(f"Record exists, gen={meta.gen}")
 else:
     print("Record not found")
 ```
@@ -3413,7 +3413,7 @@ try:
     client.put(
         key,
         {"val": bins["val"] + 1},
-        meta={"gen": meta["gen"]},
+        meta={"gen": meta.gen},
         policy={"gen": aerospike.POLICY_GEN_EQ},
     )
 except RecordGenerationError:
@@ -3431,7 +3431,7 @@ try:
     await client.put(
         key,
         {"val": bins["val"] + 1},
-        meta={"gen": meta["gen"]},
+        meta={"gen": meta.gen},
         policy={"gen": aerospike.POLICY_GEN_EQ},
     )
 except RecordGenerationError:
@@ -3541,7 +3541,7 @@ def increment_counter(client, key, bin_name):
             client.put(
                 key,
                 {bin_name: new_val},
-                meta={"gen": meta["gen"]},
+                meta={"gen": meta.gen},
                 policy={"gen": aerospike.POLICY_GEN_EQ},
             )
             return new_val
@@ -5125,7 +5125,7 @@ async def create_user(body: UserCreate, request: Request):
     user_id = uuid.uuid4().hex
     await client.put(_key(user_id), body.model_dump())
     _, meta, bins = await client.get(_key(user_id))
-    return UserResponse(user_id=user_id, generation=meta["gen"], **bins)
+    return UserResponse(user_id=user_id, generation=meta.gen, **bins)
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(user_id: str, request: Request):
@@ -5134,7 +5134,7 @@ async def get_user(user_id: str, request: Request):
         _, meta, bins = await client.get(_key(user_id))
     except RecordNotFound:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserResponse(user_id=user_id, generation=meta["gen"], **bins)
+    return UserResponse(user_id=user_id, generation=meta.gen, **bins)
 
 @router.delete("/{user_id}", status_code=204)
 async def delete_user(user_id: str, request: Request):

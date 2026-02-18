@@ -23,8 +23,8 @@ class TestGetReturnFormat:
         _, rust_meta, _ = rust_client.get(key)
         _, off_meta, _ = official_client.get(key)
 
-        assert "gen" in rust_meta
-        assert "ttl" in rust_meta
+        assert hasattr(rust_meta, "gen")
+        assert hasattr(rust_meta, "ttl")
         assert "gen" in off_meta
         assert "ttl" in off_meta
 
@@ -68,7 +68,7 @@ class TestGenerationBehavior:
         _, rust_meta, _ = rust_client.get(key_r)
         _, off_meta, _ = official_client.get(key_o)
 
-        assert rust_meta["gen"] == 1
+        assert rust_meta.gen == 1
         assert off_meta["gen"] == 1
 
     def test_gen_increments(self, rust_client, official_client, cleanup):
@@ -85,5 +85,5 @@ class TestGenerationBehavior:
         _, rust_meta, _ = rust_client.get(key_r)
         _, off_meta, _ = official_client.get(key_o)
 
-        assert rust_meta["gen"] == 3
+        assert rust_meta.gen == 3
         assert off_meta["gen"] == 3

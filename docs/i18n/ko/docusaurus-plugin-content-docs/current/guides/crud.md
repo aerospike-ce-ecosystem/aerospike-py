@@ -141,7 +141,7 @@ await client.put(key, bins, policy={"key": aerospike.POLICY_KEY_SEND})
 ```python
 key, meta, bins = client.get(("test", "demo", "user1"))
 # key  = ("test", "demo", "user1") or None
-# meta = {"gen": 1, "ttl": 2591998}
+# meta.gen == 1, meta.ttl == 2591998
 # bins = {"name": "Alice", "age": 30}
 ```
 
@@ -183,7 +183,7 @@ _, meta, bins = await client.select(key, ["name"])
 ```python
 _, meta = client.exists(key)
 if meta is not None:
-    print(f"Record exists, gen={meta['gen']}")
+    print(f"Record exists, gen={meta.gen}")
 else:
     print("Record not found")
 ```
@@ -194,7 +194,7 @@ else:
 ```python
 _, meta = await client.exists(key)
 if meta is not None:
-    print(f"Record exists, gen={meta['gen']}")
+    print(f"Record exists, gen={meta.gen}")
 else:
     print("Record not found")
 ```
@@ -476,7 +476,7 @@ try:
     client.put(
         key,
         {"val": bins["val"] + 1},
-        meta={"gen": meta["gen"]},
+        meta={"gen": meta.gen},
         policy={"gen": aerospike.POLICY_GEN_EQ},
     )
 except RecordGenerationError:
@@ -495,7 +495,7 @@ try:
     await client.put(
         key,
         {"val": bins["val"] + 1},
-        meta={"gen": meta["gen"]},
+        meta={"gen": meta.gen},
         policy={"gen": aerospike.POLICY_GEN_EQ},
     )
 except RecordGenerationError:

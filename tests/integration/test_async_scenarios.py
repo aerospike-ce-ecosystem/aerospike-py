@@ -19,13 +19,13 @@ class TestAsyncCRUDWorkflow:
         _, meta1, bins = await async_client.get(key)
         assert bins["name"] == "Alice"
         assert bins["age"] == 25
-        gen1 = meta1["gen"]
+        gen1 = meta1.gen
 
         await async_client.put(key, {"age": 26})
         _, meta2, bins = await async_client.get(key)
         assert bins["name"] == "Alice"
         assert bins["age"] == 26
-        assert meta2["gen"] == gen1 + 1
+        assert meta2.gen == gen1 + 1
 
         await async_client.remove(key)
         _, meta = await async_client.exists(key)

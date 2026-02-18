@@ -77,7 +77,7 @@ def increment_counter(client, key, bin_name):
             client.put(
                 key,
                 {bin_name: new_val},
-                meta={"gen": meta["gen"]},
+                meta={"gen": meta.gen},
                 policy={"gen": aerospike.POLICY_GEN_EQ},
             )
             return new_val

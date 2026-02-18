@@ -103,7 +103,7 @@ from aerospike_py.exception import RecordGenerationError
 try:
     _, meta, bins = client.get(key)
     client.put(key, {"val": bins["val"] + 1},
-               meta={"gen": meta["gen"]},
+               meta={"gen": meta.gen},
                policy={"gen": aerospike.POLICY_GEN_EQ})
 except RecordGenerationError:
     print("Record was modified by another client")

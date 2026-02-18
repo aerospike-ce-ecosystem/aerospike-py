@@ -18,7 +18,7 @@ class TestCRUDWorkflow:
         _, meta1, bins = client.get(key)
         assert bins["name"] == "Alice"
         assert bins["age"] == 25
-        gen1 = meta1["gen"]
+        gen1 = meta1.gen
 
         # Update
         client.put(key, {"age": 26, "score": 200})
@@ -26,7 +26,7 @@ class TestCRUDWorkflow:
         assert bins["name"] == "Alice"  # unchanged bin persists
         assert bins["age"] == 26
         assert bins["score"] == 200
-        assert meta2["gen"] == gen1 + 1
+        assert meta2.gen == gen1 + 1
 
         # Delete
         client.remove(key)
@@ -276,7 +276,7 @@ class TestTTLScenarios:
 
         client.put(key, {"val": 1}, meta={"ttl": 600})
         _, meta, _ = client.get(key)
-        assert 0 < meta["ttl"] <= 600
+        assert 0 < meta.ttl <= 600
 
     def test_ttl_touch_extends(self, client, cleanup):
         """Touch should extend TTL."""
@@ -285,11 +285,11 @@ class TestTTLScenarios:
 
         client.put(key, {"val": 1}, meta={"ttl": 100})
         _, meta1, _ = client.get(key)
-        original_ttl = meta1["ttl"]
+        original_ttl = meta1.ttl
 
         client.touch(key, 1000)
         _, meta2, _ = client.get(key)
-        assert meta2["ttl"] > original_ttl
+        assert meta2.ttl > original_ttl
 
     def test_ttl_never_expire(self, client, cleanup):
         """Set TTL to never expire."""
@@ -299,7 +299,7 @@ class TestTTLScenarios:
         client.put(key, {"val": 1}, meta={"ttl": aerospike_py.TTL_NEVER_EXPIRE})
         _, meta, _ = client.get(key)
         # TTL for never-expire is a very large number
-        assert meta["ttl"] > 0
+        assert meta.ttl > 0
 
 
 class TestGenerationPolicy:
@@ -312,15 +312,15 @@ class TestGenerationPolicy:
 
         client.put(key, {"val": 1})
         _, meta1, _ = client.get(key)
-        assert meta1["gen"] == 1
+        assert meta1.gen == 1
 
         client.put(key, {"val": 2})
         _, meta2, _ = client.get(key)
-        assert meta2["gen"] == 2
+        assert meta2.gen == 2
 
         client.put(key, {"val": 3})
         _, meta3, _ = client.get(key)
-        assert meta3["gen"] == 3
+        assert meta3.gen == 3
 
     def test_generation_eq_policy_success(self, client, cleanup):
         """Write with gen=current should succeed."""
@@ -334,7 +334,7 @@ class TestGenerationPolicy:
         client.put(
             key,
             {"val": 2},
-            meta={"gen": meta["gen"]},
+            meta={"gen": meta.gen},
             policy={"gen": aerospike_py.POLICY_GEN_EQ},
         )
         _, meta2, bins = client.get(key)
@@ -376,7 +376,7 @@ class TestGenerationPolicy:
         client.put(
             key,
             {"balance": bins1["balance"] - 100},
-            meta={"gen": meta1["gen"]},
+            meta={"gen": meta1.gen},
             policy={"gen": aerospike_py.POLICY_GEN_EQ},
         )
 
@@ -385,7 +385,7 @@ class TestGenerationPolicy:
             client.put(
                 key,
                 {"balance": bins1["balance"] + 500},
-                meta={"gen": meta1["gen"]},  # stale!
+                meta={"gen": meta1.gen},  # stale!
                 policy={"gen": aerospike_py.POLICY_GEN_EQ},
             )
 
@@ -721,7 +721,7 @@ class TestOperateOrdered:
         ]
         _, meta, ordered = client.operate_ordered(key, ops)
         assert isinstance(ordered, list)
-        assert meta["gen"] >= 1
+        assert meta.gen >= 1
         # Each element should be (bin_name, value) tuple
         for item in ordered:
             assert isinstance(item, tuple)

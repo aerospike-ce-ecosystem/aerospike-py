@@ -20,7 +20,7 @@ class TestAsyncCRUD:
         _, meta, bins = await async_client.get(key)
         assert bins["name"] == "async"
         assert bins["val"] == 42
-        assert meta["gen"] >= 1
+        assert meta.gen >= 1
         await async_client.remove(key)
 
     async def test_exists(self, async_client):

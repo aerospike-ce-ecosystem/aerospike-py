@@ -173,7 +173,7 @@ class TestBatchWrite:
             _, meta, bins = client.get(k)
             assert bins["name"] == "new"
             assert bins["score"] == 999
-            assert meta["gen"] == 2  # generation incremented
+            assert meta.gen == 2  # generation incremented
 
     def test_batch_write_partial_failure_mixed_types(self, client, cleanup):
         """batch_operate returns per-record results when some ops fail.

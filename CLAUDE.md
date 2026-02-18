@@ -92,14 +92,31 @@ make run-numpy-benchmark            # NumPy 배치 벤치마크
 ## 핵심 타입
 
 ```python
-Key = tuple[str, str, str | int | bytes]       # (namespace, set, primary_key)
-Metadata = dict[str, Any]                       # {"gen": int, "ttl": int}
-Bins = dict[str, Any]                           # {"bin_name": value, ...}
-Record = tuple[Key | None, Metadata | None, Bins | None]
-ExistsResult = tuple[Key | None, Metadata | None]
-PolicyDict = dict[str, Any]                     # {"timeout": int, "key": int, ...}
-OperationDict = dict[str, Any]                  # {"op": int, "bin": str, "val": Any}
-PrivilegeDict = dict[str, Any]                  # {"code": int, "ns": str, "set": str}
+# NamedTuple 반환 타입 (from aerospike_py.types)
+AerospikeKey = NamedTuple(namespace, set_name, user_key, digest)
+RecordMetadata = NamedTuple(gen, ttl)
+Bins = dict[str, Any]
+Record = NamedTuple(key: AerospikeKey | None, meta: RecordMetadata | None, bins: Bins | None)
+ExistsResult = NamedTuple(key: AerospikeKey | None, meta: RecordMetadata | None)
+InfoNodeResult = NamedTuple(node_name, error_code, response)
+BinTuple = NamedTuple(name, value)
+OperateOrderedResult = NamedTuple(key, meta, ordered_bins: list[BinTuple])
+
+# TypedDict 입력 타입
+ReadPolicy, WritePolicy, BatchPolicy, AdminPolicy, QueryPolicy  # 각 API별 정책
+WriteMeta = TypedDict(gen: int, ttl: int)                       # put/remove 등의 meta 파라미터
+ClientConfig = TypedDict(hosts, cluster_name, ...)              # client() 설정
+Privilege = TypedDict(code, ns, set)                            # admin API 권한
+
+# 기존 호환 alias
+Key = tuple[str, str, str | int | bytes]       # 입력용 키 타입
+
+# 속성 접근 예시
+record = client.get(key)
+record.meta.gen     # generation (NamedTuple 필드 접근)
+record.meta.ttl     # TTL
+record.key.namespace  # namespace
+record.bins["name"]   # bin 값
 ```
 
 ---
@@ -127,7 +144,7 @@ Context manager 지원: `with aerospike_py.client(config).connect() as c: ...`
 
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
-| `info_all` | `(command, policy=None) -> list[tuple[str, int, str]]` | 모든 노드에 info 명령 전송. `(node_name, error_code, response)` 반환 |
+| `info_all` | `(command, policy=None) -> list[InfoNodeResult]` | 모든 노드에 info 명령 전송. NamedTuple `(node_name, error_code, response)` 반환 |
 | `info_random_node` | `(command, policy=None) -> str` | 랜덤 노드에 info 명령 전송. 응답 문자열 반환 |
 
 ### CRUD
@@ -155,7 +172,7 @@ Context manager 지원: `with aerospike_py.client(config).connect() as c: ...`
 | 메서드 | 시그니처 | 설명 |
 |--------|----------|------|
 | `operate` | `(key, ops, meta=None, policy=None) -> Record` | 단일 레코드에 복합 연산 |
-| `operate_ordered` | `(key, ops, meta=None, policy=None) -> tuple[Key, Metadata, list[tuple[str, Any]]]` | 복합 연산 (순서 보존) |
+| `operate_ordered` | `(key, ops, meta=None, policy=None) -> OperateOrderedResult` | 복합 연산 (순서 보존). NamedTuple `(key, meta, ordered_bins: list[BinTuple])` 반환 |
 
 ### Batch
 
@@ -245,7 +262,9 @@ async def main():
     await client.connect()
 
     await client.put(("test", "demo", "key1"), {"name": "Alice"})
-    _, meta, bins = await client.get(("test", "demo", "key1"))
+    record = await client.get(("test", "demo", "key1"))
+    print(record.bins)       # {"name": "Alice"}
+    print(record.meta.gen)   # generation number
 
     await client.close()
 ```
@@ -319,7 +338,7 @@ from aerospike_py import exp
 
 # age > 21인 레코드만 조회
 expr = exp.gt(exp.int_bin("age"), exp.int_val(21))
-_, _, bins = client.get(key, policy={"expressions": expr})
+record = client.get(key, policy={"expressions": expr})
 ```
 
 주요 카테고리:

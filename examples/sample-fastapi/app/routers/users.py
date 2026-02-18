@@ -29,7 +29,7 @@ def _to_response(user_id: str, meta: dict, bins: dict) -> UserResponse:
         name=bins["name"],
         email=bins["email"],
         age=bins["age"],
-        generation=meta["gen"],
+        generation=meta.gen,
     )
 
 
