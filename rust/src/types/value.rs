@@ -1,9 +1,12 @@
+//! Bidirectional conversion between Python objects and `aerospike_core::Value`.
+
 use aerospike_core::Value;
 use log::warn;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
 use std::collections::HashMap;
 
+/// Maximum recursion depth for nested list/dict values to prevent stack overflow.
 const MAX_NESTING_DEPTH: usize = 64;
 
 /// Convert a Python object to an Aerospike Value

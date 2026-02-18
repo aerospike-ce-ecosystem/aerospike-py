@@ -1,3 +1,9 @@
+//! Prometheus metrics collection for Aerospike operations.
+//!
+//! Tracks `db_client_operation_duration_seconds` as a histogram, labeled by
+//! system, namespace, collection (set), operation name, and error type.
+//! Metrics are exposed in Prometheus text format via [`get_text`].
+
 use std::borrow::Cow;
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
@@ -8,6 +14,7 @@ use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::histogram::Histogram;
 use prometheus_client::registry::Registry;
 
+/// Histogram bucket boundaries (in seconds) for operation duration.
 const HISTOGRAM_BUCKETS: &[f64] = &[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0];
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
@@ -40,6 +47,10 @@ static METRICS: LazyLock<MetricsState> = LazyLock::new(|| {
     }
 });
 
+/// A RAII timer that records operation duration on [`finish`](Self::finish).
+///
+/// Created via [`OperationTimer::start`]; must be explicitly finished
+/// (not dropped) to record the metric with the correct error type.
 pub struct OperationTimer {
     start: Instant,
     op_name: String,
@@ -74,6 +85,7 @@ impl OperationTimer {
     }
 }
 
+/// Classify an `aerospike_core::Error` into a short error-type string for metric labels.
 pub fn error_type_from_aerospike_error(err: &AsError) -> String {
     match err {
         AsError::Connection(_) => "Connection".to_string(),
@@ -96,6 +108,7 @@ pub fn error_type_from_aerospike_error(err: &AsError) -> String {
     }
 }
 
+/// Encode all registered metrics in Prometheus text exposition format.
 pub fn get_text() -> String {
     let mut buf = String::new();
     let registry = METRICS.registry.lock().unwrap_or_else(|e| e.into_inner());

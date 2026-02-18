@@ -1,3 +1,10 @@
+//! Conversion of Python expression dict trees to `aerospike_core::Expression`.
+//!
+//! Expressions are represented in Python as nested dicts with an `"__expr__"` key
+//! identifying the expression type (e.g. `"eq"`, `"int_bin"`, `"and"`).
+//! The `aerospike_py.exp` Python module provides builder functions that produce
+//! these dicts; this module recursively converts them to Rust `Expression` values.
+
 use aerospike_core::expressions::{self, ExpType, Expression};
 use aerospike_core::Value;
 use pyo3::prelude::*;
@@ -255,6 +262,7 @@ fn parse_sub_expr_list(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<Expr
     Ok(result)
 }
 
+/// Map a Python integer to an [`ExpType`] enum variant used by key expressions.
 fn int_to_exp_type(val: i64) -> PyResult<ExpType> {
     match val {
         0 => Ok(ExpType::NIL),

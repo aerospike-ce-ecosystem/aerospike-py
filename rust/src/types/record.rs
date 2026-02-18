@@ -1,3 +1,5 @@
+//! Conversion from `aerospike_core::Record` to the Python `(key, meta, bins)` tuple.
+
 use aerospike_core::{Key, Record};
 use log::trace;
 use pyo3::prelude::*;

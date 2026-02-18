@@ -1,3 +1,22 @@
+//! Aerospike error types mapped to Python exceptions.
+//!
+//! The exception hierarchy mirrors the Aerospike error taxonomy:
+//!
+//! ```text
+//! AerospikeError (base)
+//!   +-- ClientError          (connection, config, internal)
+//!   +-- ServerError          (server-side errors)
+//!   |     +-- AerospikeIndexError
+//!   |     |     +-- IndexNotFound / IndexFoundError
+//!   |     +-- QueryError / QueryAbortedError
+//!   |     +-- AdminError / UDFError
+//!   +-- RecordError          (record-level)
+//!   |     +-- RecordNotFound / RecordExistsError / RecordGenerationError / ...
+//!   +-- ClusterError         (node/connectivity)
+//!   +-- AerospikeTimeoutError
+//!   +-- InvalidArgError
+//! ```
+
 use aerospike_core::{Error as AsError, ResultCode};
 use log::debug;
 use pyo3::exceptions::PyException;
@@ -146,6 +165,9 @@ pyo3::create_exception!(
     "User-Defined Function (UDF) execution error."
 );
 
+/// Map an `aerospike_core::ResultCode` to its integer wire-protocol value.
+///
+/// Unknown variants are passed through; truly unrecognized variants return `-1`.
 pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
     match rc {
         ResultCode::Ok => 0,
@@ -195,6 +217,11 @@ pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
     }
 }
 
+/// Convert an `aerospike_core::Error` into the appropriate Python exception.
+///
+/// Maps each error variant to the most specific exception subclass
+/// (e.g. `KeyNotFoundError` -> `RecordNotFound`), falling back to
+/// broader categories like `ServerError` or `ClientError`.
 pub fn as_to_pyerr(err: AsError) -> PyErr {
     debug!("Mapping aerospike error: {}", err);
     match &err {
@@ -289,6 +316,7 @@ mod tests {
     }
 }
 
+/// Register all Aerospike exception types on the native Python module.
 pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     // Base exceptions

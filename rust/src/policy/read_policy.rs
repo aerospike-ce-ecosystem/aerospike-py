@@ -1,3 +1,5 @@
+//! Read policy parsing from Python dicts.
+
 use std::sync::LazyLock;
 
 use aerospike_core::ReadPolicy;
@@ -8,6 +10,7 @@ use pyo3::types::PyDict;
 use super::extract_policy_fields;
 use crate::expressions::{is_expression, py_to_expression};
 
+/// Lazily-initialized default read policy used when no policy dict is provided.
 pub static DEFAULT_READ_POLICY: LazyLock<ReadPolicy> = LazyLock::new(ReadPolicy::default);
 
 /// Parse a Python policy dict into a ReadPolicy

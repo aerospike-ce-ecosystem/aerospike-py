@@ -1,8 +1,13 @@
+//! Admin policy parsing and user/role type conversion.
+
 use aerospike_core::{Privilege, PrivilegeCode};
 use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
+/// Parse a Python policy dict into an `AdminPolicy`.
+///
+/// Supported keys: `"timeout"` (u32, milliseconds).
 pub fn parse_admin_policy(
     policy: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<aerospike_core::AdminPolicy> {

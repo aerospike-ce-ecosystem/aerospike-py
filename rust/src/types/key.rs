@@ -1,3 +1,5 @@
+//! Bidirectional conversion between Python key tuples and `aerospike_core::Key`.
+
 use aerospike_core::{Key, Value};
 use log::trace;
 use pyo3::prelude::*;

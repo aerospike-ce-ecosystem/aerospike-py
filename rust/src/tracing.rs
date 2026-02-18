@@ -7,11 +7,16 @@
 //
 // When the `otel` feature is disabled, `traced_op!` falls back to `timed_op!`.
 
-/// Connection metadata attached to every span.
+/// Connection metadata attached to every OTel span and used for metric labels.
+///
+/// Populated during `connect()` from the first host in the config.
 #[derive(Clone, Debug, Default)]
 pub struct ConnectionInfo {
+    /// Address of the first seed host (e.g. `"127.0.0.1"`).
     pub server_address: String,
+    /// Port of the first seed host (e.g. `18710`).
     pub server_port: i64,
+    /// Cluster name from the client config (empty string if unset).
     pub cluster_name: String,
 }
 
