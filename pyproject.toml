@@ -108,6 +108,7 @@ env_list = ["py{310,311,312,313,314}", "py314t"]
 [tool.tox.env_run_base]
 package = "wheel"
 dependency_groups = ["test"]
+pass_env = ["AEROSPIKE_HOST", "AEROSPIKE_PORT"]
 commands = [["pytest", "tests/unit/", "-v"]]
 
 [tool.tox.env.py314t]

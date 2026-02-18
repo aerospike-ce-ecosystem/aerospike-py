@@ -593,7 +593,7 @@ for key, meta, bins in records:
 
 :::note
 
-AsyncClient에는 `query()` 메서드가 없습니다. 서버사이드 필터링은 `scan()`과 [Expression Filters](../guides/expression-filters.md)를 조합하여 사용하세요.
+AsyncClient에는 `query()` 메서드가 없습니다. 서버사이드 필터링은 `scan()`과 [Expression Filters](../guides/query-scan/expression-filters.md)를 조합하여 사용하세요.
 
 :::
 
@@ -954,6 +954,6 @@ records = await client.batch_operate(keys, ops, policy={"filter_expression": exp
 :::tip
 
 레코드가 필터 expression과 매칭되지 않으면 `FilteredOut`이 발생합니다.
-자세한 문서는 [Expression 필터 가이드](../guides/expression-filters.md)를 참조하세요.
+자세한 문서는 [Expression 필터 가이드](../guides/query-scan/expression-filters.md)를 참조하세요.
 
 :::
