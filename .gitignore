@@ -29,6 +29,7 @@ rust/target/
 
 # Claude Code
 .claude/settings.local.json
+.claude/skills/playwright-cli/
 
 # Sisyphus
 .sisyphus/
