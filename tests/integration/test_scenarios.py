@@ -173,12 +173,12 @@ class TestBatchWorkflow:
             assert br.result == 2  # KEY_NOT_FOUND
 
 
-class TestQueryScanWorkflow:
-    """Scenarios combining writes with queries/scans."""
+class TestQueryWorkflow:
+    """Scenarios combining writes with queries."""
 
     @pytest.fixture(autouse=True)
     def setup_data(self, client):
-        """Set up test data for query/scan scenarios."""
+        """Set up test data for query scenarios."""
         self.ns = "test"
         self.set_name = "scenario_qs"
         self.keys = []
@@ -203,45 +203,6 @@ class TestQueryScanWorkflow:
                 client.remove(key)
             except Exception:
                 pass
-
-    def test_scan_count_matches_inserts(self, client):
-        """Scan should return at least as many records as we inserted."""
-        scan = client.scan(self.ns, self.set_name)
-        results = scan.results()
-        assert len(results) >= 10
-
-    def test_scan_then_modify(self, client):
-        """Scan to find records, then modify them individually."""
-        scan = client.scan(self.ns, self.set_name)
-        scan.select("id", "value")
-        results = scan.results()
-
-        modified_count = 0
-        for key_tuple, meta, bins in results:
-            if bins.get("value", 0) >= 500:
-                ns = key_tuple[0] if isinstance(key_tuple, tuple) else self.ns
-                set_n = key_tuple[1] if isinstance(key_tuple, tuple) else self.set_name
-                pk = key_tuple[2] if isinstance(key_tuple, tuple) else None
-                if pk is not None:
-                    client.put((ns, set_n, pk), {"value": bins["value"] * 2})
-                    modified_count += 1
-
-        assert modified_count >= 5  # values 500, 600, 700, 800, 900
-
-    def test_scan_foreach_accumulate(self, client):
-        """Use foreach to accumulate values from a scan."""
-        scan = client.scan(self.ns, self.set_name)
-        scan.select("value")
-
-        total = [0]
-
-        def accumulator(record):
-            _, _, bins = record
-            total[0] += bins.get("value", 0)
-
-        scan.foreach(accumulator)
-        # Sum of 0,100,200,...,900 = 4500
-        assert total[0] >= 4500
 
     def test_query_with_index(self, client):
         """Create index, query with predicate, verify results."""

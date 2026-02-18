@@ -225,23 +225,6 @@ def _create_app() -> FastAPI:
         await app.state.client.truncate(ns, set_name, nanos)
         return {"message": f"Truncated {ns}/{set_name}"}
 
-    # -- Scan ---------------------------------------------------------------
-
-    @app.get("/scan/{ns}/{set_name}")
-    async def scan(ns: str, set_name: str):
-        records = await app.state.client.scan(ns, set_name)
-        sanitized = []
-        for rec in records:
-            k, meta, bins_data = rec
-            sanitized.append(
-                {
-                    "key": _sanitize_key(k),
-                    "meta": meta._asdict() if meta else None,
-                    "bins": bins_data,
-                }
-            )
-        return {"records": sanitized}
-
     return app
 
 
@@ -344,17 +327,6 @@ class TestFastAPICRUD:
 
         r = client.delete("/kv/crud-cycle")
         assert r.status_code == 200
-
-    def test_scan(self, client, sync_client, cleanup):
-        for i in range(3):
-            key = (NS, SET_NAME, f"scan-{i}")
-            sync_client.put(key, {"v": i})
-            cleanup.append(key)
-
-        r = client.get(f"/scan/{NS}/{SET_NAME}")
-        assert r.status_code == 200
-        records = r.json()["records"]
-        assert len(records) >= 3
 
 
 # ---------------------------------------------------------------------------

@@ -190,39 +190,6 @@ class TestExpressionOnGet:
         assert "id" not in bins or "score" not in bins
 
 
-class TestExpressionOnScan:
-    """Expression filter applied to scan operations."""
-
-    def test_scan_with_expression_filter(self, rust_client, cleanup):
-        """Scan with age >= 25 filter."""
-        rust_expr = exp.ge(exp.int_bin("age"), exp.int_val(25))
-
-        scan = rust_client.scan(NS, SET)
-        scan.select("id", "age")
-        results = scan.results(policy={"filter_expression": rust_expr})
-
-        for _, _, bins in results:
-            assert bins["age"] >= 25
-
-    def test_scan_expression_count_matches_official(self, rust_client, official_client, cleanup):
-        """Both clients should filter the same number of records."""
-        # Rust scan with expression
-        rust_expr = exp.gt(exp.int_bin("age"), exp.int_val(24))
-        r_scan = rust_client.scan(NS, SET)
-        r_scan.select("id", "age")
-        r_results = r_scan.results(policy={"filter_expression": rust_expr})
-
-        # Official scan with expression
-        off_expr = off_exp.GT(off_exp.IntBin("age"), 24).compile()
-        o_scan = official_client.scan(NS, SET)
-        o_scan.select("id", "age")
-        o_results = o_scan.results({"expressions": off_expr})
-
-        r_ids = sorted([bins["id"] for _, _, bins in r_results])
-        o_ids = sorted([bins["id"] for _, _, bins in o_results])
-        assert r_ids == o_ids
-
-
 class TestExpressionMetadata:
     """Expression filters using record metadata."""
 

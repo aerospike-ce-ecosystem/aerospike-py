@@ -1,4 +1,4 @@
-"""Cross-client scan and query compatibility tests."""
+"""Cross-client query compatibility tests."""
 
 import pytest
 
@@ -28,48 +28,6 @@ def seed_data(rust_client, official_client):
             rust_client.remove(key)
         except Exception:
             pass
-
-
-class TestScan:
-    def test_rust_put_official_scan(self, official_client):
-        scan = official_client.scan(NS, SET_NAME)
-        results = scan.results()
-        assert len(results) >= 10
-
-    def test_official_scan_has_bins(self, official_client):
-        scan = official_client.scan(NS, SET_NAME)
-        scan.select("id", "value")
-        results = scan.results()
-        for _, _, bins in results:
-            assert "id" in bins
-            assert "value" in bins
-
-    def test_rust_scan_has_bins(self, rust_client):
-        scan = rust_client.scan(NS, SET_NAME)
-        scan.select("id", "value")
-        results = scan.results()
-        for _, _, bins in results:
-            assert "id" in bins
-            assert "value" in bins
-
-    def test_cross_scan_results_match(self, rust_client, official_client):
-        """Both clients should see the same data when scanning."""
-        rust_scan = rust_client.scan(NS, SET_NAME)
-        rust_scan.select("id", "value")
-        rust_results = rust_scan.results()
-
-        off_scan = official_client.scan(NS, SET_NAME)
-        off_scan.select("id", "value")
-        off_results = off_scan.results()
-
-        # Extract and sort bins by id for comparison
-        rust_bins = sorted([bins for _, _, bins in rust_results], key=lambda b: b["id"])
-        off_bins = sorted([bins for _, _, bins in off_results], key=lambda b: b["id"])
-
-        assert len(rust_bins) == len(off_bins)
-        for rb, ob in zip(rust_bins, off_bins):
-            assert rb["id"] == ob["id"]
-            assert rb["value"] == ob["value"]
 
 
 class TestQuery:

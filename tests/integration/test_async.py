@@ -159,12 +159,3 @@ class TestAsyncBatchWrite:
             else:
                 assert val == 77
         await async_client.batch_remove(keys)
-
-
-class TestAsyncScan:
-    async def test_scan(self, async_client):
-        key = ("test", "demo", "async_scan_1")
-        await async_client.put(key, {"s": "data"})
-        results = await async_client.scan("test", "demo")
-        assert len(results) >= 1
-        await async_client.remove(key)
