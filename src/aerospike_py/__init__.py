@@ -8,7 +8,7 @@ from typing import Any
 
 from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
-from aerospike_py._aerospike import Query as _NativeQuery, Scan as _NativeScan  # noqa: F401
+from aerospike_py._aerospike import Query as _NativeQuery  # noqa: F401
 from aerospike_py._aerospike import BatchRecord, BatchRecords  # noqa: F401
 from aerospike_py._aerospike import get_metrics_text as _get_metrics_text
 from aerospike_py._aerospike import init_tracing as _init_tracing
@@ -297,7 +297,7 @@ def _wrap_operate_ordered(raw: tuple) -> OperateOrderedResult:
 
 
 # ---------------------------------------------------------------------------
-# Query / Scan Python wrappers
+# Query Python wrapper
 # ---------------------------------------------------------------------------
 
 
@@ -312,25 +312,6 @@ class Query:
 
     def where(self, predicate) -> None:
         self._inner.where(predicate)
-
-    def results(self, policy=None) -> list[Record]:
-        return [_wrap_record(r) for r in self._inner.results(policy)]
-
-    def foreach(self, callback, policy=None) -> None:
-        def _cb(raw):
-            return callback(_wrap_record(raw))
-
-        self._inner.foreach(_cb, policy)
-
-
-class Scan:
-    """Python wrapper around the native Scan object that returns typed records."""
-
-    def __init__(self, inner: _NativeScan):
-        self._inner = inner
-
-    def select(self, *bins: str) -> None:
-        self._inner.select(*bins)
 
     def results(self, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in self._inner.results(policy)]
@@ -439,9 +420,6 @@ class Client(_NativeClient):
 
     def query(self, namespace, set_name) -> Query:
         return Query(super().query(namespace, set_name))
-
-    def scan(self, namespace, set_name) -> Scan:
-        return Scan(super().scan(namespace, set_name))
 
     def __enter__(self) -> "Client":
         return self
@@ -571,9 +549,6 @@ class AsyncClient:
 
     async def batch_remove(self, keys, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in await self._inner.batch_remove(keys, policy)]
-
-    async def scan(self, namespace, set_name, policy=None) -> list[Record]:
-        return [_wrap_record(r) for r in await self._inner.scan(namespace, set_name, policy)]
 
 
 def set_log_level(level: int) -> None:
@@ -709,7 +684,6 @@ __all__ = [
     "Client",
     "AsyncClient",
     "Query",
-    "Scan",
     "BatchRecord",
     "BatchRecords",
     "NumpyBatchRecords",
