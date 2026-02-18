@@ -1,3 +1,5 @@
+//! Conversion from Python dicts to `aerospike_core::Bin` vectors.
+
 use aerospike_core::Bin;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;

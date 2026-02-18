@@ -1,3 +1,5 @@
+//! Client-level policy parsing, including authentication and cluster settings.
+
 use aerospike_core::{AuthMode, ClientPolicy};
 use log::trace;
 use pyo3::prelude::*;

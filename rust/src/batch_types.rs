@@ -1,3 +1,5 @@
+//! Python-visible batch record types for `batch_read` results.
+
 use aerospike_core::BatchRecord;
 use log::trace;
 use pyo3::prelude::*;
@@ -6,6 +8,7 @@ use crate::errors::result_code_to_int;
 use crate::types::key::key_to_py;
 use crate::types::record::record_to_py;
 
+/// A single record within batch results, exposed to Python.
 #[pyclass(name = "BatchRecord")]
 pub struct PyBatchRecord {
     #[pyo3(get)]
@@ -16,12 +19,14 @@ pub struct PyBatchRecord {
     record: Py<PyAny>,
 }
 
+/// Container holding a list of [`PyBatchRecord`]s, exposed to Python.
 #[pyclass(name = "BatchRecords")]
 pub struct PyBatchRecords {
     #[pyo3(get)]
     batch_records: Vec<Py<PyBatchRecord>>,
 }
 
+/// Convert a slice of `BatchRecord`s into a Python [`PyBatchRecords`] object.
 pub fn batch_to_batch_records_py(
     py: Python<'_>,
     results: &[BatchRecord],

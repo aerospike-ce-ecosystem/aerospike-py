@@ -1,3 +1,5 @@
+//! Write policy parsing from Python dicts, including TTL and generation handling.
+
 use std::sync::LazyLock;
 
 use aerospike_core::{CommitLevel, Expiration, GenerationPolicy, RecordExistsAction, WritePolicy};
@@ -8,9 +10,12 @@ use pyo3::types::PyDict;
 use super::extract_policy_fields;
 use crate::expressions::{is_expression, py_to_expression};
 
+/// Lazily-initialized default write policy used when no policy dict is provided.
 pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePolicy::default);
 
-/// Convert a TTL integer value to an Expiration enum
+/// Convert a TTL integer value to an [`Expiration`] enum.
+///
+/// Special values: `0` = namespace default, `-1` = never expire, `-2` = don't update.
 fn parse_ttl(ttl_val: i64) -> Expiration {
     match ttl_val {
         0 => Expiration::NamespaceDefault,
