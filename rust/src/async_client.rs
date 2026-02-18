@@ -3,10 +3,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use crate::traced_op;
 use aerospike_core::{
     BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy, Bin, Bins,
-    Client as AsClient, Error as AsError, PartitionFilter, ResultCode, Statement, Task, UDFLang,
-    Value,
+    Client as AsClient, Error as AsError, ResultCode, Task, UDFLang, Value,
 };
-use futures::StreamExt;
 use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
@@ -18,7 +16,6 @@ use crate::operations::py_ops_to_rust;
 use crate::policy::admin_policy::{parse_admin_policy, parse_privileges, role_to_py, user_to_py};
 use crate::policy::batch_policy::parse_batch_policy;
 use crate::policy::client_policy::parse_client_policy;
-use crate::policy::query_policy::parse_query_policy;
 use crate::policy::read_policy::parse_read_policy;
 use crate::policy::write_policy::parse_write_policy;
 use crate::record_helpers::{batch_records_to_py, record_to_meta};
@@ -1111,88 +1108,6 @@ impl PyAsyncClient {
         })
     }
 
-    // ── Scan ──────────────────────────────────────────────────
-
-    /// Scan all records (async). Returns list of (key, meta, bins).
-    #[pyo3(signature = (namespace, set_name, policy=None))]
-    fn scan<'py>(
-        &self,
-        py: Python<'py>,
-        namespace: &str,
-        set_name: &str,
-        policy: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        debug!("async scan: ns={} set={}", namespace, set_name);
-        let client = self.get_client()?;
-        let query_policy = parse_query_policy(policy)?;
-        let stmt = Statement::new(namespace, set_name, Bins::All);
-        let ns = namespace.to_string();
-        let set = set_name.to_string();
-
-        #[cfg(feature = "otel")]
-        let parent_ctx = crate::tracing::otel_impl::extract_python_context(py);
-        #[allow(unused)]
-        let conn_info = self.connection_info.clone();
-
-        future_into_py(py, async move {
-            let timer = crate::metrics::OperationTimer::start("scan", &ns, &set);
-            let scan_result: Result<Vec<_>, AsError> = async {
-                let rs = client
-                    .query(&query_policy, PartitionFilter::all(), stmt)
-                    .await?;
-                let mut stream = rs.into_stream();
-                let mut results = Vec::new();
-                while let Some(result) = stream.next().await {
-                    results.push(result?);
-                }
-                Ok(results)
-            }
-            .await;
-
-            match &scan_result {
-                Ok(_) => timer.finish(""),
-                Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
-            }
-
-            // OTel span for scan
-            #[cfg(feature = "otel")]
-            {
-                use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
-                use opentelemetry::KeyValue;
-                let tracer = crate::tracing::otel_impl::get_tracer();
-                let span_name = format!("SCAN {}.{}", ns, set);
-                let span = tracer
-                    .span_builder(span_name)
-                    .with_kind(SpanKind::Client)
-                    .with_attributes(vec![
-                        KeyValue::new("db.system.name", "aerospike"),
-                        KeyValue::new("db.namespace", ns.clone()),
-                        KeyValue::new("db.collection.name", set.clone()),
-                        KeyValue::new("db.operation.name", "SCAN"),
-                        KeyValue::new("server.address", conn_info.server_address.clone()),
-                        KeyValue::new("server.port", conn_info.server_port),
-                        KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
-                    ])
-                    .start_with_context(&tracer, &parent_ctx);
-                let cx = parent_ctx.with_span(span);
-                let span_ref = opentelemetry::trace::TraceContextExt::span(&cx);
-                if let Err(e) = &scan_result {
-                    crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
-                }
-                span_ref.end();
-            }
-
-            let records = scan_result.map_err(as_to_pyerr)?;
-
-            Python::attach(|py| {
-                let py_list = PyList::empty(py);
-                for record in &records {
-                    py_list.append(record_to_py(py, record, None)?)?;
-                }
-                Ok(py_list.into_any().unbind())
-            })
-        })
-    }
     // ── Index ─────────────────────────────────────────────────
 
     /// Create a secondary integer index (async).

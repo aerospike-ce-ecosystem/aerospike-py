@@ -824,25 +824,13 @@ impl PyClient {
         Ok(result.into_any().unbind())
     }
 
-    // ── Query / Scan / Index ─────────────────────────────────────
+    // ── Query / Index ─────────────────────────────────────
 
     /// Create a Query object for the given namespace and set.
     fn query(&self, namespace: &str, set_name: &str) -> PyResult<crate::query::PyQuery> {
         debug!("Creating query: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
         Ok(crate::query::PyQuery::new(
-            client,
-            namespace.to_string(),
-            set_name.to_string(),
-            self.connection_info.clone(),
-        ))
-    }
-
-    /// Create a Scan object for the given namespace and set.
-    fn scan(&self, namespace: &str, set_name: &str) -> PyResult<crate::query::PyScan> {
-        debug!("Creating scan: ns={} set={}", namespace, set_name);
-        let client = self.get_client()?.clone();
-        Ok(crate::query::PyScan::new(
             client,
             namespace.to_string(),
             set_name.to_string(),
