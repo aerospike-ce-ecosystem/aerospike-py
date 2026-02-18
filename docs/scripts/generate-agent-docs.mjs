@@ -185,12 +185,17 @@ function transformFile(filePath) {
   let content = readFileSync(filePath, 'utf-8');
   const slug = buildSlug(filePath);
   const category = getCategory(filePath);
-  const docPath = buildDocPath(filePath);
+  let docPath = buildDocPath(filePath);
 
-  // Extract title and description from original frontmatter
+  // Extract title, description, and slug from original frontmatter
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
   const title = fmMatch?.[1]?.match(/^title:\s*(.+)$/m)?.[1]?.trim() || slug;
   const description = fmMatch?.[1]?.match(/^description:\s*(.+)$/m)?.[1]?.trim() || '';
+  const fmSlug = fmMatch?.[1]?.match(/^slug:\s*(.+)$/m)?.[1]?.trim();
+  if (fmSlug) {
+    // Use frontmatter slug (strip leading /) for URL generation
+    docPath = fmSlug.replace(/^\//, '');
+  }
 
   content = stripImports(content);
   content = flattenTabs(content);

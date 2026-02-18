@@ -1,7 +1,8 @@
 ---
 title: Performance Tuning
 sidebar_label: Performance Tuning
-sidebar_position: 8
+sidebar_position: 2
+slug: /guides/performance-tuning
 description: Tips for optimizing aerospike-py throughput and latency.
 ---
 

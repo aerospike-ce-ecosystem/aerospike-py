@@ -1,7 +1,8 @@
 ---
 title: UDF Guide
 sidebar_label: UDF (Lua)
-sidebar_position: 6
+sidebar_position: 2
+slug: /guides/udf
 description: Register, execute, and remove User Defined Functions (Lua scripts) on the Aerospike server.
 ---
 

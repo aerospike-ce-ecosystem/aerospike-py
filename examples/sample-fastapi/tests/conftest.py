@@ -71,9 +71,25 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _local_aerospike_available(host: str, port: int) -> bool:
+    """Check if a local Aerospike server is already reachable."""
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
 @pytest.fixture(scope="session")
 def aerospike_container(tmp_path_factory):
-    """Start an Aerospike CE container for the entire test session."""
+    """Start an Aerospike CE container, or reuse a local server if available."""
+    local_host = os.environ.get("AEROSPIKE_HOST", "127.0.0.1")
+    local_port = int(os.environ.get("AEROSPIKE_PORT", "3000"))
+
+    if _local_aerospike_available(local_host, local_port):
+        yield None, local_port
+        return
+
     host_port = _find_free_port()
 
     # Write a custom config template that sets access-address/access-port

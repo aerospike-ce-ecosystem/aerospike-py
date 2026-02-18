@@ -1,7 +1,8 @@
 ---
 title: Expression Filters
 sidebar_label: Expression Filters
-sidebar_position: 3
+sidebar_position: 2
+slug: /guides/expression-filters
 description: 서버 측 레코드 필터링을 위한 Expression 필터 가이드
 ---
 

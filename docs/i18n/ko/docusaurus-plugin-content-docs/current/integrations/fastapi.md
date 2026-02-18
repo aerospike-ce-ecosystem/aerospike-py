@@ -123,7 +123,7 @@ async def create_user(body: UserCreate, request: Request):
     user_id = uuid.uuid4().hex
     await client.put(_key(user_id), body.model_dump())
     _, meta, bins = await client.get(_key(user_id))
-    return UserResponse(user_id=user_id, generation=meta["gen"], **bins)
+    return UserResponse(user_id=user_id, generation=meta.gen, **bins)
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -133,7 +133,7 @@ async def get_user(user_id: str, request: Request):
         _, meta, bins = await client.get(_key(user_id))
     except RecordNotFound:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserResponse(user_id=user_id, generation=meta["gen"], **bins)
+    return UserResponse(user_id=user_id, generation=meta.gen, **bins)
 
 
 @router.delete("/{user_id}", status_code=204)

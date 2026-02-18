@@ -8,7 +8,7 @@ from typing import Any
 
 from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
-from aerospike_py._aerospike import Query, Scan  # noqa: F401
+from aerospike_py._aerospike import Query as _NativeQuery, Scan as _NativeScan  # noqa: F401
 from aerospike_py._aerospike import BatchRecord, BatchRecords  # noqa: F401
 from aerospike_py._aerospike import get_metrics_text as _get_metrics_text
 from aerospike_py._aerospike import init_tracing as _init_tracing
@@ -230,6 +230,26 @@ from aerospike_py.numpy_batch import NumpyBatchRecords  # noqa: F401
 from aerospike_py import list_operations  # noqa: F401
 from aerospike_py import map_operations  # noqa: F401
 from aerospike_py import exp  # noqa: F401
+from aerospike_py.types import (  # noqa: F401
+    AerospikeKey,
+    RecordMetadata,
+    Record,
+    ExistsResult,
+    InfoNodeResult,
+    BinTuple,
+    OperateOrderedResult,
+    Bins,
+    ReadPolicy,
+    WritePolicy,
+    BatchPolicy,
+    AdminPolicy,
+    QueryPolicy,
+    WriteMeta,
+    ClientConfig,
+    Privilege,
+    UserInfo,
+    RoleInfo,
+)
 
 try:
     from importlib.metadata import PackageNotFoundError
@@ -243,8 +263,97 @@ logger = logging.getLogger("aerospike_py")
 logger.addHandler(logging.NullHandler())
 
 
+# ---------------------------------------------------------------------------
+# Wrapping helpers
+# ---------------------------------------------------------------------------
+
+
+def _wrap_key(raw: tuple | None) -> AerospikeKey | None:
+    if raw is None:
+        return None
+    return AerospikeKey(raw[0], raw[1], raw[2], raw[3])
+
+
+def _wrap_meta(raw: dict | None) -> RecordMetadata | None:
+    if raw is None:
+        return None
+    return RecordMetadata(gen=raw["gen"], ttl=raw["ttl"])
+
+
+def _wrap_record(raw: tuple) -> Record:
+    return Record(key=_wrap_key(raw[0]), meta=_wrap_meta(raw[1]), bins=raw[2])
+
+
+def _wrap_exists(raw: tuple) -> ExistsResult:
+    return ExistsResult(key=_wrap_key(raw[0]), meta=_wrap_meta(raw[1]))
+
+
+def _wrap_operate_ordered(raw: tuple) -> OperateOrderedResult:
+    return OperateOrderedResult(
+        key=_wrap_key(raw[0]),
+        meta=_wrap_meta(raw[1]),
+        ordered_bins=[BinTuple(n, v) for n, v in raw[2]],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Query / Scan Python wrappers
+# ---------------------------------------------------------------------------
+
+
+class Query:
+    """Python wrapper around the native Query object that returns typed records."""
+
+    def __init__(self, inner: _NativeQuery):
+        self._inner = inner
+
+    def select(self, *bins: str) -> None:
+        self._inner.select(*bins)
+
+    def where(self, predicate) -> None:
+        self._inner.where(predicate)
+
+    def results(self, policy=None) -> list[Record]:
+        return [_wrap_record(r) for r in self._inner.results(policy)]
+
+    def foreach(self, callback, policy=None) -> None:
+        def _cb(raw):
+            return callback(_wrap_record(raw))
+
+        self._inner.foreach(_cb, policy)
+
+
+class Scan:
+    """Python wrapper around the native Scan object that returns typed records."""
+
+    def __init__(self, inner: _NativeScan):
+        self._inner = inner
+
+    def select(self, *bins: str) -> None:
+        self._inner.select(*bins)
+
+    def results(self, policy=None) -> list[Record]:
+        return [_wrap_record(r) for r in self._inner.results(policy)]
+
+    def foreach(self, callback, policy=None) -> None:
+        def _cb(raw):
+            return callback(_wrap_record(raw))
+
+        self._inner.foreach(_cb, policy)
+
+
+# ---------------------------------------------------------------------------
+# Client
+# ---------------------------------------------------------------------------
+
+
 class Client(_NativeClient):
-    """Aerospike client wrapper that supports method chaining on connect()."""
+    """Aerospike client wrapper that supports method chaining on connect().
+
+    All read methods (``get``, ``select``, ``exists``, ``operate``, etc.)
+    return NamedTuple instances (``Record``, ``ExistsResult``, etc.) with
+    named field access: ``record.meta.gen``, ``record.bins["name"]``.
+    """
 
     def connect(self, username: str | None = None, password: str | None = None) -> "Client":
         """Connect to the Aerospike cluster.
@@ -273,6 +382,24 @@ class Client(_NativeClient):
         super().connect(username, password)
         return self
 
+    def get(self, key, policy=None) -> Record:
+        return _wrap_record(super().get(key, policy))
+
+    def select(self, key, bins, policy=None) -> Record:
+        return _wrap_record(super().select(key, bins, policy))
+
+    def exists(self, key, policy=None) -> ExistsResult:
+        return _wrap_exists(super().exists(key, policy))
+
+    def operate(self, key, ops, meta=None, policy=None) -> Record:
+        return _wrap_record(super().operate(key, ops, meta, policy))
+
+    def operate_ordered(self, key, ops, meta=None, policy=None) -> OperateOrderedResult:
+        return _wrap_operate_ordered(super().operate_ordered(key, ops, meta, policy))
+
+    def info_all(self, command, policy=None) -> list[InfoNodeResult]:
+        return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
+
     def batch_read(self, keys, bins=None, policy=None, _dtype=None):
         """Read multiple records in a single batch call.
 
@@ -293,11 +420,28 @@ class Client(_NativeClient):
             batch = client.batch_read(keys, bins=["name", "age"])
             for br in batch.batch_records:
                 if br.record:
-                    key, meta, bins = br.record
+                    key, meta, bins = br.record  # raw tuples (not wrapped)
                     print(bins)
             ```
+
+        Note:
+            ``batch_read`` returns raw ``BatchRecords`` from the native layer.
+            Individual ``br.record`` tuples are **not** wrapped as ``Record``
+            NamedTuples. Use dict-style access for metadata: ``meta["gen"]``.
         """
         return super().batch_read(keys, bins, policy, _dtype)
+
+    def batch_operate(self, keys, ops, policy=None) -> list[Record]:
+        return [_wrap_record(r) for r in super().batch_operate(keys, ops, policy)]
+
+    def batch_remove(self, keys, policy=None) -> list[Record]:
+        return [_wrap_record(r) for r in super().batch_remove(keys, policy)]
+
+    def query(self, namespace, set_name) -> Query:
+        return Query(super().query(namespace, set_name))
+
+    def scan(self, namespace, set_name) -> Scan:
+        return Scan(super().scan(namespace, set_name))
 
     def __enter__(self) -> "Client":
         return self
@@ -312,6 +456,10 @@ class AsyncClient:
     """Aerospike async client wrapper with numpy batch_read support.
 
     Delegates to _NativeAsyncClient (PyO3 type that cannot be subclassed).
+
+    All read methods (``get``, ``select``, ``exists``, ``operate``, etc.)
+    return NamedTuple instances (``Record``, ``ExistsResult``, etc.) with
+    named field access: ``record.meta.gen``, ``record.bins["name"]``.
     """
 
     def __init__(self, config: dict):
@@ -367,6 +515,24 @@ class AsyncClient:
         logger.debug("Async client closing")
         return await self._inner.close()
 
+    async def get(self, key, policy=None) -> Record:
+        return _wrap_record(await self._inner.get(key, policy))
+
+    async def select(self, key, bins, policy=None) -> Record:
+        return _wrap_record(await self._inner.select(key, bins, policy))
+
+    async def exists(self, key, policy=None) -> ExistsResult:
+        return _wrap_exists(await self._inner.exists(key, policy))
+
+    async def operate(self, key, ops, meta=None, policy=None) -> Record:
+        return _wrap_record(await self._inner.operate(key, ops, meta, policy))
+
+    async def operate_ordered(self, key, ops, meta=None, policy=None) -> OperateOrderedResult:
+        return _wrap_operate_ordered(await self._inner.operate_ordered(key, ops, meta, policy))
+
+    async def info_all(self, command, policy=None) -> list[InfoNodeResult]:
+        return [InfoNodeResult(*t) for t in await self._inner.info_all(command, policy)]
+
     async def batch_read(
         self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None, _dtype: Any = None
     ) -> Any:
@@ -389,11 +555,25 @@ class AsyncClient:
             batch = await client.batch_read(keys, bins=["name", "age"])
             for br in batch.batch_records:
                 if br.record:
-                    key, meta, bins = br.record
+                    key, meta, bins = br.record  # raw tuples (not wrapped)
                     print(bins)
             ```
+
+        Note:
+            ``batch_read`` returns raw ``BatchRecords`` from the native layer.
+            Individual ``br.record`` tuples are **not** wrapped as ``Record``
+            NamedTuples. Use dict-style access for metadata: ``meta["gen"]``.
         """
         return await self._inner.batch_read(keys, bins, policy, _dtype)
+
+    async def batch_operate(self, keys, ops, policy=None) -> list[Record]:
+        return [_wrap_record(r) for r in await self._inner.batch_operate(keys, ops, policy)]
+
+    async def batch_remove(self, keys, policy=None) -> list[Record]:
+        return [_wrap_record(r) for r in await self._inner.batch_remove(keys, policy)]
+
+    async def scan(self, namespace, set_name, policy=None) -> list[Record]:
+        return [_wrap_record(r) for r in await self._inner.scan(namespace, set_name, policy)]
 
 
 def set_log_level(level: int) -> None:
@@ -541,6 +721,25 @@ __all__ = [
     "init_tracing",
     "shutdown_tracing",
     "__version__",
+    # Type classes
+    "AerospikeKey",
+    "RecordMetadata",
+    "Record",
+    "ExistsResult",
+    "InfoNodeResult",
+    "BinTuple",
+    "OperateOrderedResult",
+    "Bins",
+    "ReadPolicy",
+    "WritePolicy",
+    "BatchPolicy",
+    "AdminPolicy",
+    "QueryPolicy",
+    "WriteMeta",
+    "ClientConfig",
+    "Privilege",
+    "UserInfo",
+    "RoleInfo",
     # Submodules
     "exception",
     "predicates",

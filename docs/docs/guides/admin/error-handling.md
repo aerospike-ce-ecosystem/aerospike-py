@@ -1,27 +1,29 @@
 ---
-title: 에러 처리
-sidebar_label: 에러 처리
-sidebar_position: 7
-description: 프로덕션 애플리케이션에서 Aerospike 에러를 처리하는 모범 사례
+title: Error Handling
+sidebar_label: Error Handling
+sidebar_position: 3
+slug: /guides/error-handling
+description: Best practices for handling Aerospike errors in production applications.
 ---
 
-# 에러 처리 가이드
+# Error Handling Guide
 
-## 예외 계층 구조
+## Exception Hierarchy
 
-모든 aerospike-py 예외는 `AerospikeError`를 상속합니다. 전체 계층 구조와
-설명은 [Exceptions API 레퍼런스](../api/exceptions.md)를 참고하세요.
+All aerospike-py exceptions inherit from `AerospikeError`. See the
+[Exceptions API reference](../../api/exceptions.md) for the full hierarchy and
+descriptions.
 
 ```python
 import aerospike_py as aerospike
 from aerospike_py import exception
 ```
 
-## 권장 패턴
+## Recommended Patterns
 
-### 구체적 예외를 먼저, 그다음 포괄적 예외
+### Catch Specific, Then Broad
 
-항상 가장 구체적인 예외부터 캐치하세요:
+Always catch the most specific exception first:
 
 ```python
 from aerospike_py.exception import (
@@ -33,20 +35,20 @@ from aerospike_py.exception import (
 try:
     _, meta, bins = client.get(key)
 except RecordNotFound:
-    # 레코드 미존재 처리 (예: 기본값 반환)
+    # Handle missing record (e.g., return default)
     bins = {}
 except AerospikeTimeoutError:
-    # 재시도 또는 서킷 브레이커
+    # Retry or circuit-break
     raise
 except AerospikeError as e:
-    # 예상치 못한 Aerospike 에러
+    # Unexpected Aerospike error
     logger.error("Aerospike error: %s", e)
     raise
 ```
 
-### 백오프를 적용한 재시도
+### Retry with Backoff
 
-타임아웃 및 클러스터 에러는 일시적인 경우가 많습니다:
+Timeout and cluster errors are often transient:
 
 ```python
 import time
@@ -59,12 +61,12 @@ def get_with_retry(client, key, max_retries=3):
         except (AerospikeTimeoutError, ClusterError):
             if attempt == max_retries - 1:
                 raise
-            time.sleep(0.1 * (2 ** attempt))  # 지수 백오프
+            time.sleep(0.1 * (2 ** attempt))  # exponential backoff
 ```
 
 ### Optimistic Locking (Check-and-Set)
 
-세대(generation) 검사를 사용하여 동시 수정을 감지합니다:
+Use generation checks to detect concurrent modifications:
 
 ```python
 from aerospike_py.exception import RecordGenerationError
@@ -77,12 +79,12 @@ def increment_counter(client, key, bin_name):
             client.put(
                 key,
                 {bin_name: new_val},
-                meta={"gen": meta["gen"]},
+                meta={"gen": meta.gen},
                 policy={"gen": aerospike.POLICY_GEN_EQ},
             )
             return new_val
         except RecordGenerationError:
-            continue  # 최신 데이터로 재시도
+            continue  # retry with fresh data
 ```
 
 ### Upsert vs Create-Only
@@ -90,19 +92,19 @@ def increment_counter(client, key, bin_name):
 ```python
 from aerospike_py.exception import RecordExistsError
 
-# Create-only: 레코드가 존재하면 실패
+# Create-only: fail if record exists
 try:
     client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 except RecordExistsError:
-    print("레코드가 이미 존재합니다, 건너뜁니다")
+    print("Record already exists, skipping")
 
-# Upsert (기본값): 생성 또는 업데이트
-client.put(key, bins)  # RecordExistsError가 발생하지 않음
+# Upsert (default): create or update
+client.put(key, bins)  # never raises RecordExistsError
 ```
 
-### 배치 에러 처리
+### Batch Error Handling
 
-배치 작업은 키별로 결과를 반환합니다. 개별 레코드 상태를 확인하세요:
+Batch operations return results per-key. Check individual record status:
 
 ```python
 results = client.batch_read(keys)
@@ -112,10 +114,10 @@ for result in results:
     elif result.result_code == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
         handle_missing(result.key)
     else:
-        logger.warning("배치 키 에러: code=%d", result.result_code)
+        logger.warning("Batch key error: code=%d", result.result_code)
 ```
 
-### 연결 라이프사이클
+### Connection Lifecycle
 
 ```python
 from aerospike_py.exception import ClientError, ClusterError
@@ -124,19 +126,19 @@ client = aerospike.client(config)
 try:
     client.connect()
 except ClusterError as e:
-    print(f"클러스터에 연결할 수 없습니다: {e}")
+    print(f"Cannot reach cluster: {e}")
     raise SystemExit(1)
 
 try:
-    # ... 애플리케이션 로직 ...
+    # ... application logic ...
     pass
 finally:
     client.close()
 ```
 
-### 비동기 에러 처리
+### Async Error Handling
 
-비동기 에러도 동일한 방식으로 작동하며, `await`만 추가됩니다:
+Async errors work the same way, just with `await`:
 
 ```python
 from aerospike_py.exception import RecordNotFound
@@ -150,18 +152,18 @@ async def get_user(client, user_id):
         return None
 ```
 
-## 결과 코드
+## Result Codes
 
-예외에 매핑되는 주요 Aerospike 결과 코드:
+Common Aerospike result codes mapped to exceptions:
 
-| 코드 | 상수 | 예외 |
+| Code | Constant | Exception |
 |------|----------|-----------|
-| 0 | `AEROSPIKE_OK` | (성공) |
+| 0 | `AEROSPIKE_OK` | (success) |
 | 2 | `AEROSPIKE_ERR_RECORD_NOT_FOUND` | `RecordNotFound` |
 | 5 | `AEROSPIKE_ERR_RECORD_EXISTS` | `RecordExistsError` |
 | 9 | `AEROSPIKE_ERR_TIMEOUT` | `AerospikeTimeoutError` |
-| 3 | (세대 에러) | `RecordGenerationError` |
-| 13 | (레코드 너무 큼) | `RecordTooBig` |
-| 27 | (필터링됨) | `FilteredOut` |
+| 3 | (generation error) | `RecordGenerationError` |
+| 13 | (record too big) | `RecordTooBig` |
+| 27 | (filtered out) | `FilteredOut` |
 
-전체 목록은 [상수 레퍼런스](../api/constants.md)를 참고하세요.
+See the [Constants reference](../../api/constants.md) for the full list.

@@ -54,8 +54,9 @@ with aerospike.client({
     key = ("test", "demo", "user1")
     client.put(key, {"name": "Alice", "age": 30})
 
-    _, meta, bins = client.get(key)
-    print(bins)  # {'name': 'Alice', 'age': 30}
+    record = client.get(key)
+    print(record.bins)      # {'name': 'Alice', 'age': 30}
+    print(record.meta.gen)  # 1
 
     client.increment(key, "age", 1)
     client.remove(key)
@@ -76,8 +77,8 @@ async def main():
 
         key = ("test", "demo", "user1")
         await client.put(key, {"name": "Bob", "age": 25})
-        _, _, bins = await client.get(key)
-        print(bins)
+        record = await client.get(key)
+        print(record.bins)  # {'name': 'Bob', 'age': 25}
 
         # Concurrent operations
         tasks = [client.put(("test", "demo", f"item_{i}"), {"idx": i}) for i in range(10)]

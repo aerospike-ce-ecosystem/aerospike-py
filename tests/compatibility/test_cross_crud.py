@@ -28,7 +28,7 @@ class TestCrossWrite:
 
         assert bins["name"] == "Bob"
         assert bins["age"] == 25
-        assert meta["gen"] >= 1
+        assert meta.gen >= 1
 
 
 class TestCrossExists:
@@ -52,7 +52,7 @@ class TestCrossExists:
         _, meta = rust_client.exists(key)
 
         assert meta is not None
-        assert meta["gen"] >= 1
+        assert meta.gen >= 1
 
 
 class TestCrossRemove:
@@ -108,7 +108,7 @@ class TestCrossModify:
         official_client.touch(key, 500)
         _, meta, _ = rust_client.get(key)
 
-        assert meta["ttl"] > 100
+        assert meta.ttl > 100
 
     def test_cross_select(self, rust_client, official_client, cleanup):
         key = ("test", "compat", "cross_select")

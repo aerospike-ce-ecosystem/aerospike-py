@@ -1,7 +1,8 @@
 ---
 title: UDF Guide
 sidebar_label: UDF (Lua)
-sidebar_position: 6
+sidebar_position: 2
+slug: /guides/udf
 description: Aerospike 서버에서 Lua UDF 등록, 실행, 제거 가이드
 ---
 

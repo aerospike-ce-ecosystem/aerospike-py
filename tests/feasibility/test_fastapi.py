@@ -72,7 +72,7 @@ def _create_app() -> FastAPI:
     @app.get("/kv/{key}")
     async def get_key(key: str):
         k, meta, bins = await app.state.client.get(_key(NS, SET_NAME, key))
-        return {"key": _sanitize_key(k), "meta": meta, "bins": bins}
+        return {"key": _sanitize_key(k), "meta": meta._asdict() if meta else None, "bins": bins}
 
     @app.delete("/kv/{key}")
     async def delete_key(key: str):
@@ -85,13 +85,13 @@ def _create_app() -> FastAPI:
     async def records_select(body: dict):
         key = _key(body["ns"], body["set"], body["key"])
         k, meta, bins = await app.state.client.select(key, body["bins"])
-        return {"key": _sanitize_key(k), "meta": meta, "bins": bins}
+        return {"key": _sanitize_key(k), "meta": meta._asdict() if meta else None, "bins": bins}
 
     @app.post("/records/exists")
     async def records_exists(body: dict):
         key = _key(body["ns"], body["set"], body["key"])
         k, meta = await app.state.client.exists(key)
-        return {"key": _sanitize_key(k), "exists": meta is not None, "meta": meta}
+        return {"key": _sanitize_key(k), "exists": meta is not None, "meta": meta._asdict() if meta else None}
 
     @app.post("/records/touch")
     async def records_touch(body: dict):
@@ -130,13 +130,17 @@ def _create_app() -> FastAPI:
         key = _key(body["ns"], body["set"], body["key"])
         meta_arg = body.get("meta")
         k, meta, bins = await app.state.client.operate(key, body["ops"], meta=meta_arg)
-        return {"key": _sanitize_key(k), "meta": meta, "bins": bins}
+        return {"key": _sanitize_key(k), "meta": meta._asdict() if meta else None, "bins": bins}
 
     @app.post("/operations/operate-ordered")
     async def operations_operate_ordered(body: dict):
         key = _key(body["ns"], body["set"], body["key"])
         k, meta, ordered = await app.state.client.operate_ordered(key, body["ops"])
-        return {"key": _sanitize_key(k), "meta": meta, "ordered_bins": ordered}
+        return {
+            "key": _sanitize_key(k),
+            "meta": meta._asdict() if meta else None,
+            "ordered_bins": [list(b) for b in ordered],
+        }
 
     # -- Batch --------------------------------------------------------------
 
@@ -152,7 +156,9 @@ def _create_app() -> FastAPI:
                 sanitized.append(
                     {
                         "key": _sanitize_key(k),
-                        "meta": meta,
+                        "meta": meta._asdict()
+                        if hasattr(meta, "_asdict") and meta
+                        else (meta if isinstance(meta, dict) else None),
                         "bins": bins_data,
                     }
                 )
@@ -176,7 +182,7 @@ def _create_app() -> FastAPI:
             sanitized.append(
                 {
                     "key": _sanitize_key(k),
-                    "meta": meta,
+                    "meta": meta._asdict() if meta else None,
                     "bins": bins_data,
                 }
             )
@@ -229,7 +235,7 @@ def _create_app() -> FastAPI:
             sanitized.append(
                 {
                     "key": _sanitize_key(k),
-                    "meta": meta,
+                    "meta": meta._asdict() if meta else None,
                     "bins": bins_data,
                 }
             )
@@ -421,7 +427,7 @@ class TestFastAPIRecordOps:
         assert r.status_code == 200
 
         _, meta, _ = sync_client.get(key)
-        assert meta["ttl"] > 100
+        assert meta.ttl > 100
 
     def test_append(self, client, sync_client, cleanup):
         key = (NS, SET_NAME, "rec-append-1")

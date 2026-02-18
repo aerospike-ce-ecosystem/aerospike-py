@@ -9,25 +9,33 @@ from aerospike_py import list_operations as list_operations
 from aerospike_py import map_operations as map_operations
 from aerospike_py import predicates as predicates
 from aerospike_py.numpy_batch import NumpyBatchRecords as NumpyBatchRecords
+from aerospike_py.types import (
+    AdminPolicy as AdminPolicy,
+    AerospikeKey as AerospikeKey,
+    BatchPolicy as BatchPolicy,
+    Bins as Bins,
+    BinTuple as BinTuple,
+    ClientConfig as ClientConfig,
+    ExistsResult as ExistsResult,
+    InfoNodeResult as InfoNodeResult,
+    OperateOrderedResult as OperateOrderedResult,
+    Privilege as Privilege,
+    QueryPolicy as QueryPolicy,
+    ReadPolicy as ReadPolicy,
+    Record as Record,
+    RecordMetadata as RecordMetadata,
+    RoleInfo as RoleInfo,
+    UserInfo as UserInfo,
+    WriteMeta as WriteMeta,
+    WritePolicy as WritePolicy,
+)
 
 __version__: str
 
 # -- Type aliases --------------------------------------------------------
 
 Key = tuple[str, str, Union[str, int, bytes]]
-"""Aerospike key: (namespace, set, primary_key)"""
-
-Metadata = dict[str, Any]
-"""Record metadata dict with 'gen' (generation) and 'ttl' keys."""
-
-Bins = dict[str, Any]
-"""Record bins dict mapping bin name to value."""
-
-Record = tuple[Optional[Key], Optional[Metadata], Optional[Bins]]
-"""Full record tuple: (key, meta, bins)."""
-
-ExistsResult = tuple[Optional[Key], Optional[Metadata]]
-"""Exists result tuple: (key, meta) where meta is None if not found."""
+"""Aerospike key: (namespace, set, primary_key). Input type for all key parameters."""
 
 class BatchRecord:
     """Single record result from a batch read operation."""
@@ -40,15 +48,6 @@ class BatchRecords:
     """Container for batch read results."""
 
     batch_records: list[BatchRecord]
-
-PolicyDict = dict[str, Any]
-"""Policy dictionary with keys like 'timeout', 'key', 'exists', 'gen', etc."""
-
-OperationDict = dict[str, Any]
-"""Operation dict with 'op', 'bin', 'val' keys."""
-
-PrivilegeDict = dict[str, Any]
-"""Privilege dict with 'code', optional 'ns', optional 'set' keys."""
 
 # -- Client --------------------------------------------------------------
 
@@ -67,7 +66,9 @@ class Client:
         }).connect()
 
         client.put(("test", "demo", "key1"), {"name": "Alice"})
-        _, meta, bins = client.get(("test", "demo", "key1"))
+        record = client.get(("test", "demo", "key1"))
+        print(record.bins)  # {"name": "Alice"}
+        print(record.meta.gen)  # generation number
 
         client.close()
         ```
@@ -154,16 +155,16 @@ class Client:
     def info_all(
         self,
         command: str,
-        policy: Optional[PolicyDict] = None,
-    ) -> list[tuple[str, int, str]]:
+        policy: Optional[dict[str, Any]] = None,
+    ) -> list[InfoNodeResult]:
         """Send an info command to all cluster nodes.
 
         Args:
             command: The info command string (e.g. ``"namespaces"``).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Returns:
-            A list of ``(node_name, error_code, response)`` tuples.
+            A list of ``InfoNodeResult(node_name, error_code, response)`` tuples.
 
         Example:
             ```python
@@ -177,13 +178,13 @@ class Client:
     def info_random_node(
         self,
         command: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> str:
         """Send an info command to a random cluster node.
 
         Args:
             command: The info command string.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Returns:
             The info response string.
@@ -201,16 +202,16 @@ class Client:
         self,
         key: Key,
         bins: Bins,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Write a record to the Aerospike cluster.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bins: Dictionary of bin name-value pairs to write.
-            meta: Optional metadata dict with ``"ttl"`` and ``"gen"`` keys.
-            policy: Optional write policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``).
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordExistsError: Record already exists (with CREATE_ONLY policy).
@@ -235,23 +236,23 @@ class Client:
         """
         ...
 
-    def get(self, key: Key, policy: Optional[PolicyDict] = None) -> Record:
+    def get(self, key: Key, policy: Optional[dict[str, Any]] = None) -> Record:
         """Read a record from the cluster.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
-            A ``(key, meta, bins)`` tuple.
+            A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
         Raises:
             RecordNotFound: The record does not exist.
 
         Example:
             ```python
-            key, meta, bins = client.get(("test", "demo", "user1"))
-            print(bins)  # {"name": "Alice", "age": 30}
+            record = client.get(("test", "demo", "user1"))
+            print(record.bins)  # {"name": "Alice", "age": 30}
             ```
         """
         ...
@@ -260,25 +261,25 @@ class Client:
         self,
         key: Key,
         bins: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> Record:
         """Read specific bins from a record.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bins: List of bin names to retrieve.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
-            A ``(key, meta, bins)`` tuple containing only the requested bins.
+            A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
         Raises:
             RecordNotFound: The record does not exist.
 
         Example:
             ```python
-            _, meta, bins = client.select(("test", "demo", "user1"), ["name"])
-            # bins = {"name": "Alice"}
+            record = client.select(("test", "demo", "user1"), ["name"])
+            # record.bins = {"name": "Alice"}
             ```
         """
         ...
@@ -286,23 +287,23 @@ class Client:
     def exists(
         self,
         key: Key,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> ExistsResult:
         """Check whether a record exists.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
-            A ``(key, meta)`` tuple. ``meta`` is ``None`` if the record
-            does not exist.
+            An ``ExistsResult`` NamedTuple with ``key``, ``meta`` fields.
+            ``meta`` is ``None`` if the record does not exist.
 
         Example:
             ```python
-            _, meta = client.exists(("test", "demo", "user1"))
-            if meta is not None:
-                print(f"Found, gen={meta['gen']}")
+            result = client.exists(("test", "demo", "user1"))
+            if result.meta is not None:
+                print(f"Found, gen={result.meta.gen}")
             ```
         """
         ...
@@ -310,15 +311,15 @@ class Client:
     def remove(
         self,
         key: Key,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Delete a record from the cluster.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            meta: Optional metadata dict for generation check.
-            policy: Optional remove policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict for generation check.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordNotFound: The record does not exist.
@@ -342,16 +343,16 @@ class Client:
         self,
         key: Key,
         val: int = 0,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Reset the TTL of a record.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             val: New TTL value in seconds.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordNotFound: The record does not exist.
@@ -370,8 +371,8 @@ class Client:
         key: Key,
         bin: str,
         val: Any,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Append a string to a bin value.
 
@@ -379,8 +380,8 @@ class Client:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             val: String value to append.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -394,8 +395,8 @@ class Client:
         key: Key,
         bin: str,
         val: Any,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Prepend a string to a bin value.
 
@@ -403,8 +404,8 @@ class Client:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             val: String value to prepend.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -418,8 +419,8 @@ class Client:
         key: Key,
         bin: str,
         offset: Union[int, float],
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Increment a numeric bin value.
 
@@ -427,8 +428,8 @@ class Client:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             offset: Integer or float amount to add (use negative to decrement).
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -442,16 +443,16 @@ class Client:
         self,
         key: Key,
         bin_names: list[str],
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Remove specific bins from a record by setting them to nil.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin_names: List of bin names to remove.
-            meta: Optional metadata dict.
-            policy: Optional write policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -465,20 +466,20 @@ class Client:
     def operate(
         self,
         key: Key,
-        ops: list[OperationDict],
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        ops: list[dict[str, Any]],
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> Record:
         """Execute multiple operations atomically on a single record.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
-            A ``(key, meta, bins)`` tuple with the results of read operations.
+            A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
         Example:
             ```python
@@ -488,7 +489,8 @@ class Client:
                 {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
                 {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
             ]
-            _, meta, bins = client.operate(("test", "demo", "key1"), ops)
+            record = client.operate(("test", "demo", "key1"), ops)
+            print(record.bins)
             ```
         """
         ...
@@ -496,10 +498,10 @@ class Client:
     def operate_ordered(
         self,
         key: Key,
-        ops: list[OperationDict],
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
-    ) -> tuple[Any, Metadata, list[tuple[str, Any]]]:
+        ops: list[dict[str, Any]],
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
+    ) -> OperateOrderedResult:
         """Execute multiple operations with ordered results.
 
         Like ``operate()`` but returns results as an ordered list preserving
@@ -508,12 +510,12 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
-            A ``(key, meta, results)`` tuple where ``results`` is a list of
-            ``(bin_name, value)`` tuples in operation order.
+            An ``OperateOrderedResult`` NamedTuple with ``key``, ``meta``,
+            ``ordered_bins`` fields.
 
         Example:
             ```python
@@ -523,8 +525,8 @@ class Client:
                 {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
                 {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
             ]
-            _, meta, results = client.operate_ordered(("test", "demo", "key1"), ops)
-            # results = [("counter", 2)]
+            result = client.operate_ordered(("test", "demo", "key1"), ops)
+            # result.ordered_bins = [BinTuple("counter", 2)]
             ```
         """
         ...
@@ -536,7 +538,7 @@ class Client:
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
         _dtype: None = None,
     ) -> BatchRecords: ...
     @overload
@@ -544,7 +546,7 @@ class Client:
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
         *,
         _dtype: np.dtype,
     ) -> NumpyBatchRecords: ...
@@ -552,7 +554,7 @@ class Client:
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
         _dtype: Optional[np.dtype] = None,
     ) -> Union[BatchRecords, NumpyBatchRecords]:
         """Read multiple records in a single batch call.
@@ -561,7 +563,7 @@ class Client:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             bins: Optional list of bin names to read. ``None`` reads all bins;
                 an empty list performs an existence check only.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             _dtype: Optional NumPy dtype. When provided, returns
                 ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
@@ -575,8 +577,7 @@ class Client:
             batch = client.batch_read(keys)
             for br in batch.batch_records:
                 if br.record:
-                    key, meta, bins = br.record
-                    print(bins)
+                    print(br.record.bins)
 
             # Read specific bins
             batch = client.batch_read(keys, bins=["name", "age"])
@@ -587,18 +588,18 @@ class Client:
     def batch_operate(
         self,
         keys: list[Key],
-        ops: list[OperationDict],
-        policy: Optional[PolicyDict] = None,
+        ops: list[dict[str, Any]],
+        policy: Optional[dict[str, Any]] = None,
     ) -> list[Record]:
         """Execute operations on multiple records in a single batch call.
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             ops: List of operation dicts to apply to each record.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
 
         Returns:
-            A list of ``(key, meta, bins)`` result tuples.
+            A list of ``Record`` NamedTuples.
 
         Example:
             ```python
@@ -614,16 +615,16 @@ class Client:
     def batch_remove(
         self,
         keys: list[Key],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> list[Record]:
         """Delete multiple records in a single batch call.
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
 
         Returns:
-            A list of ``(key, meta, bins)`` result tuples.
+            A list of ``Record`` NamedTuples.
 
         Example:
             ```python
@@ -683,7 +684,7 @@ class Client:
         set_name: str,
         bin_name: str,
         index_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Create a numeric secondary index.
 
@@ -692,7 +693,7 @@ class Client:
             set_name: Target set.
             bin_name: Bin to index.
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Raises:
             IndexFoundError: An index with that name already exists.
@@ -710,7 +711,7 @@ class Client:
         set_name: str,
         bin_name: str,
         index_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Create a string secondary index.
 
@@ -719,7 +720,7 @@ class Client:
             set_name: Target set.
             bin_name: Bin to index.
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Raises:
             IndexFoundError: An index with that name already exists.
@@ -737,7 +738,7 @@ class Client:
         set_name: str,
         bin_name: str,
         index_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Create a geospatial secondary index.
 
@@ -746,7 +747,7 @@ class Client:
             set_name: Target set.
             bin_name: Bin to index (must contain GeoJSON values).
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Raises:
             IndexFoundError: An index with that name already exists.
@@ -762,14 +763,14 @@ class Client:
         self,
         namespace: str,
         index_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Remove a secondary index.
 
         Args:
             namespace: Target namespace.
             index_name: Name of the index to remove.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Raises:
             IndexNotFound: The index does not exist.
@@ -788,7 +789,7 @@ class Client:
         namespace: str,
         set_name: str,
         nanos: int = 0,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Remove all records in a namespace/set.
 
@@ -796,7 +797,7 @@ class Client:
             namespace: Target namespace.
             set_name: Target set.
             nanos: Optional last-update cutoff in nanoseconds.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -811,14 +812,14 @@ class Client:
         self,
         filename: str,
         udf_type: int = 0,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Register a Lua UDF module on the cluster.
 
         Args:
             filename: Path to the Lua source file.
             udf_type: UDF language type (only Lua ``0`` is supported).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -830,13 +831,13 @@ class Client:
     def udf_remove(
         self,
         module: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Remove a registered UDF module.
 
         Args:
             module: Module name to remove (without ``.lua`` extension).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -851,7 +852,7 @@ class Client:
         module: str,
         function: str,
         args: Optional[list[Any]] = None,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> Any:
         """Execute a UDF on a single record.
 
@@ -860,7 +861,7 @@ class Client:
             module: Name of the registered UDF module.
             function: Name of the function within the module.
             args: Optional list of arguments to pass to the function.
-            policy: Optional apply policy dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
             The return value of the UDF function.
@@ -884,68 +885,68 @@ class Client:
         username: str,
         password: str,
         roles: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
-    def admin_drop_user(self, username: str, policy: Optional[PolicyDict] = None) -> None: ...
+    def admin_drop_user(self, username: str, policy: Optional[dict[str, Any]] = None) -> None: ...
     def admin_change_password(
         self,
         username: str,
         password: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
     def admin_grant_roles(
         self,
         username: str,
         roles: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
     def admin_revoke_roles(
         self,
         username: str,
         roles: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
-    def admin_query_user_info(self, username: str, policy: Optional[PolicyDict] = None) -> dict[str, Any]: ...
-    def admin_query_users_info(self, policy: Optional[PolicyDict] = None) -> list[dict[str, Any]]: ...
+    def admin_query_user_info(self, username: str, policy: Optional[dict[str, Any]] = None) -> dict[str, Any]: ...
+    def admin_query_users_info(self, policy: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]: ...
 
     # -- Admin: Role --
 
     def admin_create_role(
         self,
         role: str,
-        privileges: list[PrivilegeDict],
-        policy: Optional[PolicyDict] = None,
+        privileges: list[Privilege],
+        policy: Optional[dict[str, Any]] = None,
         whitelist: Optional[list[str]] = None,
         read_quota: int = 0,
         write_quota: int = 0,
     ) -> None: ...
-    def admin_drop_role(self, role: str, policy: Optional[PolicyDict] = None) -> None: ...
+    def admin_drop_role(self, role: str, policy: Optional[dict[str, Any]] = None) -> None: ...
     def admin_grant_privileges(
         self,
         role: str,
-        privileges: list[PrivilegeDict],
-        policy: Optional[PolicyDict] = None,
+        privileges: list[Privilege],
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
     def admin_revoke_privileges(
         self,
         role: str,
-        privileges: list[PrivilegeDict],
-        policy: Optional[PolicyDict] = None,
+        privileges: list[Privilege],
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
-    def admin_query_role(self, role: str, policy: Optional[PolicyDict] = None) -> dict[str, Any]: ...
-    def admin_query_roles(self, policy: Optional[PolicyDict] = None) -> list[dict[str, Any]]: ...
+    def admin_query_role(self, role: str, policy: Optional[dict[str, Any]] = None) -> dict[str, Any]: ...
+    def admin_query_roles(self, policy: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]: ...
     def admin_set_whitelist(
         self,
         role: str,
         whitelist: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
     def admin_set_quotas(
         self,
         role: str,
         read_quota: int = 0,
         write_quota: int = 0,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
 
 class AsyncClient:
@@ -965,7 +966,9 @@ class AsyncClient:
             await client.connect()
 
             await client.put(("test", "demo", "key1"), {"name": "Alice"})
-            _, meta, bins = await client.get(("test", "demo", "key1"))
+            record = await client.get(("test", "demo", "key1"))
+            print(record.bins)  # {"name": "Alice"}
+            print(record.meta.gen)  # generation number
 
             await client.close()
         ```
@@ -1041,16 +1044,16 @@ class AsyncClient:
     async def info_all(
         self,
         command: str,
-        policy: Optional[PolicyDict] = None,
-    ) -> list[tuple[str, int, str]]:
+        policy: Optional[dict[str, Any]] = None,
+    ) -> list[InfoNodeResult]:
         """Send an info command to all cluster nodes.
 
         Args:
             command: The info command string (e.g. ``"namespaces"``).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Returns:
-            A list of ``(node_name, error_code, response)`` tuples.
+            A list of ``InfoNodeResult(node_name, error_code, response)`` tuples.
 
         Example:
             ```python
@@ -1064,13 +1067,13 @@ class AsyncClient:
     async def info_random_node(
         self,
         command: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> str:
         """Send an info command to a random cluster node.
 
         Args:
             command: The info command string.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Returns:
             The info response string.
@@ -1088,16 +1091,16 @@ class AsyncClient:
         self,
         key: Key,
         bins: Bins,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Write a record to the Aerospike cluster.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bins: Dictionary of bin name-value pairs to write.
-            meta: Optional metadata dict with ``"ttl"`` and ``"gen"`` keys.
-            policy: Optional write policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``).
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordExistsError: Record already exists (with CREATE_ONLY policy).
@@ -1114,23 +1117,23 @@ class AsyncClient:
         """
         ...
 
-    async def get(self, key: Key, policy: Optional[PolicyDict] = None) -> Record:
+    async def get(self, key: Key, policy: Optional[dict[str, Any]] = None) -> Record:
         """Read a record from the cluster.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
-            A ``(key, meta, bins)`` tuple.
+            A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
         Raises:
             RecordNotFound: The record does not exist.
 
         Example:
             ```python
-            key, meta, bins = await client.get(("test", "demo", "user1"))
-            print(bins)  # {"name": "Alice", "age": 30}
+            record = await client.get(("test", "demo", "user1"))
+            print(record.bins)  # {"name": "Alice", "age": 30}
             ```
         """
         ...
@@ -1139,25 +1142,25 @@ class AsyncClient:
         self,
         key: Key,
         bins: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> Record:
         """Read specific bins from a record.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bins: List of bin names to retrieve.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
-            A ``(key, meta, bins)`` tuple containing only the requested bins.
+            A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
         Raises:
             RecordNotFound: The record does not exist.
 
         Example:
             ```python
-            _, meta, bins = await client.select(("test", "demo", "user1"), ["name"])
-            # bins = {"name": "Alice"}
+            record = await client.select(("test", "demo", "user1"), ["name"])
+            # record.bins = {"name": "Alice"}
             ```
         """
         ...
@@ -1165,23 +1168,23 @@ class AsyncClient:
     async def exists(
         self,
         key: Key,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> ExistsResult:
         """Check whether a record exists.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            policy: Optional read policy dict.
+            policy: Optional [`ReadPolicy`](types.md#readpolicy) dict.
 
         Returns:
-            A ``(key, meta)`` tuple. ``meta`` is ``None`` if the record
-            does not exist.
+            An ``ExistsResult`` NamedTuple with ``key``, ``meta`` fields.
+            ``meta`` is ``None`` if the record does not exist.
 
         Example:
             ```python
-            _, meta = await client.exists(("test", "demo", "user1"))
-            if meta is not None:
-                print(f"Found, gen={meta['gen']}")
+            result = await client.exists(("test", "demo", "user1"))
+            if result.meta is not None:
+                print(f"Found, gen={result.meta.gen}")
             ```
         """
         ...
@@ -1189,15 +1192,15 @@ class AsyncClient:
     async def remove(
         self,
         key: Key,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Delete a record from the cluster.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
-            meta: Optional metadata dict for generation check.
-            policy: Optional remove policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict for generation check.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordNotFound: The record does not exist.
@@ -1213,16 +1216,16 @@ class AsyncClient:
         self,
         key: Key,
         val: int = 0,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Reset the TTL of a record.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             val: New TTL value in seconds.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Raises:
             RecordNotFound: The record does not exist.
@@ -1241,8 +1244,8 @@ class AsyncClient:
         key: Key,
         bin: str,
         val: Any,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Append a string to a bin value.
 
@@ -1250,8 +1253,8 @@ class AsyncClient:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             val: String value to append.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -1265,8 +1268,8 @@ class AsyncClient:
         key: Key,
         bin: str,
         val: Any,
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Prepend a string to a bin value.
 
@@ -1274,8 +1277,8 @@ class AsyncClient:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             val: String value to prepend.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -1289,8 +1292,8 @@ class AsyncClient:
         key: Key,
         bin: str,
         offset: Union[int, float],
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Increment a numeric bin value.
 
@@ -1298,8 +1301,8 @@ class AsyncClient:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin: Target bin name.
             offset: Integer or float amount to add (use negative to decrement).
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -1313,16 +1316,16 @@ class AsyncClient:
         self,
         key: Key,
         bin_names: list[str],
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Remove specific bins from a record by setting them to nil.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             bin_names: List of bin names to remove.
-            meta: Optional metadata dict.
-            policy: Optional write policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Example:
             ```python
@@ -1336,20 +1339,20 @@ class AsyncClient:
     async def operate(
         self,
         key: Key,
-        ops: list[OperationDict],
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
+        ops: list[dict[str, Any]],
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> Record:
         """Execute multiple operations atomically on a single record.
 
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
-            A ``(key, meta, bins)`` tuple with the results of read operations.
+            A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
         Example:
             ```python
@@ -1359,7 +1362,8 @@ class AsyncClient:
                 {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
                 {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
             ]
-            _, meta, bins = await client.operate(("test", "demo", "key1"), ops)
+            record = await client.operate(("test", "demo", "key1"), ops)
+            print(record.bins)
             ```
         """
         ...
@@ -1367,10 +1371,10 @@ class AsyncClient:
     async def operate_ordered(
         self,
         key: Key,
-        ops: list[OperationDict],
-        meta: Optional[Metadata] = None,
-        policy: Optional[PolicyDict] = None,
-    ) -> tuple[Any, Metadata, list[tuple[str, Any]]]:
+        ops: list[dict[str, Any]],
+        meta: Optional[WriteMeta] = None,
+        policy: Optional[dict[str, Any]] = None,
+    ) -> OperateOrderedResult:
         """Execute multiple operations with ordered results.
 
         Like ``operate()`` but returns results as an ordered list preserving
@@ -1379,12 +1383,12 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
-            meta: Optional metadata dict.
-            policy: Optional operate policy dict.
+            meta: Optional [`WriteMeta`](types.md#writemeta) dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
-            A ``(key, meta, results)`` tuple where ``results`` is a list of
-            ``(bin_name, value)`` tuples in operation order.
+            An ``OperateOrderedResult`` NamedTuple with ``key``, ``meta``,
+            ``ordered_bins`` fields.
 
         Example:
             ```python
@@ -1394,9 +1398,10 @@ class AsyncClient:
                 {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
                 {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
             ]
-            _, meta, results = await client.operate_ordered(
+            result = await client.operate_ordered(
                 ("test", "demo", "key1"), ops
             )
+            # result.ordered_bins = [BinTuple("counter", 2)]
             ```
         """
         ...
@@ -1408,7 +1413,7 @@ class AsyncClient:
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
         _dtype: None = None,
     ) -> BatchRecords: ...
     @overload
@@ -1416,7 +1421,7 @@ class AsyncClient:
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
         *,
         _dtype: np.dtype,
     ) -> NumpyBatchRecords: ...
@@ -1424,7 +1429,7 @@ class AsyncClient:
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
         _dtype: Optional[np.dtype] = None,
     ) -> Union[BatchRecords, NumpyBatchRecords]:
         """Read multiple records in a single batch call.
@@ -1433,7 +1438,7 @@ class AsyncClient:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             bins: Optional list of bin names to read. ``None`` reads all bins;
                 an empty list performs an existence check only.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             _dtype: Optional NumPy dtype. When provided, returns
                 ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
@@ -1446,8 +1451,7 @@ class AsyncClient:
             batch = await client.batch_read(keys, bins=["name", "age"])
             for br in batch.batch_records:
                 if br.record:
-                    key, meta, bins = br.record
-                    print(bins)
+                    print(br.record.bins)
             ```
         """
         ...
@@ -1455,18 +1459,18 @@ class AsyncClient:
     async def batch_operate(
         self,
         keys: list[Key],
-        ops: list[OperationDict],
-        policy: Optional[PolicyDict] = None,
+        ops: list[dict[str, Any]],
+        policy: Optional[dict[str, Any]] = None,
     ) -> list[Record]:
         """Execute operations on multiple records in a single batch call.
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             ops: List of operation dicts to apply to each record.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
 
         Returns:
-            A list of ``(key, meta, bins)`` result tuples.
+            A list of ``Record`` NamedTuples.
 
         Example:
             ```python
@@ -1482,16 +1486,16 @@ class AsyncClient:
     async def batch_remove(
         self,
         keys: list[Key],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> list[Record]:
         """Delete multiple records in a single batch call.
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            policy: Optional batch policy dict.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
 
         Returns:
-            A list of ``(key, meta, bins)`` result tuples.
+            A list of ``Record`` NamedTuples.
 
         Example:
             ```python
@@ -1507,7 +1511,7 @@ class AsyncClient:
         self,
         namespace: str,
         set_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> list[Record]:
         """Scan all records in a namespace/set.
 
@@ -1517,17 +1521,17 @@ class AsyncClient:
         Args:
             namespace: The namespace to scan.
             set_name: The set to scan.
-            policy: Optional scan policy dict. Supports ``"filter_expression"``
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict. Supports ``"filter_expression"``
                 for server-side filtering.
 
         Returns:
-            A list of ``(key, meta, bins)`` tuples.
+            A list of ``Record`` NamedTuples.
 
         Example:
             ```python
             records = await client.scan("test", "demo")
-            for key, meta, bins in records:
-                print(bins)
+            for record in records:
+                print(record.bins)
             ```
         """
         ...
@@ -1540,7 +1544,7 @@ class AsyncClient:
         set_name: str,
         bin_name: str,
         index_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Create a numeric secondary index.
 
@@ -1549,7 +1553,7 @@ class AsyncClient:
             set_name: Target set.
             bin_name: Bin to index.
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1564,7 +1568,7 @@ class AsyncClient:
         set_name: str,
         bin_name: str,
         index_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Create a string secondary index.
 
@@ -1573,7 +1577,7 @@ class AsyncClient:
             set_name: Target set.
             bin_name: Bin to index.
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1588,7 +1592,7 @@ class AsyncClient:
         set_name: str,
         bin_name: str,
         index_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Create a geospatial secondary index.
 
@@ -1597,7 +1601,7 @@ class AsyncClient:
             set_name: Target set.
             bin_name: Bin to index (must contain GeoJSON values).
             index_name: Name for the new index.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1612,14 +1616,14 @@ class AsyncClient:
         self,
         namespace: str,
         index_name: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Remove a secondary index.
 
         Args:
             namespace: Target namespace.
             index_name: Name of the index to remove.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1635,7 +1639,7 @@ class AsyncClient:
         namespace: str,
         set_name: str,
         nanos: int = 0,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Remove all records in a namespace/set.
 
@@ -1643,7 +1647,7 @@ class AsyncClient:
             namespace: Target namespace.
             set_name: Target set.
             nanos: Optional last-update cutoff in nanoseconds.
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1658,14 +1662,14 @@ class AsyncClient:
         self,
         filename: str,
         udf_type: int = 0,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Register a Lua UDF module on the cluster.
 
         Args:
             filename: Path to the Lua source file.
             udf_type: UDF language type (only Lua ``0`` is supported).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1677,13 +1681,13 @@ class AsyncClient:
     async def udf_remove(
         self,
         module: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Remove a registered UDF module.
 
         Args:
             module: Module name to remove (without ``.lua`` extension).
-            policy: Optional info policy dict.
+            policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
         Example:
             ```python
@@ -1698,7 +1702,7 @@ class AsyncClient:
         module: str,
         function: str,
         args: Optional[list[Any]] = None,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> Any:
         """Execute a UDF on a single record.
 
@@ -1707,7 +1711,7 @@ class AsyncClient:
             module: Name of the registered UDF module.
             function: Name of the function within the module.
             args: Optional list of arguments to pass to the function.
-            policy: Optional apply policy dict.
+            policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
         Returns:
             The return value of the UDF function.
@@ -1731,68 +1735,68 @@ class AsyncClient:
         username: str,
         password: str,
         roles: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
-    async def admin_drop_user(self, username: str, policy: Optional[PolicyDict] = None) -> None: ...
+    async def admin_drop_user(self, username: str, policy: Optional[dict[str, Any]] = None) -> None: ...
     async def admin_change_password(
         self,
         username: str,
         password: str,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
     async def admin_grant_roles(
         self,
         username: str,
         roles: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
     async def admin_revoke_roles(
         self,
         username: str,
         roles: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
-    async def admin_query_user_info(self, username: str, policy: Optional[PolicyDict] = None) -> dict[str, Any]: ...
-    async def admin_query_users_info(self, policy: Optional[PolicyDict] = None) -> list[dict[str, Any]]: ...
+    async def admin_query_user_info(self, username: str, policy: Optional[dict[str, Any]] = None) -> dict[str, Any]: ...
+    async def admin_query_users_info(self, policy: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]: ...
 
     # -- Admin: Role --
 
     async def admin_create_role(
         self,
         role: str,
-        privileges: list[PrivilegeDict],
-        policy: Optional[PolicyDict] = None,
+        privileges: list[Privilege],
+        policy: Optional[dict[str, Any]] = None,
         whitelist: Optional[list[str]] = None,
         read_quota: int = 0,
         write_quota: int = 0,
     ) -> None: ...
-    async def admin_drop_role(self, role: str, policy: Optional[PolicyDict] = None) -> None: ...
+    async def admin_drop_role(self, role: str, policy: Optional[dict[str, Any]] = None) -> None: ...
     async def admin_grant_privileges(
         self,
         role: str,
-        privileges: list[PrivilegeDict],
-        policy: Optional[PolicyDict] = None,
+        privileges: list[Privilege],
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
     async def admin_revoke_privileges(
         self,
         role: str,
-        privileges: list[PrivilegeDict],
-        policy: Optional[PolicyDict] = None,
+        privileges: list[Privilege],
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
-    async def admin_query_role(self, role: str, policy: Optional[PolicyDict] = None) -> dict[str, Any]: ...
-    async def admin_query_roles(self, policy: Optional[PolicyDict] = None) -> list[dict[str, Any]]: ...
+    async def admin_query_role(self, role: str, policy: Optional[dict[str, Any]] = None) -> dict[str, Any]: ...
+    async def admin_query_roles(self, policy: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]: ...
     async def admin_set_whitelist(
         self,
         role: str,
         whitelist: list[str],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
     async def admin_set_quotas(
         self,
         role: str,
         read_quota: int = 0,
         write_quota: int = 0,
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
 
 class Query:
@@ -1846,20 +1850,20 @@ class Query:
         """
         ...
 
-    def results(self, policy: Optional[PolicyDict] = None) -> list[Record]:
+    def results(self, policy: Optional[dict[str, Any]] = None) -> list[Record]:
         """Execute the query and return all matching records.
 
         Args:
-            policy: Optional query policy dict.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
 
         Returns:
-            A list of ``(key, meta, bins)`` tuples.
+            A list of ``Record`` NamedTuples.
 
         Example:
             ```python
             records = query.results()
-            for key, meta, bins in records:
-                print(bins)
+            for record in records:
+                print(record.bins)
             ```
         """
         ...
@@ -1867,22 +1871,21 @@ class Query:
     def foreach(
         self,
         callback: Callable[[Record], Optional[bool]],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Execute the query and invoke a callback for each record.
 
-        The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+        The callback receives a ``Record`` NamedTuple. Return ``False``
         from the callback to stop iteration early.
 
         Args:
             callback: Function called with each record. Return ``False`` to stop.
-            policy: Optional query policy dict.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
 
         Example:
             ```python
             def process(record):
-                key, meta, bins = record
-                print(bins)
+                print(record.bins)
 
             query.foreach(process)
             ```
@@ -1917,20 +1920,20 @@ class Scan:
         """
         ...
 
-    def results(self, policy: Optional[PolicyDict] = None) -> list[Record]:
+    def results(self, policy: Optional[dict[str, Any]] = None) -> list[Record]:
         """Execute the scan and return all records.
 
         Args:
-            policy: Optional scan policy dict.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
 
         Returns:
-            A list of ``(key, meta, bins)`` tuples.
+            A list of ``Record`` NamedTuples.
 
         Example:
             ```python
             records = scan.results()
-            for key, meta, bins in records:
-                print(bins)
+            for record in records:
+                print(record.bins)
             ```
         """
         ...
@@ -1938,22 +1941,21 @@ class Scan:
     def foreach(
         self,
         callback: Callable[[Record], Optional[bool]],
-        policy: Optional[PolicyDict] = None,
+        policy: Optional[dict[str, Any]] = None,
     ) -> None:
         """Execute the scan and invoke a callback for each record.
 
-        The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+        The callback receives a ``Record`` NamedTuple. Return ``False``
         from the callback to stop iteration early.
 
         Args:
             callback: Function called with each record. Return ``False`` to stop.
-            policy: Optional scan policy dict.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
 
         Example:
             ```python
             def process(record):
-                key, meta, bins = record
-                print(bins)
+                print(record.bins)
 
             scan.foreach(process)
             ```
@@ -1966,7 +1968,7 @@ def client(config: dict[str, Any]) -> Client:
     """Create a new Aerospike client instance.
 
     Args:
-        config: Configuration dictionary. Must contain a ``"hosts"`` key
+        config: [`ClientConfig`](types.md#clientconfig) dictionary. Must contain a ``"hosts"`` key
             with a list of ``(host, port)`` tuples.
 
     Returns:

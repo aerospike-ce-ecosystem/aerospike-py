@@ -159,7 +159,7 @@ class TestTTLSpecialValues:
         _, o_meta, _ = official_client.get(key)
 
         # Both should report the same TTL for never-expire
-        assert r_meta["ttl"] == o_meta["ttl"]
+        assert r_meta.ttl == o_meta["ttl"]
 
     def test_ttl_never_expire_official(self, rust_client, official_client, cleanup):
         key = (NS, SET, "ttl_never_o")
@@ -174,7 +174,7 @@ class TestTTLSpecialValues:
         _, r_meta, _ = rust_client.get(key)
         _, o_meta, _ = official_client.get(key)
 
-        assert r_meta["ttl"] == o_meta["ttl"]
+        assert r_meta.ttl == o_meta["ttl"]
 
     def test_ttl_dont_update(self, rust_client, official_client, cleanup):
         """TTL_DONT_UPDATE should preserve the original TTL.
@@ -197,7 +197,7 @@ class TestTTLSpecialValues:
         _, o_meta, _ = official_client.get(key)
 
         # Both clients should read approximately the same TTL (within 2 sec)
-        assert abs(r_meta["ttl"] - o_meta["ttl"]) <= 2, f"TTL mismatch: rust={r_meta['ttl']}, official={o_meta['ttl']}"
+        assert abs(r_meta.ttl - o_meta["ttl"]) <= 2, f"TTL mismatch: rust={r_meta.ttl}, official={o_meta['ttl']}"
         # Value should be updated
         _, _, bins = rust_client.get(key)
         assert bins["val"] == 2
@@ -227,8 +227,8 @@ class TestTTLNoExpiration:
         _, o_meta, _ = official_client.get(key)
 
         # The actual TTL values should match between clients
-        assert r_meta["ttl"] == o_meta["ttl"], (
-            f"TTL mismatch for never-expire: rust={r_meta['ttl']}, "
+        assert r_meta.ttl == o_meta["ttl"], (
+            f"TTL mismatch for never-expire: rust={r_meta.ttl}, "
             f"official={o_meta['ttl']}. "
             "Check record.rs:38 0xFFFFFFFF handling."
         )
@@ -245,7 +245,7 @@ class TestTTLNoExpiration:
         _, o_meta, _ = official_client.get(key)
 
         # TTL values should be approximately equal (within 2 seconds)
-        assert abs(r_meta["ttl"] - o_meta["ttl"]) <= 2
+        assert abs(r_meta.ttl - o_meta["ttl"]) <= 2
 
 
 # ── POLICY_KEY_SEND ────────────────────────────────────────────────
@@ -351,7 +351,7 @@ class TestGenerationPolicy:
         rust_client.put(
             key,
             {"val": 2},
-            meta={"gen": meta["gen"]},
+            meta={"gen": meta.gen},
             policy={"gen": aerospike_py.POLICY_GEN_EQ},
         )
 

@@ -69,6 +69,13 @@ class RecordResponse(BaseModel):
     def _strip_digest(cls, v: Any) -> Any:
         return _sanitize_key(v)
 
+    @field_validator("meta", mode="before")
+    @classmethod
+    def _meta_to_dict(cls, v: Any) -> Any:
+        if v is not None and hasattr(v, "_asdict"):
+            return v._asdict()
+        return v
+
 
 class ExistsResponse(BaseModel):
     key: Any = None
@@ -79,6 +86,13 @@ class ExistsResponse(BaseModel):
     @classmethod
     def _strip_digest(cls, v: Any) -> Any:
         return _sanitize_key(v)
+
+    @field_validator("meta", mode="before")
+    @classmethod
+    def _meta_to_dict(cls, v: Any) -> Any:
+        if v is not None and hasattr(v, "_asdict"):
+            return v._asdict()
+        return v
 
 
 # ── Records router request models ─────────────────────────────
@@ -133,6 +147,13 @@ class OperateRequest(BaseModel):
 class OperateOrderedResponse(BaseModel):
     meta: dict[str, Any] | None = None
     ordered_bins: list[list[Any]] = Field(description="List of [bin_name, value] pairs in operation order")
+
+    @field_validator("meta", mode="before")
+    @classmethod
+    def _meta_to_dict(cls, v: Any) -> Any:
+        if v is not None and hasattr(v, "_asdict"):
+            return v._asdict()
+        return v
 
 
 # ── Batch router models ───────────────────────────────────────

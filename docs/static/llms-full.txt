@@ -165,6 +165,7 @@ python -c "import aerospike_py as aerospike; print(aerospike.__version__)"
 
 ```python
 import aerospike_py as aerospike
+from aerospike_py import Record
 
 # Create and connect (with context manager)
 with aerospike.client({
@@ -176,9 +177,12 @@ with aerospike.client({
     key = ("test", "demo", "user1")
     client.put(key, {"name": "Alice", "age": 30})
 
-    # Read a record
+    # Read a record — returns Record NamedTuple
+    record: Record = client.get(key)
+    print(f"bins={record.bins}, gen={record.meta.gen}, ttl={record.meta.ttl}")
+
+    # Tuple unpacking also works (backward compat)
     _, meta, bins = client.get(key)
-    print(f"bins={bins}, gen={meta['gen']}, ttl={meta['ttl']}")
 
     # Update with increment
     client.increment(key, "age", 1)
@@ -188,7 +192,8 @@ with aerospike.client({
         {"op": aerospike.OPERATOR_INCR, "bin": "age", "val": 1},
         {"op": aerospike.OPERATOR_READ, "bin": "age", "val": None},
     ]
-    _, _, bins = client.operate(key, ops)
+    record = client.operate(key, ops)
+    print(record.bins)
 
     # Delete
     client.remove(key)
@@ -208,7 +213,7 @@ with aerospike.client({
 ```python
 import asyncio
 import aerospike_py as aerospike
-from aerospike_py import AsyncClient
+from aerospike_py import AsyncClient, Record
 
 async def main():
     client = AsyncClient({
@@ -221,9 +226,12 @@ async def main():
     key = ("test", "demo", "user1")
     await client.put(key, {"name": "Bob", "age": 25})
 
-    # Read a record
+    # Read a record — returns Record NamedTuple
+    record: Record = await client.get(key)
+    print(f"bins={record.bins}, gen={record.meta.gen}, ttl={record.meta.ttl}")
+
+    # Tuple unpacking also works (backward compat)
     _, meta, bins = await client.get(key)
-    print(f"bins={bins}, gen={meta['gen']}, ttl={meta['ttl']}")
 
     # Update with increment
     await client.increment(key, "age", 1)
@@ -233,7 +241,8 @@ async def main():
         {"op": aerospike.OPERATOR_INCR, "bin": "age", "val": 1},
         {"op": aerospike.OPERATOR_READ, "bin": "age", "val": None},
     ]
-    _, _, bins = await client.operate(key, ops)
+    record = await client.operate(key, ops)
+    print(record.bins)
 
     # Concurrent writes with asyncio.gather
     keys = [("test", "demo", f"item_{i}") for i in range(10)]
@@ -250,7 +259,7 @@ asyncio.run(main())
 
 #### Configuration
 
-The `config` dictionary supports:
+The `config` dictionary accepts a [`ClientConfig`](api/types.md#clientconfig) TypedDict. Key options:
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -260,6 +269,8 @@ The `config` dictionary supports:
 | `auth_mode` | `int` | `AUTH_INTERNAL`, `AUTH_EXTERNAL`, or `AUTH_PKI` |
 
 #### Policies and Metadata
+
+Use [`WritePolicy`](api/types.md#writepolicy) for write policies, [`WriteMeta`](api/types.md#writemeta) for metadata, and [`ReadPolicy`](api/types.md#readpolicy) for read policies. See [Types Reference](/docs/api/types) for all available fields.
 
 ##### Sync Client
 
@@ -276,7 +287,7 @@ client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 # Optimistic locking with generation check
 _, meta, bins = client.get(key)
 client.put(key, {"val": bins["val"] + 1},
-           meta={"gen": meta["gen"]},
+           meta={"gen": meta.gen},
            policy={"gen": aerospike.POLICY_GEN_EQ})
 ```
 
@@ -295,18 +306,20 @@ await client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONL
 # Optimistic locking with generation check
 _, meta, bins = await client.get(key)
 await client.put(key, {"val": bins["val"] + 1},
-                 meta={"gen": meta["gen"]},
+                 meta={"gen": meta.gen},
                  policy={"gen": aerospike.POLICY_GEN_EQ})
 ```
 
 #### Next Steps
 
-- [CRUD & Batch Guide](/docs/guides/crud) - CRUD and batch operations
-- [Query & Scan Guide](/docs/guides/query-scan) - Secondary index queries and scans
-- [Expression Filters Guide](/docs/guides/expression-filters) - Server-side filtering
-- [List CDT Operations Guide](/docs/guides/cdt-list) - Atomic list operations
-- [Map CDT Operations Guide](/docs/guides/cdt-map) - Atomic map operations
+- [CRUD & Batch Guide](/docs/guides/crud/crud) - CRUD and batch operations
+- [Query & Scan Guide](/docs/guides/query-scan/query-scan) - Secondary index queries and scans
+- [Expression Filters Guide](/docs/guides/query-scan/expression-filters) - Server-side filtering
+- [List CDT Operations Guide](/docs/guides/crud/cdt-list) - Atomic list operations
+- [Map CDT Operations Guide](/docs/guides/crud/cdt-map) - Atomic map operations
+- [Client Config Guide](/docs/guides/config/client-config) - Connection and configuration
 - [API Reference](/docs/api/client) - Full API documentation
+- [Types Reference](/docs/api/types) - NamedTuple and TypedDict type definitions
 
 
 ---
@@ -334,7 +347,7 @@ Create a new Aerospike client instance.
 
 | Parameter | Description |
 |-----------|-------------|
-| `config` | Configuration dictionary. Must contain a ``"hosts"`` key with a list of ``(host, port)`` tuples. |
+| `config` | [`ClientConfig`](types.md#clientconfig) dictionary. Must contain a ``"hosts"`` key with a list of ``(host, port)`` tuples. |
 
 **Returns:** A new ``Client`` instance (not yet connected).
 
@@ -493,9 +506,9 @@ Send an info command to all cluster nodes.
 | Parameter | Description |
 |-----------|-------------|
 | `command` | The info command string (e.g. ``"namespaces"``). |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
-**Returns:** A list of ``(node_name, error_code, response)`` tuples.
+**Returns:** A list of ``InfoNodeResult(node_name, error_code, response)`` tuples.
 
 ##### Sync Client
 
@@ -520,7 +533,7 @@ Send an info command to a random cluster node.
 | Parameter | Description |
 |-----------|-------------|
 | `command` | The info command string. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 **Returns:** The info response string.
 
@@ -546,8 +559,8 @@ Write a record to the Aerospike cluster.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bins` | Dictionary of bin name-value pairs to write. |
-| `meta` | Optional metadata dict with ``"ttl"`` and ``"gen"`` keys. |
-| `policy` | Optional write policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``). |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 > **Note:**
 > Raises `RecordExistsError` Record already exists (with CREATE_ONLY policy).
@@ -588,24 +601,24 @@ Read a record from the cluster.
 | Parameter | Description |
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
-| `policy` | Optional read policy dict. |
+| `policy` | Optional [`ReadPolicy`](types.md#readpolicy) dict. |
 
-**Returns:** A ``(key, meta, bins)`` tuple.
+**Returns:** A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
 > **Note:**
 > Raises `RecordNotFound` The record does not exist.
 ##### Sync Client
 
 ```python
-key, meta, bins = client.get(("test", "demo", "user1"))
-print(bins)  # {"name": "Alice", "age": 30}
+record = client.get(("test", "demo", "user1"))
+print(record.bins)  # {"name": "Alice", "age": 30}
 ```
 
 ##### Async Client
 
 ```python
-key, meta, bins = await client.get(("test", "demo", "user1"))
-print(bins)  # {"name": "Alice", "age": 30}
+record = await client.get(("test", "demo", "user1"))
+print(record.bins)  # {"name": "Alice", "age": 30}
 ```
 
 ##### `select(key, bins, policy=None)`
@@ -616,24 +629,24 @@ Read specific bins from a record.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bins` | List of bin names to retrieve. |
-| `policy` | Optional read policy dict. |
+| `policy` | Optional [`ReadPolicy`](types.md#readpolicy) dict. |
 
-**Returns:** A ``(key, meta, bins)`` tuple containing only the requested bins.
+**Returns:** A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
 > **Note:**
 > Raises `RecordNotFound` The record does not exist.
 ##### Sync Client
 
 ```python
-_, meta, bins = client.select(("test", "demo", "user1"), ["name"])
-# bins = {"name": "Alice"}
+record = client.select(("test", "demo", "user1"), ["name"])
+# record.bins = {"name": "Alice"}
 ```
 
 ##### Async Client
 
 ```python
-_, meta, bins = await client.select(("test", "demo", "user1"), ["name"])
-# bins = {"name": "Alice"}
+record = await client.select(("test", "demo", "user1"), ["name"])
+# record.bins = {"name": "Alice"}
 ```
 
 ##### `exists(key, policy=None)`
@@ -643,25 +656,25 @@ Check whether a record exists.
 | Parameter | Description |
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
-| `policy` | Optional read policy dict. |
+| `policy` | Optional [`ReadPolicy`](types.md#readpolicy) dict. |
 
-**Returns:** A ``(key, meta)`` tuple. ``meta`` is ``None`` if the record
-    does not exist.
+**Returns:** An ``ExistsResult`` NamedTuple with ``key``, ``meta`` fields.
+    ``meta`` is ``None`` if the record does not exist.
 
 ##### Sync Client
 
 ```python
-_, meta = client.exists(("test", "demo", "user1"))
-if meta is not None:
-    print(f"Found, gen={meta['gen']}")
+result = client.exists(("test", "demo", "user1"))
+if result.meta is not None:
+    print(f"Found, gen={result.meta.gen}")
 ```
 
 ##### Async Client
 
 ```python
-_, meta = await client.exists(("test", "demo", "user1"))
-if meta is not None:
-    print(f"Found, gen={meta['gen']}")
+result = await client.exists(("test", "demo", "user1"))
+if result.meta is not None:
+    print(f"Found, gen={result.meta.gen}")
 ```
 
 ##### `remove(key, meta=None, policy=None)`
@@ -671,8 +684,8 @@ Delete a record from the cluster.
 | Parameter | Description |
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
-| `meta` | Optional metadata dict for generation check. |
-| `policy` | Optional remove policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict for generation check. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 > **Note:**
 > Raises `RecordNotFound` The record does not exist.
@@ -704,8 +717,8 @@ Reset the TTL of a record.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `val` | New TTL value in seconds. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 > **Note:**
 > Raises `RecordNotFound` The record does not exist.
@@ -732,8 +745,8 @@ Append a string to a bin value.
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bin` | Target bin name. |
 | `val` | String value to append. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 ##### Sync Client
 
@@ -756,8 +769,8 @@ Prepend a string to a bin value.
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bin` | Target bin name. |
 | `val` | String value to prepend. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 ##### Sync Client
 
@@ -780,8 +793,8 @@ Increment a numeric bin value.
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bin` | Target bin name. |
 | `offset` | Integer or float amount to add (use negative to decrement). |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 ##### Sync Client
 
@@ -805,8 +818,8 @@ Remove specific bins from a record by setting them to nil.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `bin_names` | List of bin names to remove. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional write policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 ##### Sync Client
 
@@ -830,10 +843,10 @@ Execute multiple operations atomically on a single record.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
-**Returns:** A ``(key, meta, bins)`` tuple with the results of read operations.
+**Returns:** A ``Record`` NamedTuple with ``key``, ``meta``, ``bins`` fields.
 
 ##### Sync Client
 
@@ -844,7 +857,8 @@ ops = [
     {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, bins = client.operate(("test", "demo", "key1"), ops)
+record = client.operate(("test", "demo", "key1"), ops)
+print(record.bins)
 ```
 
 ##### Async Client
@@ -856,7 +870,8 @@ ops = [
     {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, bins = await client.operate(("test", "demo", "key1"), ops)
+record = await client.operate(("test", "demo", "key1"), ops)
+print(record.bins)
 ```
 
 ##### `operate_ordered(key, ops, meta=None, policy=None)`
@@ -870,11 +885,11 @@ the operation order.
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
 | `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. |
-| `meta` | Optional metadata dict. |
-| `policy` | Optional operate policy dict. |
+| `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
-**Returns:** A ``(key, meta, results)`` tuple where ``results`` is a list of
-    ``(bin_name, value)`` tuples in operation order.
+**Returns:** An ``OperateOrderedResult`` NamedTuple with ``key``, ``meta``,
+    ``ordered_bins`` fields.
 
 ##### Sync Client
 
@@ -885,8 +900,8 @@ ops = [
     {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, results = client.operate_ordered(("test", "demo", "key1"), ops)
-# results = [("counter", 2)]
+result = client.operate_ordered(("test", "demo", "key1"), ops)
+# result.ordered_bins = [BinTuple("counter", 2)]
 ```
 
 ##### Async Client
@@ -898,9 +913,10 @@ ops = [
     {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, results = await client.operate_ordered(
+result = await client.operate_ordered(
     ("test", "demo", "key1"), ops
 )
+# result.ordered_bins = [BinTuple("counter", 2)]
 ```
 
 #### Batch Operations
@@ -913,7 +929,7 @@ Read multiple records in a single batch call.
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `bins` | Optional list of bin names to read. ``None`` reads all bins; an empty list performs an existence check only. |
-| `policy` | Optional batch policy dict. |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 | `_dtype` | Optional NumPy dtype. When provided, returns ``NumpyBatchRecords`` instead of ``BatchRecords``. |
 
 **Returns:** ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
@@ -926,8 +942,7 @@ keys = [("test", "demo", f"user_{i}") for i in range(10)]
 batch = client.batch_read(keys)
 for br in batch.batch_records:
     if br.record:
-        key, meta, bins = br.record
-        print(bins)
+        print(br.record.bins)
 
 # Read specific bins
 batch = client.batch_read(keys, bins=["name", "age"])
@@ -940,8 +955,7 @@ keys = [("test", "demo", f"user_{i}") for i in range(10)]
 batch = await client.batch_read(keys, bins=["name", "age"])
 for br in batch.batch_records:
     if br.record:
-        key, meta, bins = br.record
-        print(bins)
+        print(br.record.bins)
 ```
 
 ##### `batch_operate(keys, ops, policy=None)`
@@ -952,9 +966,9 @@ Execute operations on multiple records in a single batch call.
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `ops` | List of operation dicts to apply to each record. |
-| `policy` | Optional batch policy dict. |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** A list of ``(key, meta, bins)`` result tuples.
+**Returns:** A list of ``Record`` NamedTuples.
 
 ##### Sync Client
 
@@ -983,9 +997,9 @@ Delete multiple records in a single batch call.
 | Parameter | Description |
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
-| `policy` | Optional batch policy dict. |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** A list of ``(key, meta, bins)`` result tuples.
+**Returns:** A list of ``Record`` NamedTuples.
 
 ##### Sync Client
 
@@ -1045,8 +1059,8 @@ records = scan.results()
 
 ```python
 records = await client.scan("test", "demo")
-for key, meta, bins in records:
-    print(bins)
+for record in records:
+    print(record.bins)
 ```
 
 #### Index Management
@@ -1061,7 +1075,7 @@ Create a numeric secondary index.
 | `set_name` | Target set. |
 | `bin_name` | Bin to index. |
 | `index_name` | Name for the new index. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 > **Note:**
 > Raises `IndexFoundError` An index with that name already exists.
@@ -1087,7 +1101,7 @@ Create a string secondary index.
 | `set_name` | Target set. |
 | `bin_name` | Bin to index. |
 | `index_name` | Name for the new index. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 > **Note:**
 > Raises `IndexFoundError` An index with that name already exists.
@@ -1113,7 +1127,7 @@ Create a geospatial secondary index.
 | `set_name` | Target set. |
 | `bin_name` | Bin to index (must contain GeoJSON values). |
 | `index_name` | Name for the new index. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 > **Note:**
 > Raises `IndexFoundError` An index with that name already exists.
@@ -1139,7 +1153,7 @@ Remove a secondary index.
 |-----------|-------------|
 | `namespace` | Target namespace. |
 | `index_name` | Name of the index to remove. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 > **Note:**
 > Raises `IndexNotFound` The index does not exist.
@@ -1166,7 +1180,7 @@ Remove all records in a namespace/set.
 | `namespace` | Target namespace. |
 | `set_name` | Target set. |
 | `nanos` | Optional last-update cutoff in nanoseconds. |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 ##### Sync Client
 
@@ -1190,7 +1204,7 @@ Register a Lua UDF module on the cluster.
 |-----------|-------------|
 | `filename` | Path to the Lua source file. |
 | `udf_type` | UDF language type (only Lua ``0`` is supported). |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 ##### Sync Client
 
@@ -1211,7 +1225,7 @@ Remove a registered UDF module.
 | Parameter | Description |
 |-----------|-------------|
 | `module` | Module name to remove (without ``.lua`` extension). |
-| `policy` | Optional info policy dict. |
+| `policy` | Optional [`AdminPolicy`](types.md#adminpolicy) dict. |
 
 ##### Sync Client
 
@@ -1235,7 +1249,7 @@ Execute a UDF on a single record.
 | `module` | Name of the registered UDF module. |
 | `function` | Name of the function within the module. |
 | `args` | Optional list of arguments to pass to the function. |
-| `policy` | Optional apply policy dict. |
+| `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 **Returns:** The return value of the UDF function.
 
@@ -1310,32 +1324,31 @@ Execute the query and return all matching records.
 
 | Parameter | Description |
 |-----------|-------------|
-| `policy` | Optional query policy dict. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
-**Returns:** A list of ``(key, meta, bins)`` tuples.
+**Returns:** A list of ``Record`` NamedTuples.
 
 ```python
 records = query.results()
-for key, meta, bins in records:
-    print(bins)
+for record in records:
+    print(record.bins)
 ```
 
 ##### `foreach(callback, policy=None)`
 
 Execute the query and invoke a callback for each record.
 
-The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+The callback receives a ``Record`` NamedTuple. Return ``False``
 from the callback to stop iteration early.
 
 | Parameter | Description |
 |-----------|-------------|
 | `callback` | Function called with each record. Return ``False`` to stop. |
-| `policy` | Optional query policy dict. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
 ```python
 def process(record):
-    key, meta, bins = record
-    print(bins)
+    print(record.bins)
 
 query.foreach(process)
 ```
@@ -1368,32 +1381,31 @@ Execute the scan and return all records.
 
 | Parameter | Description |
 |-----------|-------------|
-| `policy` | Optional scan policy dict. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
-**Returns:** A list of ``(key, meta, bins)`` tuples.
+**Returns:** A list of ``Record`` NamedTuples.
 
 ```python
 records = scan.results()
-for key, meta, bins in records:
-    print(bins)
+for record in records:
+    print(record.bins)
 ```
 
 ##### `foreach(callback, policy=None)`
 
 Execute the scan and invoke a callback for each record.
 
-The callback receives a ``(key, meta, bins)`` tuple. Return ``False``
+The callback receives a ``Record`` NamedTuple. Return ``False``
 from the callback to stop iteration early.
 
 | Parameter | Description |
 |-----------|-------------|
 | `callback` | Function called with each record. Return ``False`` to stop. |
-| `policy` | Optional scan policy dict. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
 ```python
 def process(record):
-    key, meta, bins = record
-    print(bins)
+    print(record.bins)
 
 scan.foreach(process)
 ```
@@ -1807,7 +1819,7 @@ from aerospike_py.exception import RecordGenerationError
 try:
     _, meta, bins = client.get(key)
     client.put(key, {"val": bins["val"] + 1},
-               meta={"gen": meta["gen"]},
+               meta={"gen": meta.gen},
                policy={"gen": aerospike.POLICY_GEN_EQ})
 except RecordGenerationError:
     print("Record was modified by another client")
@@ -2046,6 +2058,372 @@ client.close()
 
 ---
 
+### Types
+
+> NamedTuple return types and TypedDict input types for aerospike-py.
+
+aerospike-py uses **NamedTuple** classes for return values and **TypedDict** classes for input parameters.
+All types can be imported from the top-level package or from `aerospike_py.types`.
+
+```python
+from aerospike_py import Record, ExistsResult, ReadPolicy, WritePolicy, WriteMeta
+# or
+from aerospike_py.types import Record, ExistsResult, ReadPolicy, WritePolicy, WriteMeta
+```
+
+#### Return Types (NamedTuple)
+
+NamedTuple return types support both attribute access and tuple unpacking for backward compatibility.
+
+##### `Record`
+
+Full record returned by read and operate methods.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | `AerospikeKey \| None` | Record key (`None` if `POLICY_KEY_DIGEST`) |
+| `meta` | `RecordMetadata \| None` | Record metadata |
+| `bins` | `dict[str, Any] \| None` | Bin name-value pairs |
+
+**Returned by**: `get()`, `select()`, `operate()`, `batch_operate()`, `batch_remove()`, `Query.results()`, `Scan.results()`
+
+```python
+record: Record = client.get(key)
+print(record.meta.gen)   # attribute access
+print(record.bins)       # {"name": "Alice", "age": 30}
+
+key, meta, bins = record  # tuple unpacking (backward compat)
+```
+
+##### `RecordMetadata`
+
+Record metadata with generation and TTL.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gen` | `int` | Record generation (optimistic lock version) |
+| `ttl` | `int` | Record time-to-live in seconds |
+
+```python
+record = client.get(key)
+print(record.meta.gen)  # 1
+print(record.meta.ttl)  # 2591998
+```
+
+##### `AerospikeKey`
+
+Record key returned by the server.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `namespace` | `str` | Namespace name |
+| `set_name` | `str` | Set name |
+| `user_key` | `str \| int \| bytes \| None` | User-provided primary key (`None` if `POLICY_KEY_DIGEST`) |
+| `digest` | `bytes` | 20-byte RIPEMD-160 digest |
+
+```python
+record = client.get(key, policy={"key": aerospike_py.POLICY_KEY_SEND})
+print(record.key.namespace)   # "test"
+print(record.key.set_name)    # "demo"
+print(record.key.user_key)    # "user1"
+```
+
+##### `ExistsResult`
+
+Existence check result.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | `AerospikeKey \| None` | Record key |
+| `meta` | `RecordMetadata \| None` | Metadata (`None` if record does not exist) |
+
+**Returned by**: `exists()`
+
+```python
+result: ExistsResult = client.exists(key)
+if result.meta is not None:
+    print(f"gen={result.meta.gen}")
+
+_, meta = result  # tuple unpacking
+```
+
+##### `InfoNodeResult`
+
+Info command result per cluster node.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `node_name` | `str` | Cluster node name |
+| `error_code` | `int` | 0 on success |
+| `response` | `str` | Info response string |
+
+**Returned by**: `info_all()`
+
+```python
+results: list[InfoNodeResult] = client.info_all("namespaces")
+for result in results:
+    print(f"{result.node_name}: {result.response}")
+```
+
+##### `OperateOrderedResult`
+
+Result from `operate_ordered()` with ordered bin results.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | `AerospikeKey \| None` | Record key |
+| `meta` | `RecordMetadata \| None` | Record metadata |
+| `ordered_bins` | `list[BinTuple]` | Ordered operation results |
+
+**Returned by**: `operate_ordered()`
+
+```python
+result: OperateOrderedResult = client.operate_ordered(key, ops)
+for bin_tuple in result.ordered_bins:
+    print(f"{bin_tuple.name} = {bin_tuple.value}")
+```
+
+##### `BinTuple`
+
+Single bin name-value pair used in ordered results.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Bin name |
+| `value` | `Any` | Bin value |
+
+#### API → Return Type Quick Reference
+
+| Method | Return Type |
+|--------|-------------|
+| `get()` | `Record` |
+| `select()` | `Record` |
+| `exists()` | `ExistsResult` |
+| `operate()` | `Record` |
+| `operate_ordered()` | `OperateOrderedResult` |
+| `info_all()` | `list[InfoNodeResult]` |
+| `batch_read()` | `BatchRecords` |
+| `batch_operate()` | `list[Record]` |
+| `batch_remove()` | `list[Record]` |
+| `Query.results()` | `list[Record]` |
+| `Scan.results()` | `list[Record]` |
+| `scan()` (async) | `list[Record]` |
+
+---
+
+#### Input Types (TypedDict)
+
+TypedDict input types provide IDE autocompletion and type checking for `policy` and `meta` parameters.
+All fields are optional (`total=False`).
+
+##### `ClientConfig`
+
+Configuration dictionary for client creation.
+
+**Used by**: `aerospike_py.client(config)`, `AsyncClient(config)`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `hosts` | `list[tuple[str, int]]` | *required* | Cluster seed nodes |
+| `cluster_name` | `str` | | Expected cluster name |
+| `auth_mode` | `int` | `AUTH_INTERNAL` | Authentication mode (`AUTH_INTERNAL`, `AUTH_EXTERNAL`, `AUTH_PKI`) |
+| `user` | `str` | | Username for authentication |
+| `password` | `str` | | Password for authentication |
+| `timeout` | `int` | `1000` | Connection timeout in ms |
+| `idle_timeout` | `int` | | Connection idle timeout in ms |
+| `max_conns_per_node` | `int` | | Max connections per node |
+| `min_conns_per_node` | `int` | | Min connections per node |
+| `tend_interval` | `int` | | Cluster tend interval in ms |
+| `use_services_alternate` | `bool` | `False` | Use alternate services addresses |
+
+```python
+config: ClientConfig = {
+    "hosts": [("127.0.0.1", 3000)],
+    "cluster_name": "docker",
+    "timeout": 5000,
+}
+client = aerospike_py.client(config).connect()
+```
+
+##### `ReadPolicy`
+
+Policy for read operations.
+
+**Used by**: `get()`, `select()`, `exists()`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | Socket idle timeout in ms |
+| `total_timeout` | `int` | `1000` | Total transaction timeout in ms |
+| `max_retries` | `int` | `2` | Maximum number of retries |
+| `sleep_between_retries` | `int` | `0` | Sleep between retries in ms |
+| `filter_expression` | `Any` | | Expression filter (deprecated, use `expressions`) |
+| `expressions` | `Any` | | Expression filter built with `aerospike_py.exp` |
+| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | Replica algorithm |
+| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP read consistency level |
+
+```python
+policy: ReadPolicy = {
+    "total_timeout": 5000,
+    "max_retries": 3,
+}
+record = client.get(key, policy=policy)
+```
+
+##### `WritePolicy`
+
+Policy for write operations.
+
+**Used by**: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`, `remove_bin()`, `operate()`, `operate_ordered()`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | Socket idle timeout in ms |
+| `total_timeout` | `int` | `1000` | Total transaction timeout in ms |
+| `max_retries` | `int` | `0` | Maximum number of retries |
+| `durable_delete` | `bool` | `False` | Use durable delete (Enterprise only) |
+| `key` | `int` | `POLICY_KEY_DIGEST` | Key send policy (`POLICY_KEY_DIGEST`, `POLICY_KEY_SEND`) |
+| `exists` | `int` | `POLICY_EXISTS_IGNORE` | Existence policy (`POLICY_EXISTS_*`) |
+| `gen` | `int` | `POLICY_GEN_IGNORE` | Generation policy (`POLICY_GEN_IGNORE`, `POLICY_GEN_EQ`, `POLICY_GEN_GT`) |
+| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | Commit level (`POLICY_COMMIT_LEVEL_ALL`, `POLICY_COMMIT_LEVEL_MASTER`) |
+| `ttl` | `int` | `0` | Record TTL in seconds |
+| `filter_expression` | `Any` | | Expression filter (deprecated, use `expressions`) |
+| `expressions` | `Any` | | Expression filter built with `aerospike_py.exp` |
+
+```python
+policy: WritePolicy = {
+    "key": aerospike_py.POLICY_KEY_SEND,
+    "exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY,
+}
+client.put(key, bins, policy=policy)
+```
+
+##### `BatchPolicy`
+
+Policy for batch operations.
+
+**Used by**: `batch_read()`, `batch_operate()`, `batch_remove()`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | Socket idle timeout in ms |
+| `total_timeout` | `int` | `1000` | Total transaction timeout in ms |
+| `max_retries` | `int` | `2` | Maximum number of retries |
+| `filter_expression` | `Any` | | Expression filter |
+
+```python
+policy: BatchPolicy = {"total_timeout": 10000}
+batch = client.batch_read(keys, policy=policy)
+```
+
+##### `QueryPolicy`
+
+Policy for query and scan operations.
+
+**Used by**: `Query.results()`, `Query.foreach()`, `Scan.results()`, `Scan.foreach()`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | Socket idle timeout in ms |
+| `total_timeout` | `int` | `0` | Total transaction timeout in ms (0 = no limit) |
+| `max_retries` | `int` | `2` | Maximum number of retries |
+| `max_records` | `int` | `0` | Max records to return (0 = all) |
+| `records_per_second` | `int` | `0` | Rate limit (0 = unlimited) |
+| `filter_expression` | `Any` | | Expression filter (deprecated, use `expressions`) |
+| `expressions` | `Any` | | Expression filter built with `aerospike_py.exp` |
+
+```python
+policy: QueryPolicy = {"max_records": 100}
+records = query.results(policy=policy)
+```
+
+##### `AdminPolicy`
+
+Policy for admin operations.
+
+**Used by**: `admin_create_user()`, `admin_drop_user()`, `admin_change_password()`, `admin_grant_roles()`, `admin_revoke_roles()`, `admin_query_user_info()`, `admin_query_users_info()`, `admin_create_role()`, `admin_drop_role()`, `admin_grant_privileges()`, `admin_revoke_privileges()`, `admin_query_role()`, `admin_query_roles()`, `admin_set_whitelist()`, `admin_set_quotas()`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `timeout` | `int` | `1000` | Admin operation timeout in ms |
+
+```python
+policy: AdminPolicy = {"timeout": 5000}
+client.admin_create_user("user", "pass", ["read-write"], policy=policy)
+```
+
+##### `WriteMeta`
+
+Metadata for write operations.
+
+**Used by**: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`, `remove_bin()`, `operate()`, `operate_ordered()` — as the `meta` parameter
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gen` | `int` | Expected generation for optimistic locking (use with `POLICY_GEN_EQ`) |
+| `ttl` | `int` | Record time-to-live in seconds |
+
+```python
+# Set TTL
+meta: WriteMeta = {"ttl": 300}
+client.put(key, bins, meta=meta)
+
+# Optimistic locking
+record = client.get(key)
+meta: WriteMeta = {"gen": record.meta.gen}
+client.put(key, new_bins, meta=meta, policy={"gen": aerospike_py.POLICY_GEN_EQ})
+```
+
+##### `Privilege`
+
+Privilege definition for admin role management.
+
+**Used by**: `admin_create_role()`, `admin_grant_privileges()`, `admin_revoke_privileges()`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `code` | `int` | Privilege code (`PRIV_READ`, `PRIV_WRITE`, `PRIV_READ_WRITE`, etc.) |
+| `ns` | `str` | Namespace scope (empty string for global) |
+| `set` | `str` | Set scope (empty string for namespace-wide) |
+
+```python
+privilege: Privilege = {
+    "code": aerospike_py.PRIV_READ_WRITE,
+    "ns": "test",
+    "set": "demo",
+}
+client.admin_create_role("custom_role", [privilege])
+```
+
+##### `UserInfo`
+
+User information returned by admin queries.
+
+**Returned by**: `admin_query_user_info()`, `admin_query_users_info()`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `user` | `str` | Username |
+| `roles` | `list[str]` | Assigned role names |
+| `conns_in_use` | `int` | Number of active connections |
+
+##### `RoleInfo`
+
+Role information returned by admin queries.
+
+**Returned by**: `admin_query_role()`, `admin_query_roles()`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Role name |
+| `privileges` | `list[Privilege]` | Assigned privileges |
+| `allowlist` | `list[str]` | IP allowlist |
+| `read_quota` | `int` | Read quota |
+| `write_quota` | `int` | Write quota |
+
+
+---
+
 ## Guides
 
 ### Admin Guide
@@ -2183,6 +2561,947 @@ client.admin_drop_role("data_reader")
 # Namespace + set scoped
 {"code": aerospike.PRIV_READ, "ns": "test", "set": "demo"}
 ```
+
+
+---
+
+### Error Handling
+
+> Best practices for handling Aerospike errors in production applications.
+
+### Error Handling Guide
+
+#### Exception Hierarchy
+
+All aerospike-py exceptions inherit from `AerospikeError`. See the
+[Exceptions API reference](/docs/api/exceptions) for the full hierarchy and
+descriptions.
+
+```python
+import aerospike_py as aerospike
+from aerospike_py import exception
+```
+
+#### Recommended Patterns
+
+##### Catch Specific, Then Broad
+
+Always catch the most specific exception first:
+
+```python
+from aerospike_py.exception import (
+    RecordNotFound,
+    AerospikeTimeoutError,
+    AerospikeError,
+)
+
+try:
+    _, meta, bins = client.get(key)
+except RecordNotFound:
+    # Handle missing record (e.g., return default)
+    bins = {}
+except AerospikeTimeoutError:
+    # Retry or circuit-break
+    raise
+except AerospikeError as e:
+    # Unexpected Aerospike error
+    logger.error("Aerospike error: %s", e)
+    raise
+```
+
+##### Retry with Backoff
+
+Timeout and cluster errors are often transient:
+
+```python
+import time
+from aerospike_py.exception import AerospikeTimeoutError, ClusterError
+
+def get_with_retry(client, key, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return client.get(key)
+        except (AerospikeTimeoutError, ClusterError):
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(0.1 * (2 ** attempt))  # exponential backoff
+```
+
+##### Optimistic Locking (Check-and-Set)
+
+Use generation checks to detect concurrent modifications:
+
+```python
+from aerospike_py.exception import RecordGenerationError
+
+def increment_counter(client, key, bin_name):
+    while True:
+        try:
+            _, meta, bins = client.get(key)
+            new_val = bins.get(bin_name, 0) + 1
+            client.put(
+                key,
+                {bin_name: new_val},
+                meta={"gen": meta.gen},
+                policy={"gen": aerospike.POLICY_GEN_EQ},
+            )
+            return new_val
+        except RecordGenerationError:
+            continue  # retry with fresh data
+```
+
+##### Upsert vs Create-Only
+
+```python
+from aerospike_py.exception import RecordExistsError
+
+# Create-only: fail if record exists
+try:
+    client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
+except RecordExistsError:
+    print("Record already exists, skipping")
+
+# Upsert (default): create or update
+client.put(key, bins)  # never raises RecordExistsError
+```
+
+##### Batch Error Handling
+
+Batch operations return results per-key. Check individual record status:
+
+```python
+results = client.batch_read(keys)
+for result in results:
+    if result.result_code == aerospike.AEROSPIKE_OK:
+        process(result.bins)
+    elif result.result_code == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
+        handle_missing(result.key)
+    else:
+        logger.warning("Batch key error: code=%d", result.result_code)
+```
+
+##### Connection Lifecycle
+
+```python
+from aerospike_py.exception import ClientError, ClusterError
+
+client = aerospike.client(config)
+try:
+    client.connect()
+except ClusterError as e:
+    print(f"Cannot reach cluster: {e}")
+    raise SystemExit(1)
+
+try:
+    # ... application logic ...
+    pass
+finally:
+    client.close()
+```
+
+##### Async Error Handling
+
+Async errors work the same way, just with `await`:
+
+```python
+from aerospike_py.exception import RecordNotFound
+
+async def get_user(client, user_id):
+    key = ("app", "users", user_id)
+    try:
+        _, _, bins = await client.get(key)
+        return bins
+    except RecordNotFound:
+        return None
+```
+
+#### Result Codes
+
+Common Aerospike result codes mapped to exceptions:
+
+| Code | Constant | Exception |
+|------|----------|-----------|
+| 0 | `AEROSPIKE_OK` | (success) |
+| 2 | `AEROSPIKE_ERR_RECORD_NOT_FOUND` | `RecordNotFound` |
+| 5 | `AEROSPIKE_ERR_RECORD_EXISTS` | `RecordExistsError` |
+| 9 | `AEROSPIKE_ERR_TIMEOUT` | `AerospikeTimeoutError` |
+| 3 | (generation error) | `RecordGenerationError` |
+| 13 | (record too big) | `RecordTooBig` |
+| 27 | (filtered out) | `FilteredOut` |
+
+See the [Constants reference](/docs/api/constants) for the full list.
+
+
+---
+
+### UDF Guide
+
+> Register, execute, and remove User Defined Functions (Lua scripts) on the Aerospike server.
+
+User Defined Functions (UDFs) are Lua scripts that execute on the Aerospike server.
+
+#### Register a UDF
+
+```python
+client.udf_put("my_udf.lua")
+```
+
+The file must be accessible from the Python process. The UDF is registered on all cluster nodes.
+
+#### Execute a UDF on a Record
+
+```python
+key = ("test", "demo", "user1")
+result = client.apply(key, "my_udf", "my_function", [1, "hello"])
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `key` | Record key to execute on |
+| `module` | UDF module name (without `.lua`) |
+| `function` | Function name within the module |
+| `args` | Optional list of arguments |
+
+#### Remove a UDF
+
+```python
+client.udf_remove("my_udf")
+```
+
+#### Example: Counter UDF
+
+##### Lua Script (`counter.lua`)
+
+```lua
+function increment(rec, bin_name, amount)
+    if aerospike:exists(rec) then
+        rec[bin_name] = rec[bin_name] + amount
+        aerospike:update(rec)
+    else
+        rec[bin_name] = amount
+        aerospike:create(rec)
+    end
+    return rec[bin_name]
+end
+```
+
+##### Python Usage
+
+```python
+# Register
+client.udf_put("counter.lua")
+
+# Execute
+key = ("test", "demo", "counter1")
+result = client.apply(key, "counter", "increment", ["count", 5])
+print(result)  # 5
+
+result = client.apply(key, "counter", "increment", ["count", 3])
+print(result)  # 8
+
+# Cleanup
+client.udf_remove("counter")
+```
+
+#### Async UDF
+
+```python
+import asyncio
+from aerospike_py import AsyncClient
+
+async def main():
+    client = AsyncClient({
+        "hosts": [("127.0.0.1", 3000)],
+        "cluster_name": "docker",
+    })
+    await client.connect()
+
+    await client.udf_put("counter.lua")
+
+    key = ("test", "demo", "counter1")
+    result = await client.apply(key, "counter", "increment", ["count", 1])
+    print(result)
+
+    await client.udf_remove("counter")
+    await client.close()
+
+asyncio.run(main())
+```
+
+#### Notes
+
+- UDFs execute on the server node that owns the record
+- Lua is the only supported UDF language
+- UDF changes take a few seconds to propagate to all nodes
+- Keep UDFs simple for best performance
+
+
+---
+
+### Client Configuration
+
+> Complete guide for configuring aerospike-py client connections, timeouts, and connection pools.
+
+#### ClientConfig Overview
+
+The [`ClientConfig`](/docs/api/types.md#clientconfig) TypedDict defines all connection options passed to `aerospike.client()` or `AsyncClient()`.
+
+```python
+import aerospike_py as aerospike
+
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+    "cluster_name": "docker",
+}
+client = aerospike.client(config).connect()
+```
+
+#### All Configuration Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `hosts` | `list[tuple[str, int]]` | *required* | Seed node addresses `(host, port)` |
+| `cluster_name` | `str` | `""` | Expected cluster name for validation |
+| `auth_mode` | `int` | `AUTH_INTERNAL` | Authentication mode (`AUTH_INTERNAL`, `AUTH_EXTERNAL`, `AUTH_PKI`) |
+| `user` | `str` | `""` | Username for authentication |
+| `password` | `str` | `""` | Password for authentication |
+| `timeout` | `int` | `1000` | Connection timeout in ms |
+| `idle_timeout` | `int` | `55` | Max idle time for pooled connections in seconds |
+| `max_conns_per_node` | `int` | `100` | Max connections per cluster node |
+| `min_conns_per_node` | `int` | `0` | Pre-warm connections per node |
+| `tend_interval` | `int` | `1000` | Cluster tend interval in ms |
+| `use_services_alternate` | `bool` | `false` | Use alternate addresses from service responses |
+
+#### Hosts Configuration
+
+##### Single Node
+
+```python
+config = {"hosts": [("127.0.0.1", 3000)]}
+```
+
+##### Multi-Node Cluster
+
+Provide multiple seed nodes for automatic cluster discovery:
+
+```python
+config = {
+    "hosts": [
+        ("node1.example.com", 3000),
+        ("node2.example.com", 3000),
+        ("node3.example.com", 3000),
+    ],
+}
+```
+
+The client discovers all cluster nodes from any reachable seed node.
+
+##### Cluster Name Validation
+
+```python
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+    "cluster_name": "production",  # fails if cluster name doesn't match
+}
+```
+
+#### Connection Pool
+
+```python
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+    "max_conns_per_node": 300,   # default: 100
+    "min_conns_per_node": 10,    # pre-warm connections
+    "idle_timeout": 55,          # seconds
+}
+```
+
+**Guidelines:**
+- Set `max_conns_per_node` based on expected concurrent requests per node
+- Use `min_conns_per_node` to avoid cold-start latency
+- Set `idle_timeout` slightly below the server's `proto-fd-idle-ms` (default 60s)
+
+#### Timeouts
+
+##### Client-Level Timeout
+
+```python
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+    "timeout": 30000,  # connection + tend timeout in ms
+}
+```
+
+##### Per-Operation Timeouts
+
+Use [`ReadPolicy`](/docs/api/types.md#readpolicy) or [`WritePolicy`](/docs/api/types.md#writepolicy) for per-operation timeouts:
+
+##### Sync Client
+
+```python
+# Per-operation timeout via policy
+policy = {
+    "socket_timeout": 5000,   # per-socket timeout in ms
+    "total_timeout": 10000,   # total operation timeout in ms
+    "max_retries": 2,         # retry attempts
+}
+client.get(key, policy=policy)
+client.put(key, bins, policy=policy)
+```
+
+##### Async Client
+
+```python
+policy = {
+    "socket_timeout": 5000,
+    "total_timeout": 10000,
+    "max_retries": 2,
+}
+await client.get(key, policy=policy)
+await client.put(key, bins, policy=policy)
+```
+
+**Guidelines:**
+- `socket_timeout` catches hung connections; keep it tight (1-5s)
+- `total_timeout` limits end-to-end including retries; set based on SLA
+- `max_retries` adds resilience but multiplies latency on failure
+
+#### Authentication
+
+##### Internal Authentication
+
+```python
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+    "auth_mode": aerospike.AUTH_INTERNAL,
+}
+client = aerospike.client(config).connect(username="admin", password="admin")
+```
+
+##### External Authentication (LDAP)
+
+```python
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+    "auth_mode": aerospike.AUTH_EXTERNAL,
+}
+client = aerospike.client(config).connect(username="ldap_user", password="ldap_pass")
+```
+
+#### Cluster Info Commands
+
+Use `info_all()` and `info_random_node()` to query cluster state:
+
+##### Sync Client
+
+```python
+from aerospike_py import InfoNodeResult
+
+# Query all nodes
+results: list[InfoNodeResult] = client.info_all("status")
+for r in results:
+    print(f"{r.node_name}: {r.response}")
+
+# Query a random node
+response: str = client.info_random_node("build")
+print(f"Server version: {response}")
+
+# Common info commands
+client.info_all("namespaces")          # list namespaces
+client.info_all("sets/test")           # list sets in 'test' namespace
+client.info_all("statistics")          # server statistics
+```
+
+##### Async Client
+
+```python
+from aerospike_py import InfoNodeResult
+
+results: list[InfoNodeResult] = await client.info_all("status")
+for r in results:
+    print(f"{r.node_name}: {r.response}")
+
+response: str = await client.info_random_node("build")
+```
+
+#### Logging
+
+```python
+import aerospike_py as aerospike
+
+# Set log verbosity
+aerospike.set_log_level(aerospike.LOG_LEVEL_DEBUG)
+```
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `LOG_LEVEL_OFF` | -1 | Disable logging |
+| `LOG_LEVEL_ERROR` | 0 | Errors only |
+| `LOG_LEVEL_WARN` | 1 | Warnings and above |
+| `LOG_LEVEL_INFO` | 2 | Info and above |
+| `LOG_LEVEL_DEBUG` | 3 | Debug and above |
+| `LOG_LEVEL_TRACE` | 4 | Full trace |
+
+#### Observability
+
+##### Prometheus Metrics
+
+```python
+# Start metrics HTTP server on /metrics
+aerospike.start_metrics_server(port=9464)
+
+# Get metrics as Prometheus text format
+metrics_text = aerospike.get_metrics()
+
+# Stop metrics server
+aerospike.stop_metrics_server()
+```
+
+##### OpenTelemetry Tracing
+
+```python
+# Initialize OTel tracer (configure via OTEL_* env vars)
+aerospike.init_tracing()
+
+# ... perform operations ...
+
+# Flush spans and shutdown
+aerospike.shutdown_tracing()
+```
+
+Span attributes: `db.system.name`, `db.namespace`, `db.collection.name`, `db.operation.name`, `server.address`, `server.port`, `db.aerospike.cluster_name`
+
+#### Sync vs Async Client
+
+##### Sync Client
+
+```python
+import aerospike_py as aerospike
+
+# Context manager (recommended)
+with aerospike.client(config).connect() as client:
+    client.put(key, bins)
+    record = client.get(key)
+# client.close() called automatically
+
+# Manual lifecycle
+client = aerospike.client(config).connect()
+try:
+    client.put(key, bins)
+finally:
+    client.close()
+```
+
+##### Async Client
+
+```python
+import aerospike_py as aerospike
+
+# Context manager
+async with aerospike.AsyncClient(config) as client:
+    await client.connect()
+    await client.put(key, bins)
+    record = await client.get(key)
+
+# Manual lifecycle
+client = aerospike.AsyncClient(config)
+await client.connect()
+try:
+    await client.put(key, bins)
+finally:
+    await client.close()
+```
+
+**When to use async:**
+
+- High-concurrency web servers (FastAPI, aiohttp)
+- Fan-out read patterns (many keys in parallel)
+- Mixed I/O workloads (database + HTTP + cache)
+
+**When sync is fine:**
+
+- Simple scripts and batch jobs
+- Sequential processing pipelines
+- Low-concurrency applications
+
+
+---
+
+### Migration from Official Client
+
+> Migrate from the official aerospike-client-python (C-based) to aerospike-py (Rust-based).
+
+### Migration Guide
+
+This guide helps you migrate from the
+[official aerospike-client-python](https://github.com/aerospike/aerospike-client-python)
+(C extension) to **aerospike-py** (Rust + PyO3).
+
+#### Installation
+
+```bash
+# Remove old client
+pip uninstall aerospike
+
+# Install new client
+pip install aerospike-py
+```
+
+#### Import Changes
+
+```python
+# Before (official client)
+import aerospike
+from aerospike import exception as ex
+
+# After (aerospike-py) — designed to be a drop-in alias
+import aerospike_py as aerospike
+from aerospike_py import exception as ex
+```
+
+#### Client Creation
+
+```python
+# Before
+config = {"hosts": [("127.0.0.1", 3000)]}
+client = aerospike.client(config).connect()
+
+# After — identical API
+config = {"hosts": [("127.0.0.1", 3000)]}
+client = aerospike.client(config).connect()
+
+# After — with context manager (new)
+with aerospike.client(config).connect() as client:
+    # client.close() called automatically
+    pass
+```
+
+#### CRUD Operations
+
+The core CRUD API is compatible:
+
+```python
+key = ("test", "demo", "user1")
+
+# put / get / exists / remove — same signature
+client.put(key, {"name": "Alice", "age": 30})
+_, meta, bins = client.get(key)
+_, meta = client.exists(key)
+client.remove(key)
+
+# select — same signature
+_, meta, bins = client.select(key, ["name"])
+
+# touch / append / prepend / increment — same signature
+client.touch(key)
+client.append(key, "name", " Smith")
+client.prepend(key, "name", "Ms. ")
+client.increment(key, "counter", 1)
+```
+
+#### Policy Dicts
+
+Policy dicts use the same keys:
+
+```python
+policy = {
+    "socket_timeout": 5000,
+    "total_timeout": 10000,
+    "max_retries": 2,
+}
+client.get(key, policy=policy)
+
+write_policy = {
+    "key": aerospike.POLICY_KEY_SEND,
+    "exists": aerospike.POLICY_EXISTS_CREATE_ONLY,
+    "gen": aerospike.POLICY_GEN_EQ,
+}
+client.put(key, bins, meta={"gen": 5}, policy=write_policy)
+```
+
+#### Exception Handling
+
+Exception classes are compatible:
+
+```python
+from aerospike_py.exception import (
+    AerospikeError,
+    RecordNotFound,
+    RecordExistsError,
+    AerospikeTimeoutError,  # was TimeoutError in official client
+)
+
+try:
+    client.get(key)
+except RecordNotFound:
+    pass
+```
+
+:::note Exception Renames
+`TimeoutError` and `IndexError` are renamed to `AerospikeTimeoutError` and
+`AerospikeIndexError` to avoid shadowing Python builtins. The old names still
+work as deprecated aliases.
+:::
+
+#### Constants
+
+All constants use the same names and values:
+
+```python
+aerospike.POLICY_KEY_DIGEST      # 0
+aerospike.POLICY_KEY_SEND        # 1
+aerospike.POLICY_EXISTS_IGNORE   # 0
+aerospike.POLICY_GEN_EQ          # 1
+aerospike.TTL_NEVER_EXPIRE       # -1
+aerospike.OPERATOR_READ          # 1
+aerospike.OPERATOR_WRITE         # 2
+```
+
+#### List / Map CDT Operations
+
+```python
+from aerospike_py import list_operations as lops
+from aerospike_py import map_operations as mops
+
+ops = [
+    lops.list_append("tags", "new_tag"),
+    mops.map_put("attrs", "color", "blue"),
+]
+_, _, result = client.operate(key, ops)
+```
+
+#### Expression Filters
+
+```python
+from aerospike_py import exp
+
+# Build expression
+expr = exp.and_(
+    exp.ge(exp.int_bin("age"), exp.int_val(18)),
+    exp.eq(exp.string_bin("status"), exp.string_val("active")),
+)
+
+# Pass to policy
+policy = {"filter_expression": expr}
+client.get(key, policy=policy)
+```
+
+#### Query / Scan
+
+```python
+query = client.query("test", "demo")
+query.select("name", "age")
+query.where(aerospike.predicates.between("age", 18, 65))
+records = query.results()
+```
+
+#### Async Client (New)
+
+aerospike-py adds an async client not available in the official client:
+
+```python
+import asyncio
+import aerospike_py as aerospike
+
+async def main():
+    client = aerospike.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+    await client.connect()
+
+    await client.put(key, {"name": "Alice"})
+    _, meta, bins = await client.get(key)
+
+    await client.close()
+
+asyncio.run(main())
+```
+
+#### Known Differences
+
+| Feature | Official Client | aerospike-py |
+|---------|----------------|--------------|
+| Runtime | C extension | Rust + PyO3 |
+| Async support | No | Yes |
+| NumPy batch reads | No | Yes |
+| Context manager | No | Yes (`with` / `async with`) |
+| `TimeoutError` name | `TimeoutError` | `AerospikeTimeoutError` (alias available) |
+| `IndexError` name | `IndexError` | `AerospikeIndexError` (alias available) |
+| Predicate helpers | `aerospike.predicates` | `aerospike.predicates` |
+| GeoJSON type | `aerospike.GeoJSON` | Not yet available |
+| `operate_ordered()` | Returns ordered list | Same |
+
+
+---
+
+### Performance Tuning
+
+> Tips for optimizing aerospike-py throughput and latency.
+
+### Performance Tuning Guide
+
+#### Client Configuration
+
+##### Connection Pool
+
+```python
+config = {
+    "hosts": [("node1", 3000), ("node2", 3000)],
+    "max_conns_per_node": 300,   # default: 100
+    "min_conns_per_node": 10,    # pre-warm connections
+    "idle_timeout": 55,          # seconds, keep below server proto-fd-idle-ms
+}
+client = aerospike.client(config).connect()
+```
+
+**Guidelines:**
+- Set `max_conns_per_node` based on expected concurrent requests per node
+- Use `min_conns_per_node` to avoid cold-start latency
+- Set `idle_timeout` slightly below the server's `proto-fd-idle-ms` (default 60s)
+
+##### Timeouts
+
+```python
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+    "timeout": 30000,  # client-level timeout in ms (connect + tend)
+}
+
+# Per-operation timeouts via policy
+policy = {
+    "socket_timeout": 5000,  # per-socket timeout in ms
+    "total_timeout": 10000,  # total operation timeout in ms
+    "max_retries": 2,
+}
+client.get(key, policy=policy)
+```
+
+**Guidelines:**
+- `socket_timeout` catches hung connections; keep it tight (1-5s)
+- `total_timeout` limits end-to-end including retries; set based on SLA
+- `max_retries` adds resilience but multiplies latency on failure
+
+#### Read Optimization
+
+##### Select Specific Bins
+
+```python
+# Slow: reads ALL bins from server
+_, _, bins = client.get(key)
+
+# Fast: reads only the bins you need
+_, _, bins = client.select(key, ["name", "age"])
+```
+
+##### Batch Reads
+
+```python
+# Slow: N sequential round-trips
+results = [client.get(k) for k in keys]
+
+# Fast: single round-trip
+results = client.batch_read(keys, bins=["name", "age"])
+```
+
+##### NumPy Batch Reads
+
+For numeric workloads, use the numpy dtype to avoid Python dict overhead:
+
+```python
+import numpy as np
+
+dtype = np.dtype([("score", "i8"), ("rating", "f8")])
+result = client.batch_read(keys, bins=["score", "rating"], _dtype=dtype)
+# result.array is a numpy structured array — no per-record dict allocation
+```
+
+#### Write Optimization
+
+##### Batch Writes via operate()
+
+When updating multiple bins in one record:
+
+```python
+# Slow: two round-trips
+client.put(key, {"counter": 1})
+client.put(key, {"updated_at": now})
+
+# Fast: single round-trip
+from aerospike_py import list_operations as lops
+ops = [
+    {"op": aerospike.OPERATOR_WRITE, "bin": "counter", "val": 1},
+    {"op": aerospike.OPERATOR_WRITE, "bin": "updated_at", "val": now},
+]
+client.operate(key, ops)
+```
+
+##### TTL Strategy
+
+```python
+# Never expire (careful with storage)
+client.put(key, bins, meta={"ttl": aerospike.TTL_NEVER_EXPIRE})
+
+# Don't update TTL on writes (preserves existing expiration)
+client.put(key, bins, meta={"ttl": aerospike.TTL_DONT_UPDATE})
+
+# Use namespace default
+client.put(key, bins, meta={"ttl": aerospike.TTL_NAMESPACE_DEFAULT})
+```
+
+#### Async Client
+
+The async client uses a Tokio multi-threaded runtime under the hood.
+For I/O-bound workloads with high concurrency, it significantly outperforms
+the sync client:
+
+```python
+import asyncio
+import aerospike_py as aerospike
+
+async def main():
+    client = aerospike.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+    await client.connect()
+
+    # Concurrent reads
+    keys = [("test", "demo", f"key{i}") for i in range(1000)]
+    tasks = [client.get(k) for k in keys]
+    results = await asyncio.gather(*tasks)
+
+    await client.close()
+```
+
+**When to use async:**
+- High-concurrency web servers (FastAPI, aiohttp)
+- Fan-out read patterns (many keys in parallel)
+- Mixed I/O workloads (database + HTTP + cache)
+
+**When sync is fine:**
+- Simple scripts and batch jobs
+- Sequential processing pipelines
+- Low-concurrency applications
+
+#### Expression Filters
+
+Push filtering to the server to reduce network transfer:
+
+```python
+from aerospike_py import exp
+
+# Without filter: transfers ALL records, filters in Python
+results = client.query("test", "demo").results()
+active = [r for r in results if r[2].get("active")]
+
+# With filter: server only returns matching records
+policy = {
+    "filter_expression": exp.eq(exp.bool_bin("active"), exp.bool_val(True))
+}
+results = client.query("test", "demo").results(policy)
+```
+
+#### Monitoring
+
+Key metrics to watch:
+- **Connection pool usage**: If consistently near `max_conns_per_node`, increase the limit
+- **Timeout rate**: High timeout rates suggest network issues or undersized timeouts
+- **Record size**: Large records increase serialization cost; consider splitting into multiple bins or records
 
 
 ---
@@ -3108,8 +4427,11 @@ await client.put(key, {"val": 1}, meta={"ttl": aerospike.TTL_NEVER_EXPIRE})
 ##### Sync Client
 
 ```python
+from aerospike_py import WritePolicy
+
 # Create only (fails if record exists)
-client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
+policy: WritePolicy = {"exists": aerospike.POLICY_EXISTS_CREATE_ONLY}
+client.put(key, bins, policy=policy)
 
 # Replace only (fails if record doesn't exist)
 client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_REPLACE_ONLY})
@@ -3131,15 +4453,26 @@ await client.put(key, bins, policy={"key": aerospike.POLICY_KEY_SEND})
 ##### Sync Client
 
 ```python
+from aerospike_py import Record
+
+record: Record = client.get(("test", "demo", "user1"))
+# record.key  → AerospikeKey | None
+# record.meta → RecordMetadata | None (meta.gen, meta.ttl)
+# record.bins → dict[str, Any] | None
+
+# Tuple unpacking also works (backward compat)
 key, meta, bins = client.get(("test", "demo", "user1"))
-# key  = ("test", "demo", "user1") or None
-# meta = {"gen": 1, "ttl": 2591998}
+# meta.gen == 1, meta.ttl == 2591998
 # bins = {"name": "Alice", "age": 30}
 ```
 
 ##### Async Client
 
 ```python
+from aerospike_py import Record
+
+record: Record = await client.get(("test", "demo", "user1"))
+# or tuple unpacking
 key, meta, bins = await client.get(("test", "demo", "user1"))
 ```
 
@@ -3163,19 +4496,26 @@ _, meta, bins = await client.select(key, ["name"])
 ##### Sync Client
 
 ```python
-_, meta = client.exists(key)
-if meta is not None:
-    print(f"Record exists, gen={meta['gen']}")
+from aerospike_py import ExistsResult
+
+result: ExistsResult = client.exists(key)
+if result.meta is not None:
+    print(f"Record exists, gen={result.meta.gen}")
 else:
     print("Record not found")
+
+# Tuple unpacking also works
+_, meta = client.exists(key)
 ```
 
 ##### Async Client
 
 ```python
-_, meta = await client.exists(key)
-if meta is not None:
-    print(f"Record exists, gen={meta['gen']}")
+from aerospike_py import ExistsResult
+
+result: ExistsResult = await client.exists(key)
+if result.meta is not None:
+    print(f"Record exists, gen={result.meta.gen}")
 else:
     print("Record not found")
 ```
@@ -3353,31 +4693,35 @@ Execute operations on multiple records:
 ##### Sync Client
 
 ```python
+from aerospike_py import Record
+
 keys = [("test", "demo", f"counter_{i}") for i in range(10)]
 ops = [
     {"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1},
     {"op": aerospike.OPERATOR_READ, "bin": "views", "val": None},
 ]
-results = client.batch_operate(keys, ops)
+results: list[Record] = client.batch_operate(keys, ops)
 
-for _, _, bins in results:
-    if bins:
-        print(f"views: {bins['views']}")
+for record in results:
+    if record.bins:
+        print(f"views: {record.bins['views']}")
 ```
 
 ##### Async Client
 
 ```python
+from aerospike_py import Record
+
 keys = [("test", "demo", f"counter_{i}") for i in range(10)]
 ops = [
     {"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1},
     {"op": aerospike.OPERATOR_READ, "bin": "views", "val": None},
 ]
-results = await client.batch_operate(keys, ops)
+results: list[Record] = await client.batch_operate(keys, ops)
 
-for _, _, bins in results:
-    if bins:
-        print(f"views: {bins['views']}")
+for record in results:
+    if record.bins:
+        print(f"views: {record.bins['views']}")
 ```
 
 #### Batch Remove
@@ -3413,7 +4757,7 @@ try:
     client.put(
         key,
         {"val": bins["val"] + 1},
-        meta={"gen": meta["gen"]},
+        meta={"gen": meta.gen},
         policy={"gen": aerospike.POLICY_GEN_EQ},
     )
 except RecordGenerationError:
@@ -3431,7 +4775,7 @@ try:
     await client.put(
         key,
         {"val": bins["val"] + 1},
-        meta={"gen": meta["gen"]},
+        meta={"gen": meta.gen},
         policy={"gen": aerospike.POLICY_GEN_EQ},
     )
 except RecordGenerationError:
@@ -3460,711 +4804,6 @@ except AerospikeError as e:
 - **Batch size**: Keep batch sizes reasonable (100-5000 keys). Very large batches may timeout.
 - **Timeouts**: Set appropriate timeouts for large batch operations via policy.
 - **Error handling**: Individual records in a batch can fail independently. Check each result for `None` bins.
-
-
----
-
-### Error Handling
-
-> Best practices for handling Aerospike errors in production applications.
-
-### Error Handling Guide
-
-#### Exception Hierarchy
-
-All aerospike-py exceptions inherit from `AerospikeError`. See the
-[Exceptions API reference](/docs/api/exceptions) for the full hierarchy and
-descriptions.
-
-```python
-import aerospike_py as aerospike
-from aerospike_py import exception
-```
-
-#### Recommended Patterns
-
-##### Catch Specific, Then Broad
-
-Always catch the most specific exception first:
-
-```python
-from aerospike_py.exception import (
-    RecordNotFound,
-    AerospikeTimeoutError,
-    AerospikeError,
-)
-
-try:
-    _, meta, bins = client.get(key)
-except RecordNotFound:
-    # Handle missing record (e.g., return default)
-    bins = {}
-except AerospikeTimeoutError:
-    # Retry or circuit-break
-    raise
-except AerospikeError as e:
-    # Unexpected Aerospike error
-    logger.error("Aerospike error: %s", e)
-    raise
-```
-
-##### Retry with Backoff
-
-Timeout and cluster errors are often transient:
-
-```python
-import time
-from aerospike_py.exception import AerospikeTimeoutError, ClusterError
-
-def get_with_retry(client, key, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            return client.get(key)
-        except (AerospikeTimeoutError, ClusterError):
-            if attempt == max_retries - 1:
-                raise
-            time.sleep(0.1 * (2 ** attempt))  # exponential backoff
-```
-
-##### Optimistic Locking (Check-and-Set)
-
-Use generation checks to detect concurrent modifications:
-
-```python
-from aerospike_py.exception import RecordGenerationError
-
-def increment_counter(client, key, bin_name):
-    while True:
-        try:
-            _, meta, bins = client.get(key)
-            new_val = bins.get(bin_name, 0) + 1
-            client.put(
-                key,
-                {bin_name: new_val},
-                meta={"gen": meta["gen"]},
-                policy={"gen": aerospike.POLICY_GEN_EQ},
-            )
-            return new_val
-        except RecordGenerationError:
-            continue  # retry with fresh data
-```
-
-##### Upsert vs Create-Only
-
-```python
-from aerospike_py.exception import RecordExistsError
-
-# Create-only: fail if record exists
-try:
-    client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
-except RecordExistsError:
-    print("Record already exists, skipping")
-
-# Upsert (default): create or update
-client.put(key, bins)  # never raises RecordExistsError
-```
-
-##### Batch Error Handling
-
-Batch operations return results per-key. Check individual record status:
-
-```python
-results = client.batch_read(keys)
-for result in results:
-    if result.result_code == aerospike.AEROSPIKE_OK:
-        process(result.bins)
-    elif result.result_code == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
-        handle_missing(result.key)
-    else:
-        logger.warning("Batch key error: code=%d", result.result_code)
-```
-
-##### Connection Lifecycle
-
-```python
-from aerospike_py.exception import ClientError, ClusterError
-
-client = aerospike.client(config)
-try:
-    client.connect()
-except ClusterError as e:
-    print(f"Cannot reach cluster: {e}")
-    raise SystemExit(1)
-
-try:
-    # ... application logic ...
-    pass
-finally:
-    client.close()
-```
-
-##### Async Error Handling
-
-Async errors work the same way, just with `await`:
-
-```python
-from aerospike_py.exception import RecordNotFound
-
-async def get_user(client, user_id):
-    key = ("app", "users", user_id)
-    try:
-        _, _, bins = await client.get(key)
-        return bins
-    except RecordNotFound:
-        return None
-```
-
-#### Result Codes
-
-Common Aerospike result codes mapped to exceptions:
-
-| Code | Constant | Exception |
-|------|----------|-----------|
-| 0 | `AEROSPIKE_OK` | (success) |
-| 2 | `AEROSPIKE_ERR_RECORD_NOT_FOUND` | `RecordNotFound` |
-| 5 | `AEROSPIKE_ERR_RECORD_EXISTS` | `RecordExistsError` |
-| 9 | `AEROSPIKE_ERR_TIMEOUT` | `AerospikeTimeoutError` |
-| 3 | (generation error) | `RecordGenerationError` |
-| 13 | (record too big) | `RecordTooBig` |
-| 27 | (filtered out) | `FilteredOut` |
-
-See the [Constants reference](/docs/api/constants) for the full list.
-
-
----
-
-### Expression Filters
-
-> Use 104+ composable expression filter functions for server-side record filtering.
-
-Expression Filters allow server-side filtering of records during read, write, query, and scan operations. The server evaluates the expression and only returns (or modifies) records that match.
-
-> **Server Requirement:**
-> Expression filters require Aerospike Server **5.2+**.
-#### Import
-
-```python
-from aerospike_py import exp
-```
-
-#### Overview
-
-Expressions are built by composing function calls that return dict nodes. These dicts are passed to the Rust layer via the `filter_expression` policy key, where they are compiled into the Aerospike wire-format.
-
-```python
-# Build expression: age >= 21
-expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
-
-# Use in policy
-policy = {"filter_expression": expr}
-_, _, bins = client.get(key, policy=policy)
-```
-
-#### Value Constructors
-
-Create literal value expressions:
-
-| Function | Description |
-|----------|-------------|
-| `exp.int_val(val)` | 64-bit integer |
-| `exp.float_val(val)` | 64-bit float |
-| `exp.string_val(val)` | String |
-| `exp.bool_val(val)` | Boolean |
-| `exp.blob_val(val)` | Bytes |
-| `exp.list_val(val)` | List |
-| `exp.map_val(val)` | Map/dict |
-| `exp.geo_val(val)` | GeoJSON string |
-| `exp.nil()` | Nil value |
-| `exp.infinity()` | Infinity (for unbounded ranges) |
-| `exp.wildcard()` | Wildcard (matches any value) |
-
-```python
-exp.int_val(42)
-exp.string_val("hello")
-exp.bool_val(True)
-exp.list_val([1, 2, 3])
-exp.map_val({"key": "value"})
-```
-
-#### Bin Accessors
-
-Read bin values by type:
-
-| Function | Description |
-|----------|-------------|
-| `exp.int_bin(name)` | Read integer bin |
-| `exp.float_bin(name)` | Read float bin |
-| `exp.string_bin(name)` | Read string bin |
-| `exp.bool_bin(name)` | Read boolean bin |
-| `exp.blob_bin(name)` | Read blob bin |
-| `exp.list_bin(name)` | Read list bin |
-| `exp.map_bin(name)` | Read map bin |
-| `exp.geo_bin(name)` | Read geospatial bin |
-| `exp.hll_bin(name)` | Read HyperLogLog bin |
-| `exp.bin_exists(name)` | True if bin exists |
-| `exp.bin_type(name)` | Bin particle type |
-
-```python
-exp.int_bin("age")
-exp.string_bin("name")
-exp.bin_exists("optional_field")
-```
-
-#### Comparison Operations
-
-| Function | Description |
-|----------|-------------|
-| `exp.eq(left, right)` | Equal (`==`) |
-| `exp.ne(left, right)` | Not equal (`!=`) |
-| `exp.gt(left, right)` | Greater than (`>`) |
-| `exp.ge(left, right)` | Greater or equal (`>=`) |
-| `exp.lt(left, right)` | Less than (`<`) |
-| `exp.le(left, right)` | Less or equal (`<=`) |
-
-```python
-# age == 30
-exp.eq(exp.int_bin("age"), exp.int_val(30))
-
-# score > 100.5
-exp.gt(exp.float_bin("score"), exp.float_val(100.5))
-
-# name != "admin"
-exp.ne(exp.string_bin("name"), exp.string_val("admin"))
-```
-
-#### Logical Operations
-
-| Function | Description |
-|----------|-------------|
-| `exp.and_(*exprs)` | Logical AND |
-| `exp.or_(*exprs)` | Logical OR |
-| `exp.not_(expr)` | Logical NOT |
-| `exp.xor_(*exprs)` | Logical XOR |
-
-```python
-# age >= 18 AND active == true
-exp.and_(
-    exp.ge(exp.int_bin("age"), exp.int_val(18)),
-    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
-)
-
-# status == "gold" OR status == "platinum"
-exp.or_(
-    exp.eq(exp.string_bin("status"), exp.string_val("gold")),
-    exp.eq(exp.string_bin("status"), exp.string_val("platinum")),
-)
-
-# NOT deleted
-exp.not_(exp.eq(exp.bool_bin("deleted"), exp.bool_val(True)))
-```
-
-#### Numeric Operations
-
-| Function | Description |
-|----------|-------------|
-| `exp.num_add(*exprs)` | Addition |
-| `exp.num_sub(*exprs)` | Subtraction |
-| `exp.num_mul(*exprs)` | Multiplication |
-| `exp.num_div(*exprs)` | Division |
-| `exp.num_mod(num, denom)` | Modulo |
-| `exp.num_pow(base, exponent)` | Power |
-| `exp.num_log(num, base)` | Logarithm |
-| `exp.num_abs(value)` | Absolute value |
-| `exp.num_floor(num)` | Floor |
-| `exp.num_ceil(num)` | Ceiling |
-| `exp.to_int(num)` | Convert to integer |
-| `exp.to_float(num)` | Convert to float |
-| `exp.min_(*exprs)` | Minimum value |
-| `exp.max_(*exprs)` | Maximum value |
-
-```python
-# (price * quantity) > 1000
-exp.gt(
-    exp.num_mul(exp.int_bin("price"), exp.int_bin("quantity")),
-    exp.int_val(1000),
-)
-```
-
-#### Integer Bitwise Operations
-
-| Function | Description |
-|----------|-------------|
-| `exp.int_and(*exprs)` | Bitwise AND |
-| `exp.int_or(*exprs)` | Bitwise OR |
-| `exp.int_xor(*exprs)` | Bitwise XOR |
-| `exp.int_not(expr)` | Bitwise NOT |
-| `exp.int_lshift(value, shift)` | Left shift |
-| `exp.int_rshift(value, shift)` | Logical right shift |
-| `exp.int_arshift(value, shift)` | Arithmetic right shift |
-| `exp.int_count(expr)` | Bit count |
-| `exp.int_lscan(value, search)` | Scan from MSB |
-| `exp.int_rscan(value, search)` | Scan from LSB |
-
-#### Record Metadata
-
-| Function | Description |
-|----------|-------------|
-| `exp.key(exp_type)` | Record primary key |
-| `exp.key_exists()` | True if key stored in metadata |
-| `exp.set_name()` | Record set name |
-| `exp.record_size()` | Record size in bytes (Server 7.0+) |
-| `exp.last_update()` | Last update time (ns since epoch) |
-| `exp.since_update()` | Milliseconds since last update |
-| `exp.void_time()` | Expiration time (ns since epoch) |
-| `exp.ttl()` | Record TTL in seconds |
-| `exp.is_tombstone()` | True if tombstone record |
-| `exp.digest_modulo(mod)` | Digest modulo (for sampling) |
-
-```python
-# TTL < 3600 (expiring within an hour)
-exp.lt(exp.ttl(), exp.int_val(3600))
-
-# Record updated within last 24 hours (86400000 ms)
-exp.lt(exp.since_update(), exp.int_val(86_400_000))
-
-# Sample ~10% of records
-exp.eq(exp.digest_modulo(10), exp.int_val(0))
-```
-
-#### Pattern Matching
-
-##### Regex
-
-```python
-# name matches pattern (case insensitive: flags=2)
-exp.regex_compare("^alice.*", 2, exp.string_bin("name"))
-```
-
-##### Geospatial
-
-```python
-# point within region
-region = '{"type":"AeroCircle","coordinates":[[-122.0, 37.5], 1000]}'
-exp.geo_compare(exp.geo_bin("location"), exp.geo_val(region))
-```
-
-#### Variables and Control Flow
-
-##### Conditional (`cond`)
-
-```python
-# if age < 18: "minor", elif age < 65: "adult", else: "senior"
-exp.cond(
-    exp.lt(exp.int_bin("age"), exp.int_val(18)), exp.string_val("minor"),
-    exp.lt(exp.int_bin("age"), exp.int_val(65)), exp.string_val("adult"),
-    exp.string_val("senior"),
-)
-```
-
-##### Let Bindings (`let_` / `def_` / `var`)
-
-```python
-# let total = price * qty in total > 1000
-exp.let_(
-    exp.def_("total", exp.num_mul(exp.int_bin("price"), exp.int_bin("qty"))),
-    exp.gt(exp.var("total"), exp.int_val(1000)),
-)
-```
-
-#### Using with Operations
-
-Expression filters can be applied to any operation via the `filter_expression` policy key.
-
-##### Get with Filter
-
-```python
-expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
-try:
-    _, _, bins = client.get(key, policy={"filter_expression": expr})
-except aerospike.FilteredOut:
-    print("Record does not match filter")
-```
-
-##### Put with Filter
-
-```python
-# Only update if status == "active"
-expr = exp.eq(exp.string_bin("status"), exp.string_val("active"))
-client.put(key, {"visits": 1}, policy={"filter_expression": expr})
-```
-
-##### Query with Filter
-
-```python
-# Secondary index query + expression filter
-query = client.query("test", "demo")
-query.where(aerospike.predicates.between("age", 20, 50))
-
-expr = exp.eq(exp.string_bin("region"), exp.string_val("US"))
-records = query.results(policy={"filter_expression": expr})
-```
-
-##### Scan with Filter
-
-```python
-# Scan with filter: only active users with TTL > 1 hour
-expr = exp.and_(
-    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
-    exp.gt(exp.ttl(), exp.int_val(3600)),
-)
-scan = client.scan("test", "demo")
-records = scan.results(policy={"filter_expression": expr})
-```
-
-##### Batch with Filter
-
-```python
-expr = exp.ge(exp.int_bin("score"), exp.int_val(100))
-ops = [{"op": aerospike.OPERATOR_READ, "bin": "score", "val": None}]
-records = client.batch_operate(keys, ops, policy={"filter_expression": expr})
-```
-
-#### Practical Examples
-
-##### Active Premium Users
-
-```python
-expr = exp.and_(
-    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
-    exp.or_(
-        exp.eq(exp.string_bin("tier"), exp.string_val("gold")),
-        exp.eq(exp.string_bin("tier"), exp.string_val("platinum")),
-    ),
-    exp.ge(exp.int_bin("age"), exp.int_val(18)),
-)
-
-scan = client.scan("test", "users")
-records = scan.results(policy={"filter_expression": expr})
-```
-
-##### Records Expiring Soon
-
-```python
-# Records with TTL < 1 hour
-expr = exp.and_(
-    exp.gt(exp.ttl(), exp.int_val(0)),       # not immortal
-    exp.lt(exp.ttl(), exp.int_val(3600)),     # expiring within 1hr
-)
-scan = client.scan("test", "cache")
-expiring = scan.results(policy={"filter_expression": expr})
-```
-
-##### High-Value Transactions
-
-```python
-# amount * quantity > 10000
-expr = exp.gt(
-    exp.num_mul(exp.float_bin("amount"), exp.int_bin("quantity")),
-    exp.float_val(10000.0),
-)
-scan = client.scan("test", "transactions")
-records = scan.results(policy={"filter_expression": expr})
-```
-
-
----
-
-### Migration from Official Client
-
-> Migrate from the official aerospike-client-python (C-based) to aerospike-py (Rust-based).
-
-### Migration Guide
-
-This guide helps you migrate from the
-[official aerospike-client-python](https://github.com/aerospike/aerospike-client-python)
-(C extension) to **aerospike-py** (Rust + PyO3).
-
-#### Installation
-
-```bash
-# Remove old client
-pip uninstall aerospike
-
-# Install new client
-pip install aerospike-py
-```
-
-#### Import Changes
-
-```python
-# Before (official client)
-import aerospike
-from aerospike import exception as ex
-
-# After (aerospike-py) — designed to be a drop-in alias
-import aerospike_py as aerospike
-from aerospike_py import exception as ex
-```
-
-#### Client Creation
-
-```python
-# Before
-config = {"hosts": [("127.0.0.1", 3000)]}
-client = aerospike.client(config).connect()
-
-# After — identical API
-config = {"hosts": [("127.0.0.1", 3000)]}
-client = aerospike.client(config).connect()
-
-# After — with context manager (new)
-with aerospike.client(config).connect() as client:
-    # client.close() called automatically
-    pass
-```
-
-#### CRUD Operations
-
-The core CRUD API is compatible:
-
-```python
-key = ("test", "demo", "user1")
-
-# put / get / exists / remove — same signature
-client.put(key, {"name": "Alice", "age": 30})
-_, meta, bins = client.get(key)
-_, meta = client.exists(key)
-client.remove(key)
-
-# select — same signature
-_, meta, bins = client.select(key, ["name"])
-
-# touch / append / prepend / increment — same signature
-client.touch(key)
-client.append(key, "name", " Smith")
-client.prepend(key, "name", "Ms. ")
-client.increment(key, "counter", 1)
-```
-
-#### Policy Dicts
-
-Policy dicts use the same keys:
-
-```python
-policy = {
-    "socket_timeout": 5000,
-    "total_timeout": 10000,
-    "max_retries": 2,
-}
-client.get(key, policy=policy)
-
-write_policy = {
-    "key": aerospike.POLICY_KEY_SEND,
-    "exists": aerospike.POLICY_EXISTS_CREATE_ONLY,
-    "gen": aerospike.POLICY_GEN_EQ,
-}
-client.put(key, bins, meta={"gen": 5}, policy=write_policy)
-```
-
-#### Exception Handling
-
-Exception classes are compatible:
-
-```python
-from aerospike_py.exception import (
-    AerospikeError,
-    RecordNotFound,
-    RecordExistsError,
-    AerospikeTimeoutError,  # was TimeoutError in official client
-)
-
-try:
-    client.get(key)
-except RecordNotFound:
-    pass
-```
-
-:::note Exception Renames
-`TimeoutError` and `IndexError` are renamed to `AerospikeTimeoutError` and
-`AerospikeIndexError` to avoid shadowing Python builtins. The old names still
-work as deprecated aliases.
-:::
-
-#### Constants
-
-All constants use the same names and values:
-
-```python
-aerospike.POLICY_KEY_DIGEST      # 0
-aerospike.POLICY_KEY_SEND        # 1
-aerospike.POLICY_EXISTS_IGNORE   # 0
-aerospike.POLICY_GEN_EQ          # 1
-aerospike.TTL_NEVER_EXPIRE       # -1
-aerospike.OPERATOR_READ          # 1
-aerospike.OPERATOR_WRITE         # 2
-```
-
-#### List / Map CDT Operations
-
-```python
-from aerospike_py import list_operations as lops
-from aerospike_py import map_operations as mops
-
-ops = [
-    lops.list_append("tags", "new_tag"),
-    mops.map_put("attrs", "color", "blue"),
-]
-_, _, result = client.operate(key, ops)
-```
-
-#### Expression Filters
-
-```python
-from aerospike_py import exp
-
-# Build expression
-expr = exp.and_(
-    exp.ge(exp.int_bin("age"), exp.int_val(18)),
-    exp.eq(exp.string_bin("status"), exp.string_val("active")),
-)
-
-# Pass to policy
-policy = {"filter_expression": expr}
-client.get(key, policy=policy)
-```
-
-#### Query / Scan
-
-```python
-query = client.query("test", "demo")
-query.select("name", "age")
-query.where(aerospike.predicates.between("age", 18, 65))
-records = query.results()
-```
-
-#### Async Client (New)
-
-aerospike-py adds an async client not available in the official client:
-
-```python
-import asyncio
-import aerospike_py as aerospike
-
-async def main():
-    client = aerospike.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
-    await client.connect()
-
-    await client.put(key, {"name": "Alice"})
-    _, meta, bins = await client.get(key)
-
-    await client.close()
-
-asyncio.run(main())
-```
-
-#### Known Differences
-
-| Feature | Official Client | aerospike-py |
-|---------|----------------|--------------|
-| Runtime | C extension | Rust + PyO3 |
-| Async support | No | Yes |
-| NumPy batch reads | No | Yes |
-| Context manager | No | Yes (`with` / `async with`) |
-| `TimeoutError` name | `TimeoutError` | `AerospikeTimeoutError` (alias available) |
-| `IndexError` name | `IndexError` | `AerospikeIndexError` (alias available) |
-| Predicate helpers | `aerospike.predicates` | `aerospike.predicates` |
-| GeoJSON type | `aerospike.GeoJSON` | Not yet available |
-| `operate_ordered()` | Returns ordered list | Same |
 
 
 ---
@@ -4542,176 +5181,333 @@ batch: NumpyBatchRecords = await client.batch_read(
 
 ---
 
-### Performance Tuning
+### Expression Filters
 
-> Tips for optimizing aerospike-py throughput and latency.
+> Use 104+ composable expression filter functions for server-side record filtering.
 
-### Performance Tuning Guide
+Expression Filters allow server-side filtering of records during read, write, query, and scan operations. The server evaluates the expression and only returns (or modifies) records that match.
 
-#### Client Configuration
-
-##### Connection Pool
-
-```python
-config = {
-    "hosts": [("node1", 3000), ("node2", 3000)],
-    "max_conns_per_node": 300,   # default: 100
-    "min_conns_per_node": 10,    # pre-warm connections
-    "idle_timeout": 55,          # seconds, keep below server proto-fd-idle-ms
-}
-client = aerospike.client(config).connect()
-```
-
-**Guidelines:**
-- Set `max_conns_per_node` based on expected concurrent requests per node
-- Use `min_conns_per_node` to avoid cold-start latency
-- Set `idle_timeout` slightly below the server's `proto-fd-idle-ms` (default 60s)
-
-##### Timeouts
-
-```python
-config = {
-    "hosts": [("127.0.0.1", 3000)],
-    "timeout": 30000,  # client-level timeout in ms (connect + tend)
-}
-
-# Per-operation timeouts via policy
-policy = {
-    "socket_timeout": 5000,  # per-socket timeout in ms
-    "total_timeout": 10000,  # total operation timeout in ms
-    "max_retries": 2,
-}
-client.get(key, policy=policy)
-```
-
-**Guidelines:**
-- `socket_timeout` catches hung connections; keep it tight (1-5s)
-- `total_timeout` limits end-to-end including retries; set based on SLA
-- `max_retries` adds resilience but multiplies latency on failure
-
-#### Read Optimization
-
-##### Select Specific Bins
-
-```python
-# Slow: reads ALL bins from server
-_, _, bins = client.get(key)
-
-# Fast: reads only the bins you need
-_, _, bins = client.select(key, ["name", "age"])
-```
-
-##### Batch Reads
-
-```python
-# Slow: N sequential round-trips
-results = [client.get(k) for k in keys]
-
-# Fast: single round-trip
-results = client.batch_read(keys, bins=["name", "age"])
-```
-
-##### NumPy Batch Reads
-
-For numeric workloads, use the numpy dtype to avoid Python dict overhead:
-
-```python
-import numpy as np
-
-dtype = np.dtype([("score", "i8"), ("rating", "f8")])
-result = client.batch_read(keys, bins=["score", "rating"], _dtype=dtype)
-# result.array is a numpy structured array — no per-record dict allocation
-```
-
-#### Write Optimization
-
-##### Batch Writes via operate()
-
-When updating multiple bins in one record:
-
-```python
-# Slow: two round-trips
-client.put(key, {"counter": 1})
-client.put(key, {"updated_at": now})
-
-# Fast: single round-trip
-from aerospike_py import list_operations as lops
-ops = [
-    {"op": aerospike.OPERATOR_WRITE, "bin": "counter", "val": 1},
-    {"op": aerospike.OPERATOR_WRITE, "bin": "updated_at", "val": now},
-]
-client.operate(key, ops)
-```
-
-##### TTL Strategy
-
-```python
-# Never expire (careful with storage)
-client.put(key, bins, meta={"ttl": aerospike.TTL_NEVER_EXPIRE})
-
-# Don't update TTL on writes (preserves existing expiration)
-client.put(key, bins, meta={"ttl": aerospike.TTL_DONT_UPDATE})
-
-# Use namespace default
-client.put(key, bins, meta={"ttl": aerospike.TTL_NAMESPACE_DEFAULT})
-```
-
-#### Async Client
-
-The async client uses a Tokio multi-threaded runtime under the hood.
-For I/O-bound workloads with high concurrency, it significantly outperforms
-the sync client:
-
-```python
-import asyncio
-import aerospike_py as aerospike
-
-async def main():
-    client = aerospike.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
-    await client.connect()
-
-    # Concurrent reads
-    keys = [("test", "demo", f"key{i}") for i in range(1000)]
-    tasks = [client.get(k) for k in keys]
-    results = await asyncio.gather(*tasks)
-
-    await client.close()
-```
-
-**When to use async:**
-- High-concurrency web servers (FastAPI, aiohttp)
-- Fan-out read patterns (many keys in parallel)
-- Mixed I/O workloads (database + HTTP + cache)
-
-**When sync is fine:**
-- Simple scripts and batch jobs
-- Sequential processing pipelines
-- Low-concurrency applications
-
-#### Expression Filters
-
-Push filtering to the server to reduce network transfer:
+> **Server Requirement:**
+> Expression filters require Aerospike Server **5.2+**.
+#### Import
 
 ```python
 from aerospike_py import exp
-
-# Without filter: transfers ALL records, filters in Python
-results = client.query("test", "demo").results()
-active = [r for r in results if r[2].get("active")]
-
-# With filter: server only returns matching records
-policy = {
-    "filter_expression": exp.eq(exp.bool_bin("active"), exp.bool_val(True))
-}
-results = client.query("test", "demo").results(policy)
 ```
 
-#### Monitoring
+#### Overview
 
-Key metrics to watch:
-- **Connection pool usage**: If consistently near `max_conns_per_node`, increase the limit
-- **Timeout rate**: High timeout rates suggest network issues or undersized timeouts
-- **Record size**: Large records increase serialization cost; consider splitting into multiple bins or records
+Expressions are built by composing function calls that return dict nodes. These dicts are passed to the Rust layer via the `filter_expression` policy key, where they are compiled into the Aerospike wire-format.
+
+```python
+# Build expression: age >= 21
+expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
+
+# Use in policy
+policy = {"filter_expression": expr}
+_, _, bins = client.get(key, policy=policy)
+```
+
+#### Value Constructors
+
+Create literal value expressions:
+
+| Function | Description |
+|----------|-------------|
+| `exp.int_val(val)` | 64-bit integer |
+| `exp.float_val(val)` | 64-bit float |
+| `exp.string_val(val)` | String |
+| `exp.bool_val(val)` | Boolean |
+| `exp.blob_val(val)` | Bytes |
+| `exp.list_val(val)` | List |
+| `exp.map_val(val)` | Map/dict |
+| `exp.geo_val(val)` | GeoJSON string |
+| `exp.nil()` | Nil value |
+| `exp.infinity()` | Infinity (for unbounded ranges) |
+| `exp.wildcard()` | Wildcard (matches any value) |
+
+```python
+exp.int_val(42)
+exp.string_val("hello")
+exp.bool_val(True)
+exp.list_val([1, 2, 3])
+exp.map_val({"key": "value"})
+```
+
+#### Bin Accessors
+
+Read bin values by type:
+
+| Function | Description |
+|----------|-------------|
+| `exp.int_bin(name)` | Read integer bin |
+| `exp.float_bin(name)` | Read float bin |
+| `exp.string_bin(name)` | Read string bin |
+| `exp.bool_bin(name)` | Read boolean bin |
+| `exp.blob_bin(name)` | Read blob bin |
+| `exp.list_bin(name)` | Read list bin |
+| `exp.map_bin(name)` | Read map bin |
+| `exp.geo_bin(name)` | Read geospatial bin |
+| `exp.hll_bin(name)` | Read HyperLogLog bin |
+| `exp.bin_exists(name)` | True if bin exists |
+| `exp.bin_type(name)` | Bin particle type |
+
+```python
+exp.int_bin("age")
+exp.string_bin("name")
+exp.bin_exists("optional_field")
+```
+
+#### Comparison Operations
+
+| Function | Description |
+|----------|-------------|
+| `exp.eq(left, right)` | Equal (`==`) |
+| `exp.ne(left, right)` | Not equal (`!=`) |
+| `exp.gt(left, right)` | Greater than (`>`) |
+| `exp.ge(left, right)` | Greater or equal (`>=`) |
+| `exp.lt(left, right)` | Less than (`<`) |
+| `exp.le(left, right)` | Less or equal (`<=`) |
+
+```python
+# age == 30
+exp.eq(exp.int_bin("age"), exp.int_val(30))
+
+# score > 100.5
+exp.gt(exp.float_bin("score"), exp.float_val(100.5))
+
+# name != "admin"
+exp.ne(exp.string_bin("name"), exp.string_val("admin"))
+```
+
+#### Logical Operations
+
+| Function | Description |
+|----------|-------------|
+| `exp.and_(*exprs)` | Logical AND |
+| `exp.or_(*exprs)` | Logical OR |
+| `exp.not_(expr)` | Logical NOT |
+| `exp.xor_(*exprs)` | Logical XOR |
+
+```python
+# age >= 18 AND active == true
+exp.and_(
+    exp.ge(exp.int_bin("age"), exp.int_val(18)),
+    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
+)
+
+# status == "gold" OR status == "platinum"
+exp.or_(
+    exp.eq(exp.string_bin("status"), exp.string_val("gold")),
+    exp.eq(exp.string_bin("status"), exp.string_val("platinum")),
+)
+
+# NOT deleted
+exp.not_(exp.eq(exp.bool_bin("deleted"), exp.bool_val(True)))
+```
+
+#### Numeric Operations
+
+| Function | Description |
+|----------|-------------|
+| `exp.num_add(*exprs)` | Addition |
+| `exp.num_sub(*exprs)` | Subtraction |
+| `exp.num_mul(*exprs)` | Multiplication |
+| `exp.num_div(*exprs)` | Division |
+| `exp.num_mod(num, denom)` | Modulo |
+| `exp.num_pow(base, exponent)` | Power |
+| `exp.num_log(num, base)` | Logarithm |
+| `exp.num_abs(value)` | Absolute value |
+| `exp.num_floor(num)` | Floor |
+| `exp.num_ceil(num)` | Ceiling |
+| `exp.to_int(num)` | Convert to integer |
+| `exp.to_float(num)` | Convert to float |
+| `exp.min_(*exprs)` | Minimum value |
+| `exp.max_(*exprs)` | Maximum value |
+
+```python
+# (price * quantity) > 1000
+exp.gt(
+    exp.num_mul(exp.int_bin("price"), exp.int_bin("quantity")),
+    exp.int_val(1000),
+)
+```
+
+#### Integer Bitwise Operations
+
+| Function | Description |
+|----------|-------------|
+| `exp.int_and(*exprs)` | Bitwise AND |
+| `exp.int_or(*exprs)` | Bitwise OR |
+| `exp.int_xor(*exprs)` | Bitwise XOR |
+| `exp.int_not(expr)` | Bitwise NOT |
+| `exp.int_lshift(value, shift)` | Left shift |
+| `exp.int_rshift(value, shift)` | Logical right shift |
+| `exp.int_arshift(value, shift)` | Arithmetic right shift |
+| `exp.int_count(expr)` | Bit count |
+| `exp.int_lscan(value, search)` | Scan from MSB |
+| `exp.int_rscan(value, search)` | Scan from LSB |
+
+#### Record Metadata
+
+| Function | Description |
+|----------|-------------|
+| `exp.key(exp_type)` | Record primary key |
+| `exp.key_exists()` | True if key stored in metadata |
+| `exp.set_name()` | Record set name |
+| `exp.record_size()` | Record size in bytes (Server 7.0+) |
+| `exp.last_update()` | Last update time (ns since epoch) |
+| `exp.since_update()` | Milliseconds since last update |
+| `exp.void_time()` | Expiration time (ns since epoch) |
+| `exp.ttl()` | Record TTL in seconds |
+| `exp.is_tombstone()` | True if tombstone record |
+| `exp.digest_modulo(mod)` | Digest modulo (for sampling) |
+
+```python
+# TTL < 3600 (expiring within an hour)
+exp.lt(exp.ttl(), exp.int_val(3600))
+
+# Record updated within last 24 hours (86400000 ms)
+exp.lt(exp.since_update(), exp.int_val(86_400_000))
+
+# Sample ~10% of records
+exp.eq(exp.digest_modulo(10), exp.int_val(0))
+```
+
+#### Pattern Matching
+
+##### Regex
+
+```python
+# name matches pattern (case insensitive: flags=2)
+exp.regex_compare("^alice.*", 2, exp.string_bin("name"))
+```
+
+##### Geospatial
+
+```python
+# point within region
+region = '{"type":"AeroCircle","coordinates":[[-122.0, 37.5], 1000]}'
+exp.geo_compare(exp.geo_bin("location"), exp.geo_val(region))
+```
+
+#### Variables and Control Flow
+
+##### Conditional (`cond`)
+
+```python
+# if age < 18: "minor", elif age < 65: "adult", else: "senior"
+exp.cond(
+    exp.lt(exp.int_bin("age"), exp.int_val(18)), exp.string_val("minor"),
+    exp.lt(exp.int_bin("age"), exp.int_val(65)), exp.string_val("adult"),
+    exp.string_val("senior"),
+)
+```
+
+##### Let Bindings (`let_` / `def_` / `var`)
+
+```python
+# let total = price * qty in total > 1000
+exp.let_(
+    exp.def_("total", exp.num_mul(exp.int_bin("price"), exp.int_bin("qty"))),
+    exp.gt(exp.var("total"), exp.int_val(1000)),
+)
+```
+
+#### Using with Operations
+
+Expression filters can be applied to any operation via the `filter_expression` policy key.
+
+##### Get with Filter
+
+```python
+expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
+try:
+    _, _, bins = client.get(key, policy={"filter_expression": expr})
+except aerospike.FilteredOut:
+    print("Record does not match filter")
+```
+
+##### Put with Filter
+
+```python
+# Only update if status == "active"
+expr = exp.eq(exp.string_bin("status"), exp.string_val("active"))
+client.put(key, {"visits": 1}, policy={"filter_expression": expr})
+```
+
+##### Query with Filter
+
+```python
+# Secondary index query + expression filter
+query = client.query("test", "demo")
+query.where(aerospike.predicates.between("age", 20, 50))
+
+expr = exp.eq(exp.string_bin("region"), exp.string_val("US"))
+records = query.results(policy={"filter_expression": expr})
+```
+
+##### Scan with Filter
+
+```python
+# Scan with filter: only active users with TTL > 1 hour
+expr = exp.and_(
+    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
+    exp.gt(exp.ttl(), exp.int_val(3600)),
+)
+scan = client.scan("test", "demo")
+records = scan.results(policy={"filter_expression": expr})
+```
+
+##### Batch with Filter
+
+```python
+expr = exp.ge(exp.int_bin("score"), exp.int_val(100))
+ops = [{"op": aerospike.OPERATOR_READ, "bin": "score", "val": None}]
+records = client.batch_operate(keys, ops, policy={"filter_expression": expr})
+```
+
+#### Practical Examples
+
+##### Active Premium Users
+
+```python
+expr = exp.and_(
+    exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
+    exp.or_(
+        exp.eq(exp.string_bin("tier"), exp.string_val("gold")),
+        exp.eq(exp.string_bin("tier"), exp.string_val("platinum")),
+    ),
+    exp.ge(exp.int_bin("age"), exp.int_val(18)),
+)
+
+scan = client.scan("test", "users")
+records = scan.results(policy={"filter_expression": expr})
+```
+
+##### Records Expiring Soon
+
+```python
+# Records with TTL < 1 hour
+expr = exp.and_(
+    exp.gt(exp.ttl(), exp.int_val(0)),       # not immortal
+    exp.lt(exp.ttl(), exp.int_val(3600)),     # expiring within 1hr
+)
+scan = client.scan("test", "cache")
+expiring = scan.results(policy={"filter_expression": expr})
+```
+
+##### High-Value Transactions
+
+```python
+# amount * quantity > 10000
+expr = exp.gt(
+    exp.num_mul(exp.float_bin("amount"), exp.int_bin("quantity")),
+    exp.float_val(10000.0),
+)
+scan = client.scan("test", "transactions")
+records = scan.results(policy={"filter_expression": expr})
+```
 
 
 ---
@@ -4907,110 +5703,6 @@ query.where(predicates.geo_contains_geojson_point("coverage", point))
 
 ---
 
-### UDF Guide
-
-> Register, execute, and remove User Defined Functions (Lua scripts) on the Aerospike server.
-
-User Defined Functions (UDFs) are Lua scripts that execute on the Aerospike server.
-
-#### Register a UDF
-
-```python
-client.udf_put("my_udf.lua")
-```
-
-The file must be accessible from the Python process. The UDF is registered on all cluster nodes.
-
-#### Execute a UDF on a Record
-
-```python
-key = ("test", "demo", "user1")
-result = client.apply(key, "my_udf", "my_function", [1, "hello"])
-```
-
-| Parameter | Description |
-|-----------|-------------|
-| `key` | Record key to execute on |
-| `module` | UDF module name (without `.lua`) |
-| `function` | Function name within the module |
-| `args` | Optional list of arguments |
-
-#### Remove a UDF
-
-```python
-client.udf_remove("my_udf")
-```
-
-#### Example: Counter UDF
-
-##### Lua Script (`counter.lua`)
-
-```lua
-function increment(rec, bin_name, amount)
-    if aerospike:exists(rec) then
-        rec[bin_name] = rec[bin_name] + amount
-        aerospike:update(rec)
-    else
-        rec[bin_name] = amount
-        aerospike:create(rec)
-    end
-    return rec[bin_name]
-end
-```
-
-##### Python Usage
-
-```python
-# Register
-client.udf_put("counter.lua")
-
-# Execute
-key = ("test", "demo", "counter1")
-result = client.apply(key, "counter", "increment", ["count", 5])
-print(result)  # 5
-
-result = client.apply(key, "counter", "increment", ["count", 3])
-print(result)  # 8
-
-# Cleanup
-client.udf_remove("counter")
-```
-
-#### Async UDF
-
-```python
-import asyncio
-from aerospike_py import AsyncClient
-
-async def main():
-    client = AsyncClient({
-        "hosts": [("127.0.0.1", 3000)],
-        "cluster_name": "docker",
-    })
-    await client.connect()
-
-    await client.udf_put("counter.lua")
-
-    key = ("test", "demo", "counter1")
-    result = await client.apply(key, "counter", "increment", ["count", 1])
-    print(result)
-
-    await client.udf_remove("counter")
-    await client.close()
-
-asyncio.run(main())
-```
-
-#### Notes
-
-- UDFs execute on the server node that owns the record
-- Lua is the only supported UDF language
-- UDF changes take a few seconds to propagate to all nodes
-- Keep UDFs simple for best performance
-
-
----
-
 ## Integrations
 
 ### FastAPI Integration
@@ -5125,7 +5817,7 @@ async def create_user(body: UserCreate, request: Request):
     user_id = uuid.uuid4().hex
     await client.put(_key(user_id), body.model_dump())
     _, meta, bins = await client.get(_key(user_id))
-    return UserResponse(user_id=user_id, generation=meta["gen"], **bins)
+    return UserResponse(user_id=user_id, generation=meta.gen, **bins)
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(user_id: str, request: Request):
@@ -5134,7 +5826,7 @@ async def get_user(user_id: str, request: Request):
         _, meta, bins = await client.get(_key(user_id))
     except RecordNotFound:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserResponse(user_id=user_id, generation=meta["gen"], **bins)
+    return UserResponse(user_id=user_id, generation=meta.gen, **bins)
 
 @router.delete("/{user_id}", status_code=204)
 async def delete_user(user_id: str, request: Request):
