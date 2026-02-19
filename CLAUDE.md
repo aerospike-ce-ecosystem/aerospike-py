@@ -107,7 +107,7 @@ make run-numpy-benchmark            # NumPy 배치 벤치마크
 
 ## API 레퍼런스
 
-API 사용법(메서드 시그니처, 타입, 상수, 예외, 코드 예제)은 `.claude/skills/aerospike-py/SKILL.md` 참조.
+API 사용법은 `.claude/skills/api-*/SKILL.md` 스킬 파일들에서 도메인별로 자동 로드됨.
 전체 타입/상수 정의는 `src/aerospike_py/__init__.pyi` 참조.
 
 ---
