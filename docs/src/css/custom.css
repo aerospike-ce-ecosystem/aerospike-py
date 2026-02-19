@@ -78,7 +78,8 @@
    Tables
    ============================================================ */
 table {
-  display: table;
+  display: block;
+  overflow-x: auto;
   width: 100%;
 }
 
