@@ -389,13 +389,13 @@ def generate_client_doc(tree: ast.Module) -> str:
 
     # Build document
     lines: list[str] = [
-        AUTO_HEADER,
         "---",
         "title: Client",
         "sidebar_label: Client (Sync & Async)",
         "sidebar_position: 1",
         "description: Complete API reference for the synchronous Client and asynchronous AsyncClient classes.",
         "---\n",
+        AUTO_HEADER,
         "import Tabs from '@theme/Tabs';",
         "import TabItem from '@theme/TabItem';\n",
         "aerospike-py provides both synchronous (`Client`) and asynchronous (`AsyncClient`) APIs with identical functionality.\n",
