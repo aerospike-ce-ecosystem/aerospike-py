@@ -106,7 +106,7 @@ const config: Config = {
             },
             {
               label: 'Performance',
-              to: '/docs/category/performance',
+              to: '/docs/performance/overview',
             },
           ],
         },
