@@ -157,6 +157,22 @@ Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to und
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and making changes.
 
+## Code stats
+
+`src` + `rust/src` only ([tokei](https://github.com/XAMPPRocky/tokei)):
+
+```
+$ tokei -C src rust/src
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Language                                 Files        Lines         Code     Comments       Blanks
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Rust                                        29         7884         6949          189          746
+ Python                                      15         5809         4917          175          717
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Total                                       44        14165        11866          773         1526
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.

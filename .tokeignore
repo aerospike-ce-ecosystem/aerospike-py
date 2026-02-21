@@ -1,0 +1,5 @@
+# tokei 제외 패턴 (glob, .gitignore와 동일)
+tests/
+
+# examples 제외
+examples/

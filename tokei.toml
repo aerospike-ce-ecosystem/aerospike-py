@@ -1,0 +1,11 @@
+# tokei - 코드 라인수 분석 설정
+# 사용: tokei -C src rust/src  (소스만: src + rust/src, -C로 Rust 내장 Markdown 미표시)
+
+# 터미널 출력 너비(칸)
+columns = 100
+# 언어별 정렬 기준: "lines" | "code" | "comments" | "blanks"
+sort = "lines"
+# Python docstring을 주석으로 셀 것인지 (false = 코드로 카운트)
+treat_doc_strings_as_comments = false
+# Python, Rust만 집계
+types = ["Python", "Rust"]
