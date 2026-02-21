@@ -474,7 +474,7 @@ results: list[Record] = await client.batch_write_numpy(
 | `set_name` | `str` | required | Target set name |
 | `_dtype` | `np.dtype` | required | Structured dtype describing the array layout |
 | `key_field` | `str` | `"_key"` | Name of the dtype field to use as the record user key |
-| `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](../../api/types.md#batchpolicy) overrides |
+| `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides |
 
 **Returns:** `list[Record]` — a list of `Record` NamedTuples `(key, meta, bins)` with write results.
 
