@@ -13,8 +13,29 @@ import { dirname, join, extname, relative } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DOCS_DIR = join(__dirname, '..', 'docs');
 const STATIC_DIR = join(__dirname, '..', 'static');
+
+/**
+ * Determine the docs source directory.
+ * If versioned docs exist (versions.json), use the latest versioned snapshot.
+ * Otherwise, fall back to the current docs/ directory.
+ */
+function getDocsDir() {
+  const versionsFile = join(__dirname, '..', 'versions.json');
+  if (existsSync(versionsFile)) {
+    const versions = JSON.parse(readFileSync(versionsFile, 'utf-8'));
+    if (versions.length > 0) {
+      const latestVersion = versions[0];
+      const versionedDir = join(__dirname, '..', 'versioned_docs', `version-${latestVersion}`);
+      if (existsSync(versionedDir)) {
+        return versionedDir;
+      }
+    }
+  }
+  return join(__dirname, '..', 'docs');
+}
+
+const DOCS_DIR = getDocsDir();
 const SITE_URL = 'https://kimsoungryoul.github.io/aerospike-py';
 const BASE_URL = '/docs';
 

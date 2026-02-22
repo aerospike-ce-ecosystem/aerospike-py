@@ -3434,7 +3434,7 @@ from aerospike_py import map_operations as map_ops
 import aerospike_py as aerospike
 ```
 
----
+##### List CDT Operations
 
 #### List CDT Operations
 
@@ -3825,7 +3825,7 @@ with aerospike.client({
     print(f"Total scores: {bins['scores']}")
 ```
 
----
+##### Map CDT Operations
 
 #### Map CDT Operations
 

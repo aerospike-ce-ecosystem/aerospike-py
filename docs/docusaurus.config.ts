@@ -45,6 +45,17 @@ const config: Config = {
           editUrl:
             'https://github.com/KimSoungRyoul/aerospike-py/tree/main/docs/',
           showLastUpdateTime: true,
+          // Versioning: 릴리스 전에는 current가 기본
+          // 첫 릴리스 후 lastVersion을 해당 버전으로 변경하고
+          // current.path를 'next', current.banner를 'unreleased'로 전환
+          lastVersion: 'current',
+          versions: {
+            current: {
+              label: 'In Development',
+              path: '',
+              banner: 'none',
+            },
+          },
         },
         blog: false,
         theme: {
@@ -75,6 +86,11 @@ const config: Config = {
           label: 'Docs',
         },
         {to: '/releases', label: 'Releases', position: 'left'},
+        {
+          type: 'docsVersionDropdown',
+          position: 'right',
+          dropdownActiveClassDisabled: true,
+        },
         {
           type: 'localeDropdown',
           position: 'right',
