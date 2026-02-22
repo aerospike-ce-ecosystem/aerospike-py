@@ -6,38 +6,39 @@
 
 ## Getting Started
 
-- [Contributing](https://kimsoungryoul.github.io/aerospike-py/docs/contributing): Development setup, build instructions, testing, and code style guidelines for contributors.
-- [Getting Started](https://kimsoungryoul.github.io/aerospike-py/docs/getting-started): Install aerospike-py and connect to an Aerospike cluster in minutes with sync or async Python clients.
+- [Contributing](https://kimsoungryoul.github.io/aerospike-py/docs/contributing): Development setup, build, test, and code style guidelines.
+- [Getting Started](https://kimsoungryoul.github.io/aerospike-py/docs/getting-started): Install aerospike-py and connect to an Aerospike cluster in minutes.
 
 ## API Reference
 
-- [api-client](https://kimsoungryoul.github.io/aerospike-py/docs/api/client)
-- [Constants](https://kimsoungryoul.github.io/aerospike-py/docs/api/constants): Policy, TTL, operator, index type, and other constants used across the aerospike-py API.
-- [Exceptions](https://kimsoungryoul.github.io/aerospike-py/docs/api/exceptions): Exception hierarchy and error handling patterns for aerospike-py.
-- [Query](https://kimsoungryoul.github.io/aerospike-py/docs/api/query-scan): API reference for the Query class including predicates and result iteration.
-- [Types](https://kimsoungryoul.github.io/aerospike-py/docs/api/types): NamedTuple return types and TypedDict input types for aerospike-py.
+- [Client](https://kimsoungryoul.github.io/aerospike-py/docs/api/client): Complete API reference for the synchronous Client and asynchronous AsyncClient classes.
+- [Constants](https://kimsoungryoul.github.io/aerospike-py/docs/api/constants): All constants used across the aerospike-py API.
+- [Exceptions](https://kimsoungryoul.github.io/aerospike-py/docs/api/exceptions): Exception hierarchy and error handling patterns.
+- [Query API](https://kimsoungryoul.github.io/aerospike-py/docs/api/query-scan): Query and AsyncQuery class reference with predicates.
+- [Types](https://kimsoungryoul.github.io/aerospike-py/docs/api/types): NamedTuple return types and TypedDict input types.
 
 ## Guides
 
-- [Admin Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/admin): User and role management operations for security-enabled Aerospike clusters.
-- [Error Handling](https://kimsoungryoul.github.io/aerospike-py/docs/guides/error-handling): Best practices for handling Aerospike errors in production applications.
-- [UDF Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/udf): Register, execute, and remove User Defined Functions (Lua scripts) on the Aerospike server.
-- [Client Configuration](https://kimsoungryoul.github.io/aerospike-py/docs/guides/client-config): Complete guide for configuring aerospike-py client connections, timeouts, and connection pools.
-- [Migration from Official Client](https://kimsoungryoul.github.io/aerospike-py/docs/guides/migration): Migrate from the official aerospike-client-python (C-based) to aerospike-py (Rust-based).
+- [Admin Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/admin): User and role management for security-enabled Aerospike clusters.
+- [Error Handling](https://kimsoungryoul.github.io/aerospike-py/docs/guides/error-handling): Production error handling patterns for aerospike-py.
+- [UDF Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/udf): Register, execute, and remove Lua UDFs on the Aerospike server.
+- [Client Configuration](https://kimsoungryoul.github.io/aerospike-py/docs/guides/client-config): Configure connections, timeouts, auth, and connection pools.
+- [Migration from Official Client](https://kimsoungryoul.github.io/aerospike-py/docs/guides/migration): Migrate from aerospike-client-python (C-based) to aerospike-py (Rust-based).
 - [Performance Tuning](https://kimsoungryoul.github.io/aerospike-py/docs/guides/performance-tuning): Tips for optimizing aerospike-py throughput and latency.
-- [List CDT Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/cdt-list): 31 atomic list operations for append, insert, remove, sort, and advanced queries on list bins.
-- [Map CDT Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/cdt-map): 27 atomic map operations for put, get, remove, and advanced queries on map bins.
-- [CRUD & Batch Operations Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/crud): Step-by-step guide covering put, get, remove, batch operations, and optimistic locking.
 - [NumPy Batch Read Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/numpy-batch): Use batch_read with numpy structured arrays for high-performance columnar analytics directly from Aerospike.
-- [Expression Filters](https://kimsoungryoul.github.io/aerospike-py/docs/guides/expression-filters): Use 104+ composable expression filter functions for server-side record filtering.
-- [Query Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/query-scan): Learn how to create secondary index queries and use predicates.
+- [NumPy Batch Write Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/numpy-batch-write): Use batch_write_numpy to write records directly from numpy structured arrays for high-performance bulk ingestion into Aerospike.
+- [List & Map CDT Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/operations): Atomic server-side List (31 ops) and Map (27 ops) collection data type operations via client.operate().
+- [Read Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/read): Get, select, exists, and batch read operations.
+- [Write Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/write): Put, update, delete, operate, batch operate, and optimistic locking.
+- [Expression Filters](https://kimsoungryoul.github.io/aerospike-py/docs/guides/expression-filters): Server-side record filtering with 104+ composable expression functions.
+- [Query Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/query-scan): Secondary index queries with predicates.
 
 ## Integrations
 
-- [FastAPI Integration](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/fastapi): How to use aerospike-py AsyncClient with FastAPI lifespan and dependency injection.
-- [Logging](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/logging): Structured logging with the Rust-to-Python logging bridge in aerospike-py.
-- [Prometheus Metrics](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/metrics): OpenTelemetry-compatible Prometheus metrics for monitoring Aerospike operations.
-- [Distributed Tracing](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/tracing): OpenTelemetry distributed tracing for Aerospike operations with OTLP gRPC export.
+- [FastAPI Integration](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/fastapi): AsyncClient with FastAPI lifespan and dependency injection.
+- [Logging](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/logging): Rust-to-Python logging bridge for observing Aerospike client internals.
+- [Prometheus Metrics](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/metrics): Prometheus metrics for monitoring Aerospike operations.
+- [Distributed Tracing](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/tracing): OpenTelemetry distributed tracing for Aerospike operations.
 
 ## Performance
 

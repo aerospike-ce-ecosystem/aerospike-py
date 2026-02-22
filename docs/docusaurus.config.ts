@@ -102,7 +102,7 @@ const config: Config = {
             },
             {
               label: 'Guides',
-              to: '/docs/guides/crud',
+              to: '/docs/guides/write',
             },
             {
               label: 'Performance',
