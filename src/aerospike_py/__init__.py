@@ -254,6 +254,7 @@ from aerospike_py.types import (  # noqa: F401
     RoleInfo,
 )
 from aerospike_py._types import ListPolicy, MapPolicy, Operation  # noqa: F401
+from aerospike_py._bug_report import catch_unexpected
 
 try:
     from importlib.metadata import PackageNotFoundError
@@ -317,9 +318,11 @@ class Query:
     def where(self, predicate) -> None:
         self._inner.where(predicate)
 
+    @catch_unexpected("Query.results")
     def results(self, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in self._inner.results(policy)]
 
+    @catch_unexpected("Query.foreach")
     def foreach(self, callback, policy=None) -> None:
         def _cb(raw):
             return callback(_wrap_record(raw))
@@ -344,10 +347,12 @@ class AsyncQuery:
     def where(self, predicate) -> None:
         self._inner.where(predicate)
 
+    @catch_unexpected("AsyncQuery.results")
     async def results(self, policy=None) -> list[Record]:
         raw = await asyncio.to_thread(self._inner.results, policy)
         return [_wrap_record(r) for r in raw]
 
+    @catch_unexpected("AsyncQuery.foreach")
     async def foreach(self, callback, policy=None) -> None:
         def _sync_foreach():
             def _cb(raw):
@@ -398,21 +403,27 @@ class Client(_NativeClient):
         super().connect(username, password)
         return self
 
+    @catch_unexpected("Client.get")
     def get(self, key, policy=None) -> Record:
         return _wrap_record(super().get(key, policy))
 
+    @catch_unexpected("Client.select")
     def select(self, key, bins, policy=None) -> Record:
         return _wrap_record(super().select(key, bins, policy))
 
+    @catch_unexpected("Client.exists")
     def exists(self, key, policy=None) -> ExistsResult:
         return _wrap_exists(super().exists(key, policy))
 
+    @catch_unexpected("Client.operate")
     def operate(self, key, ops, meta=None, policy=None) -> Record:
         return _wrap_record(super().operate(key, ops, meta, policy))
 
+    @catch_unexpected("Client.operate_ordered")
     def operate_ordered(self, key, ops, meta=None, policy=None) -> OperateOrderedResult:
         return _wrap_operate_ordered(super().operate_ordered(key, ops, meta, policy))
 
+    @catch_unexpected("Client.info_all")
     def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
@@ -447,6 +458,7 @@ class Client(_NativeClient):
         """
         return super().batch_read(keys, bins, policy, _dtype)
 
+    @catch_unexpected("Client.batch_write_numpy")
     def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None):
         """Write multiple records from a numpy structured array.
 
@@ -477,9 +489,11 @@ class Client(_NativeClient):
             _wrap_record(r) for r in super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy)
         ]
 
+    @catch_unexpected("Client.batch_operate")
     def batch_operate(self, keys, ops, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in super().batch_operate(keys, ops, policy)]
 
+    @catch_unexpected("Client.batch_remove")
     def batch_remove(self, keys, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in super().batch_remove(keys, policy)]
 
@@ -564,21 +578,27 @@ class AsyncClient:
         logger.debug("Async client closing")
         return await self._inner.close()
 
+    @catch_unexpected("AsyncClient.get")
     async def get(self, key, policy=None) -> Record:
         return _wrap_record(await self._inner.get(key, policy))
 
+    @catch_unexpected("AsyncClient.select")
     async def select(self, key, bins, policy=None) -> Record:
         return _wrap_record(await self._inner.select(key, bins, policy))
 
+    @catch_unexpected("AsyncClient.exists")
     async def exists(self, key, policy=None) -> ExistsResult:
         return _wrap_exists(await self._inner.exists(key, policy))
 
+    @catch_unexpected("AsyncClient.operate")
     async def operate(self, key, ops, meta=None, policy=None) -> Record:
         return _wrap_record(await self._inner.operate(key, ops, meta, policy))
 
+    @catch_unexpected("AsyncClient.operate_ordered")
     async def operate_ordered(self, key, ops, meta=None, policy=None) -> OperateOrderedResult:
         return _wrap_operate_ordered(await self._inner.operate_ordered(key, ops, meta, policy))
 
+    @catch_unexpected("AsyncClient.info_all")
     async def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in await self._inner.info_all(command, policy)]
 
@@ -615,6 +635,7 @@ class AsyncClient:
         """
         return await self._inner.batch_read(keys, bins, policy, _dtype)
 
+    @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
         self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None
     ) -> list[Record]:
@@ -648,9 +669,11 @@ class AsyncClient:
             for r in await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy)
         ]
 
+    @catch_unexpected("AsyncClient.batch_operate")
     async def batch_operate(self, keys, ops, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in await self._inner.batch_operate(keys, ops, policy)]
 
+    @catch_unexpected("AsyncClient.batch_remove")
     async def batch_remove(self, keys, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in await self._inner.batch_remove(keys, policy)]
 

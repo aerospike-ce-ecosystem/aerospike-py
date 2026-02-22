@@ -262,12 +262,25 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
                 | ResultCode::SecurityNotSupported
                 | ResultCode::SecurityNotEnabled => AdminError::new_err(msg),
                 // Default server error
-                _ => ServerError::new_err(msg),
+                _ => {
+                    log::warn!(
+                        "Unmapped ResultCode encountered in aerospike-py. \
+                         This may indicate aerospike-py needs updating for this server error code. \
+                         Error: {msg}"
+                    );
+                    ServerError::new_err(msg)
+                }
             }
         }
         AsError::InvalidNode(msg) => ClusterError::new_err(format!("Invalid node: {msg}")),
         AsError::NoMoreConnections => ClusterError::new_err("No more connections available"),
-        _ => ClientError::new_err(format!("{err}")),
+        _ => {
+            crate::bug_report::log_unexpected_error(
+                "errors::as_to_pyerr",
+                &format!("Unmapped aerospike_core::Error variant: {err}"),
+            );
+            ClientError::new_err(format!("{err}"))
+        }
     }
 }
 

@@ -131,7 +131,10 @@ fn convert_bin_accessor(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expressi
         "hll_bin" => Ok(expressions::hll_bin(name)),
         "bin_exists" => Ok(expressions::bin_exists(name)),
         "bin_type" => Ok(expressions::bin_type(name)),
-        _ => unreachable!("convert_bin_accessor called with unexpected op: {op}"),
+        _ => crate::bug_report::internal_bug!(
+            "expressions::convert_bin_accessor",
+            "unexpected op: {op}"
+        ),
     }
 }
 
@@ -147,7 +150,10 @@ fn convert_binary_comparison(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Exp
         "lt" => Ok(expressions::lt(left, right)),
         "le" => Ok(expressions::le(left, right)),
         "geo_compare" => Ok(expressions::geo_compare(left, right)),
-        _ => unreachable!("convert_binary_comparison called with unexpected op: {op}"),
+        _ => crate::bug_report::internal_bug!(
+            "expressions::convert_binary_comparison",
+            "unexpected op: {op}"
+        ),
     }
 }
 
@@ -169,7 +175,10 @@ fn convert_variadic_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expressio
         "int_xor" => Ok(expressions::int_xor(exprs)),
         "cond" => Ok(expressions::cond(exprs)),
         "let" => Ok(expressions::exp_let(exprs)),
-        _ => unreachable!("convert_variadic_op called with unexpected op: {op}"),
+        _ => crate::bug_report::internal_bug!(
+            "expressions::convert_variadic_op",
+            "unexpected op: {op}"
+        ),
     }
 }
 
@@ -189,7 +198,9 @@ fn convert_unary_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> 
         "to_float" => Ok(expressions::to_float(expr)),
         "int_not" => Ok(expressions::int_not(expr)),
         "int_count" => Ok(expressions::int_count(expr)),
-        _ => unreachable!("convert_unary_op called with unexpected op: {op}"),
+        _ => {
+            crate::bug_report::internal_bug!("expressions::convert_unary_op", "unexpected op: {op}")
+        }
     }
 }
 
@@ -218,7 +229,10 @@ fn convert_binary_pair_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expres
         "int_arshift" => Ok(expressions::int_arshift(first, second)),
         "int_lscan" => Ok(expressions::int_lscan(first, second)),
         "int_rscan" => Ok(expressions::int_rscan(first, second)),
-        _ => unreachable!("convert_binary_pair_op called with unexpected op: {op}"),
+        _ => crate::bug_report::internal_bug!(
+            "expressions::convert_binary_pair_op",
+            "unexpected op: {op}"
+        ),
     }
 }
 

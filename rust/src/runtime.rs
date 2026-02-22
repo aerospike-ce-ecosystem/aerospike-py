@@ -16,5 +16,11 @@ pub static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .expect("Failed to create Tokio runtime")
+        .unwrap_or_else(|e| {
+            crate::bug_report::log_unexpected_error(
+                "runtime::RUNTIME",
+                &format!("Failed to create Tokio runtime: {e}"),
+            );
+            panic!("Failed to create Tokio runtime: {e}")
+        })
 });
