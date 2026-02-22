@@ -150,6 +150,15 @@ test-matrix: build ## Run unit tests across all Python versions
 # Helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Documentation
+# ---------------------------------------------------------------------------
+
+.PHONY: docs-version
+docs-version: ## Create a new docs version (usage: make docs-version VERSION=0.1.0)
+	@test -n "$(VERSION)" || (echo "ERROR: VERSION required. Usage: make docs-version VERSION=0.1.0" && exit 1)
+	bash docs/scripts/create-version.sh $(VERSION)
+
 .PHONY: clean
 clean: ## Remove venv and build artifacts
 	rm -rf .venv target/ dist/ *.egg-info

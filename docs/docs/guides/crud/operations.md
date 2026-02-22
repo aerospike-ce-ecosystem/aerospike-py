@@ -17,7 +17,8 @@ from aerospike_py import map_operations as map_ops
 import aerospike_py as aerospike
 ```
 
----
+<Tabs>
+  <TabItem value="list" label="List CDT Operations" default>
 
 ## List CDT Operations
 
@@ -416,7 +417,8 @@ with aerospike.client({
     print(f"Total scores: {bins['scores']}")
 ```
 
----
+  </TabItem>
+  <TabItem value="map" label="Map CDT Operations">
 
 ## Map CDT Operations
 
@@ -790,3 +792,6 @@ with aerospike.client({
     _, _, bins = client.operate(key, ops)
     print(f"Total subjects: {bins['scores']}")
 ```
+
+  </TabItem>
+</Tabs>
