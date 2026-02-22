@@ -102,9 +102,9 @@ client.put(
 
 | Topic | Description |
 |-------|-------------|
-| [CRUD & Batch](guides/crud/crud.md) | Put, get, batch operations, optimistic locking |
-| [List CDT](guides/crud/cdt-list.md) | Atomic list operations |
-| [Map CDT](guides/crud/cdt-map.md) | Atomic map operations |
+| [Read Operations](guides/crud/read.md) | Get, select, exists, batch read |
+| [Write Operations](guides/crud/write.md) | Put, update, delete, operate, batch operate |
+| [CDT Operations](guides/crud/operations.md) | Atomic list & map operations |
 | [NumPy Batch](guides/crud/numpy-batch.md) | Zero-copy columnar batch reads |
 | [Query](guides/query-scan/query-scan.md) | Secondary index queries |
 | [Expression Filters](guides/query-scan/expression-filters.md) | Server-side filtering |

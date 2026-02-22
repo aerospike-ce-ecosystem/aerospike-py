@@ -21,6 +21,7 @@ const sidebars: SidebarsConfig = {
           type: 'category',
           label: 'Read',
           items: [
+            'guides/crud/read',
             'guides/query-scan/query-scan',
             'guides/query-scan/expression-filters',
             'guides/crud/numpy-batch',
@@ -30,9 +31,8 @@ const sidebars: SidebarsConfig = {
           type: 'category',
           label: 'Write',
           items: [
-            'guides/crud/crud',
-            'guides/crud/cdt-list',
-            'guides/crud/cdt-map',
+            'guides/crud/write',
+            'guides/crud/operations',
             'guides/crud/numpy-batch-write',
           ],
         },

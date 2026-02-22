@@ -205,11 +205,11 @@ await client.put(key, {"val": bins["val"] + 1},
 
 ## Next Steps
 
-- [CRUD & Batch Guide](guides/crud/crud.md) - CRUD 및 배치 작업
+- [Read Operations Guide](guides/crud/read.md) - Get, select, exists, batch read
+- [Write Operations Guide](guides/crud/write.md) - Put, update, delete, operate, batch operate
+- [CDT Operations Guide](guides/crud/operations.md) - 원자적 리스트 & 맵 연산
 - [Query Guide](guides/query-scan/query-scan.md) - Secondary Index 쿼리
 - [Expression Filters Guide](guides/query-scan/expression-filters.md) - 서버사이드 필터링
-- [List CDT Operations Guide](guides/crud/cdt-list.md) - 원자적 리스트 연산
-- [Map CDT Operations Guide](guides/crud/cdt-map.md) - 원자적 맵 연산
 - [Client Config Guide](guides/config/client-config.md) - 연결 및 설정
 - [API Reference](api/client.md) - 전체 API 문서
 - [Types Reference](api/types.md) - NamedTuple 및 TypedDict 타입 정의
