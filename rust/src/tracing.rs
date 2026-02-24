@@ -34,35 +34,34 @@ impl Default for ConnectionInfo {
     }
 }
 
-/// Map a known operation name to its uppercase `&'static str` equivalent.
+/// Map a known operation name to its uppercase equivalent.
 ///
-/// Avoids `$op.to_uppercase()` runtime heap allocations by returning
-/// pre-existing static strings. The compiler optimizes this into a jump table.
+/// Returns `Cow::Borrowed` for known operations (zero alloc) and
+/// `Cow::Owned` for unknown operations (runtime `to_uppercase()`).
 #[inline]
-pub fn op_to_upper(op: &str) -> &'static str {
+pub fn op_to_upper(op: &str) -> std::borrow::Cow<'static, str> {
     match op {
-        "put" => "PUT",
-        "get" => "GET",
-        "select" => "SELECT",
-        "exists" => "EXISTS",
-        "delete" => "DELETE",
-        "remove" => "REMOVE",
-        "remove_bin" => "REMOVE_BIN",
-        "append" => "APPEND",
-        "prepend" => "PREPEND",
-        "increment" => "INCREMENT",
-        "touch" => "TOUCH",
-        "operate" => "OPERATE",
-        "operate_ordered" => "OPERATE_ORDERED",
-        "batch_read" => "BATCH_READ",
-        "batch_operate" => "BATCH_OPERATE",
-        "batch_remove" => "BATCH_REMOVE",
-        "batch_write_numpy" => "BATCH_WRITE_NUMPY",
-        "query" => "QUERY",
+        "put" => std::borrow::Cow::Borrowed("PUT"),
+        "get" => std::borrow::Cow::Borrowed("GET"),
+        "select" => std::borrow::Cow::Borrowed("SELECT"),
+        "exists" => std::borrow::Cow::Borrowed("EXISTS"),
+        "delete" => std::borrow::Cow::Borrowed("DELETE"),
+        "remove" => std::borrow::Cow::Borrowed("REMOVE"),
+        "remove_bin" => std::borrow::Cow::Borrowed("REMOVE_BIN"),
+        "append" => std::borrow::Cow::Borrowed("APPEND"),
+        "prepend" => std::borrow::Cow::Borrowed("PREPEND"),
+        "increment" => std::borrow::Cow::Borrowed("INCREMENT"),
+        "touch" => std::borrow::Cow::Borrowed("TOUCH"),
+        "operate" => std::borrow::Cow::Borrowed("OPERATE"),
+        "operate_ordered" => std::borrow::Cow::Borrowed("OPERATE_ORDERED"),
+        "batch_read" => std::borrow::Cow::Borrowed("BATCH_READ"),
+        "batch_operate" => std::borrow::Cow::Borrowed("BATCH_OPERATE"),
+        "batch_remove" => std::borrow::Cow::Borrowed("BATCH_REMOVE"),
+        "batch_write_numpy" => std::borrow::Cow::Borrowed("BATCH_WRITE_NUMPY"),
+        "query" => std::borrow::Cow::Borrowed("QUERY"),
         other => {
             log::warn!("Unknown operation name for uppercase mapping: {other}");
-            // Leak a static string for truly unknown ops (should never happen)
-            Box::leak(other.to_uppercase().into_boxed_str())
+            std::borrow::Cow::Owned(other.to_uppercase())
         }
     }
 }
@@ -291,7 +290,7 @@ macro_rules! traced_op {
             use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
             use opentelemetry::KeyValue;
 
-            let op_upper: &'static str = $crate::tracing::op_to_upper($op);
+            let op_upper = $crate::tracing::op_to_upper($op);
             let tracer = $crate::tracing::otel_impl::get_tracer();
             let span_name = format!("{} {}.{}", op_upper, $ns, $set);
             let conn = &$conn_info;
@@ -302,7 +301,7 @@ macro_rules! traced_op {
                     KeyValue::new("db.system.name", "aerospike"),
                     KeyValue::new("db.namespace", $ns.to_string()),
                     KeyValue::new("db.collection.name", $set.to_string()),
-                    KeyValue::new("db.operation.name", op_upper),
+                    KeyValue::new("db.operation.name", op_upper.clone().into_owned()),
                     KeyValue::new(
                         "server.address",
                         opentelemetry::StringValue::from(std::sync::Arc::clone(
@@ -379,7 +378,7 @@ macro_rules! traced_exists_op {
             use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
             use opentelemetry::KeyValue;
 
-            let op_upper: &'static str = $crate::tracing::op_to_upper($op);
+            let op_upper = $crate::tracing::op_to_upper($op);
             let tracer = $crate::tracing::otel_impl::get_tracer();
             let span_name = format!("{} {}.{}", op_upper, $ns, $set);
             let conn = &$conn_info;
@@ -390,7 +389,7 @@ macro_rules! traced_exists_op {
                     KeyValue::new("db.system.name", "aerospike"),
                     KeyValue::new("db.namespace", $ns.to_string()),
                     KeyValue::new("db.collection.name", $set.to_string()),
-                    KeyValue::new("db.operation.name", op_upper),
+                    KeyValue::new("db.operation.name", op_upper.clone().into_owned()),
                     KeyValue::new(
                         "server.address",
                         opentelemetry::StringValue::from(std::sync::Arc::clone(
