@@ -44,18 +44,17 @@ fn record_to_py_inner(
     pre_key_py: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     trace!("Converting Rust record to Python");
-    // Key tuple: prefer a pre-converted key, then the key from the record,
-    // fall back to the original request key.
-    let key_py = if let Some(k) = pre_key_py {
-        k
-    } else {
-        match &record.key {
-            Some(key) => key_to_py(py, key)?,
+    // Key tuple: prefer the key returned by the server, then the pre-converted
+    // key (avoids re-conversion), fall back to the original request key.
+    let key_py = match &record.key {
+        Some(key) => key_to_py(py, key)?,
+        None => match pre_key_py {
+            Some(k) => k,
             None => match fallback_key {
                 Some(key) => key_to_py(py, key)?,
                 None => py.None(),
             },
-        }
+        },
     };
 
     // Meta dict — use interned keys to avoid repeated string allocation

@@ -264,10 +264,11 @@ fn execute_query(
         py, client, statement, policy, op_name, namespace, set_name, conn_info,
     )?;
     debug!("{} returned {} records", op_name, records.len());
-    let py_list = PyList::empty(py);
-    for record in &records {
-        py_list.append(record_to_py(py, record, None)?)?;
-    }
+    let py_records: Vec<Py<PyAny>> = records
+        .iter()
+        .map(|record| record_to_py(py, record, None))
+        .collect::<PyResult<_>>()?;
+    let py_list = PyList::new(py, &py_records)?;
     Ok(py_list.into_any().unbind())
 }
 
