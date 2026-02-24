@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gc
+import math
 import os
 import platform
 import random
@@ -88,16 +89,6 @@ class BenchmarkResults:
 # ── timing helpers ───────────────────────────────────────────
 
 
-def _measure_loop(fn, count: int) -> list[float]:
-    """Call fn(i) for i in range(count), return per-op times in seconds."""
-    times = []
-    for i in range(count):
-        t0 = time.perf_counter()
-        fn(i)
-        times.append(time.perf_counter() - t0)
-    return times
-
-
 def _measure_loop_cpu(fn, count: int) -> tuple[list[float], list[float]]:
     """Call fn(i) for i in range(count), return (wall_times, cpu_times) in seconds.
 
@@ -142,8 +133,6 @@ def _compute_percentile(sorted_vals: list[float], p: float) -> float | None:
     n = len(sorted_vals)
     if n == 0:
         return None
-    import math
-
     idx = max(0, math.ceil(n * p / 100) - 1)
     return sorted_vals[idx]
 
@@ -227,6 +216,14 @@ def _bulk_median(
 def _log(msg: str):
     ts = _c(Color.DIM, f"[{time.strftime('%H:%M:%S')}]")
     print(f"      {ts} {msg}")
+
+
+def _group_range(g: int, count: int, batch_groups: int) -> range:
+    """Return the index range for group g, with the last group absorbing remainder."""
+    size = count // batch_groups
+    start = g * size
+    end = count if g == batch_groups - 1 else (g + 1) * size
+    return range(start, end)
 
 
 def _settle():
@@ -461,10 +458,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
         _log(f"BATCH_WRITE_NUMPY  {batch_groups} groups x {rounds} rounds  (gc disabled)")
         numpy_write_data = [
             np.array(
-                [
-                    (i, f"nw_{i}".encode(), i * 10, float(i) * 0.1)
-                    for i in range(g * (count // batch_groups), (g + 1) * (count // batch_groups))
-                ],
+                [(i, f"nw_{i}".encode(), i * 10, float(i) * 0.1) for i in _group_range(g, count, batch_groups)],
                 dtype=numpy_write_dtype,
             )
             for g in range(batch_groups)
@@ -483,11 +477,7 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
             numpy_write_cpu_rounds.append(cpu_elapsed)
         results["batch_write_numpy"] = _bulk_median(numpy_write_rounds, count, numpy_write_cpu_rounds)
         # cleanup numpy write keys
-        nw_keys = [
-            (NAMESPACE, SET_NAME, i)
-            for g in range(batch_groups)
-            for i in range(g * (count // batch_groups), (g + 1) * (count // batch_groups))
-        ]
+        nw_keys = [(NAMESPACE, SET_NAME, i) for g in range(batch_groups) for i in _group_range(g, count, batch_groups)]
         for k in nw_keys:
             try:
                 client.remove(k)
@@ -965,10 +955,7 @@ async def bench_rust_async(
         _log(f"BATCH_WRITE_NUMPY  {batch_groups} groups x {rounds} rounds  (gc disabled)")
         numpy_write_data = [
             np.array(
-                [
-                    (i, f"nw_{i}".encode(), i * 10, float(i) * 0.1)
-                    for i in range(g * (count // batch_groups), (g + 1) * (count // batch_groups))
-                ],
+                [(i, f"nw_{i}".encode(), i * 10, float(i) * 0.1) for i in _group_range(g, count, batch_groups)],
                 dtype=numpy_write_dtype,
             )
             for g in range(batch_groups)
@@ -989,11 +976,7 @@ async def bench_rust_async(
             numpy_write_cpu_rounds.append(cpu_elapsed)
         results["batch_write_numpy"] = _bulk_median(numpy_write_rounds, count, numpy_write_cpu_rounds)
         # cleanup numpy write keys
-        nw_keys = [
-            (NAMESPACE, SET_NAME, i)
-            for g in range(batch_groups)
-            for i in range(g * (count // batch_groups), (g + 1) * (count // batch_groups))
-        ]
+        nw_keys = [(NAMESPACE, SET_NAME, i) for g in range(batch_groups) for i in _group_range(g, count, batch_groups)]
         await _chunked_batch_remove(client, nw_keys)
     except ImportError:
         _log("numpy not installed, skipping BATCH_WRITE_NUMPY")
