@@ -9,6 +9,8 @@ import platform
 import sys
 import traceback
 
+__all__ = ["log_unexpected_error", "catch_unexpected"]
+
 logger = logging.getLogger("aerospike_py")
 
 _REPO = "KimSoungRyoul/aerospike-py"
