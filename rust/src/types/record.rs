@@ -44,8 +44,8 @@ fn record_to_py_inner(
     pre_key_py: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     trace!("Converting Rust record to Python");
-    // Key tuple: prefer the key returned by the server, then the pre-converted
-    // key (avoids re-conversion), fall back to the original request key.
+    // Key tuple: prefer the key returned by the server (honours POLICY_KEY_SEND),
+    // then the pre-converted key (avoids re-conversion), fall back to the original request key.
     let key_py = match &record.key {
         Some(key) => key_to_py(py, key)?,
         None => match pre_key_py {

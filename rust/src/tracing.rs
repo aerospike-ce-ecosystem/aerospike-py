@@ -7,6 +7,7 @@
 //
 // When the `otel` feature is disabled, `traced_op!` falls back to `timed_op!`.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Connection metadata attached to every OTel span and used for metric labels.
@@ -39,29 +40,29 @@ impl Default for ConnectionInfo {
 /// Returns `Cow::Borrowed` for known operations (zero alloc) and
 /// `Cow::Owned` for unknown operations (runtime `to_uppercase()`).
 #[inline]
-pub fn op_to_upper(op: &str) -> std::borrow::Cow<'static, str> {
+pub fn op_to_upper(op: &str) -> Cow<'static, str> {
     match op {
-        "put" => std::borrow::Cow::Borrowed("PUT"),
-        "get" => std::borrow::Cow::Borrowed("GET"),
-        "select" => std::borrow::Cow::Borrowed("SELECT"),
-        "exists" => std::borrow::Cow::Borrowed("EXISTS"),
-        "delete" => std::borrow::Cow::Borrowed("DELETE"),
-        "remove" => std::borrow::Cow::Borrowed("REMOVE"),
-        "remove_bin" => std::borrow::Cow::Borrowed("REMOVE_BIN"),
-        "append" => std::borrow::Cow::Borrowed("APPEND"),
-        "prepend" => std::borrow::Cow::Borrowed("PREPEND"),
-        "increment" => std::borrow::Cow::Borrowed("INCREMENT"),
-        "touch" => std::borrow::Cow::Borrowed("TOUCH"),
-        "operate" => std::borrow::Cow::Borrowed("OPERATE"),
-        "operate_ordered" => std::borrow::Cow::Borrowed("OPERATE_ORDERED"),
-        "batch_read" => std::borrow::Cow::Borrowed("BATCH_READ"),
-        "batch_operate" => std::borrow::Cow::Borrowed("BATCH_OPERATE"),
-        "batch_remove" => std::borrow::Cow::Borrowed("BATCH_REMOVE"),
-        "batch_write_numpy" => std::borrow::Cow::Borrowed("BATCH_WRITE_NUMPY"),
-        "query" => std::borrow::Cow::Borrowed("QUERY"),
+        "put" => Cow::Borrowed("PUT"),
+        "get" => Cow::Borrowed("GET"),
+        "select" => Cow::Borrowed("SELECT"),
+        "exists" => Cow::Borrowed("EXISTS"),
+        "delete" => Cow::Borrowed("DELETE"),
+        "remove" => Cow::Borrowed("REMOVE"),
+        "remove_bin" => Cow::Borrowed("REMOVE_BIN"),
+        "append" => Cow::Borrowed("APPEND"),
+        "prepend" => Cow::Borrowed("PREPEND"),
+        "increment" => Cow::Borrowed("INCREMENT"),
+        "touch" => Cow::Borrowed("TOUCH"),
+        "operate" => Cow::Borrowed("OPERATE"),
+        "operate_ordered" => Cow::Borrowed("OPERATE_ORDERED"),
+        "batch_read" => Cow::Borrowed("BATCH_READ"),
+        "batch_operate" => Cow::Borrowed("BATCH_OPERATE"),
+        "batch_remove" => Cow::Borrowed("BATCH_REMOVE"),
+        "batch_write_numpy" => Cow::Borrowed("BATCH_WRITE_NUMPY"),
+        "query" => Cow::Borrowed("QUERY"),
         other => {
             log::warn!("Unknown operation name for uppercase mapping: {other}");
-            std::borrow::Cow::Owned(other.to_uppercase())
+            Cow::Owned(other.to_uppercase())
         }
     }
 }

@@ -24,7 +24,8 @@ pub static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     let workers = std::env::var("AEROSPIKE_RUNTIME_WORKERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(2);
+        .unwrap_or(2)
+        .max(1);
 
     info!(
         "Initializing Tokio multi-thread runtime with {} workers",
