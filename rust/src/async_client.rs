@@ -31,7 +31,10 @@ type SharedClientState = Arc<Mutex<Option<Arc<AsClient>>>>;
 
 /// Convert a [`PoisonError`] into a Python [`ClientError`].
 fn lock_err<T>(e: PoisonError<T>) -> PyErr {
-    crate::errors::ClientError::new_err(format!("Internal lock poisoned: {e}"))
+    crate::errors::ClientError::new_err(format!(
+        "Internal client lock poisoned (likely caused by a panic in another async operation). \
+         Please recreate the client. Details: {e}"
+    ))
 }
 
 /// Asynchronous Aerospike client exposed to Python as `AsyncClient`.

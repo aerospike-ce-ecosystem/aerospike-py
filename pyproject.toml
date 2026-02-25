@@ -52,6 +52,16 @@ bench = ["aerospike>=17.0.0", "numpy>=2.0"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+minversion = "7.0"
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "unit: unit tests (no server required)",
+    "integration: integration tests (Aerospike server required)",
+    "compatibility: compatibility tests with official C client",
+    "concurrency: thread safety tests",
+    "slow: slow tests (>5 seconds)",
+]
 
 [build-system]
 requires = ["maturin>=1.9,<2"]

@@ -28,3 +28,16 @@ class MapPolicy(TypedDict, total=False):
 
     order: int
     write_mode: int
+
+
+_UNSET: Any = object()
+"""Sentinel for unset optional parameters in CDT operations."""
+
+
+def _build_op(op_code: int, bin: str, /, **kwargs: Any) -> Operation:
+    """Build an operation dict, omitting keys whose value is ``_UNSET``."""
+    result: Operation = {"op": op_code, "bin": bin}
+    for key, value in kwargs.items():
+        if value is not _UNSET:
+            result[key] = value
+    return result

@@ -6,7 +6,7 @@ and ``client.operate_ordered()``.
 
 from typing import Any, Optional
 
-from aerospike_py._types import ListPolicy, Operation
+from aerospike_py._types import _UNSET, ListPolicy, Operation, _build_op
 
 __all__ = [
     "Operation",
@@ -75,18 +75,6 @@ _OP_LIST_REMOVE_BY_RANK_RANGE = 1028
 _OP_LIST_INCREMENT = 1029
 _OP_LIST_SORT = 1030
 _OP_LIST_SET_ORDER = 1031
-
-# Sentinel for distinguishing "not provided" from an explicit None value.
-_UNSET: Any = object()
-
-
-def _build_op(op_code: int, bin: str, /, **kwargs: Any) -> Operation:
-    """Build an operation dict, omitting keys whose value is ``_UNSET``."""
-    result: Operation = {"op": op_code, "bin": bin}
-    for key, value in kwargs.items():
-        if value is not _UNSET:
-            result[key] = value
-    return result
 
 
 def list_append(bin: str, val: Any, policy: Optional[ListPolicy] = None) -> Operation:

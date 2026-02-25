@@ -6,7 +6,7 @@ and ``client.operate_ordered()``.
 
 from typing import Any, Optional
 
-from aerospike_py._types import MapPolicy, Operation
+from aerospike_py._types import _UNSET, MapPolicy, Operation, _build_op
 
 __all__ = [
     "Operation",
@@ -67,18 +67,6 @@ _OP_MAP_GET_BY_RANK = 2024
 _OP_MAP_GET_BY_RANK_RANGE = 2025
 _OP_MAP_GET_BY_KEY_LIST = 2026
 _OP_MAP_GET_BY_VALUE_LIST = 2027
-
-# Sentinel for distinguishing "not provided" from an explicit None value.
-_UNSET: Any = object()
-
-
-def _build_op(op_code: int, bin: str, /, **kwargs: Any) -> Operation:
-    """Build an operation dict, omitting keys whose value is ``_UNSET``."""
-    result: Operation = {"op": op_code, "bin": bin}
-    for key, value in kwargs.items():
-        if value is not _UNSET:
-            result[key] = value
-    return result
 
 
 def map_set_order(bin: str, map_order: int) -> Operation:
