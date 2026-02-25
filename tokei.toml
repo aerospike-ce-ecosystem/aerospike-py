@@ -1,5 +1,12 @@
 # tokei - 코드 라인수 분석 설정
-# 사용: tokei -C src rust/src  (소스만: src + rust/src, -C로 Rust 내장 Markdown 미표시)
+#
+# 순수 구현 코드만 (기본):
+#   tokei
+#   → .tokeignore에 의해 tests/, examples/, benchmark/ 자동 제외
+#
+# 테스트 + 벤치마크 + 샘플 포함:
+#   tokei src rust/src tests benchmark examples
+#   → 유의미한 소스 전체 (docs, node_modules 등 제외)
 
 # 터미널 출력 너비(칸)
 columns = 100
