@@ -3,9 +3,9 @@ services:
     image: aerospike:ce-8.1.0.3_1
     container_name: aerospike
     ports:
-      - "18710:3000"
-      - "18711:3001"
-      - "18712:3002"
+      - "127.0.0.1:18710:3000"
+      - "127.0.0.1:18711:3001"
+      - "127.0.0.1:18712:3002"
     cpus: 2
     mem_limit: 2g
     shm_size: 1g
@@ -16,3 +16,9 @@ services:
       ACCESS_PORT: "18710"
     volumes:
       - ./scripts/aerospike.template.conf:/etc/aerospike/aerospike.template.conf
+    healthcheck:
+      test: ["CMD", "asinfo", "-v", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
