@@ -2,6 +2,14 @@
 //!
 //! The runtime is initialized lazily on first access and lives for the
 //! lifetime of the Python process.
+//!
+//! # Why `panic!` instead of `Result`
+//!
+//! [`LazyLock<T>`] requires `T` (not `Result<T, E>`), so the initializer
+//! closure must return a valid `Runtime` or abort.  Runtime creation failure
+//! is an unrecoverable environment issue (e.g. OS thread-limit exhaustion)
+//! that cannot be meaningfully handled at the call-site, so panicking with a
+//! descriptive message is the appropriate strategy here.
 
 use std::sync::LazyLock;
 
@@ -42,9 +50,18 @@ pub static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
                 &format!("Failed to create Tokio runtime: {e}"),
             );
             panic!(
-                "aerospike-py: Failed to create Tokio runtime ({e}). \
-                 This is likely a system resource issue (e.g. thread limit reached). \
-                 Try reducing AEROSPIKE_RUNTIME_WORKERS (current: {workers}) or check system limits (ulimit -u)."
+                "aerospike-py: failed to create Tokio runtime: {e}\n\
+                 \n\
+                 Requested workers : {workers}\n\
+                 Env var           : AEROSPIKE_RUNTIME_WORKERS\n\
+                 \n\
+                 Troubleshooting:\n\
+                 1. Reduce workers — export AEROSPIKE_RUNTIME_WORKERS=1\n\
+                 2. Check thread limits — ulimit -u  (nproc)\n\
+                 3. On Linux containers, verify /proc/sys/kernel/threads-max\n\
+                 \n\
+                 This panic is intentional: LazyLock<Runtime> cannot propagate \
+                 errors, and a missing Tokio runtime is unrecoverable."
             )
         })
 });

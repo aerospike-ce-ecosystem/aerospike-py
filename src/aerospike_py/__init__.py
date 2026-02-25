@@ -813,6 +813,17 @@ class AsyncClient:
         return AsyncQuery(self._inner.query(namespace, set_name))
 
 
+_LEVEL_MAP: dict[int, int] = {
+    -1: logging.CRITICAL + 1,  # OFF
+    0: logging.ERROR,
+    1: logging.WARNING,
+    2: logging.INFO,
+    3: logging.DEBUG,
+    4: 5,  # TRACE
+}
+"""Map aerospike LOG_LEVEL_* constants to Python logging levels."""
+
+
 def set_log_level(level: int) -> None:
     """Set the aerospike_py log level.
 
@@ -831,14 +842,6 @@ def set_log_level(level: int) -> None:
         aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
         ```
     """
-    _LEVEL_MAP = {
-        -1: logging.CRITICAL + 1,  # OFF
-        0: logging.ERROR,
-        1: logging.WARNING,
-        2: logging.INFO,
-        3: logging.DEBUG,
-        4: 5,  # TRACE
-    }
     py_level = _LEVEL_MAP.get(level, level)
     logging.getLogger("aerospike_py").setLevel(py_level)
     logging.getLogger("_aerospike").setLevel(py_level)
