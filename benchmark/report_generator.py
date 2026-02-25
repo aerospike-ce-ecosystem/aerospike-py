@@ -1,7 +1,7 @@
 """Generate benchmark report: JSON data for Docusaurus React charts.
 
 Called from bench_compare.py with --report flag.
-Outputs date-stamped JSON files and maintains an index.json for the React UI.
+Outputs a single latest.json file that the React UI loads directly.
 Charts are rendered client-side by Recharts components.
 """
 
@@ -15,14 +15,27 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from bench_compare import BenchmarkResults
 
-OPERATIONS = ["put", "get", "batch_read", "batch_read_numpy", "batch_write", "scan"]
+OPERATIONS = [
+    "put",
+    "get",
+    "operate",
+    "remove",
+    "batch_read",
+    "batch_read_numpy",
+    "batch_write",
+    "batch_write_numpy",
+    "query",
+]
 OP_LABELS = {
     "put": "PUT",
     "get": "GET",
+    "operate": "OPERATE",
+    "remove": "REMOVE",
     "batch_read": "BATCH_READ",
     "batch_read_numpy": "BATCH_READ_NUMPY",
     "batch_write": "BATCH_WRITE",
-    "scan": "SCAN",
+    "batch_write_numpy": "BATCH_WRITE_NUMPY",
+    "query": "QUERY",
 }
 
 
@@ -128,15 +141,36 @@ def _generate_takeaways(results: BenchmarkResults) -> list[str]:
 
 
 def _op_dict(data: dict, op: str) -> dict:
-    """Extract metrics for a single operation."""
+    """Extract metrics for a single operation (enhanced with full percentiles and CPU breakdown)."""
     d = data.get(op, {})
-    return {
+    result = {
         "avg_ms": d.get("avg_ms"),
         "p50_ms": d.get("p50_ms"),
+        "p75_ms": d.get("p75_ms"),
+        "p90_ms": d.get("p90_ms"),
+        "p95_ms": d.get("p95_ms"),
         "p99_ms": d.get("p99_ms"),
+        "p999_ms": d.get("p999_ms"),
         "ops_per_sec": d.get("ops_per_sec"),
         "stdev_ms": d.get("stdev_ms"),
+        "mad_ms": d.get("mad_ms"),
     }
+    # CPU time breakdown (sync only)
+    if d.get("cpu_p50_ms") is not None:
+        result["cpu_p50_ms"] = d["cpu_p50_ms"]
+        result["io_wait_p50_ms"] = d.get("io_wait_p50_ms")
+        result["cpu_pct"] = d.get("cpu_pct")
+    # Async per-op latency distribution
+    if d.get("per_op") is not None:
+        po = d["per_op"]
+        result["per_op"] = {
+            "p50_ms": po.get("p50_ms"),
+            "p95_ms": po.get("p95_ms"),
+            "p99_ms": po.get("p99_ms"),
+            "p999_ms": po.get("p999_ms"),
+            "mad_ms": po.get("mad_ms"),
+        }
+    return result
 
 
 def _build_client_section(data: dict) -> dict:
@@ -395,8 +429,50 @@ def generate_numpy_report(results, json_dir: str, date_slug: str) -> None:
 # ── main entry point ─────────────────────────────────────────
 
 
+def _advanced_takeaways(results: BenchmarkResults) -> list[str]:
+    """Generate takeaways from advanced scenarios (data_size, concurrency, memory, mixed)."""
+    takeaways = []
+
+    if results.data_size:
+        data = results.data_size["data"]
+        if len(data) >= 2:
+            smallest, largest = data[0], data[-1]
+            sp50, lp50 = smallest["get"].get("p50_ms", 0), largest["get"].get("p50_ms", 0)
+            if sp50 and lp50 and sp50 > 0:
+                ratio = lp50 / sp50
+                if ratio > 1:
+                    takeaways.append(
+                        f"GET latency increases **{ratio:.1f}x** from {smallest['label']} to {largest['label']}"
+                    )
+
+    if results.concurrency_scaling:
+        data = results.concurrency_scaling["data"]
+        if len(data) >= 2:
+            peak = max(data, key=lambda e: e["get"].get("ops_per_sec", 0))
+            takeaways.append(
+                f"Peak GET throughput **{peak['get']['ops_per_sec']:,.0f} ops/s** at concurrency={peak['concurrency']}"
+            )
+
+    if results.memory_profiling:
+        data = results.memory_profiling["data"]
+        if data:
+            largest = data[-1]
+            get_kb = largest.get("get_peak_kb")
+            if get_kb:
+                label = f"{get_kb / 1024:.1f}MB" if get_kb >= 1024 else f"{get_kb:.1f}KB"
+                takeaways.append(f"Peak GET memory for {largest['label']}: **{label}**")
+
+    if results.mixed_workload:
+        data = results.mixed_workload["data"]
+        if data:
+            best = max(data, key=lambda e: e.get("throughput_ops_sec", 0))
+            takeaways.append(f"Highest mixed throughput: **{best['throughput_ops_sec']:,.0f} ops/s** ({best['label']})")
+
+    return takeaways
+
+
 def generate_report(results: BenchmarkResults, json_dir: str, date_slug: str) -> None:
-    """Generate benchmark report JSON (charts rendered client-side by Recharts)."""
+    """Generate benchmark report JSON."""
     now = datetime.fromisoformat(results.timestamp)
     json_filename = f"{date_slug}.json"
 
@@ -418,16 +494,37 @@ def generate_report(results: BenchmarkResults, json_dir: str, date_slug: str) ->
             "concurrency": results.concurrency,
             "batch_groups": results.batch_groups,
         },
-        "rust_sync": _build_client_section(results.rust_sync),
-        "c_sync": _build_client_section(results.c_sync) if results.c_sync else None,
-        "rust_async": _build_client_section(results.rust_async),
-        "takeaways": _generate_takeaways(results),
     }
+
+    # Basic benchmark results
+    if results.rust_sync:
+        report["rust_sync"] = _build_client_section(results.rust_sync)
+    if results.c_sync:
+        report["c_sync"] = _build_client_section(results.c_sync)
+    if results.rust_async:
+        report["rust_async"] = _build_client_section(results.rust_async)
+
+    # Advanced scenario results
+    if results.data_size:
+        report["data_size"] = results.data_size
+    if results.concurrency_scaling:
+        report["concurrency_scaling"] = results.concurrency_scaling
+    if results.memory_profiling:
+        report["memory_profiling"] = results.memory_profiling
+    if results.mixed_workload:
+        report["mixed_workload"] = results.mixed_workload
+
+    # Takeaways
+    takeaways = _generate_takeaways(results) if results.rust_sync else []
+    takeaways.extend(_advanced_takeaways(results))
+    if not takeaways:
+        takeaways.append("Benchmark results collected successfully")
+    report["takeaways"] = takeaways
 
     # Write JSON
     json_path = os.path.join(json_dir, json_filename)
     with open(json_path, "w") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
+        json.dump(report, f, indent=2, ensure_ascii=False, default=str)
         f.write("\n")
     print(f"    JSON: {json_filename}")
 
