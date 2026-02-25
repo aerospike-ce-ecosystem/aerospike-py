@@ -420,6 +420,14 @@ pub fn batch_to_numpy_py(
     // 1. Parse dtype fields
     let (fields, row_stride) = parse_dtype_fields(dtype_obj)?;
 
+    // Overflow check: ensure n * row_stride does not overflow usize
+    if n.checked_mul(row_stride).is_none() {
+        return Err(PyValueError::new_err(format!(
+            "buffer size overflow: {} rows * {} bytes/row exceeds usize",
+            n, row_stride,
+        )));
+    }
+
     // 2. Allocate numpy arrays
     let data_array = np.call_method1("zeros", (n, dtype_obj))?;
 
@@ -634,6 +642,15 @@ pub fn numpy_to_records(
     );
 
     let (fields, row_stride) = parse_dtype_fields(dtype_obj)?;
+
+    // Overflow check: ensure n * row_stride does not overflow usize
+    if n.checked_mul(row_stride).is_none() {
+        return Err(PyValueError::new_err(format!(
+            "buffer size overflow: {} rows * {} bytes/row exceeds usize",
+            n, row_stride,
+        )));
+    }
+
     let data_ptr = get_array_data_ptr_readonly(data_array)?;
 
     // Partition fields into key-fields and bin-fields
@@ -643,13 +660,12 @@ pub fn numpy_to_records(
         .filter(|f| f.name != key_field && !f.name.starts_with('_'))
         .collect();
 
-    if key_field_info.is_none() {
+    let Some(key_fi) = key_field_info else {
         return Err(PyValueError::new_err(format!(
             "dtype must contain a '{}' field for the record key",
             key_field
         )));
-    }
-    let key_fi = key_field_info.unwrap();
+    };
 
     // Check for optional _namespace and _set fields
     let ns_field = fields.iter().find(|f| f.name == "_namespace");
