@@ -77,29 +77,25 @@ pub fn parse_privileges(privileges: &Bound<'_, PyList>) -> PyResult<Vec<Privileg
     Ok(result)
 }
 
+/// Convert a slice to a Python list.
+fn slice_to_pylist<'py, T>(py: Python<'py>, items: &[T]) -> PyResult<Bound<'py, PyList>>
+where
+    T: IntoPyObject<'py> + Clone,
+{
+    PyList::new(py, items.iter().cloned())
+}
+
 /// Convert a Rust User to a Python dict.
 pub fn user_to_py(py: Python<'_>, user: &aerospike_core::User) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
     dict.set_item("user", &user.user)?;
-    let roles = PyList::empty(py);
-    for r in &user.roles {
-        roles.append(r)?;
-    }
-    dict.set_item("roles", roles)?;
+    dict.set_item("roles", slice_to_pylist(py, &user.roles)?)?;
     dict.set_item("conns_in_use", user.conns_in_use)?;
     if !user.read_info.is_empty() {
-        let ri = PyList::empty(py);
-        for v in &user.read_info {
-            ri.append(*v)?;
-        }
-        dict.set_item("read_info", ri)?;
+        dict.set_item("read_info", slice_to_pylist(py, &user.read_info)?)?;
     }
     if !user.write_info.is_empty() {
-        let wi = PyList::empty(py);
-        for v in &user.write_info {
-            wi.append(*v)?;
-        }
-        dict.set_item("write_info", wi)?;
+        dict.set_item("write_info", slice_to_pylist(py, &user.write_info)?)?;
     }
     Ok(dict.into_any().unbind())
 }
@@ -123,11 +119,7 @@ pub fn role_to_py(py: Python<'_>, role: &aerospike_core::Role) -> PyResult<Py<Py
     }
     dict.set_item("privileges", privs)?;
 
-    let allowlist = PyList::empty(py);
-    for a in &role.allowlist {
-        allowlist.append(a)?;
-    }
-    dict.set_item("allowlist", allowlist)?;
+    dict.set_item("allowlist", slice_to_pylist(py, &role.allowlist)?)?;
     dict.set_item("read_quota", role.read_quota)?;
     dict.set_item("write_quota", role.write_quota)?;
     Ok(dict.into_any().unbind())

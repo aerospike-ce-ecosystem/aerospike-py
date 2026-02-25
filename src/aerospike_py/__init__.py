@@ -920,6 +920,11 @@ def stop_metrics_server() -> None:
                 _metrics_server.shutdown()
                 if _metrics_server_thread is not None:
                     _metrics_server_thread.join(timeout=5)
+                    if _metrics_server_thread.is_alive():
+                        logger.warning(
+                            "Metrics server thread did not stop within 5 seconds; "
+                            "thread is daemonic and will be terminated at interpreter exit"
+                        )
             finally:
                 _metrics_server = None
                 _metrics_server_thread = None

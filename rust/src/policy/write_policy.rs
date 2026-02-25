@@ -7,8 +7,7 @@ use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use super::extract_policy_fields;
-use crate::expressions::{is_expression, py_to_expression};
+use super::{extract_filter_expression, extract_policy_fields};
 
 /// Lazily-initialized default write policy used when no policy dict is provided.
 pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePolicy::default);
@@ -103,11 +102,7 @@ pub fn parse_write_policy(
     }
 
     // Filter expression
-    if let Some(val) = dict.get_item("filter_expression")? {
-        if is_expression(&val) {
-            policy.base_policy.filter_expression = Some(py_to_expression(&val)?);
-        }
-    }
+    policy.base_policy.filter_expression = extract_filter_expression(dict)?;
 
     Ok(policy)
 }

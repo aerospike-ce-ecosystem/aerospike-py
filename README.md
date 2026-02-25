@@ -159,18 +159,30 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and
 
 ## Code stats
 
-`src` + `rust/src` only ([tokei](https://github.com/XAMPPRocky/tokei)):
+[tokei](https://github.com/XAMPPRocky/tokei) 기반. 설정: `tokei.toml` + `.tokeignore`
 
+```bash
+# 순수 구현 코드만 (tests, examples, benchmark 제외)
+tokei
+
+# 테스트 + 벤치마크 + 샘플 포함
+tokei src rust/src tests benchmark examples
 ```
-$ tokei -C src rust/src
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Language                                 Files        Lines         Code     Comments       Blanks
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Rust                                        29         7884         6949          189          746
- Python                                      15         5809         4917          175          717
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Total                                       44        14165        11866          773         1526
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+순수 구현 코드:
+```
+$ tokei
+ Rust                                        30         8,281         7,298
+ Python                                      17         5,938         4,882
+ Total                                       47        14,744        12,180
+```
+
+테스트 + 벤치마크 + 샘플 포함:
+```
+$ tokei src rust/src tests benchmark examples
+ Rust                                        30         8,281         7,298
+ Python                                      95        20,805        16,306
+ Total                                      125        29,611        23,604
 ```
 
 ## License

@@ -41,6 +41,10 @@ pub static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
                 "runtime::RUNTIME",
                 &format!("Failed to create Tokio runtime: {e}"),
             );
-            panic!("Failed to create Tokio runtime: {e}")
+            panic!(
+                "aerospike-py: Failed to create Tokio runtime ({e}). \
+                 This is likely a system resource issue (e.g. thread limit reached). \
+                 Try reducing AEROSPIKE_RUNTIME_WORKERS (current: {workers}) or check system limits (ulimit -u)."
+            )
         })
 });

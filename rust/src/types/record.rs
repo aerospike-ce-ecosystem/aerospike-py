@@ -8,6 +8,7 @@ use pyo3::types::{PyDict, PyTuple};
 
 use super::key::key_to_py;
 use super::value::value_to_py;
+use crate::record_helpers::record_ttl_seconds;
 
 /// Convert a Rust Record to a Python tuple: (key, meta, bins)
 /// key = (namespace, set, user_key, digest)
@@ -60,11 +61,7 @@ fn record_to_py_inner(
     // Meta dict — use interned keys to avoid repeated string allocation
     let meta = PyDict::new(py);
     meta.set_item(intern!(py, "gen"), record.generation)?;
-    let ttl = match record.time_to_live() {
-        Some(duration) => duration.as_secs() as u32,
-        None => 0xFFFFFFFF_u32,
-    };
-    meta.set_item(intern!(py, "ttl"), ttl)?;
+    meta.set_item(intern!(py, "ttl"), record_ttl_seconds(record))?;
 
     // Bins dict
     let bins = PyDict::new(py);

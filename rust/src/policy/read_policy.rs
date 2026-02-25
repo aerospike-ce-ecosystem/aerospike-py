@@ -7,8 +7,7 @@ use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use super::extract_policy_fields;
-use crate::expressions::{is_expression, py_to_expression};
+use super::{extract_filter_expression, extract_policy_fields};
 
 /// Lazily-initialized default read policy used when no policy dict is provided.
 pub static DEFAULT_READ_POLICY: LazyLock<ReadPolicy> = LazyLock::new(ReadPolicy::default);
@@ -30,11 +29,7 @@ pub fn parse_read_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<Re
         "sleep_between_retries" => policy.base_policy.sleep_between_retries
     });
 
-    if let Some(val) = dict.get_item("filter_expression")? {
-        if is_expression(&val) {
-            policy.base_policy.filter_expression = Some(py_to_expression(&val)?);
-        }
-    }
+    policy.base_policy.filter_expression = extract_filter_expression(dict)?;
 
     Ok(policy)
 }

@@ -5,8 +5,7 @@ use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use super::extract_policy_fields;
-use crate::expressions::{is_expression, py_to_expression};
+use super::{extract_filter_expression, extract_policy_fields};
 
 /// Parse a Python policy dict into a BatchPolicy
 pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchPolicy> {
@@ -27,11 +26,7 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
         "respond_all_keys" => policy.respond_all_keys
     });
 
-    if let Some(val) = dict.get_item("filter_expression")? {
-        if is_expression(&val) {
-            policy.filter_expression = Some(py_to_expression(&val)?);
-        }
-    }
+    policy.filter_expression = extract_filter_expression(dict)?;
 
     Ok(policy)
 }
