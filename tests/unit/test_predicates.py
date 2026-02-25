@@ -1,3 +1,9 @@
+"""Unit tests for predicates helpers (no server required)."""
+
+import warnings
+
+import pytest
+
 from aerospike_py import (
     INDEX_TYPE_LIST,
     INDEX_TYPE_MAPKEYS,
@@ -5,78 +11,121 @@ from aerospike_py import (
 )
 from aerospike_py import predicates as p
 
-
-class TestEquals:
-    def test_integer_value(self):
-        result = p.equals("age", 30)
-        assert result == ("equals", "age", 30)
-
-    def test_string_value(self):
-        result = p.equals("name", "Alice")
-        assert result == ("equals", "name", "Alice")
-
-    def test_tuple_structure(self):
-        result = p.equals("bin", 42)
-        assert len(result) == 3
-        assert result[0] == "equals"
-        assert result[1] == "bin"
-        assert result[2] == 42
+# ── Equals predicate ──────────────────────────────────────────────
 
 
-class TestBetween:
-    def test_integer_range(self):
-        result = p.between("age", 18, 65)
-        assert result == ("between", "age", 18, 65)
+@pytest.mark.parametrize(
+    "bin_name,val",
+    [
+        ("age", 30),
+        ("name", "Alice"),
+        ("count", 0),
+        ("flag", True),
+        ("score", 3.14),
+        ("tag", ""),
+        ("big", 2**63 - 1),
+    ],
+    ids=["int", "string", "zero", "bool", "float", "empty_string", "large_int"],
+)
+def test_equals(bin_name, val):
+    """equals() produces correct 3-tuple for various value types."""
+    result = p.equals(bin_name, val)
+    assert result == ("equals", bin_name, val)
+    assert len(result) == 3
+    assert result[0] == "equals"
 
-    def test_float_range(self):
-        result = p.between("score", 0.0, 100.0)
-        assert result == ("between", "score", 0.0, 100.0)
 
-    def test_tuple_structure(self):
-        result = p.between("bin", 1, 10)
-        assert len(result) == 4
-        assert result[0] == "between"
-        assert result[1] == "bin"
-        assert result[2] == 1
-        assert result[3] == 10
+# ── Between predicate ─────────────────────────────────────────────
 
 
-class TestContains:
-    def test_list_contains(self):
-        result = p.contains("tags", INDEX_TYPE_LIST, "python")
-        assert result == ("contains", "tags", INDEX_TYPE_LIST, "python")
+@pytest.mark.parametrize(
+    "bin_name,min_val,max_val",
+    [
+        ("age", 18, 65),
+        ("score", 0.0, 100.0),
+        ("count", 0, 0),
+        ("level", -100, 100),
+        ("timestamp", 0, 2**32),
+    ],
+    ids=["int_range", "float_range", "same_val", "negative_range", "large_range"],
+)
+def test_between(bin_name, min_val, max_val):
+    """between() produces correct 4-tuple for various ranges."""
+    result = p.between(bin_name, min_val, max_val)
+    assert result == ("between", bin_name, min_val, max_val)
+    assert len(result) == 4
+    assert result[0] == "between"
 
-    def test_mapkeys_contains(self):
-        result = p.contains("metadata", INDEX_TYPE_MAPKEYS, "key1")
-        assert result == ("contains", "metadata", INDEX_TYPE_MAPKEYS, "key1")
 
-    def test_mapvalues_contains(self):
-        result = p.contains("metadata", INDEX_TYPE_MAPVALUES, 42)
-        assert result == ("contains", "metadata", INDEX_TYPE_MAPVALUES, 42)
+# ── Contains predicate ────────────────────────────────────────────
 
-    def test_tuple_structure(self):
-        result = p.contains("bin", INDEX_TYPE_LIST, "val")
-        assert len(result) == 4
-        assert result[0] == "contains"
+
+@pytest.mark.parametrize(
+    "index_type,val,type_name",
+    [
+        (INDEX_TYPE_LIST, "python", "list"),
+        (INDEX_TYPE_MAPKEYS, "key1", "mapkeys"),
+        (INDEX_TYPE_MAPVALUES, 42, "mapvalues"),
+    ],
+    ids=["list", "mapkeys", "mapvalues"],
+)
+def test_contains(index_type, val, type_name):
+    """contains() produces correct 4-tuple for each index type."""
+    result = p.contains("mybin", index_type, val)
+    assert result == ("contains", "mybin", index_type, val)
+    assert len(result) == 4
+    assert result[0] == "contains"
+
+
+# ── Geo predicates ────────────────────────────────────────────────
 
 
 class TestGeoPredicates:
     def test_geo_within_geojson_region(self):
         geojson = '{"type": "Polygon", "coordinates": [[[0,0],[1,0],[1,1],[0,1],[0,0]]]}'
-        result = p.geo_within_geojson_region("location", geojson)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = p.geo_within_geojson_region("location", geojson)
         assert result == ("geo_within_geojson_region", "location", geojson)
         assert len(result) == 3
+        assert any("not yet supported" in str(x.message) for x in w)
 
     def test_geo_within_radius(self):
-        result = p.geo_within_radius("location", 37.7749, -122.4194, 1000.0)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = p.geo_within_radius("location", 37.7749, -122.4194, 1000.0)
         assert result == ("geo_within_radius", "location", 37.7749, -122.4194, 1000.0)
         assert len(result) == 5
+        assert any("not yet supported" in str(x.message) for x in w)
 
     def test_geo_contains_geojson_point(self):
         geojson = '{"type": "Point", "coordinates": [0.5, 0.5]}'
-        result = p.geo_contains_geojson_point("region", geojson)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = p.geo_contains_geojson_point("region", geojson)
         assert result == ("geo_contains_geojson_point", "region", geojson)
         assert len(result) == 3
+        assert any("not yet supported" in str(x.message) for x in w)
+
+    @pytest.mark.parametrize(
+        "func,args",
+        [
+            (p.geo_within_geojson_region, ("loc", '{"type":"Point"}')),
+            (p.geo_within_radius, ("loc", 0.0, 0.0, 100.0)),
+            (p.geo_contains_geojson_point, ("loc", '{"type":"Point"}')),
+        ],
+        ids=["within_region", "within_radius", "contains_point"],
+    )
+    def test_geo_predicates_emit_future_warning(self, func, args):
+        """All geo predicates emit FutureWarning."""
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            func(*args)
+            future_warns = [x for x in w if issubclass(x.category, FutureWarning)]
+            assert len(future_warns) >= 1
+
+
+# ── Module access tests ───────────────────────────────────────────
 
 
 class TestPredicateModule:
@@ -85,3 +134,8 @@ class TestPredicateModule:
 
         assert hasattr(aerospike_py, "predicates")
         assert aerospike_py.predicates is p
+
+    def test_all_exports(self):
+        """Every symbol in __all__ is importable."""
+        for name in p.__all__:
+            assert hasattr(p, name), f"predicates.__all__ contains '{name}' but it is not defined"

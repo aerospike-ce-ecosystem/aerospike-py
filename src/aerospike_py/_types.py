@@ -2,6 +2,8 @@
 
 from typing import Any, TypedDict
 
+__all__ = ["Operation", "ListPolicy", "MapPolicy"]
+
 Operation = dict[str, Any]
 """Operation dict with 'op', 'bin', 'val' keys, for use with client.operate()."""
 

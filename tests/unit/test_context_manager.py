@@ -49,3 +49,65 @@ class TestAsyncClientInitFailure:
         # _inner가 설정되지 않은 상태에서 속성 접근
         with pytest.raises(AttributeError, match="not be fully initialized"):
             _ = client.some_attribute
+
+
+class TestAsyncContextManagerProtocol:
+    """Test AsyncClient async context manager protocol without a server."""
+
+    async def test_async_with_statement_aenter(self):
+        """Verify 'async with' calls __aenter__ and returns the client."""
+        c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+        # __aenter__ should return self
+        entered = await c.__aenter__()
+        assert entered is c
+
+    async def test_async_with_statement_aexit_signature(self):
+        """Verify __aexit__ accepts the standard 3 args and returns bool."""
+        # We just verify the method is callable with the right signature
+        import inspect
+
+        sig = inspect.signature(aerospike_py.AsyncClient.__aexit__)
+        params = list(sig.parameters.keys())
+        # Should have: self, exc_type, exc_val, exc_tb
+        assert len(params) == 4
+
+    async def test_async_client_is_connected_false_after_init(self):
+        """An unconnected AsyncClient should report is_connected() == False."""
+        c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+        assert not c.is_connected()
+
+    async def test_async_client_aenter_does_not_connect(self):
+        """__aenter__ should return self but NOT connect to the cluster."""
+        c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+        entered = await c.__aenter__()
+        assert entered is c
+        assert not c.is_connected()
+
+
+class TestSyncContextManagerProtocol:
+    """Additional tests for sync Client context manager protocol."""
+
+    def test_sync_with_statement_enter(self):
+        """Verify 'with' statement calls __enter__ and returns the client."""
+        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+        entered = c.__enter__()
+        assert entered is c
+
+    def test_sync_client_enter_does_not_connect(self):
+        """__enter__ should return self but NOT connect to the cluster."""
+        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+        entered = c.__enter__()
+        assert entered is c
+        assert not c.is_connected()
+
+    def test_sync_exit_with_exception_info(self):
+        """__exit__ should handle exception info parameters without crashing."""
+        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+        try:
+            raise ValueError("test")
+        except ValueError:
+            import sys
+
+            exc_info = sys.exc_info()
+            result = c.__exit__(*exc_info)
+            assert result is False

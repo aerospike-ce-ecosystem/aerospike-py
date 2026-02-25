@@ -41,17 +41,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
         with:
+          cache-key: rust-lint
           components: rustfmt, clippy
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: "rust-lint"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -86,15 +80,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: "rust-build"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -111,15 +98,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
         with:
-          workspaces: ". -> target"
-          shared-key: "rust-build-freethreaded"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-key: rust-build-freethreaded
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -161,15 +143,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: "rust-build"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -206,15 +181,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: "rust-build"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -251,15 +219,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
         with:
-          workspaces: ". -> target"
-          shared-key: "rust-build-freethreaded"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-key: rust-build-freethreaded
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -304,15 +267,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: "rust-build"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -349,15 +305,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: "rust-build"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
