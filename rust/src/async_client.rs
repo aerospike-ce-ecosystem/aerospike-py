@@ -19,7 +19,7 @@ use crate::policy::write_policy::DEFAULT_WRITE_POLICY;
 use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
-use crate::types::record::record_to_py;
+use crate::types::record::record_to_py_with_key;
 use crate::types::value::value_to_py;
 
 /// Thread-safe shared state for the async client.
@@ -46,8 +46,8 @@ pub struct PyAsyncClient {
     inner: SharedClientState,
     /// Python config dict, retained for potential reconnection.
     config: Py<PyAny>,
-    /// Connection metadata used for OTel span attributes.
-    connection_info: crate::tracing::ConnectionInfo,
+    /// Connection metadata used for OTel span attributes (Arc for cheap cloning).
+    connection_info: Arc<crate::tracing::ConnectionInfo>,
 }
 
 #[pymethods]
@@ -57,7 +57,7 @@ impl PyAsyncClient {
         Ok(PyAsyncClient {
             inner: Arc::new(Mutex::new(None)),
             config,
-            connection_info: crate::tracing::ConnectionInfo::default(),
+            connection_info: Arc::new(crate::tracing::ConnectionInfo::default()),
         })
     }
 
@@ -98,11 +98,11 @@ impl PyAsyncClient {
             })
             .unwrap_or_default();
 
-        self.connection_info = crate::tracing::ConnectionInfo {
+        self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
             server_address: parsed.first_address,
             server_port: parsed.first_port as i64,
             cluster_name,
-        };
+        });
 
         let hosts_str = parsed.connection_string;
         info!("Async connecting to Aerospike cluster: {}", hosts_str);
@@ -280,6 +280,9 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name
         );
 
+        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
+        let key_py = key_to_py(py, &args.key)?;
+
         let rp = args.read_policy().clone();
         future_into_py(py, async move {
             let record = traced_op!(
@@ -291,7 +294,7 @@ impl PyAsyncClient {
                 { client.get(&rp, &args.key, Bins::All).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record, Some(&args.key)))
+            Python::attach(|py| record_to_py_with_key(py, &record, key_py))
         })
     }
 
@@ -312,6 +315,9 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name
         );
 
+        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
+        let key_py = key_to_py(py, &args.key)?;
+
         let rp = args.read_policy().clone();
         future_into_py(py, async move {
             let bin_refs: Vec<&str> = args.bin_names.iter().map(|s| s.as_str()).collect();
@@ -325,7 +331,7 @@ impl PyAsyncClient {
                 { client.get(&rp, &args.key, bins_selector).await }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record, Some(&args.key)))
+            Python::attach(|py| record_to_py_with_key(py, &record, key_py))
         })
     }
 
@@ -496,6 +502,9 @@ impl PyAsyncClient {
             args.ops.len()
         );
 
+        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
+        let key_py = key_to_py(py, &args.key)?;
+
         future_into_py(py, async move {
             let record = traced_op!(
                 "operate",
@@ -510,7 +519,7 @@ impl PyAsyncClient {
                 }
             )?;
 
-            Python::attach(|py| record_to_py(py, &record, Some(&args.key)))
+            Python::attach(|py| record_to_py_with_key(py, &record, key_py))
         })
     }
 
@@ -654,6 +663,9 @@ impl PyAsyncClient {
             args.ops.len()
         );
 
+        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
+        let pre_key_py = key_to_py(py, &args.key)?;
+
         future_into_py(py, async move {
             let record = traced_op!(
                 "operate_ordered",
@@ -671,20 +683,24 @@ impl PyAsyncClient {
             Python::attach(|py| {
                 let key_py = match &record.key {
                     Some(k) => key_to_py(py, k)?,
-                    None => key_to_py(py, &args.key)?,
+                    None => pre_key_py,
                 };
                 let meta_dict_obj = record_to_meta(py, &record)?;
-                let ordered_bins = PyList::empty(py);
-                for (name, value) in &record.bins {
-                    let tuple = PyTuple::new(
-                        py,
-                        [
-                            name.as_str().into_pyobject(py)?.into_any().unbind(),
-                            value_to_py(py, value)?,
-                        ],
-                    )?;
-                    ordered_bins.append(tuple)?;
-                }
+                let bin_items: Vec<Py<PyAny>> = record
+                    .bins
+                    .iter()
+                    .map(|(name, value)| {
+                        let tuple = PyTuple::new(
+                            py,
+                            [
+                                name.as_str().into_pyobject(py)?.into_any().unbind(),
+                                value_to_py(py, value)?,
+                            ],
+                        )?;
+                        Ok(tuple.into_any().unbind())
+                    })
+                    .collect::<PyResult<_>>()?;
+                let ordered_bins = PyList::new(py, &bin_items)?;
                 let result = PyTuple::new(
                     py,
                     [key_py, meta_dict_obj, ordered_bins.into_any().unbind()],

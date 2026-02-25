@@ -3,7 +3,7 @@
 use aerospike_core::{Key, Value};
 use log::trace;
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;
+use pyo3::types::{PyString, PyTuple};
 
 use super::value::{py_to_value, value_to_py};
 
@@ -18,8 +18,8 @@ pub fn py_to_key(key_tuple: &Bound<'_, PyAny>) -> PyResult<Key> {
         ));
     }
 
-    let namespace: String = tuple.get_item(0)?.extract()?;
-    let set_name: String = tuple.get_item(1)?.extract()?;
+    let namespace: String = tuple.get_item(0)?.cast::<PyString>()?.to_str()?.to_owned();
+    let set_name: String = tuple.get_item(1)?.cast::<PyString>()?.to_str()?.to_owned();
     let user_key = py_to_value(&tuple.get_item(2)?)?;
 
     // Handle 4-element tuple with digest

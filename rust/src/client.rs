@@ -19,7 +19,7 @@ use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::runtime::RUNTIME;
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
-use crate::types::record::record_to_py;
+use crate::types::record::record_to_py_with_key;
 use crate::types::value::value_to_py;
 
 /// Synchronous Aerospike client exposed to Python as `Client`.
@@ -34,8 +34,8 @@ pub struct PyClient {
     inner: Option<Arc<AsClient>>,
     /// Python config dict, retained for potential reconnection.
     config: Py<PyAny>,
-    /// Connection metadata used for OTel span attributes.
-    connection_info: crate::tracing::ConnectionInfo,
+    /// Connection metadata used for OTel span attributes (Arc for cheap cloning).
+    connection_info: Arc<crate::tracing::ConnectionInfo>,
 }
 
 #[pymethods]
@@ -45,7 +45,7 @@ impl PyClient {
         Ok(PyClient {
             inner: None,
             config,
-            connection_info: crate::tracing::ConnectionInfo::default(),
+            connection_info: Arc::new(crate::tracing::ConnectionInfo::default()),
         })
     }
 
@@ -85,11 +85,11 @@ impl PyClient {
             })
             .unwrap_or_default();
 
-        self.connection_info = crate::tracing::ConnectionInfo {
+        self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
             server_address: parsed.first_address,
             server_port: parsed.first_port as i64,
             cluster_name,
-        };
+        });
 
         let hosts_str = parsed.connection_string;
         info!("Connecting to Aerospike cluster: {}", hosts_str);
@@ -249,6 +249,9 @@ impl PyClient {
         let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
         debug!("get: ns={} set={}", args.key.namespace, args.key.set_name);
 
+        // Pre-compute Python key before releasing GIL to avoid Rust→Python re-conversion
+        let key_py = key_to_py(py, &args.key)?;
+
         let rp = args.read_policy();
         let record = py.detach(|| {
             RUNTIME.block_on(async {
@@ -263,7 +266,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record, Some(&args.key))
+        record_to_py_with_key(py, &record, key_py)
     }
 
     /// Read specific bins of a record
@@ -283,6 +286,9 @@ impl PyClient {
             args.key.namespace, args.key.set_name
         );
 
+        // Pre-compute Python key before releasing GIL
+        let key_py = key_to_py(py, &args.key)?;
+
         let rp = args.read_policy();
         let bins_selector = args.bins_selector();
         let record = py.detach(|| {
@@ -298,7 +304,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record, Some(&args.key))
+        record_to_py_with_key(py, &record, key_py)
     }
 
     /// Check if a record exists. Returns (key, meta) or (key, None)
@@ -593,6 +599,9 @@ impl PyClient {
             args.ops.len()
         );
 
+        // Pre-compute Python key before releasing GIL
+        let key_py = key_to_py(py, &args.key)?;
+
         let record = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
@@ -610,7 +619,7 @@ impl PyClient {
             })
         })?;
 
-        record_to_py(py, &record, Some(&args.key))
+        record_to_py_with_key(py, &record, key_py)
     }
 
     /// Perform multiple operations on a single record, returning ordered results
@@ -633,6 +642,9 @@ impl PyClient {
             args.ops.len()
         );
 
+        // Pre-compute Python key before releasing GIL
+        let pre_key_py = key_to_py(py, &args.key)?;
+
         let record = py.detach(|| {
             RUNTIME.block_on(async {
                 traced_op!(
@@ -652,22 +664,26 @@ impl PyClient {
 
         let key_py = match &record.key {
             Some(k) => key_to_py(py, k)?,
-            None => key_to_py(py, &args.key)?,
+            None => pre_key_py,
         };
 
         let meta_dict_obj = record_to_meta(py, &record)?;
 
-        let ordered_bins = PyList::empty(py);
-        for (name, value) in &record.bins {
-            let tuple = PyTuple::new(
-                py,
-                [
-                    name.as_str().into_pyobject(py)?.into_any().unbind(),
-                    value_to_py(py, value)?,
-                ],
-            )?;
-            ordered_bins.append(tuple)?;
-        }
+        let bin_items: Vec<Py<PyAny>> = record
+            .bins
+            .iter()
+            .map(|(name, value)| {
+                let tuple = PyTuple::new(
+                    py,
+                    [
+                        name.as_str().into_pyobject(py)?.into_any().unbind(),
+                        value_to_py(py, value)?,
+                    ],
+                )?;
+                Ok(tuple.into_any().unbind())
+            })
+            .collect::<PyResult<_>>()?;
+        let ordered_bins = PyList::new(py, &bin_items)?;
 
         let result = PyTuple::new(
             py,

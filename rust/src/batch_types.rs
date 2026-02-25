@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 
 use crate::errors::result_code_to_int;
 use crate::types::key::key_to_py;
-use crate::types::record::record_to_py;
+use crate::types::record::record_to_py_with_key;
 
 /// A single record within batch results, exposed to Python.
 #[pyclass(name = "BatchRecord")]
@@ -42,8 +42,9 @@ pub fn batch_to_batch_records_py(
             None => 0,
         };
 
+        // Pass the already-converted key_py to avoid double key conversion
         let record_py = match &br.record {
-            Some(record) => record_to_py(py, record, Some(&br.key))?,
+            Some(record) => record_to_py_with_key(py, record, key_py.clone_ref(py))?,
             None => py.None(),
         };
 

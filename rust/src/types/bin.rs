@@ -2,7 +2,7 @@
 
 use aerospike_core::Bin;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyString};
 
 use super::value::py_to_value;
 
@@ -12,7 +12,7 @@ use super::value::py_to_value;
 pub fn py_dict_to_bins(dict: &Bound<'_, PyDict>) -> PyResult<Vec<Bin>> {
     let mut bins = Vec::with_capacity(dict.len());
     for (key, val) in dict.iter() {
-        let name: String = key.extract()?;
+        let name: String = key.cast::<PyString>()?.to_str()?.to_owned();
         let value = py_to_value(&val)?;
         bins.push(Bin::new(name, value));
     }

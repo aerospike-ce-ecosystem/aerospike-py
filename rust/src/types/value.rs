@@ -39,12 +39,10 @@ fn py_to_value_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
         return Ok(Value::Float(aerospike_core::FloatValue::from(val)));
     }
     if let Ok(s) = obj.cast::<PyString>() {
-        let val: String = s.extract()?;
-        return Ok(Value::String(val));
+        return Ok(Value::String(s.to_str()?.to_owned()));
     }
     if let Ok(b) = obj.cast::<PyBytes>() {
-        let val: Vec<u8> = b.extract()?;
-        return Ok(Value::Blob(val));
+        return Ok(Value::Blob(b.as_bytes().to_vec()));
     }
     if let Ok(list) = obj.cast::<PyList>() {
         let mut values = Vec::with_capacity(list.len());
@@ -54,7 +52,7 @@ fn py_to_value_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
         return Ok(Value::List(values));
     }
     if let Ok(dict) = obj.cast::<PyDict>() {
-        let mut map = HashMap::new();
+        let mut map = HashMap::with_capacity(dict.len());
         for (k, v) in dict.iter() {
             let key = py_to_value_inner(&k, depth + 1)?;
             let val = py_to_value_inner(&v, depth + 1)?;
@@ -82,10 +80,11 @@ pub fn value_to_py(py: Python<'_>, val: &Value) -> PyResult<Py<PyAny>> {
         Value::String(s) => Ok(s.into_pyobject(py)?.into_any().unbind()),
         Value::Blob(b) => Ok(PyBytes::new(py, b).into_any().unbind()),
         Value::List(list) | Value::MultiResult(list) => {
-            let py_list = PyList::empty(py);
-            for item in list {
-                py_list.append(value_to_py(py, item)?)?;
-            }
+            let items: Vec<Py<PyAny>> = list
+                .iter()
+                .map(|item| value_to_py(py, item))
+                .collect::<PyResult<_>>()?;
+            let py_list = PyList::new(py, &items)?;
             Ok(py_list.into_any().unbind())
         }
         Value::HashMap(map) => {
@@ -103,11 +102,11 @@ pub fn value_to_py(py: Python<'_>, val: &Value) -> PyResult<Py<PyAny>> {
             Ok(dict.into_any().unbind())
         }
         Value::KeyValueList(pairs) => {
-            let py_list = PyList::empty(py);
-            for (k, v) in pairs {
-                let tuple = (value_to_py(py, k)?, value_to_py(py, v)?);
-                py_list.append(tuple)?;
-            }
+            let items: Vec<(Py<PyAny>, Py<PyAny>)> = pairs
+                .iter()
+                .map(|(k, v)| Ok((value_to_py(py, k)?, value_to_py(py, v)?)))
+                .collect::<PyResult<_>>()?;
+            let py_list = PyList::new(py, &items)?;
             Ok(py_list.into_any().unbind())
         }
         Value::GeoJSON(s) => Ok(s.into_pyobject(py)?.into_any().unbind()),
