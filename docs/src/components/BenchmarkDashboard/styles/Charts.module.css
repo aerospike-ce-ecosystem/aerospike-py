@@ -1,0 +1,73 @@
+/* ── Chart Wrappers ──────────────────────────────────────── */
+
+.chartWrap {
+  width: 100%;
+  margin: 1rem 0;
+}
+
+.chartContainer {
+  min-height: 400px;
+}
+
+.chartContainerSmall {
+  min-height: 300px;
+}
+
+@media (max-width: 768px) {
+  .chartContainer {
+    min-height: 280px;
+  }
+
+  .chartContainerSmall {
+    min-height: 220px;
+  }
+}
+
+/* ── Date Selector ──────────────────────────────────────── */
+
+.dateSelect {
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+}
+
+.dateSelect:focus {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 2px rgba(103, 58, 183, 0.15);
+}
+
+[data-theme='dark'] .dateSelect {
+  background: var(--ifm-background-surface-color);
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+/* ── Environment Badge ───────────────────────────────────── */
+
+.envBadgeWrap {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.envBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-color-emphasis-700);
+}
+
+[data-theme='dark'] .envBadge {
+  background: var(--ifm-color-emphasis-200);
+  color: var(--ifm-color-emphasis-600);
+}

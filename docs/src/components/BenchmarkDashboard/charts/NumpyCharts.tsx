@@ -11,149 +11,16 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
+import {ChartTooltip, themeColors} from './shared';
+import {COLOR_DICT_SYNC, COLOR_NUMPY_SYNC, COLOR_DICT_ASYNC, COLOR_NUMPY_ASYNC} from '../constants';
+import type {NumpyBenchmarkData, ColorMode} from '../types';
 
-// ── Types ───────────────────────────────────────────────────
-
-interface MetricsEntry {
-  avg_ms: number | null;
-  ops_per_sec: number | null;
-  stdev_ms: number | null;
-}
-
-interface RecordScalingEntry {
-  record_count: number;
-  batch_read_sync: MetricsEntry;
-  batch_read_numpy_sync: MetricsEntry;
-  batch_read_async: MetricsEntry;
-  batch_read_numpy_async: MetricsEntry;
-}
-
-interface BinScalingEntry {
-  bin_count: number;
-  batch_read_sync: MetricsEntry;
-  batch_read_numpy_sync: MetricsEntry;
-  batch_read_async: MetricsEntry;
-  batch_read_numpy_async: MetricsEntry;
-}
-
-interface PostProcessingEntry {
-  stage: string;
-  stage_label: string;
-  batch_read_sync: MetricsEntry;
-  batch_read_numpy_sync: MetricsEntry;
-  batch_read_async: MetricsEntry;
-  batch_read_numpy_async: MetricsEntry;
-}
-
-interface MemoryEntry {
-  record_count: number;
-  dict_peak_kb: number;
-  numpy_peak_kb: number;
-  savings_pct: number;
-}
-
-export interface NumpyBenchmarkData {
-  timestamp: string;
-  date: string;
-  report_type: string;
-  environment: {
-    platform: string;
-    python_version: string;
-    rounds: number;
-    warmup: number;
-    concurrency: number;
-    batch_groups: number;
-  };
-  record_scaling?: {
-    fixed_bins: number;
-    data: RecordScalingEntry[];
-  };
-  bin_scaling?: {
-    fixed_records: number;
-    data: BinScalingEntry[];
-  };
-  post_processing?: {
-    record_count: number;
-    bin_count: number;
-    data: PostProcessingEntry[];
-  };
-  memory?: {
-    bin_count: number;
-    data: MemoryEntry[];
-  };
-  takeaways: string[];
-}
-
-type ColorMode = 'light' | 'dark';
-
-// ── Constants ───────────────────────────────────────────────
-
-const COLOR_DICT_SYNC = '#673ab7';   // purple
-const COLOR_NUMPY_SYNC = '#e91e63';  // pink
-const COLOR_DICT_ASYNC = '#4caf50';  // green
-const COLOR_NUMPY_ASYNC = '#2196f3'; // blue
-
-function themeColors(colorMode: ColorMode) {
-  const isDark = colorMode === 'dark';
-  return {
-    text: isDark ? '#e0e0e0' : '#333333',
-    grid: isDark ? '#444444' : '#cccccc',
-    tooltipBg: isDark ? '#1e1e1e' : '#ffffff',
-    tooltipBorder: isDark ? '#555555' : '#cccccc',
-  };
-}
-
-// ── Custom Tooltip ──────────────────────────────────────────
-
-function ChartTooltip({
-  active,
-  payload,
-  label,
-  colorMode,
-  unit,
-}: {
-  active?: boolean;
-  payload?: Array<{name: string; value: number; color: string}>;
-  label?: string;
-  colorMode: ColorMode;
-  unit: string;
-}) {
-  if (!active || !payload?.length) return null;
-  const theme = themeColors(colorMode);
-  return (
-    <div
-      style={{
-        background: theme.tooltipBg,
-        border: `1px solid ${theme.tooltipBorder}`,
-        borderRadius: 6,
-        padding: '8px 12px',
-        fontSize: 13,
-      }}
-    >
-      <p style={{margin: 0, fontWeight: 600, color: theme.text}}>{label}</p>
-      {payload.map((entry, i) => (
-        <p key={i} style={{margin: '4px 0 0', color: entry.color}}>
-          {entry.name}:{' '}
-          {unit === 'ms'
-            ? `${entry.value.toFixed(3)}ms`
-            : unit === 'kb'
-              ? `${entry.value.toLocaleString()} KB`
-              : `${entry.value.toLocaleString()}/s`}
-        </p>
-      ))}
-    </div>
-  );
-}
-
-// ── Record Scaling Chart ────────────────────────────────────
-
-export function RecordScalingChart({
-  data,
-  colorMode,
-}: {
+interface Props {
   data: NumpyBenchmarkData;
   colorMode: ColorMode;
-}) {
+}
+
+export function RecordScalingChart({data, colorMode}: Props) {
   if (!data.record_scaling) return null;
   const theme = themeColors(colorMode);
 
@@ -187,15 +54,7 @@ export function RecordScalingChart({
   );
 }
 
-// ── Bin Scaling Chart ───────────────────────────────────────
-
-export function BinScalingChart({
-  data,
-  colorMode,
-}: {
-  data: NumpyBenchmarkData;
-  colorMode: ColorMode;
-}) {
+export function BinScalingChart({data, colorMode}: Props) {
   if (!data.bin_scaling) return null;
   const theme = themeColors(colorMode);
 
@@ -229,15 +88,7 @@ export function BinScalingChart({
   );
 }
 
-// ── Post-Processing Chart ───────────────────────────────────
-
-export function PostProcessingChart({
-  data,
-  colorMode,
-}: {
-  data: NumpyBenchmarkData;
-  colorMode: ColorMode;
-}) {
+export function PostProcessingChart({data, colorMode}: Props) {
   if (!data.post_processing) return null;
   const theme = themeColors(colorMode);
 
@@ -271,15 +122,7 @@ export function PostProcessingChart({
   );
 }
 
-// ── Memory Chart ────────────────────────────────────────────
-
-export function MemoryChart({
-  data,
-  colorMode,
-}: {
-  data: NumpyBenchmarkData;
-  colorMode: ColorMode;
-}) {
+export function NumpyMemoryChart({data, colorMode}: Props) {
   if (!data.memory) return null;
   const theme = themeColors(colorMode);
 

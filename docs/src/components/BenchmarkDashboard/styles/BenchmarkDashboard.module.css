@@ -1,0 +1,76 @@
+.container {
+  padding: 1rem 0;
+}
+
+.errorBox {
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-danger);
+  background: var(--ifm-color-danger-contrast-background);
+  margin: 1rem 0;
+}
+
+.errorBox pre {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+/* ── Section Tabs ──────────────────────────────────────────── */
+
+.sectionTabs :global(.tabs) {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  border-bottom: 2px solid var(--ifm-color-emphasis-200);
+  margin-bottom: 1.5rem;
+}
+
+.sectionTabs :global(.tabs__item) {
+  white-space: nowrap;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+}
+
+/* ── Panel Spacing ─────────────────────────────────────────── */
+
+.panelContent {
+  margin-top: 0.5rem;
+}
+
+/* ── Section Description ───────────────────────────────────── */
+
+.sectionDesc {
+  color: var(--ifm-color-emphasis-600);
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Scenario Card (Advanced Profiling) ────────────────────── */
+
+.scenarioCard {
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  background: var(--ifm-background-color);
+}
+
+[data-theme='dark'] .scenarioCard {
+  background: var(--ifm-background-surface-color);
+}
+
+.scenarioCard h3 {
+  margin-top: 0;
+}
+
+/* ── Advanced Inner Tabs ───────────────────────────────────── */
+
+.innerTabs :global(.tabs) {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+.innerTabs :global(.tabs__item) {
+  white-space: nowrap;
+  font-size: 0.9rem;
+}

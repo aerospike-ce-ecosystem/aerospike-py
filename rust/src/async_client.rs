@@ -99,9 +99,9 @@ impl PyAsyncClient {
             .unwrap_or_default();
 
         self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
-            server_address: parsed.first_address,
+            server_address: Arc::from(parsed.first_address.as_str()),
             server_port: parsed.first_port as i64,
-            cluster_name,
+            cluster_name: Arc::from(cluster_name.as_str()),
         });
 
         let hosts_str = parsed.connection_string;
