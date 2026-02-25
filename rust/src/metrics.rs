@@ -86,25 +86,28 @@ impl OperationTimer {
 }
 
 /// Classify an `aerospike_core::Error` into a short error-type string for metric labels.
-pub fn error_type_from_aerospike_error(err: &AsError) -> String {
+///
+/// Returns `Cow::Borrowed` for known error types (zero alloc) and `Cow::Owned`
+/// only for unknown `ResultCode` variants.
+pub fn error_type_from_aerospike_error(err: &AsError) -> Cow<'static, str> {
     match err {
-        AsError::Connection(_) => "Connection".to_string(),
-        AsError::Timeout(_) => "Timeout".to_string(),
-        AsError::InvalidArgument(_) => "InvalidArgument".to_string(),
+        AsError::Connection(_) => Cow::Borrowed("Connection"),
+        AsError::Timeout(_) => Cow::Borrowed("Timeout"),
+        AsError::InvalidArgument(_) => Cow::Borrowed("InvalidArgument"),
         AsError::ServerError(rc, _, _) => match rc {
-            ResultCode::KeyNotFoundError => "KeyNotFoundError".to_string(),
-            ResultCode::KeyExistsError => "KeyExistsError".to_string(),
-            ResultCode::GenerationError => "GenerationError".to_string(),
-            ResultCode::RecordTooBig => "RecordTooBig".to_string(),
-            ResultCode::BinTypeError => "BinTypeError".to_string(),
-            ResultCode::BinNotFound => "BinNotFound".to_string(),
-            ResultCode::FilteredOut => "FilteredOut".to_string(),
-            ResultCode::Timeout => "Timeout".to_string(),
-            _ => format!("{:?}", rc),
+            ResultCode::KeyNotFoundError => Cow::Borrowed("KeyNotFoundError"),
+            ResultCode::KeyExistsError => Cow::Borrowed("KeyExistsError"),
+            ResultCode::GenerationError => Cow::Borrowed("GenerationError"),
+            ResultCode::RecordTooBig => Cow::Borrowed("RecordTooBig"),
+            ResultCode::BinTypeError => Cow::Borrowed("BinTypeError"),
+            ResultCode::BinNotFound => Cow::Borrowed("BinNotFound"),
+            ResultCode::FilteredOut => Cow::Borrowed("FilteredOut"),
+            ResultCode::Timeout => Cow::Borrowed("Timeout"),
+            _ => Cow::Owned(format!("{:?}", rc)),
         },
-        AsError::InvalidNode(_) => "InvalidNode".to_string(),
-        AsError::NoMoreConnections => "NoMoreConnections".to_string(),
-        _ => "Unknown".to_string(),
+        AsError::InvalidNode(_) => Cow::Borrowed("InvalidNode"),
+        AsError::NoMoreConnections => Cow::Borrowed("NoMoreConnections"),
+        _ => Cow::Borrowed("Unknown"),
     }
 }
 
@@ -129,7 +132,10 @@ macro_rules! timed_op {
         let result = $body;
         match &result {
             Ok(_) => timer.finish(""),
-            Err(e) => timer.finish(&$crate::metrics::error_type_from_aerospike_error(e)),
+            Err(e) => {
+                let err_type = $crate::metrics::error_type_from_aerospike_error(e);
+                timer.finish(&err_type);
+            }
         }
         result.map_err($crate::errors::as_to_pyerr)
     }};

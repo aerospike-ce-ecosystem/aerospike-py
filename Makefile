@@ -8,6 +8,7 @@ BENCH_COUNT ?= 5000
 BENCH_ROUNDS ?= 20
 BENCH_CONCURRENCY ?= 50
 BENCH_BATCH_GROUPS ?= 10
+BENCH_SCENARIO ?= basic
 
 NUMPY_BENCH_ROUNDS ?= 10
 NUMPY_BENCH_CONCURRENCY ?= 50
@@ -47,59 +48,22 @@ stop-aerospike-ce: ## Stop and remove Aerospike CE container
 # Benchmark
 # ---------------------------------------------------------------------------
 
-.PHONY: run-benchmark
-run-benchmark: build run-aerospike-ce ## Run benchmark with local build (COUNT, ROUNDS, CONCURRENCY configurable)
-	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
-	uv run python benchmark/bench_compare.py \
-		--count $(BENCH_COUNT) \
-		--rounds $(BENCH_ROUNDS) \
-		--concurrency $(BENCH_CONCURRENCY) \
-		--batch-groups $(BENCH_BATCH_GROUPS) \
-		--host $(AEROSPIKE_HOST) \
-		--port $(AEROSPIKE_PORT); \
-	$(MAKE) stop-aerospike-ce
-
-.PHONY: run-benchmark-large
-run-benchmark-large: build run-aerospike-ce ## Run large-scale benchmark (100K ops)
-	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
-	uv run python benchmark/bench_compare.py \
-		--count 100000 \
-		--rounds 5 \
-		--concurrency $(BENCH_CONCURRENCY) \
-		--batch-groups $(BENCH_BATCH_GROUPS) \
-		--host $(AEROSPIKE_HOST) \
-		--port $(AEROSPIKE_PORT); \
-	$(MAKE) stop-aerospike-ce
+# Common benchmark arguments
+BENCH_ARGS = --count $(BENCH_COUNT) --rounds $(BENCH_ROUNDS) \
+	--concurrency $(BENCH_CONCURRENCY) --batch-groups $(BENCH_BATCH_GROUPS) \
+	--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT)
 
 .PHONY: run-benchmark-report
-run-benchmark-report: build run-aerospike-ce ## Run benchmark and generate docs report (JSON + charts)
+run-benchmark-report: build run-aerospike-ce ## Run benchmark + generate JSON report (BENCH_SCENARIO=basic|all, numpy auto-included with all)
 	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
 	uv run python benchmark/bench_compare.py \
-		--count $(BENCH_COUNT) \
-		--rounds $(BENCH_ROUNDS) \
-		--concurrency $(BENCH_CONCURRENCY) \
-		--batch-groups $(BENCH_BATCH_GROUPS) \
-		--host $(AEROSPIKE_HOST) \
-		--port $(AEROSPIKE_PORT) \
-		--report; \
-	$(MAKE) stop-aerospike-ce
-
-.PHONY: run-numpy-benchmark
-run-numpy-benchmark: build run-aerospike-ce ## Run numpy batch benchmark (dict vs numpy comparison)
-	uv run python benchmark/bench_batch_numpy.py \
-		--scenario all --rounds $(NUMPY_BENCH_ROUNDS) \
-		--concurrency $(NUMPY_BENCH_CONCURRENCY) \
-		--batch-groups $(NUMPY_BENCH_BATCH_GROUPS) \
-		--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT); \
-	$(MAKE) stop-aerospike-ce
-
-.PHONY: run-numpy-benchmark-report
-run-numpy-benchmark-report: build run-aerospike-ce ## Run numpy batch benchmark and generate report
-	uv run python benchmark/bench_batch_numpy.py \
-		--scenario all --rounds $(NUMPY_BENCH_ROUNDS) \
-		--concurrency $(NUMPY_BENCH_CONCURRENCY) \
-		--batch-groups $(NUMPY_BENCH_BATCH_GROUPS) \
-		--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT) --report; \
+		$(BENCH_ARGS) --scenario $(BENCH_SCENARIO) --report; \
+	if [ "$(BENCH_SCENARIO)" = "all" ]; then \
+		uv run python benchmark/bench_batch_numpy.py \
+			--scenario all --rounds $(NUMPY_BENCH_ROUNDS) \
+			--concurrency $(NUMPY_BENCH_CONCURRENCY) --batch-groups $(NUMPY_BENCH_BATCH_GROUPS) \
+			--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT) --report; \
+	fi; \
 	$(MAKE) stop-aerospike-ce
 
 # ---------------------------------------------------------------------------
@@ -153,6 +117,18 @@ test-matrix: build ## Run unit tests across all Python versions
 # ---------------------------------------------------------------------------
 # Documentation
 # ---------------------------------------------------------------------------
+
+.PHONY: docs-build
+docs-build: ## Build Docusaurus docs site
+	cd docs && npm run build
+
+.PHONY: docs-serve
+docs-serve: ## Serve built docs locally (run docs-build first)
+	cd docs && npm run serve
+
+.PHONY: docs-start
+docs-start: ## Start Docusaurus dev server with hot reload
+	cd docs && npm start
 
 .PHONY: docs-version
 docs-version: ## Create a new docs version (usage: make docs-version VERSION=0.1.0)

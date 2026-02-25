@@ -69,7 +69,6 @@ const sidebars: SidebarsConfig = {
       items: [
         'performance/overview',
         'performance/benchmark-results',
-        'performance/numpy-benchmark-results',
       ],
     },
     {

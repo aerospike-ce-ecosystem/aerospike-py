@@ -111,6 +111,23 @@ expr = exp.eq(exp.bool_bin("active"), exp.bool_val(True))
 results = client.query("test", "demo").results(policy={"filter_expression": expr})
 ```
 
+## Tokio Runtime Workers
+
+aerospike-py uses an internal Tokio async runtime with **2 worker threads** by default.
+This is sufficient for I/O-bound database operations and minimizes CPU overhead
+when colocated with CPU-intensive workloads (e.g. PyTorch inference).
+
+```bash
+# Override if you need more parallelism for heavy batch operations
+export AEROSPIKE_RUNTIME_WORKERS=4
+```
+
+| Workers | Use Case |
+|---------|----------|
+| 2 (default) | Most applications, ML serving, web servers |
+| 4 | Heavy batch operations, high-throughput pipelines |
+| 8+ | Rarely needed; profile first |
+
 ## Timeout Guidelines
 
 | Setting | Recommendation |

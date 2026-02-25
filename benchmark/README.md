@@ -2,192 +2,155 @@
 
 Measures how aerospike-py (Rust/PyO3) compares to the official aerospike Python client (C extension).
 
-## Methodology
-
-For consistent, reproducible results:
-
-1. **Warmup** (default 500 ops) — stabilizes connection pools and server cache before measuring
-2. **Multiple rounds** (default 20) — reports median-of-medians across rounds with IQR outlier trimming
-3. **Data separation** — read benchmarks use pre-seeded data; put is measured independently
-4. **GC disabled** — Python garbage collection is off during measurement intervals
-5. **Key isolation** — each client uses a unique key prefix to avoid interference
-
-## Comparison Targets
-
-| Column | Client | Description |
-| ------ | ------ | ----------- |
-| Sync (sequential) | `aerospike_py.client()` | Rust-based sync client |
-| Official (sequential) | `aerospike.client()` (PyPI) | Official C extension sync client |
-| Async (concurrent) | `aerospike_py.AsyncClient` | Rust-based async client + `asyncio.gather` |
-
-## Prerequisites
+## Quick Start
 
 ```bash
-# Aerospike server (via Makefile)
-make run-aerospike-ce                    # docker (default)
-make run-aerospike-ce RUNTIME=podman     # podman
-
-# Install both clients
-maturin develop --release    # aerospike-py (Rust)
-pip install aerospike        # official C client (optional, for comparison)
+make run-benchmark-report                      # basic scenario + JSON report
+make run-benchmark-report BENCH_SCENARIO=all   # all scenarios (+ numpy) + JSON report
 ```
 
 ## Run
 
-```bash
-# Default (5000 ops x 20 rounds, concurrency 50, batch_groups 10)
-make run-benchmark
+All benchmark commands accept these variables:
 
-# With report generation (JSON for Docusaurus charts)
+```bash
+make run-benchmark-report BENCH_COUNT=2000 BENCH_ROUNDS=10 BENCH_CONCURRENCY=100 BENCH_SCENARIO=data_size
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BENCH_SCENARIO` | `basic` | Scenario to run (see below) |
+| `BENCH_COUNT` | `5000` | Operations per round |
+| `BENCH_ROUNDS` | `20` | Number of rounds |
+| `BENCH_CONCURRENCY` | `50` | Async concurrency level |
+| `BENCH_BATCH_GROUPS` | `10` | Batch read groups |
+| `RUNTIME` | `podman` | Container runtime (`podman` or `docker`) |
+
+### Scenarios (`BENCH_SCENARIO`)
+
+| Value | Description |
+|-------|-------------|
+| `basic` | Standard CRUD benchmark (PUT, GET, OPERATE, REMOVE, BATCH_READ, BATCH_WRITE, QUERY) |
+| `data_size` | Latency + CPU breakdown across record sizes (tiny → xlarge) |
+| `concurrency` | AsyncClient throughput at concurrency levels 1, 10, 50, 100, 200, 500 |
+| `memory` | Peak memory profiling via `tracemalloc` |
+| `mixed` | Read/write mixed workload simulation (90:10, 50:50, 10:90) |
+| `all` | Run basic + all above scenarios + NumPy batch benchmark |
+
+### Examples
+
+```bash
+# Basic benchmark + report (default)
 make run-benchmark-report
 
-# Custom parameters
-make run-benchmark BENCH_COUNT=2000 BENCH_ROUNDS=7 BENCH_CONCURRENCY=100 BENCH_BATCH_GROUPS=20
+# Specific scenario with report
+make run-benchmark-report BENCH_SCENARIO=memory
 
-# Large-scale (100K ops x 5 rounds)
-make run-benchmark-large
+# All scenarios + numpy + report
+make run-benchmark-report BENCH_SCENARIO=all
 
-# Podman support
-make run-benchmark-report RUNTIME=podman
+# Large-scale test (100K ops x 5 rounds)
+make run-benchmark-report BENCH_COUNT=100000 BENCH_ROUNDS=5
+```
 
-# Direct execution
-python benchmark/bench_compare.py --count 5000 --rounds 20 --warmup 500 --concurrency 50 --batch-groups 10
+### Typical Workflow
+
+```bash
+# 1. Run benchmark and generate report JSON
+make run-benchmark-report BENCH_SCENARIO=all
+
+# 2. Build docs (includes benchmark charts)
+make docs-build
+
+# 3. Preview locally
+make docs-serve
+```
+
+## Prerequisites
+
+```bash
+make run-aerospike-ce               # start Aerospike CE (auto-started by benchmark targets)
+maturin develop --release           # build aerospike-py (auto-built by benchmark targets)
+pip install aerospike               # official C client (optional, for comparison)
 ```
 
 ## Output
 
 ```text
-====================================================================================================
-  aerospike-py Benchmark  (5,000 ops x 20 rounds, warmup=500, async concurrency=50, batch_groups=10)
-====================================================================================================
-
-  Avg Latency (ms)  —  lower is better  [median of round means]
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Avg Latency (ms)  —  lower is better
   Operation          |   Sync (sequential) | Official (sequential) |    Async (concurrent) | Sync vs Official | Async vs Official
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
   put                |             0.191ms |               0.147ms |               0.069ms |     1.3x slower  |     2.1x faster
   get                |             0.192ms |               0.146ms |               0.089ms |     1.3x slower  |     1.6x faster
-  operate            |             0.195ms |               0.149ms |               0.090ms |     1.3x slower  |     1.7x faster
-  remove             |             0.189ms |               0.142ms |               0.066ms |     1.3x slower  |     2.1x faster
   batch_read         |             0.008ms |               0.005ms |               0.002ms |     1.5x slower  |     2.2x faster
   batch_read_numpy   |             0.007ms |               0.005ms |               0.002ms |     1.3x slower  |     3.4x faster
-  batch_write        |             0.008ms |               0.004ms |               0.002ms |     1.9x slower  |     2.5x faster
-  scan               |             0.003ms |               0.001ms |               0.003ms |     1.8x slower  |     1.9x slower
 
-  Throughput (ops/sec)  —  higher is better  [median of rounds]
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Operation          |   Sync (sequential) | Official (sequential) |    Async (concurrent) | Sync vs Official | Async vs Official
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Throughput (ops/sec)  —  higher is better
   put                |             5,248/s |               6,780/s |              14,481/s |     1.3x slower  |     2.1x faster
   get                |             5,214/s |               6,862/s |              11,214/s |     1.3x slower  |     1.6x faster
-  operate            |             5,136/s |               6,717/s |              11,125/s |     1.3x slower  |     1.7x faster
-  remove             |             5,304/s |               7,025/s |              15,083/s |     1.3x slower  |     2.1x faster
-  batch_read         |           126,820/s |             197,391/s |             434,345/s |     1.6x slower  |     2.2x faster
   batch_read_numpy   |           151,619/s |             197,391/s |             664,809/s |     1.3x slower  |     3.4x faster
-  batch_write        |           132,419/s |             246,465/s |             618,260/s |     1.9x slower  |     2.5x faster
-  scan               |           383,436/s |             686,563/s |             373,625/s |     1.8x slower  |     1.8x slower
-
-  Stability (stdev of round median latency, ms)  —  lower = more stable
-  ─────────────────────────────────────────────────────────────────────
-  Operation          |       Sync stdev |   Official stdev |      Async stdev
-  ─────────────────────────────────────────────────────────────────────
-  put                |          0.001ms |          0.001ms |          0.001ms
-  get                |          0.001ms |          0.001ms |          0.000ms
-  operate            |          0.001ms |          0.002ms |          0.001ms
-  remove             |          0.001ms |          0.001ms |          0.001ms
-  batch_read         |          0.001ms |          0.002ms |          0.000ms
-  batch_read_numpy   |          0.001ms |                - |          0.000ms
-  batch_write        |          0.001ms |          0.002ms |          0.000ms
-  scan               |          0.000ms |          0.000ms |          0.000ms
-
-  Tail Latency (ms)  [aggregated across all rounds]
-  ──────────────────────────────────────────────────────────────────────────
-  Operation          |   Sync p50 |   Sync p99 | Official p50 | Official p99
-  ──────────────────────────────────────────────────────────────────────────
-  put                |    0.183ms |    0.283ms |      0.144ms |      0.216ms
-  get                |    0.184ms |    0.283ms |      0.142ms |      0.219ms
-  operate            |    0.186ms |    0.291ms |      0.145ms |      0.224ms
-  remove             |    0.181ms |    0.282ms |      0.138ms |      0.211ms
 ```
 
 > Environment: macOS (Apple Silicon, M4 Pro), Aerospike CE 8.1.0.3, Python 3.13
 
-## NumPy Batch Benchmark
+## Advanced Scenario Outputs
 
-Compares `batch_read` (dict) vs `batch_read_numpy` (numpy structured array) across 4 scenarios.
-
-### Run
-
-```bash
-# Default (10 rounds, concurrency 50)
-make run-numpy-benchmark
-
-# With report generation
-make run-numpy-benchmark-report
-
-# Custom parameters
-make run-numpy-benchmark NUMPY_BENCH_ROUNDS=20 NUMPY_BENCH_CONCURRENCY=100
-
-# Podman support
-make run-numpy-benchmark-report RUNTIME=podman
-```
-
-### Output
+### Data Size Scaling (`BENCH_SCENARIO=data_size`)
 
 ```text
-  Record Count Scaling (bins=5, rounds=10)
-  ──────────────────────────────────────────────────────────────────────────────────────────────────
-   Records | batch_read(Sync) | numpy(Sync) | batch_read(Async) | numpy(Async) | Speedup(Sync) | Speedup(Async)
-  ──────────────────────────────────────────────────────────────────────────────────────────────────
-       100 |          0.056ms |     0.044ms |           0.026ms |      0.024ms |  1.3x faster  |  1.1x faster
-       500 |          0.017ms |     0.015ms |           0.012ms |      0.006ms |  1.1x faster  |  2.0x faster
-     1,000 |          0.033ms |     0.016ms |           0.005ms |      0.004ms |  2.0x faster  |  1.3x faster
-     5,000 |          0.011ms |     0.007ms |           0.003ms |      0.002ms |  1.5x faster  |  1.6x faster
-    10,000 |          0.007ms |     0.005ms |           0.002ms |      0.001ms |  1.5x faster  |  1.6x faster
-
-  Bin Count Scaling (records=1000, rounds=10)
-  ──────────────────────────────────────────────────────────────────────────────────────────────────
-      Bins | batch_read(Sync) | numpy(Sync) | batch_read(Async) | numpy(Async) | Speedup(Sync) | Speedup(Async)
-  ──────────────────────────────────────────────────────────────────────────────────────────────────
-         1 |          0.020ms |     0.019ms |           0.005ms |      0.003ms |  1.1x faster  |  1.6x faster
-         3 |          0.023ms |     0.019ms |           0.007ms |      0.004ms |  1.2x faster  |  1.9x faster
-         5 |          0.028ms |     0.031ms |           0.008ms |      0.004ms |  1.1x slower  |  2.2x faster
-        10 |          0.038ms |     0.029ms |           0.007ms |      0.004ms |  1.3x faster  |  1.7x faster
-        20 |          0.023ms |     0.010ms |           0.006ms |      0.004ms |  2.2x faster  |  1.4x faster
-
-  Memory Usage (bins=5, rounds=10, Sync only)
-  ────────────────────────────────────────────────────────────────────
-   Records | dict peak (KB) | numpy peak (KB) |    Savings
-  ────────────────────────────────────────────────────────────────────
-       100 |          169.9 |            74.8 |      56.0%
-       500 |          704.2 |           129.0 |      81.7%
-     1,000 |        1,365.8 |           186.3 |      86.4%
-     5,000 |        6,612.3 |           782.3 |      88.2%
-    10,000 |       13,179.8 |         1,575.4 |      88.0%
+  Profile                    | PUT p50    | PUT p99    | PUT CPU% | GET p50    | GET p99    | GET CPU%
+  tiny (3 bins, 10B)         |    0.120ms |    0.185ms |    18.2% |    0.115ms |    0.180ms |    17.5%
+  xlarge (50 bins, 1KB)      |    0.245ms |    0.410ms |    22.8% |    0.230ms |    0.380ms |    21.0%
 ```
+
+### Concurrency Scaling (`BENCH_SCENARIO=concurrency`)
+
+```text
+    Conc | PUT ops/s    | PUT p50    | PUT p99    | GET ops/s    | GET p50    | GET p99
+       1 |      5,200/s |    0.190ms |    0.310ms |      5,400/s |    0.180ms |    0.300ms
+      50 |     14,500/s |    3.200ms |    5.200ms |     15,000/s |    3.000ms |    4.900ms
+     500 |     18,200/s |   25.000ms |   40.000ms |     18,500/s |   24.000ms |   38.000ms
+```
+
+### Memory Profiling (`BENCH_SCENARIO=memory`)
+
+```text
+  Profile                    | PUT peak     | GET peak     | BATCH peak
+  tiny (3 bins, 10B)         |       128KB  |       256KB  |       512KB
+  xlarge (50 bins, 1KB)      |       2.1MB  |       4.2MB  |       8.5MB
+```
+
+### Mixed Workload (`BENCH_SCENARIO=mixed`)
+
+```text
+  Workload               | Throughput   | Read p50   | Read p95   | Write p50  | Write p95
+  read_heavy (90:10)     |     12,500/s |    0.085ms |    0.150ms |    0.095ms |    0.180ms
+  balanced (50:50)       |     11,800/s |    0.090ms |    0.165ms |    0.098ms |    0.190ms
+  write_heavy (10:90)    |     10,500/s |    0.095ms |    0.170ms |    0.102ms |    0.200ms
+```
+
+## Methodology
+
+1. **Warmup** (500 ops) — stabilizes connection pools and server cache
+2. **Multiple rounds** (20) — median-of-medians with IQR outlier trimming
+3. **Pre-seeded data** — read benchmarks use pre-inserted records
+4. **GC disabled** — Python GC off during measurement
+5. **Key isolation** — unique key prefix per client
+6. **CPU/IO separation** — `process_time()` vs `perf_counter()` for CPU vs I/O breakdown
 
 ## Metrics
 
 | Metric | Description |
-| ------ | ----------- |
+|--------|-------------|
 | avg_ms | Median of round means (lower is better) |
-| p50_ms | Median of round medians |
-| p99_ms | Aggregated 99th percentile |
+| p50 / p95 / p99 / p99.9 | Percentile latencies |
 | ops_per_sec | Median of round throughputs (higher is better) |
-| stdev_ms | Stdev of round medians (lower = more stable) |
-
-## Environment Variables
-
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `AEROSPIKE_HOST` | `127.0.0.1` | Aerospike host |
-| `AEROSPIKE_PORT` | `3000` | Aerospike port |
-| `RUNTIME` | `docker` | Container runtime (`docker` or `podman`) |
+| stdev_ms / mad_ms | Stability metrics (lower = more stable) |
+| cpu_pct | CPU% of wall time (lower = more I/O bound) |
 
 ## Why Faster?
 
-- **Rust async runtime**: Tokio-based async I/O under the hood
+- **Rust async runtime**: Tokio-based async I/O
 - **Zero-copy**: Efficient Python-Rust type conversion via PyO3
-- **Native async**: `AsyncClient` + `asyncio.gather` for thousands of concurrent requests
+- **Native async**: `AsyncClient` + `asyncio.gather` for concurrent requests
 - **No GIL bottleneck**: GIL released during Rust execution (`py.allow_threads`)
-- **NumPy structured arrays**: Up to 88% memory savings with vectorized column operations
+- **NumPy**: Structured arrays with up to 88% memory savings

@@ -4,6 +4,17 @@ sidebar_label: Benchmark Results
 sidebar_position: 2
 ---
 
-import BenchmarkReport from '@site/src/components/BenchmarkReport';
+import BenchmarkDashboard from '@site/src/components/BenchmarkDashboard';
 
-<BenchmarkReport />
+# Benchmark Results
+
+:::tip How to generate
+```bash
+make run-benchmark-report                      # basic benchmark + report
+make run-benchmark-report BENCH_SCENARIO=all   # all scenarios (advanced + numpy) + report
+```
+:::
+
+aerospike-py (Rust/PyO3) vs official aerospike Python client (C extension).
+
+<BenchmarkDashboard />

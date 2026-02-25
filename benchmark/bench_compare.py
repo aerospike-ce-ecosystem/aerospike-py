@@ -92,16 +92,16 @@ class BenchmarkResults:
 def _measure_loop_cpu(fn, count: int) -> tuple[list[float], list[float]]:
     """Call fn(i) for i in range(count), return (wall_times, cpu_times) in seconds.
 
-    Captures both wall-clock time (perf_counter) and CPU time (process_time)
-    to separate computation from I/O wait.
+    Captures both wall-clock time (perf_counter) and CPU time (thread_time)
+    to measure only the calling thread's CPU, excluding Tokio worker threads.
     """
     wall_times = []
     cpu_times = []
     for i in range(count):
         w0 = time.perf_counter()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         fn(i)
-        c1 = time.process_time()
+        c1 = time.thread_time()
         w1 = time.perf_counter()
         wall_times.append(w1 - w0)
         cpu_times.append(c1 - c0)
@@ -189,7 +189,7 @@ def _bulk_median(
 ) -> dict:
     """Given multiple round elapsed times for a bulk op, return metrics.
 
-    If *cpu_round_times* is provided (per-round process_time deltas), CPU
+    If *cpu_round_times* is provided (per-round thread_time deltas), CPU
     breakdown fields are added.
     """
     avg_ms = _trim_iqr([(t / count) * 1000 for t in round_times])
@@ -386,9 +386,9 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
     multi_batch_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         elapsed = _measure_bulk(lambda: [client.batch_read(g) for g in groups])
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         multi_batch_rounds.append(elapsed)
         multi_batch_cpu_rounds.append(cpu_elapsed)
@@ -405,9 +405,9 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
         numpy_batch_cpu_rounds = []
         for _ in range(rounds):
             gc.disable()
-            c0 = time.process_time()
+            c0 = time.thread_time()
             elapsed = _measure_bulk(lambda: [client.batch_read(g, _dtype=numpy_dtype) for g in groups])
-            cpu_elapsed = time.process_time() - c0
+            cpu_elapsed = time.thread_time() - c0
             gc.enable()
             numpy_batch_rounds.append(elapsed)
             numpy_batch_cpu_rounds.append(cpu_elapsed)
@@ -435,9 +435,9 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
     batch_write_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         elapsed = _measure_bulk(lambda: [client.batch_operate(g, write_ops) for g in bw_groups])
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         batch_write_rounds.append(elapsed)
         batch_write_cpu_rounds.append(cpu_elapsed)
@@ -467,11 +467,11 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
         numpy_write_cpu_rounds = []
         for _ in range(rounds):
             gc.disable()
-            c0 = time.process_time()
+            c0 = time.thread_time()
             elapsed = _measure_bulk(
                 lambda: [client.batch_write_numpy(d, NAMESPACE, SET_NAME, numpy_write_dtype) for d in numpy_write_data]
             )
-            cpu_elapsed = time.process_time() - c0
+            cpu_elapsed = time.thread_time() - c0
             gc.enable()
             numpy_write_rounds.append(elapsed)
             numpy_write_cpu_rounds.append(cpu_elapsed)
@@ -627,9 +627,9 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
     multi_batch_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         elapsed = _measure_bulk(lambda: [client.batch_read(g) for g in groups])
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         multi_batch_rounds.append(elapsed)
         multi_batch_cpu_rounds.append(cpu_elapsed)
@@ -658,9 +658,9 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
     batch_write_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         elapsed = _measure_bulk(lambda: [client.batch_operate(g, c_write_ops) for g in bw_groups])
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         batch_write_rounds.append(elapsed)
         batch_write_cpu_rounds.append(cpu_elapsed)
@@ -755,11 +755,11 @@ async def bench_rust_async(
                 per_op_times.append(time.perf_counter() - t0)
 
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[_put(i) for i in range(count)])
         elapsed = time.perf_counter() - t0
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         put_rounds.append(elapsed)
         put_cpu_rounds.append(cpu_elapsed)
@@ -791,11 +791,11 @@ async def bench_rust_async(
                 per_op_times.append(time.perf_counter() - t0)
 
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[_get(i) for i in range(count)])
         elapsed = time.perf_counter() - t0
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         get_rounds.append(elapsed)
         get_cpu_rounds.append(cpu_elapsed)
@@ -828,11 +828,11 @@ async def bench_rust_async(
                 per_op_times.append(time.perf_counter() - t0)
 
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[_operate(i) for i in range(count)])
         elapsed = time.perf_counter() - t0
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         operate_rounds.append(elapsed)
         operate_cpu_rounds.append(cpu_elapsed)
@@ -858,11 +858,11 @@ async def bench_rust_async(
                 per_op_times.append(time.perf_counter() - t0)
 
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[_rm(i) for i in range(count)])
         elapsed = time.perf_counter() - t0
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         remove_rounds.append(elapsed)
         remove_cpu_rounds.append(cpu_elapsed)
@@ -879,11 +879,11 @@ async def bench_rust_async(
     multi_batch_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[client.batch_read(g) for g in groups])
         elapsed = time.perf_counter() - t0
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         multi_batch_rounds.append(elapsed)
         multi_batch_cpu_rounds.append(cpu_elapsed)
@@ -900,11 +900,11 @@ async def bench_rust_async(
         numpy_batch_cpu_rounds = []
         for _ in range(rounds):
             gc.disable()
-            c0 = time.process_time()
+            c0 = time.thread_time()
             t0 = time.perf_counter()
             await asyncio.gather(*[client.batch_read(g, _dtype=numpy_dtype) for g in groups])
             elapsed = time.perf_counter() - t0
-            cpu_elapsed = time.process_time() - c0
+            cpu_elapsed = time.thread_time() - c0
             gc.enable()
             numpy_batch_rounds.append(elapsed)
             numpy_batch_cpu_rounds.append(cpu_elapsed)
@@ -934,11 +934,11 @@ async def bench_rust_async(
     batch_write_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[client.batch_operate(g, write_ops) for g in bw_groups])
         elapsed = time.perf_counter() - t0
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         batch_write_rounds.append(elapsed)
         batch_write_cpu_rounds.append(cpu_elapsed)
@@ -964,13 +964,13 @@ async def bench_rust_async(
         numpy_write_cpu_rounds = []
         for _ in range(rounds):
             gc.disable()
-            c0 = time.process_time()
+            c0 = time.thread_time()
             t0 = time.perf_counter()
             await asyncio.gather(
                 *[client.batch_write_numpy(d, NAMESPACE, SET_NAME, numpy_write_dtype) for d in numpy_write_data]
             )
             elapsed = time.perf_counter() - t0
-            cpu_elapsed = time.process_time() - c0
+            cpu_elapsed = time.thread_time() - c0
             gc.enable()
             numpy_write_rounds.append(elapsed)
             numpy_write_cpu_rounds.append(cpu_elapsed)
@@ -995,12 +995,12 @@ async def bench_rust_async(
     query_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        c0 = time.process_time()
+        c0 = time.thread_time()
         t0 = time.perf_counter()
         async_q = client.query(NAMESPACE, SET_NAME)
         await async_q.results()
         elapsed = time.perf_counter() - t0
-        cpu_elapsed = time.process_time() - c0
+        cpu_elapsed = time.thread_time() - c0
         gc.enable()
         query_rounds.append(elapsed)
         query_cpu_rounds.append(cpu_elapsed)

@@ -1,0 +1,142 @@
+/* ── MetricCard ───────────────────────────────────────────── */
+
+.metricCard {
+  background: var(--ifm-background-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  padding: 1.25rem;
+  text-align: center;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.metricCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(103, 58, 183, 0.12);
+}
+
+[data-theme='dark'] .metricCard {
+  background: var(--ifm-background-surface-color);
+}
+
+[data-theme='dark'] .metricCard:hover {
+  box-shadow: 0 4px 12px rgba(103, 58, 183, 0.25);
+}
+
+.metricValue {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.metricValuePrimary {
+  color: var(--ifm-color-primary);
+}
+
+.metricValueSuccess {
+  color: var(--ifm-color-success-darkest, #2e7d32);
+}
+
+.metricValueWarning {
+  color: var(--ifm-color-warning-darkest, #e65100);
+}
+
+.metricLabel {
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-600);
+  margin-top: 0.25rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ── QuickComparisonGrid ─────────────────────────────────── */
+
+.comparisonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.comparisonCard {
+  background: var(--ifm-background-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+}
+
+[data-theme='dark'] .comparisonCard {
+  background: var(--ifm-background-surface-color);
+}
+
+.comparisonCardHeader {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.comparisonRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0;
+  font-size: 0.85rem;
+}
+
+.comparisonRowLabel {
+  color: var(--ifm-color-emphasis-600);
+}
+
+.comparisonRowValue {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── SpeedupBadge ────────────────────────────────────────── */
+
+.speedupBadge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.speedupFaster {
+  background: rgba(46, 125, 50, 0.12);
+  color: var(--ifm-color-success-darkest, #2e7d32);
+}
+
+.speedupSlower {
+  background: rgba(198, 40, 40, 0.12);
+  color: var(--ifm-color-danger-darkest, #c62828);
+}
+
+/* ── Takeaways ───────────────────────────────────────────── */
+
+.takeawaysList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.takeawaysList li {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  border-left: 3px solid var(--ifm-color-primary);
+  background: var(--ifm-color-emphasis-50);
+  border-radius: 0 4px 4px 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.takeawaysList li strong {
+  color: var(--ifm-color-primary);
+}
+
+@media (max-width: 768px) {
+  .comparisonGrid {
+    grid-template-columns: 1fr;
+  }
+}

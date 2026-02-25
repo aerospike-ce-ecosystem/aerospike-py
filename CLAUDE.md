@@ -87,8 +87,8 @@ make fmt                            # ruff format + cargo fmt
 make run-aerospike-ce               # compose.local.yaml로 Aerospike CE 실행 (port 18710)
 
 # 벤치마크
-make run-benchmark                  # aerospike-py vs 공식 클라이언트 비교
-make run-numpy-benchmark            # NumPy 배치 벤치마크
+make run-benchmark-report                      # 벤치마크 실행 + JSON 리포트 생성
+make run-benchmark-report BENCH_SCENARIO=all   # 전체 시나리오 (numpy 포함) + 리포트
 ```
 
 ### Pre-commit Hooks
@@ -101,6 +101,7 @@ make run-numpy-benchmark            # NumPy 배치 벤치마크
 - 통합 테스트 실행 전 `make run-aerospike-ce`로 로컬 서버 필요
 - maturin 버전 `>=1.9,<2.0`으로 고정
 - `AEROSPIKE_HOST`, `AEROSPIKE_PORT` 환경변수로 서버 주소 변경 가능 (기본: `127.0.0.1:18710`)
+- `AEROSPIKE_RUNTIME_WORKERS` 환경변수로 내부 Tokio 워커 스레드 수 조정 가능 (기본: 2, I/O-bound이므로 대부분 2로 충분)
 - `RUNTIME` 환경변수로 docker/podman 선택 가능 (기본: podman)
 - 컨테이너 설정은 프로젝트 루트의 compose 파일로 관리: `compose.local.yaml` (개발용), `compose.sample-fastapi.yaml` (FastAPI 예제용)
 - CI는 자체 서비스 컨테이너(port 3000)를 사용하며 `AEROSPIKE_PORT=3000` 환경변수로 설정됨
