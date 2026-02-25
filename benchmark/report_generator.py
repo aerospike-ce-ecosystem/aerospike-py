@@ -114,6 +114,18 @@ def _generate_takeaways(results: BenchmarkResults) -> list[str]:
                     f"official BATCH_READ (returns numpy structured array vs Python dict)"
                 )
 
+    # CPU efficiency comparison (ops/CPU-sec)
+    if has_c:
+        for op in ["put", "get"]:
+            r_eff = results.rust_sync[op].get("ops_per_cpu_sec", 0)
+            c_eff = results.c_sync[op].get("ops_per_cpu_sec", 0)
+            if r_eff and c_eff and c_eff > 0:
+                ratio = r_eff / c_eff
+                if ratio > 1:
+                    takeaways.append(
+                        f"aerospike-py {OP_LABELS[op]} processes **{ratio:.1f}x** more ops per CPU-second (ops/CPU-sec)"
+                    )
+
     # Async vs sync advantage
     best_async_sync_op = None
     best_async_sync_ratio = 0
@@ -160,6 +172,11 @@ def _op_dict(data: dict, op: str) -> dict:
         result["cpu_p50_ms"] = d["cpu_p50_ms"]
         result["io_wait_p50_ms"] = d.get("io_wait_p50_ms")
         result["cpu_pct"] = d.get("cpu_pct")
+    # Process-level CPU (all threads including Tokio workers)
+    if d.get("process_cpu_ms") is not None:
+        result["process_cpu_ms"] = d["process_cpu_ms"]
+        result["process_cpu_pct"] = d.get("process_cpu_pct")
+        result["ops_per_cpu_sec"] = d.get("ops_per_cpu_sec")
     # Async per-op latency distribution
     if d.get("per_op") is not None:
         po = d["per_op"]

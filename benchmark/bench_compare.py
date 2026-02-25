@@ -28,6 +28,7 @@ import math
 import os
 import platform
 import random
+import resource
 import statistics
 import sys
 import time
@@ -89,14 +90,22 @@ class BenchmarkResults:
 # ── timing helpers ───────────────────────────────────────────
 
 
-def _measure_loop_cpu(fn, count: int) -> tuple[list[float], list[float]]:
-    """Call fn(i) for i in range(count), return (wall_times, cpu_times) in seconds.
+def _get_process_cpu() -> float:
+    """Return total process CPU time (user + system) in seconds via getrusage."""
+    ru = resource.getrusage(resource.RUSAGE_SELF)
+    return ru.ru_utime + ru.ru_stime
+
+
+def _measure_loop_cpu(fn, count: int) -> tuple[list[float], list[float], float]:
+    """Call fn(i) for i in range(count), return (wall_times, cpu_times, process_cpu_delta) in seconds.
 
     Captures both wall-clock time (perf_counter) and CPU time (thread_time)
     to measure only the calling thread's CPU, excluding Tokio worker threads.
+    Also captures process-level CPU (all threads including Tokio workers) via getrusage.
     """
     wall_times = []
     cpu_times = []
+    proc0 = _get_process_cpu()
     for i in range(count):
         w0 = time.perf_counter()
         c0 = time.thread_time()
@@ -105,7 +114,8 @@ def _measure_loop_cpu(fn, count: int) -> tuple[list[float], list[float]]:
         w1 = time.perf_counter()
         wall_times.append(w1 - w0)
         cpu_times.append(c1 - c0)
-    return wall_times, cpu_times
+    proc1 = _get_process_cpu()
+    return wall_times, cpu_times, proc1 - proc0
 
 
 def _measure_bulk(fn) -> float:
@@ -145,10 +155,16 @@ def _compute_mad(values: list[float]) -> float:
     return statistics.median([abs(v - med) for v in values])
 
 
-def _median_of_medians(rounds: list[list[float]], cpu_rounds: list[list[float]] | None = None) -> dict:
+def _median_of_medians(
+    rounds: list[list[float]],
+    cpu_rounds: list[list[float]] | None = None,
+    process_cpu_rounds: list[tuple[float, float]] | None = None,
+) -> dict:
     """Given multiple rounds of per-op times, return stable metrics.
 
     Enhanced with p75/p90/p95/p99.9 percentiles, MAD, and optional CPU time breakdown.
+
+    *process_cpu_rounds*: list of (process_cpu_delta_sec, wall_total_sec) per round.
     """
     round_medians = _trim_iqr([statistics.median(r) * 1000 for r in rounds])
     round_means = _trim_iqr([statistics.mean(r) * 1000 for r in rounds])
@@ -179,6 +195,18 @@ def _median_of_medians(rounds: list[list[float]], cpu_rounds: list[list[float]] 
         result["io_wait_p50_ms"] = round(wall_median - cpu_median, 4) if wall_median and cpu_median else None
         result["cpu_pct"] = round((cpu_median / wall_median) * 100, 1) if wall_median and wall_median > 0 else None
 
+    # Process-level CPU (all threads including Tokio workers)
+    if process_cpu_rounds:
+        count_per_round = len(rounds[0]) if rounds else 0
+        proc_per_op_ms = _trim_iqr(
+            [(pc / count_per_round) * 1000 for pc, _ in process_cpu_rounds if count_per_round > 0]
+        )
+        proc_pcts = _trim_iqr([(pc / wt) * 100 for pc, wt in process_cpu_rounds if wt > 0])
+        ops_per_cpu = _trim_iqr([count_per_round / pc for pc, _ in process_cpu_rounds if pc > 0])
+        result["process_cpu_ms"] = round(statistics.median(proc_per_op_ms), 4) if proc_per_op_ms else None
+        result["process_cpu_pct"] = round(statistics.median(proc_pcts), 1) if proc_pcts else None
+        result["ops_per_cpu_sec"] = round(statistics.median(ops_per_cpu), 1) if ops_per_cpu else None
+
     return result
 
 
@@ -186,11 +214,14 @@ def _bulk_median(
     round_times: list[float],
     count: int,
     cpu_round_times: list[float] | None = None,
+    process_cpu_round_times: list[float] | None = None,
 ) -> dict:
     """Given multiple round elapsed times for a bulk op, return metrics.
 
     If *cpu_round_times* is provided (per-round thread_time deltas), CPU
     breakdown fields are added.
+    If *process_cpu_round_times* is provided (per-round process CPU deltas),
+    process-level CPU fields are added.
     """
     avg_ms = _trim_iqr([(t / count) * 1000 for t in round_times])
     ops_per_sec = _trim_iqr([count / t for t in round_times if t > 0])
@@ -209,6 +240,14 @@ def _bulk_median(
         result["cpu_p50_ms"] = round(cpu_median, 4)
         result["io_wait_p50_ms"] = round(wall_median - cpu_median, 4) if wall_median else None
         result["cpu_pct"] = round((cpu_median / wall_median) * 100, 1) if wall_median and wall_median > 0 else None
+
+    if process_cpu_round_times:
+        proc_per_op_ms = _trim_iqr([(t / count) * 1000 for t in process_cpu_round_times])
+        proc_pcts = _trim_iqr([(pc / wt) * 100 for pc, wt in zip(process_cpu_round_times, round_times) if wt > 0])
+        ops_per_cpu = _trim_iqr([count / t for t in process_cpu_round_times if t > 0])
+        result["process_cpu_ms"] = round(statistics.median(proc_per_op_ms), 4) if proc_per_op_ms else None
+        result["process_cpu_pct"] = round(statistics.median(proc_pcts), 1) if proc_pcts else None
+        result["ops_per_cpu_sec"] = round(statistics.median(ops_per_cpu), 1) if ops_per_cpu else None
 
     return result
 
@@ -299,9 +338,10 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
     _log(f"PUT  {count} ops x {rounds} rounds  (gc disabled, cpu tracked)")
     put_rounds = []
     put_cpu_rounds = []
+    put_process_cpu_rounds = []
     for r in range(rounds):
         gc.disable()
-        wall_times, cpu_times = _measure_loop_cpu(
+        wall_times, cpu_times, proc_cpu_delta = _measure_loop_cpu(
             lambda i, _r=r: client.put(
                 (NAMESPACE, SET_NAME, f"{prefix}p{_r}_{i}"),
                 {"n": f"u{i}", "a": i, "s": i * 1.1},
@@ -311,9 +351,12 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
         gc.enable()
         put_rounds.append(wall_times)
         put_cpu_rounds.append(cpu_times)
+        put_process_cpu_rounds.append((proc_cpu_delta, sum(wall_times)))
         for i in range(count):
             client.remove((NAMESPACE, SET_NAME, f"{prefix}p{r}_{i}"))
-    results["put"] = _median_of_medians(put_rounds, cpu_rounds=put_cpu_rounds)
+    results["put"] = _median_of_medians(
+        put_rounds, cpu_rounds=put_cpu_rounds, process_cpu_rounds=put_process_cpu_rounds
+    )
     _settle()
 
     # --- seed data for GET/BATCH/QUERY ---
@@ -325,25 +368,30 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
     _log(f"GET  {count} ops x {rounds} rounds  (gc disabled, cpu tracked)")
     get_rounds = []
     get_cpu_rounds = []
+    get_process_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        wall_times, cpu_times = _measure_loop_cpu(
+        wall_times, cpu_times, proc_cpu_delta = _measure_loop_cpu(
             lambda i: client.get((NAMESPACE, SET_NAME, f"{prefix}{i}")),
             count,
         )
         gc.enable()
         get_rounds.append(wall_times)
         get_cpu_rounds.append(cpu_times)
-    results["get"] = _median_of_medians(get_rounds, cpu_rounds=get_cpu_rounds)
+        get_process_cpu_rounds.append((proc_cpu_delta, sum(wall_times)))
+    results["get"] = _median_of_medians(
+        get_rounds, cpu_rounds=get_cpu_rounds, process_cpu_rounds=get_process_cpu_rounds
+    )
     _settle()
 
     # --- OPERATE (read + increment in single call) ---
     _log(f"OPERATE  {count} ops x {rounds} rounds  (gc disabled, cpu tracked)")
     operate_rounds = []
     operate_cpu_rounds = []
+    operate_process_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        wall_times, cpu_times = _measure_loop_cpu(
+        wall_times, cpu_times, proc_cpu_delta = _measure_loop_cpu(
             lambda i: client.operate(
                 (NAMESPACE, SET_NAME, f"{prefix}{i}"),
                 [
@@ -356,26 +404,33 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
         gc.enable()
         operate_rounds.append(wall_times)
         operate_cpu_rounds.append(cpu_times)
-    results["operate"] = _median_of_medians(operate_rounds, cpu_rounds=operate_cpu_rounds)
+        operate_process_cpu_rounds.append((proc_cpu_delta, sum(wall_times)))
+    results["operate"] = _median_of_medians(
+        operate_rounds, cpu_rounds=operate_cpu_rounds, process_cpu_rounds=operate_process_cpu_rounds
+    )
     _settle()
 
     # --- REMOVE ---
     _log(f"REMOVE  {count} ops x {rounds} rounds  (gc disabled, cpu tracked)")
     remove_rounds = []
     remove_cpu_rounds = []
+    remove_process_cpu_rounds = []
     for r in range(rounds):
         # seed fresh keys for removal
         rm_prefix = f"{prefix}rm{r}_"
         _seed_sync(client.put, rm_prefix, count)
         gc.disable()
-        wall_times, cpu_times = _measure_loop_cpu(
+        wall_times, cpu_times, proc_cpu_delta = _measure_loop_cpu(
             lambda i: client.remove((NAMESPACE, SET_NAME, f"{rm_prefix}{i}")),
             count,
         )
         gc.enable()
         remove_rounds.append(wall_times)
         remove_cpu_rounds.append(cpu_times)
-    results["remove"] = _median_of_medians(remove_rounds, cpu_rounds=remove_cpu_rounds)
+        remove_process_cpu_rounds.append((proc_cpu_delta, sum(wall_times)))
+    results["remove"] = _median_of_medians(
+        remove_rounds, cpu_rounds=remove_cpu_rounds, process_cpu_rounds=remove_process_cpu_rounds
+    )
     _settle()
 
     # --- BATCH READ MULTI (sequential) ---
@@ -384,15 +439,19 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
     groups = [keys[i::batch_groups] for i in range(batch_groups)]
     multi_batch_rounds = []
     multi_batch_cpu_rounds = []
+    multi_batch_proc_rounds = []
     for _ in range(rounds):
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         elapsed = _measure_bulk(lambda: [client.batch_read(g) for g in groups])
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         multi_batch_rounds.append(elapsed)
         multi_batch_cpu_rounds.append(cpu_elapsed)
-    results["batch_read"] = _bulk_median(multi_batch_rounds, count, multi_batch_cpu_rounds)
+        multi_batch_proc_rounds.append(proc_elapsed)
+    results["batch_read"] = _bulk_median(multi_batch_rounds, count, multi_batch_cpu_rounds, multi_batch_proc_rounds)
     _settle()
 
     # --- BATCH READ NUMPY (sequential) ---
@@ -403,15 +462,21 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
         _log(f"BATCH_READ_NUMPY  {batch_groups} groups x {rounds} rounds  (gc disabled)")
         numpy_batch_rounds = []
         numpy_batch_cpu_rounds = []
+        numpy_batch_proc_rounds = []
         for _ in range(rounds):
             gc.disable()
+            proc0 = _get_process_cpu()
             c0 = time.thread_time()
             elapsed = _measure_bulk(lambda: [client.batch_read(g, _dtype=numpy_dtype) for g in groups])
             cpu_elapsed = time.thread_time() - c0
+            proc_elapsed = _get_process_cpu() - proc0
             gc.enable()
             numpy_batch_rounds.append(elapsed)
             numpy_batch_cpu_rounds.append(cpu_elapsed)
-        results["batch_read_numpy"] = _bulk_median(numpy_batch_rounds, count, numpy_batch_cpu_rounds)
+            numpy_batch_proc_rounds.append(proc_elapsed)
+        results["batch_read_numpy"] = _bulk_median(
+            numpy_batch_rounds, count, numpy_batch_cpu_rounds, numpy_batch_proc_rounds
+        )
     except ImportError:
         _log("numpy not installed, skipping BATCH_READ_NUMPY")
         results["batch_read_numpy"] = {
@@ -433,15 +498,19 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
     bw_groups = [bw_keys[i::batch_groups] for i in range(batch_groups)]
     batch_write_rounds = []
     batch_write_cpu_rounds = []
+    batch_write_proc_rounds = []
     for _ in range(rounds):
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         elapsed = _measure_bulk(lambda: [client.batch_operate(g, write_ops) for g in bw_groups])
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         batch_write_rounds.append(elapsed)
         batch_write_cpu_rounds.append(cpu_elapsed)
-    results["batch_write"] = _bulk_median(batch_write_rounds, count, batch_write_cpu_rounds)
+        batch_write_proc_rounds.append(proc_elapsed)
+    results["batch_write"] = _bulk_median(batch_write_rounds, count, batch_write_cpu_rounds, batch_write_proc_rounds)
     # cleanup batch_write keys
     for k in bw_keys:
         try:
@@ -465,17 +534,23 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
         ]
         numpy_write_rounds = []
         numpy_write_cpu_rounds = []
+        numpy_write_proc_rounds = []
         for _ in range(rounds):
             gc.disable()
+            proc0 = _get_process_cpu()
             c0 = time.thread_time()
             elapsed = _measure_bulk(
                 lambda: [client.batch_write_numpy(d, NAMESPACE, SET_NAME, numpy_write_dtype) for d in numpy_write_data]
             )
             cpu_elapsed = time.thread_time() - c0
+            proc_elapsed = _get_process_cpu() - proc0
             gc.enable()
             numpy_write_rounds.append(elapsed)
             numpy_write_cpu_rounds.append(cpu_elapsed)
-        results["batch_write_numpy"] = _bulk_median(numpy_write_rounds, count, numpy_write_cpu_rounds)
+            numpy_write_proc_rounds.append(proc_elapsed)
+        results["batch_write_numpy"] = _bulk_median(
+            numpy_write_rounds, count, numpy_write_cpu_rounds, numpy_write_proc_rounds
+        )
         # cleanup numpy write keys
         nw_keys = [(NAMESPACE, SET_NAME, i) for g in range(batch_groups) for i in _group_range(g, count, batch_groups)]
         for k in nw_keys:
@@ -497,13 +572,17 @@ def bench_rust_sync(host: str, port: int, count: int, rounds: int, warmup: int, 
     # --- QUERY ---
     _log(f"QUERY  x {rounds} rounds  (gc disabled)")
     query_rounds = []
+    query_proc_rounds = []
     for _ in range(rounds):
         q = client.query(NAMESPACE, SET_NAME)
         gc.disable()
+        proc0 = _get_process_cpu()
         elapsed = _measure_bulk(lambda q=q: q.results())
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         query_rounds.append(elapsed)
-    results["query"] = _bulk_median(query_rounds, count)
+        query_proc_rounds.append(proc_elapsed)
+    results["query"] = _bulk_median(query_rounds, count, process_cpu_round_times=query_proc_rounds)
 
     # cleanup
     _log("cleanup ...")
@@ -542,9 +621,10 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
     _log(f"PUT  {count} ops x {rounds} rounds  (gc disabled, cpu tracked)")
     put_rounds = []
     put_cpu_rounds = []
+    put_process_cpu_rounds = []
     for r in range(rounds):
         gc.disable()
-        wall_times, cpu_times = _measure_loop_cpu(
+        wall_times, cpu_times, proc_cpu_delta = _measure_loop_cpu(
             lambda i, _r=r: client.put(
                 (NAMESPACE, SET_NAME, f"{prefix}p{_r}_{i}"),
                 {"n": f"u{i}", "a": i, "s": i * 1.1},
@@ -554,9 +634,12 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
         gc.enable()
         put_rounds.append(wall_times)
         put_cpu_rounds.append(cpu_times)
+        put_process_cpu_rounds.append((proc_cpu_delta, sum(wall_times)))
         for i in range(count):
             client.remove((NAMESPACE, SET_NAME, f"{prefix}p{r}_{i}"))
-    results["put"] = _median_of_medians(put_rounds, cpu_rounds=put_cpu_rounds)
+    results["put"] = _median_of_medians(
+        put_rounds, cpu_rounds=put_cpu_rounds, process_cpu_rounds=put_process_cpu_rounds
+    )
     _settle()
 
     # --- seed ---
@@ -568,16 +651,20 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
     _log(f"GET  {count} ops x {rounds} rounds  (gc disabled, cpu tracked)")
     get_rounds = []
     get_cpu_rounds = []
+    get_process_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        wall_times, cpu_times = _measure_loop_cpu(
+        wall_times, cpu_times, proc_cpu_delta = _measure_loop_cpu(
             lambda i: client.get((NAMESPACE, SET_NAME, f"{prefix}{i}")),
             count,
         )
         gc.enable()
         get_rounds.append(wall_times)
         get_cpu_rounds.append(cpu_times)
-    results["get"] = _median_of_medians(get_rounds, cpu_rounds=get_cpu_rounds)
+        get_process_cpu_rounds.append((proc_cpu_delta, sum(wall_times)))
+    results["get"] = _median_of_medians(
+        get_rounds, cpu_rounds=get_cpu_rounds, process_cpu_rounds=get_process_cpu_rounds
+    )
     _settle()
 
     # --- OPERATE (read + increment in single call) ---
@@ -586,9 +673,10 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
     _log(f"OPERATE  {count} ops x {rounds} rounds  (gc disabled, cpu tracked)")
     operate_rounds = []
     operate_cpu_rounds = []
+    operate_process_cpu_rounds = []
     for _ in range(rounds):
         gc.disable()
-        wall_times, cpu_times = _measure_loop_cpu(
+        wall_times, cpu_times, proc_cpu_delta = _measure_loop_cpu(
             lambda i: client.operate(
                 (NAMESPACE, SET_NAME, f"{prefix}{i}"),
                 [as_ops_single.read("n"), as_ops_single.increment("a", 1)],
@@ -598,25 +686,32 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
         gc.enable()
         operate_rounds.append(wall_times)
         operate_cpu_rounds.append(cpu_times)
-    results["operate"] = _median_of_medians(operate_rounds, cpu_rounds=operate_cpu_rounds)
+        operate_process_cpu_rounds.append((proc_cpu_delta, sum(wall_times)))
+    results["operate"] = _median_of_medians(
+        operate_rounds, cpu_rounds=operate_cpu_rounds, process_cpu_rounds=operate_process_cpu_rounds
+    )
     _settle()
 
     # --- REMOVE ---
     _log(f"REMOVE  {count} ops x {rounds} rounds  (gc disabled, cpu tracked)")
     remove_rounds = []
     remove_cpu_rounds = []
+    remove_process_cpu_rounds = []
     for r in range(rounds):
         rm_prefix = f"{prefix}rm{r}_"
         _seed_sync(client.put, rm_prefix, count)
         gc.disable()
-        wall_times, cpu_times = _measure_loop_cpu(
+        wall_times, cpu_times, proc_cpu_delta = _measure_loop_cpu(
             lambda i: client.remove((NAMESPACE, SET_NAME, f"{rm_prefix}{i}")),
             count,
         )
         gc.enable()
         remove_rounds.append(wall_times)
         remove_cpu_rounds.append(cpu_times)
-    results["remove"] = _median_of_medians(remove_rounds, cpu_rounds=remove_cpu_rounds)
+        remove_process_cpu_rounds.append((proc_cpu_delta, sum(wall_times)))
+    results["remove"] = _median_of_medians(
+        remove_rounds, cpu_rounds=remove_cpu_rounds, process_cpu_rounds=remove_process_cpu_rounds
+    )
     _settle()
 
     # --- BATCH READ MULTI (sequential) ---
@@ -625,15 +720,19 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
     groups = [keys[i::batch_groups] for i in range(batch_groups)]
     multi_batch_rounds = []
     multi_batch_cpu_rounds = []
+    multi_batch_proc_rounds = []
     for _ in range(rounds):
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         elapsed = _measure_bulk(lambda: [client.batch_read(g) for g in groups])
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         multi_batch_rounds.append(elapsed)
         multi_batch_cpu_rounds.append(cpu_elapsed)
-    results["batch_read"] = _bulk_median(multi_batch_rounds, count, multi_batch_cpu_rounds)
+        multi_batch_proc_rounds.append(proc_elapsed)
+    results["batch_read"] = _bulk_median(multi_batch_rounds, count, multi_batch_cpu_rounds, multi_batch_proc_rounds)
     # C client does not support NumpyBatchRecords
     results["batch_read_numpy"] = {
         "avg_ms": None,
@@ -656,15 +755,19 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
     bw_groups = [bw_keys[i::batch_groups] for i in range(batch_groups)]
     batch_write_rounds = []
     batch_write_cpu_rounds = []
+    batch_write_proc_rounds = []
     for _ in range(rounds):
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         elapsed = _measure_bulk(lambda: [client.batch_operate(g, c_write_ops) for g in bw_groups])
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         batch_write_rounds.append(elapsed)
         batch_write_cpu_rounds.append(cpu_elapsed)
-    results["batch_write"] = _bulk_median(batch_write_rounds, count, batch_write_cpu_rounds)
+        batch_write_proc_rounds.append(proc_elapsed)
+    results["batch_write"] = _bulk_median(batch_write_rounds, count, batch_write_cpu_rounds, batch_write_proc_rounds)
     # cleanup batch_write keys
     for k in bw_keys:
         try:
@@ -684,13 +787,17 @@ def bench_c_sync(host: str, port: int, count: int, rounds: int, warmup: int, bat
     # --- QUERY ---
     _log(f"QUERY  x {rounds} rounds  (gc disabled)")
     query_rounds = []
+    query_proc_rounds = []
     for _ in range(rounds):
         q = client.query(NAMESPACE, SET_NAME)
         gc.disable()
+        proc0 = _get_process_cpu()
         elapsed = _measure_bulk(lambda q=q: q.results())
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         query_rounds.append(elapsed)
-    results["query"] = _bulk_median(query_rounds, count)
+        query_proc_rounds.append(proc_elapsed)
+    results["query"] = _bulk_median(query_rounds, count, process_cpu_round_times=query_proc_rounds)
 
     # cleanup
     _log("cleanup ...")
@@ -741,6 +848,7 @@ async def bench_rust_async(
     _log(f"PUT  {count} ops x {rounds} rounds, concurrency={concurrency}  (gc disabled, per-op latency)")
     put_rounds = []
     put_cpu_rounds = []
+    put_proc_rounds = []
     put_per_op_rounds = []
     for r in range(rounds):
         per_op_times = []
@@ -755,19 +863,22 @@ async def bench_rust_async(
                 per_op_times.append(time.perf_counter() - t0)
 
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[_put(i) for i in range(count)])
         elapsed = time.perf_counter() - t0
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         put_rounds.append(elapsed)
         put_cpu_rounds.append(cpu_elapsed)
+        put_proc_rounds.append(proc_elapsed)
         put_per_op_rounds.append(per_op_times)
 
         # cleanup
         await _chunked_batch_remove(client, [(NAMESPACE, SET_NAME, f"{prefix}p{r}_{i}") for i in range(count)])
-    results["put"] = _bulk_median(put_rounds, count, put_cpu_rounds)
+    results["put"] = _bulk_median(put_rounds, count, put_cpu_rounds, put_proc_rounds)
     results["put"]["per_op"] = _median_of_medians(put_per_op_rounds) if put_per_op_rounds else None
     _settle()
 
@@ -780,6 +891,7 @@ async def bench_rust_async(
     _log(f"GET  {count} ops x {rounds} rounds, concurrency={concurrency}  (gc disabled, per-op latency)")
     get_rounds = []
     get_cpu_rounds = []
+    get_proc_rounds = []
     get_per_op_rounds = []
     for _ in range(rounds):
         per_op_times = []
@@ -791,16 +903,19 @@ async def bench_rust_async(
                 per_op_times.append(time.perf_counter() - t0)
 
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[_get(i) for i in range(count)])
         elapsed = time.perf_counter() - t0
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         get_rounds.append(elapsed)
         get_cpu_rounds.append(cpu_elapsed)
+        get_proc_rounds.append(proc_elapsed)
         get_per_op_rounds.append(per_op_times)
-    results["get"] = _bulk_median(get_rounds, count, get_cpu_rounds)
+    results["get"] = _bulk_median(get_rounds, count, get_cpu_rounds, get_proc_rounds)
     results["get"]["per_op"] = _median_of_medians(get_per_op_rounds) if get_per_op_rounds else None
     _settle()
 
@@ -814,6 +929,7 @@ async def bench_rust_async(
     ]
     operate_rounds = []
     operate_cpu_rounds = []
+    operate_proc_rounds = []
     operate_per_op_rounds = []
     for _ in range(rounds):
         per_op_times = []
@@ -828,16 +944,19 @@ async def bench_rust_async(
                 per_op_times.append(time.perf_counter() - t0)
 
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[_operate(i) for i in range(count)])
         elapsed = time.perf_counter() - t0
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         operate_rounds.append(elapsed)
         operate_cpu_rounds.append(cpu_elapsed)
+        operate_proc_rounds.append(proc_elapsed)
         operate_per_op_rounds.append(per_op_times)
-    results["operate"] = _bulk_median(operate_rounds, count, operate_cpu_rounds)
+    results["operate"] = _bulk_median(operate_rounds, count, operate_cpu_rounds, operate_proc_rounds)
     results["operate"]["per_op"] = _median_of_medians(operate_per_op_rounds) if operate_per_op_rounds else None
     _settle()
 
@@ -845,6 +964,7 @@ async def bench_rust_async(
     _log(f"REMOVE  {count} ops x {rounds} rounds, concurrency={concurrency}  (gc disabled, per-op latency)")
     remove_rounds = []
     remove_cpu_rounds = []
+    remove_proc_rounds = []
     remove_per_op_rounds = []
     for r in range(rounds):
         rm_prefix = f"{prefix}rm{r}_"
@@ -858,16 +978,19 @@ async def bench_rust_async(
                 per_op_times.append(time.perf_counter() - t0)
 
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[_rm(i) for i in range(count)])
         elapsed = time.perf_counter() - t0
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         remove_rounds.append(elapsed)
         remove_cpu_rounds.append(cpu_elapsed)
+        remove_proc_rounds.append(proc_elapsed)
         remove_per_op_rounds.append(per_op_times)
-    results["remove"] = _bulk_median(remove_rounds, count, remove_cpu_rounds)
+    results["remove"] = _bulk_median(remove_rounds, count, remove_cpu_rounds, remove_proc_rounds)
     results["remove"]["per_op"] = _median_of_medians(remove_per_op_rounds) if remove_per_op_rounds else None
     _settle()
 
@@ -877,17 +1000,21 @@ async def bench_rust_async(
     groups = [keys[i::batch_groups] for i in range(batch_groups)]
     multi_batch_rounds = []
     multi_batch_cpu_rounds = []
+    multi_batch_proc_rounds = []
     for _ in range(rounds):
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[client.batch_read(g) for g in groups])
         elapsed = time.perf_counter() - t0
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         multi_batch_rounds.append(elapsed)
         multi_batch_cpu_rounds.append(cpu_elapsed)
-    results["batch_read"] = _bulk_median(multi_batch_rounds, count, multi_batch_cpu_rounds)
+        multi_batch_proc_rounds.append(proc_elapsed)
+    results["batch_read"] = _bulk_median(multi_batch_rounds, count, multi_batch_cpu_rounds, multi_batch_proc_rounds)
     _settle()
 
     # --- BATCH READ NUMPY (concurrent) ---
@@ -898,17 +1025,23 @@ async def bench_rust_async(
         _log(f"BATCH_READ_NUMPY  {batch_groups} groups x {rounds} rounds  (gc disabled)")
         numpy_batch_rounds = []
         numpy_batch_cpu_rounds = []
+        numpy_batch_proc_rounds = []
         for _ in range(rounds):
             gc.disable()
+            proc0 = _get_process_cpu()
             c0 = time.thread_time()
             t0 = time.perf_counter()
             await asyncio.gather(*[client.batch_read(g, _dtype=numpy_dtype) for g in groups])
             elapsed = time.perf_counter() - t0
             cpu_elapsed = time.thread_time() - c0
+            proc_elapsed = _get_process_cpu() - proc0
             gc.enable()
             numpy_batch_rounds.append(elapsed)
             numpy_batch_cpu_rounds.append(cpu_elapsed)
-        results["batch_read_numpy"] = _bulk_median(numpy_batch_rounds, count, numpy_batch_cpu_rounds)
+            numpy_batch_proc_rounds.append(proc_elapsed)
+        results["batch_read_numpy"] = _bulk_median(
+            numpy_batch_rounds, count, numpy_batch_cpu_rounds, numpy_batch_proc_rounds
+        )
     except ImportError:
         _log("numpy not installed, skipping BATCH_READ_NUMPY")
         results["batch_read_numpy"] = {
@@ -932,17 +1065,21 @@ async def bench_rust_async(
     bw_groups = [bw_keys[i::batch_groups] for i in range(batch_groups)]
     batch_write_rounds = []
     batch_write_cpu_rounds = []
+    batch_write_proc_rounds = []
     for _ in range(rounds):
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         t0 = time.perf_counter()
         await asyncio.gather(*[client.batch_operate(g, write_ops) for g in bw_groups])
         elapsed = time.perf_counter() - t0
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         batch_write_rounds.append(elapsed)
         batch_write_cpu_rounds.append(cpu_elapsed)
-    results["batch_write"] = _bulk_median(batch_write_rounds, count, batch_write_cpu_rounds)
+        batch_write_proc_rounds.append(proc_elapsed)
+    results["batch_write"] = _bulk_median(batch_write_rounds, count, batch_write_cpu_rounds, batch_write_proc_rounds)
     # cleanup batch_write keys
     await _chunked_batch_remove(client, bw_keys)
     _settle()
@@ -962,8 +1099,10 @@ async def bench_rust_async(
         ]
         numpy_write_rounds = []
         numpy_write_cpu_rounds = []
+        numpy_write_proc_rounds = []
         for _ in range(rounds):
             gc.disable()
+            proc0 = _get_process_cpu()
             c0 = time.thread_time()
             t0 = time.perf_counter()
             await asyncio.gather(
@@ -971,10 +1110,14 @@ async def bench_rust_async(
             )
             elapsed = time.perf_counter() - t0
             cpu_elapsed = time.thread_time() - c0
+            proc_elapsed = _get_process_cpu() - proc0
             gc.enable()
             numpy_write_rounds.append(elapsed)
             numpy_write_cpu_rounds.append(cpu_elapsed)
-        results["batch_write_numpy"] = _bulk_median(numpy_write_rounds, count, numpy_write_cpu_rounds)
+            numpy_write_proc_rounds.append(proc_elapsed)
+        results["batch_write_numpy"] = _bulk_median(
+            numpy_write_rounds, count, numpy_write_cpu_rounds, numpy_write_proc_rounds
+        )
         # cleanup numpy write keys
         nw_keys = [(NAMESPACE, SET_NAME, i) for g in range(batch_groups) for i in _group_range(g, count, batch_groups)]
         await _chunked_batch_remove(client, nw_keys)
@@ -993,18 +1136,22 @@ async def bench_rust_async(
     _log(f"QUERY  x {rounds} rounds  (gc disabled)")
     query_rounds = []
     query_cpu_rounds = []
+    query_proc_rounds = []
     for _ in range(rounds):
         gc.disable()
+        proc0 = _get_process_cpu()
         c0 = time.thread_time()
         t0 = time.perf_counter()
         async_q = client.query(NAMESPACE, SET_NAME)
         await async_q.results()
         elapsed = time.perf_counter() - t0
         cpu_elapsed = time.thread_time() - c0
+        proc_elapsed = _get_process_cpu() - proc0
         gc.enable()
         query_rounds.append(elapsed)
         query_cpu_rounds.append(cpu_elapsed)
-    results["query"] = _bulk_median(query_rounds, count, query_cpu_rounds)
+        query_proc_rounds.append(proc_elapsed)
+    results["query"] = _bulk_median(query_rounds, count, query_cpu_rounds, query_proc_rounds)
 
     # cleanup
     _log("cleanup ...")
@@ -1053,6 +1200,17 @@ def _fmt_ops(val: float | None) -> str:
     if val is None:
         return "-"
     return f"{val:,.0f}/s"
+
+
+def _fmt_eff(val: float | None) -> str:
+    """Format ops/CPU-sec with K/M suffixes."""
+    if val is None:
+        return "-"
+    if val >= 1_000_000:
+        return f"{val / 1_000_000:.1f}M"
+    if val >= 1_000:
+        return f"{val / 1_000:.1f}K"
+    return f"{val:.0f}"
 
 
 def _visible_len(s: str) -> int:
@@ -1250,18 +1408,20 @@ def print_comparison(
                 line += f" | {_fmt_ms(c[op].get('p999_ms')):>10}"
             print(line)
 
-    # CPU Time Breakdown (Sync only)
-    cpu_ops = [op for op in ops if rust[op].get("cpu_p50_ms") is not None]
+    # CPU Efficiency (thread CPU, process CPU, ops/CPU-sec)
+    cpu_ops = [op for op in ops if rust[op].get("cpu_p50_ms") is not None or rust[op].get("process_cpu_ms") is not None]
     if cpu_ops:
-        has_c_cpu = c is not None and any(c[op].get("cpu_p50_ms") is not None for op in cpu_ops)
-        cpu_title = "CPU Time Breakdown (ms)  [CPU time vs I/O wait]"
+        has_c_cpu = c is not None and any(
+            c[op].get("cpu_p50_ms") is not None or c[op].get("process_cpu_ms") is not None for op in cpu_ops
+        )
+        cpu_title = "CPU Efficiency  [thread CPU, process CPU (all threads), ops/CPU-sec]"
         print(f"\n  {_c(Color.BOLD_CYAN, cpu_title) if color else cpu_title}")
         # Build header
         h = f"  {'Operation':<{COL_OP}}"
-        h += f" | {'Wall p50':>12} | {'CPU p50':>12} | {'I/O wait':>12} | {'CPU%':>8}"
+        h += f" | {'Wall p50':>12} | {'Thr.CPU':>10} | {'Proc.CPU':>10} | {'Proc.CPU%':>10} | {'Ops/CPU-s':>10}"
         if has_c_cpu:
-            h += f" | {'Off.Wall':>12} | {'Off.CPU':>12} | {'Off.I/O':>12} | {'CPU%':>8}"
-            h += f" | {'CPU vs Off.':>{COL_SP}}"
+            h += f" | {'Off.Wall':>12} | {'Off.Thr':>10} | {'Off.Proc':>10} | {'Off.CPU%':>10} | {'Off.Ops/CPU':>11}"
+            h += f" | {'Eff. vs Off.':>{COL_SP}}"
         w3 = len(h)
         print(_c(Color.DIM, f"  {'':─<{w3}}") if color else f"  {'':─<{w3}}")
         print(h)
@@ -1269,36 +1429,39 @@ def print_comparison(
         for op in cpu_ops:
             # For bulk ops (batch), p50_ms is None; fall back to avg_ms
             rust_wall = rust[op].get("p50_ms") or rust[op].get("avg_ms")
-            rust_cpu = rust[op].get("cpu_p50_ms")
             line = f"  {op:<{COL_OP}}"
             line += f" | {_fmt_ms(rust_wall):>12}"
-            line += f" | {_fmt_ms(rust_cpu):>12}"
-            line += f" | {_fmt_ms(rust[op].get('io_wait_p50_ms')):>12}"
-            cpu_pct = rust[op].get("cpu_pct")
-            line += f" | {f'{cpu_pct:.1f}%' if cpu_pct is not None else '-':>8}"
+            line += f" | {_fmt_ms(rust[op].get('cpu_p50_ms')):>10}"
+            line += f" | {_fmt_ms(rust[op].get('process_cpu_ms')):>10}"
+            proc_pct = rust[op].get("process_cpu_pct")
+            line += f" | {f'{proc_pct:.1f}%' if proc_pct is not None else '-':>10}"
+            line += f" | {_fmt_eff(rust[op].get('ops_per_cpu_sec')):>10}"
             if has_c_cpu:
-                c_cpu = c[op].get("cpu_p50_ms") if c is not None else None
-                if c_cpu is not None:
-                    c_wall = c[op].get("p50_ms") or c[op].get("avg_ms")
+                c_data = c[op] if c is not None else {}
+                c_wall = c_data.get("p50_ms") or c_data.get("avg_ms")
+                if c_data.get("cpu_p50_ms") is not None or c_data.get("process_cpu_ms") is not None:
                     line += f" | {_fmt_ms(c_wall):>12}"
-                    line += f" | {_fmt_ms(c_cpu):>12}"
-                    line += f" | {_fmt_ms(c[op].get('io_wait_p50_ms')):>12}"
-                    c_cpu_pct = c[op].get("cpu_pct")
-                    line += f" | {f'{c_cpu_pct:.1f}%' if c_cpu_pct is not None else '-':>8}"
-                    # CPU time comparison: how much more CPU does Rust use vs Official
-                    if rust_cpu and c_cpu and c_cpu > 0:
-                        pct = (rust_cpu - c_cpu) / c_cpu * 100
+                    line += f" | {_fmt_ms(c_data.get('cpu_p50_ms')):>10}"
+                    line += f" | {_fmt_ms(c_data.get('process_cpu_ms')):>10}"
+                    c_proc_pct = c_data.get("process_cpu_pct")
+                    line += f" | {f'{c_proc_pct:.1f}%' if c_proc_pct is not None else '-':>10}"
+                    line += f" | {_fmt_eff(c_data.get('ops_per_cpu_sec')):>11}"
+                    # Efficiency comparison: ops/CPU-sec (higher = GREEN = better)
+                    rust_eff = rust[op].get("ops_per_cpu_sec")
+                    c_eff = c_data.get("ops_per_cpu_sec")
+                    if rust_eff and c_eff and c_eff > 0:
+                        pct = (rust_eff - c_eff) / c_eff * 100
                         if pct >= 0:
-                            sp = f"+{pct:.2f}%"
-                            sp = _c(Color.RED, sp) if color else sp
-                        else:
-                            sp = f"{pct:.2f}%"
+                            sp = f"+{pct:.1f}%"
                             sp = _c(Color.GREEN, sp) if color else sp
+                        else:
+                            sp = f"{pct:.1f}%"
+                            sp = _c(Color.RED, sp) if color else sp
                         line += f" | {_lpad(sp, COL_SP)}"
                     else:
                         line += f" | {'-':>{COL_SP}}"
                 else:
-                    line += f" | {'-':>12} | {'-':>12} | {'-':>12} | {'-':>8} | {'-':>{COL_SP}}"
+                    line += f" | {'-':>12} | {'-':>10} | {'-':>10} | {'-':>10} | {'-':>11} | {'-':>{COL_SP}}"
             print(line)
 
     # Async Per-Op Latency Distribution
@@ -1325,8 +1488,10 @@ def print_comparison(
     note = (
         f"  Note: Sync clients are measured sequentially (one op at a time).\n"
         f"  Async client uses asyncio.gather with concurrency={concurrency}.\n"
-        f"  Async per-op latency reflects individual operation latency under concurrent load.\n"
-        f"  CPU% shows what fraction of wall time is CPU computation vs I/O wait."
+        f"  Thr.CPU: Python calling thread CPU only. Proc.CPU: entire process CPU (Tokio workers included).\n"
+        f"  Proc.CPU% can exceed 100% with multiple threads. Ops/CPU-s: ops per CPU-second (higher = more efficient).\n"
+        f"  Rust async utilizes CPU during I/O wait for other tasks → high Proc.CPU% with high Ops/CPU-s.\n"
+        f"  C sync blocks threads idle during I/O → low CPU% but wastes available CPU capacity."
     )
     print(_c(Color.DIM, note) if color else note)
     print()
@@ -1417,10 +1582,10 @@ def bench_data_size(host: str, port: int, count: int, rounds: int, warmup: int) 
         _log(f"Data Size: {label}")
 
         _log(f"  PUT {count} ops x {rounds} rounds")
-        put_rounds, put_cpu = [], []
+        put_rounds, put_cpu, put_proc = [], [], []
         for r in range(rounds):
             gc.disable()
-            wt, ct = _measure_loop_cpu(
+            wt, ct, pcd = _measure_loop_cpu(
                 lambda i, _r=r: client.put(
                     (NAMESPACE, SET_NAME, f"{prefix}p{_r}_{i}"),
                     _make_bins_sized(num_bins, value_size, i),
@@ -1430,6 +1595,7 @@ def bench_data_size(host: str, port: int, count: int, rounds: int, warmup: int) 
             gc.enable()
             put_rounds.append(wt)
             put_cpu.append(ct)
+            put_proc.append((pcd, sum(wt)))
             for i in range(count):
                 try:
                     client.remove((NAMESPACE, SET_NAME, f"{prefix}p{r}_{i}"))
@@ -1440,13 +1606,14 @@ def bench_data_size(host: str, port: int, count: int, rounds: int, warmup: int) 
         _settle()
 
         _log(f"  GET {count} ops x {rounds} rounds")
-        get_rounds, get_cpu = [], []
+        get_rounds, get_cpu, get_proc = [], [], []
         for _ in range(rounds):
             gc.disable()
-            wt, ct = _measure_loop_cpu(lambda i: client.get((NAMESPACE, SET_NAME, f"{prefix}{i}")), count)
+            wt, ct, pcd = _measure_loop_cpu(lambda i: client.get((NAMESPACE, SET_NAME, f"{prefix}{i}")), count)
             gc.enable()
             get_rounds.append(wt)
             get_cpu.append(ct)
+            get_proc.append((pcd, sum(wt)))
 
         _cleanup_sync(client.remove, prefix, count)
         _settle()
@@ -1456,8 +1623,8 @@ def bench_data_size(host: str, port: int, count: int, rounds: int, warmup: int) 
                 "label": label,
                 "num_bins": num_bins,
                 "value_size": value_size,
-                "put": _median_of_medians(put_rounds, cpu_rounds=put_cpu),
-                "get": _median_of_medians(get_rounds, cpu_rounds=get_cpu),
+                "put": _median_of_medians(put_rounds, cpu_rounds=put_cpu, process_cpu_rounds=put_proc),
+                "get": _median_of_medians(get_rounds, cpu_rounds=get_cpu, process_cpu_rounds=get_proc),
             }
         )
 
@@ -1468,20 +1635,25 @@ def bench_data_size(host: str, port: int, count: int, rounds: int, warmup: int) 
 def _print_data_size(result: dict):
     header = f"Data Size Scaling ({result['count']:,} ops x {result['rounds']} rounds)"
     print(f"\n  {_c(Color.BOLD_CYAN, header) if _use_color else header}")
-    w = 28 + 14 * 6 + 20
+    w = 28 + 14 * 8 + 20
     sep = "─" * w
     print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
-    h = f"  {'Profile':<26} | {'PUT p50':>10} | {'PUT p99':>10} | {'PUT CPU%':>8} | {'GET p50':>10} | {'GET p99':>10} | {'GET CPU%':>8}"
+    h = f"  {'Profile':<26} | {'PUT p50':>10} | {'PUT p99':>10} | {'PUT CPU%':>8} | {'Proc.CPU%':>10}"
+    h += f" | {'GET p50':>10} | {'GET p99':>10} | {'GET CPU%':>8} | {'Proc.CPU%':>10}"
     print(h)
     print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
     for e in result["data"]:
         pcp = e["put"].get("cpu_pct")
+        ppcp = e["put"].get("process_cpu_pct")
         gcp = e["get"].get("cpu_pct")
+        gpcp = e["get"].get("process_cpu_pct")
         line = f"  {e['label']:<26}"
         line += f" | {_fmt_ms(e['put'].get('p50_ms')):>10} | {_fmt_ms(e['put'].get('p99_ms')):>10}"
         line += f" | {f'{pcp:.1f}%' if pcp else '-':>8}"
+        line += f" | {f'{ppcp:.1f}%' if ppcp is not None else '-':>10}"
         line += f" | {_fmt_ms(e['get'].get('p50_ms')):>10} | {_fmt_ms(e['get'].get('p99_ms')):>10}"
         line += f" | {f'{gcp:.1f}%' if gcp else '-':>8}"
+        line += f" | {f'{gpcp:.1f}%' if gpcp is not None else '-':>10}"
         print(line)
 
 
@@ -1515,7 +1687,7 @@ def bench_concurrency_scaling(host: str, port: int, count: int, rounds: int, war
             _log(f"Concurrency={conc}: PUT+GET {count} ops x {rounds} rounds")
             sem = asyncio.Semaphore(conc)
 
-            put_bulk, put_po = [], []
+            put_bulk, put_po, put_proc = [], [], []
             for r in range(rounds):
                 per_op = []
 
@@ -1526,18 +1698,21 @@ def bench_concurrency_scaling(host: str, port: int, count: int, rounds: int, war
                         per_op.append(time.perf_counter() - t0)
 
                 gc.disable()
+                proc0 = _get_process_cpu()
                 t0 = time.perf_counter()
                 await asyncio.gather(*[_put(i) for i in range(count)])
                 elapsed = time.perf_counter() - t0
+                proc_elapsed = _get_process_cpu() - proc0
                 gc.enable()
                 put_bulk.append(elapsed)
                 put_po.append(per_op)
+                put_proc.append(proc_elapsed)
                 await _chunked_batch_remove(client, [(NAMESPACE, SET_NAME, f"{prefix}cp{r}_{i}") for i in range(count)])
 
-            pm = _bulk_median(put_bulk, count)
+            pm = _bulk_median(put_bulk, count, process_cpu_round_times=put_proc)
             pm["per_op"] = _median_of_medians(put_po)
 
-            get_bulk, get_po = [], []
+            get_bulk, get_po, get_proc = [], [], []
             for _ in range(rounds):
                 per_op = []
 
@@ -1548,14 +1723,17 @@ def bench_concurrency_scaling(host: str, port: int, count: int, rounds: int, war
                         per_op.append(time.perf_counter() - t0)
 
                 gc.disable()
+                proc0 = _get_process_cpu()
                 t0 = time.perf_counter()
                 await asyncio.gather(*[_get(i) for i in range(count)])
                 elapsed = time.perf_counter() - t0
+                proc_elapsed = _get_process_cpu() - proc0
                 gc.enable()
                 get_bulk.append(elapsed)
                 get_po.append(per_op)
+                get_proc.append(proc_elapsed)
 
-            gm = _bulk_median(get_bulk, count)
+            gm = _bulk_median(get_bulk, count, process_cpu_round_times=get_proc)
             gm["per_op"] = _median_of_medians(get_po)
             _settle()
             data.append({"concurrency": conc, "put": pm, "get": gm})
@@ -1570,11 +1748,11 @@ def bench_concurrency_scaling(host: str, port: int, count: int, rounds: int, war
 def _print_concurrency_scaling(result: dict):
     header = f"Concurrency Scaling ({result['count']:,} ops x {result['rounds']} rounds, AsyncClient)"
     print(f"\n  {_c(Color.BOLD_CYAN, header) if _use_color else header}")
-    w = 12 + 14 * 8 + 20
+    w = 12 + 14 * 10 + 20
     sep = "─" * w
     print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
-    h = f"  {'Conc':>6} | {'PUT ops/s':>12} | {'PUT p50':>10} | {'PUT p95':>10} | {'PUT p99':>10}"
-    h += f" | {'GET ops/s':>12} | {'GET p50':>10} | {'GET p95':>10} | {'GET p99':>10}"
+    h = f"  {'Conc':>6} | {'PUT ops/s':>12} | {'PUT p50':>10} | {'PUT p95':>10} | {'PUT p99':>10} | {'PUT Ops/CPU':>11}"
+    h += f" | {'GET ops/s':>12} | {'GET p50':>10} | {'GET p95':>10} | {'GET p99':>10} | {'GET Ops/CPU':>11}"
     print(h)
     print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
     for e in result["data"]:
@@ -1585,10 +1763,12 @@ def _print_concurrency_scaling(result: dict):
         line += (
             f" | {_fmt_ms(ppo.get('p50_ms')):>10} | {_fmt_ms(ppo.get('p95_ms')):>10} | {_fmt_ms(ppo.get('p99_ms')):>10}"
         )
+        line += f" | {_fmt_eff(e['put'].get('ops_per_cpu_sec')):>11}"
         line += f" | {_fmt_ops(e['get'].get('ops_per_sec')):>12}"
         line += (
             f" | {_fmt_ms(gpo.get('p50_ms')):>10} | {_fmt_ms(gpo.get('p95_ms')):>10} | {_fmt_ms(gpo.get('p99_ms')):>10}"
         )
+        line += f" | {_fmt_eff(e['get'].get('ops_per_cpu_sec')):>11}"
         print(line)
 
 
