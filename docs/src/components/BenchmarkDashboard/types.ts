@@ -14,6 +14,9 @@ export interface OpMetrics {
   cpu_p50_ms: number | null;
   io_wait_p50_ms: number | null;
   cpu_pct: number | null;
+  process_cpu_ms: number | null;
+  process_cpu_pct: number | null;
+  ops_per_cpu_sec: number | null;
   per_op?: {
     p50_ms: number | null;
     p95_ms: number | null;
