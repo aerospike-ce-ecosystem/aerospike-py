@@ -643,13 +643,12 @@ pub fn numpy_to_records(
         .filter(|f| f.name != key_field && !f.name.starts_with('_'))
         .collect();
 
-    if key_field_info.is_none() {
-        return Err(PyValueError::new_err(format!(
+    let key_fi = key_field_info.ok_or_else(|| {
+        PyValueError::new_err(format!(
             "dtype must contain a '{}' field for the record key",
             key_field
-        )));
-    }
-    let key_fi = key_field_info.unwrap();
+        ))
+    })?;
 
     // Check for optional _namespace and _set fields
     let ns_field = fields.iter().find(|f| f.name == "_namespace");
@@ -732,7 +731,8 @@ mod tests {
             kind: DtypeKind::Int,
         };
         unsafe {
-            write_int_to_buffer(buf.as_mut_ptr(), &field, 42).unwrap();
+            write_int_to_buffer(buf.as_mut_ptr(), &field, 42)
+                .expect("write i32 to valid buffer should succeed");
             let val = ptr::read_unaligned(buf.as_ptr().add(4) as *const i32);
             assert_eq!(val, 42);
         }
@@ -749,7 +749,8 @@ mod tests {
             kind: DtypeKind::Int,
         };
         unsafe {
-            write_int_to_buffer(buf.as_mut_ptr(), &field, 300).unwrap(); // truncates to 44
+            write_int_to_buffer(buf.as_mut_ptr(), &field, 300)
+                .expect("write truncated i8 should succeed"); // truncates to 44
             let val = ptr::read_unaligned(buf.as_ptr() as *const i8);
             assert_eq!(val, 300i64 as i8);
         }
@@ -766,7 +767,8 @@ mod tests {
             kind: DtypeKind::Float,
         };
         unsafe {
-            write_float_to_buffer(buf.as_mut_ptr(), &field, 3.14).unwrap();
+            write_float_to_buffer(buf.as_mut_ptr(), &field, 3.14)
+                .expect("write f32 to valid buffer should succeed");
             let val = ptr::read_unaligned(buf.as_ptr() as *const f32);
             assert!((val - 3.14f32).abs() < 1e-5);
         }
@@ -783,7 +785,8 @@ mod tests {
             kind: DtypeKind::Float,
         };
         unsafe {
-            write_float_to_buffer(buf.as_mut_ptr(), &field, 3.141592653589793).unwrap();
+            write_float_to_buffer(buf.as_mut_ptr(), &field, 3.141592653589793)
+                .expect("write f64 to valid buffer should succeed");
             let val = ptr::read_unaligned(buf.as_ptr() as *const f64);
             assert!((val - 3.141592653589793f64).abs() < 1e-15);
         }
@@ -800,7 +803,8 @@ mod tests {
             kind: DtypeKind::FixedBytes,
         };
         unsafe {
-            write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"abcdefgh").unwrap();
+            write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"abcdefgh")
+                .expect("write truncated bytes should succeed");
             // only first 4 bytes copied
             assert_eq!(&buf[0..4], b"abcd");
             assert_eq!(&buf[4..8], &[0, 0, 0, 0]);
@@ -818,7 +822,8 @@ mod tests {
             kind: DtypeKind::FixedBytes,
         };
         unsafe {
-            write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"ab").unwrap();
+            write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"ab")
+                .expect("write short bytes with zero-padding should succeed");
             assert_eq!(&buf[0..2], b"ab");
             assert_eq!(&buf[2..8], &[0, 0, 0, 0, 0, 0]); // zero-padded
         }
@@ -851,7 +856,8 @@ mod tests {
             kind: DtypeKind::Uint,
         };
         unsafe {
-            write_uint_to_buffer(buf.as_mut_ptr(), &field, 65535).unwrap();
+            write_uint_to_buffer(buf.as_mut_ptr(), &field, 65535)
+                .expect("write u16 to valid buffer should succeed");
             let val = ptr::read_unaligned(buf.as_ptr().add(2) as *const u16);
             assert_eq!(val, 65535);
         }
@@ -868,7 +874,8 @@ mod tests {
             kind: DtypeKind::Float,
         };
         unsafe {
-            write_float_to_buffer(buf.as_mut_ptr(), &field, 1.5).unwrap();
+            write_float_to_buffer(buf.as_mut_ptr(), &field, 1.5)
+                .expect("write f16 normal value should succeed");
             let bits = ptr::read_unaligned(buf.as_ptr() as *const u16);
             let val = f16::from_bits(bits);
             assert!((val.to_f64() - 1.5).abs() < 1e-3);
@@ -888,7 +895,8 @@ mod tests {
         // Smallest positive normal f16 is ~6.1e-5; test a denormal value
         let denorm_val = 5.96e-8_f64; // smallest f16 denormal
         unsafe {
-            write_float_to_buffer(buf.as_mut_ptr(), &field, denorm_val).unwrap();
+            write_float_to_buffer(buf.as_mut_ptr(), &field, denorm_val)
+                .expect("write f16 denormal value should succeed");
             let bits = ptr::read_unaligned(buf.as_ptr() as *const u16);
             let val = f16::from_bits(bits);
             // Should be representable as denormal, not flushed to zero
@@ -907,7 +915,8 @@ mod tests {
             kind: DtypeKind::Float,
         };
         unsafe {
-            write_float_to_buffer(buf.as_mut_ptr(), &field, f64::INFINITY).unwrap();
+            write_float_to_buffer(buf.as_mut_ptr(), &field, f64::INFINITY)
+                .expect("write f16 infinity should succeed");
             let bits = ptr::read_unaligned(buf.as_ptr() as *const u16);
             let val = f16::from_bits(bits);
             assert!(val.is_infinite());
@@ -926,7 +935,8 @@ mod tests {
             kind: DtypeKind::Float,
         };
         unsafe {
-            write_float_to_buffer(buf.as_mut_ptr(), &field, f64::NAN).unwrap();
+            write_float_to_buffer(buf.as_mut_ptr(), &field, f64::NAN)
+                .expect("write f16 NaN should succeed");
             let bits = ptr::read_unaligned(buf.as_ptr() as *const u16);
             let val = f16::from_bits(bits);
             assert!(val.is_nan());
@@ -944,7 +954,8 @@ mod tests {
             kind: DtypeKind::FixedBytes,
         };
         unsafe {
-            write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"").unwrap();
+            write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"")
+                .expect("write empty bytes should succeed");
             // Buffer should remain zero-initialized
             assert_eq!(&buf[0..4], &[0, 0, 0, 0]);
         }
@@ -961,7 +972,8 @@ mod tests {
             kind: DtypeKind::Int,
         };
         unsafe {
-            write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Nil).unwrap();
+            write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Nil)
+                .expect("write Nil value should be no-op and succeed");
             let val = ptr::read_unaligned(buf.as_ptr() as *const i32);
             assert_eq!(val, 0);
         }
@@ -981,7 +993,8 @@ mod tests {
         };
         unsafe {
             ptr::write_unaligned(buf.as_mut_ptr().add(4) as *mut i32, 42);
-            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            let val = read_value_from_buffer(buf.as_ptr(), &field)
+                .expect("read i32 from valid buffer should succeed");
             assert_eq!(val, Value::Int(42));
         }
     }
@@ -998,7 +1011,8 @@ mod tests {
         };
         unsafe {
             ptr::write_unaligned(buf.as_mut_ptr().add(2) as *mut u16, 65535);
-            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            let val = read_value_from_buffer(buf.as_ptr(), &field)
+                .expect("read u16 from valid buffer should succeed");
             assert_eq!(val, Value::Int(65535));
         }
     }
@@ -1015,12 +1029,13 @@ mod tests {
         };
         unsafe {
             ptr::write_unaligned(buf.as_mut_ptr() as *mut f64, 3.14);
-            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            let val = read_value_from_buffer(buf.as_ptr(), &field)
+                .expect("read f64 from valid buffer should succeed");
             match val {
                 Value::Float(FloatValue::F64(bits)) => {
                     assert!((f64::from_bits(bits) - 3.14).abs() < 1e-10);
                 }
-                _ => panic!("expected Float"),
+                _ => panic!("expected Float(F64) variant, got {:?}", val),
             }
         }
     }
@@ -1037,7 +1052,8 @@ mod tests {
         };
         buf[0..4].copy_from_slice(b"abcd");
         unsafe {
-            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            let val = read_value_from_buffer(buf.as_ptr(), &field)
+                .expect("read bytes from valid buffer should succeed");
             assert_eq!(val, Value::Blob(b"abcd".to_vec()));
         }
     }
@@ -1053,8 +1069,10 @@ mod tests {
             kind: DtypeKind::Int,
         };
         unsafe {
-            write_int_to_buffer(buf.as_mut_ptr(), &field, -123).unwrap();
-            let val = read_value_from_buffer(buf.as_ptr(), &field).unwrap();
+            write_int_to_buffer(buf.as_mut_ptr(), &field, -123)
+                .expect("roundtrip: write i32 should succeed");
+            let val = read_value_from_buffer(buf.as_ptr(), &field)
+                .expect("roundtrip: read i32 should succeed");
             assert_eq!(val, Value::Int(-123));
         }
     }
