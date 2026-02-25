@@ -865,11 +865,12 @@ impl PyAsyncClient {
 
             Python::attach(|py| {
                 if use_numpy {
-                    crate::numpy_support::batch_to_numpy_py(
-                        py,
-                        &results,
-                        &dtype_py.unwrap().into_bound(py),
-                    )
+                    let dtype = dtype_py.ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err(
+                            "internal error: numpy path reached without dtype",
+                        )
+                    })?;
+                    crate::numpy_support::batch_to_numpy_py(py, &results, &dtype.into_bound(py))
                 } else {
                     let batch_records = batch_to_batch_records_py(py, &results)?;
                     Ok(Py::new(py, batch_records)?.into_any())

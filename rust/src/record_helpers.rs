@@ -35,14 +35,20 @@ pub fn batch_records_to_py(py: Python<'_>, results: &[BatchRecord]) -> PyResult<
     Ok(py_list.into_any().unbind())
 }
 
+/// Extract the TTL from a Record as seconds (u32).
+///
+/// Returns `0xFFFFFFFF` when the record has no TTL (never-expire).
+pub fn record_ttl_seconds(record: &aerospike_core::Record) -> u32 {
+    record
+        .time_to_live()
+        .map(|d| d.as_secs() as u32)
+        .unwrap_or(0xFFFFFFFF_u32)
+}
+
 /// Extract meta dict from a Record.
 pub fn record_to_meta(py: Python<'_>, record: &aerospike_core::Record) -> PyResult<Py<PyAny>> {
     let meta = PyDict::new(py);
     meta.set_item(intern!(py, "gen"), record.generation)?;
-    let ttl: u32 = record
-        .time_to_live()
-        .map(|d| d.as_secs() as u32)
-        .unwrap_or(0xFFFFFFFF_u32);
-    meta.set_item(intern!(py, "ttl"), ttl)?;
+    meta.set_item(intern!(py, "ttl"), record_ttl_seconds(record))?;
     Ok(meta.into_any().unbind())
 }

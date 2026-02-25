@@ -206,7 +206,15 @@ pub(crate) mod otel_impl {
                     let module = py.import(intern!(py, "opentelemetry.propagate"))?;
                     let _ = PROPAGATE_MODULE.set(module.unbind());
                     // Re-fetch from OnceLock (handles race where another thread set it first)
-                    PROPAGATE_MODULE.get().unwrap().bind(py).clone()
+                    PROPAGATE_MODULE
+                        .get()
+                        .ok_or_else(|| {
+                            pyo3::exceptions::PyRuntimeError::new_err(
+                                "failed to initialize opentelemetry.propagate module cache",
+                            )
+                        })?
+                        .bind(py)
+                        .clone()
                 }
             };
             let carrier = pyo3::types::PyDict::new(py);

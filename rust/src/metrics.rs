@@ -114,7 +114,10 @@ pub fn error_type_from_aerospike_error(err: &AsError) -> Cow<'static, str> {
 /// Encode all registered metrics in Prometheus text exposition format.
 pub fn get_text() -> String {
     let mut buf = String::new();
-    let registry = METRICS.registry.lock().unwrap_or_else(|e| e.into_inner());
+    let registry = METRICS.registry.lock().unwrap_or_else(|e| {
+        log::warn!("Metrics registry mutex was poisoned, recovering inner data");
+        e.into_inner()
+    });
     if let Err(e) = prometheus_client::encoding::text::encode(&mut buf, &registry) {
         log::warn!("Failed to encode Prometheus metrics: {e}");
     }

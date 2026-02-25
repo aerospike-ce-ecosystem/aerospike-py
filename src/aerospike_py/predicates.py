@@ -21,6 +21,13 @@ __all__ = [
     "geo_contains_geojson_point",
 ]
 
+_GEO_UNSUPPORTED_MSG = "Geo filters are not yet supported; query execution will raise ClientError"
+
+
+def _warn_geo_unsupported() -> None:
+    """Emit a FutureWarning for unsupported geo filter predicates."""
+    warnings.warn(_GEO_UNSUPPORTED_MSG, FutureWarning, stacklevel=3)
+
 
 def equals(bin_name: str, val: Any) -> tuple[str, str, Any]:
     """Create an equality predicate for a secondary index query."""
@@ -50,11 +57,7 @@ def geo_within_geojson_region(bin_name: str, geojson: str) -> tuple[str, str, st
         Geo filters are not yet supported in this version.
         Using this predicate in a query will raise ``ClientError`` at execution time.
     """
-    warnings.warn(
-        "Geo filters are not yet supported; query execution will raise ClientError",
-        FutureWarning,
-        stacklevel=2,
-    )
+    _warn_geo_unsupported()
     return ("geo_within_geojson_region", bin_name, geojson)
 
 
@@ -65,11 +68,7 @@ def geo_within_radius(bin_name: str, lat: float, lng: float, radius: float) -> t
         Geo filters are not yet supported in this version.
         Using this predicate in a query will raise ``ClientError`` at execution time.
     """
-    warnings.warn(
-        "Geo filters are not yet supported; query execution will raise ClientError",
-        FutureWarning,
-        stacklevel=2,
-    )
+    _warn_geo_unsupported()
     return ("geo_within_radius", bin_name, lat, lng, radius)
 
 
@@ -80,9 +79,5 @@ def geo_contains_geojson_point(bin_name: str, geojson: str) -> tuple[str, str, s
         Geo filters are not yet supported in this version.
         Using this predicate in a query will raise ``ClientError`` at execution time.
     """
-    warnings.warn(
-        "Geo filters are not yet supported; query execution will raise ClientError",
-        FutureWarning,
-        stacklevel=2,
-    )
+    _warn_geo_unsupported()
     return ("geo_contains_geojson_point", bin_name, geojson)
