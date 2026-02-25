@@ -3,6 +3,8 @@
 //! Each `prepare_*` function converts Python arguments into their Rust equivalents,
 //! so that the caller only needs a thin sync/async wrapper around the actual client call.
 
+use std::sync::Arc;
+
 use aerospike_core::{
     operations::Operation, BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy,
     Bin, Bins, Key, ReadPolicy, UDFLang, Value, WritePolicy,
@@ -44,7 +46,7 @@ pub struct PutArgs {
     pub bins: Vec<Bin>,
     pub policy: PutPolicy,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub enum PutPolicy {
@@ -58,7 +60,7 @@ pub fn prepare_put_args(
     bins: &Bound<'_, PyAny>,
     meta: Option<&Bound<'_, PyDict>>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<PutArgs> {
     let type_name = bins
         .get_type()
@@ -84,7 +86,7 @@ pub fn prepare_put_args(
         bins: rust_bins,
         policy: put_policy,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -94,7 +96,7 @@ pub struct GetArgs {
     pub key: Key,
     pub policy: ReadPolicyChoice,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub enum ReadPolicyChoice {
@@ -106,7 +108,7 @@ pub fn prepare_get_args(
     py: Python<'_>,
     key: &Bound<'_, PyAny>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<GetArgs> {
     let rust_key = py_to_key(key)?;
     let read_policy = if policy.is_none() {
@@ -119,7 +121,7 @@ pub fn prepare_get_args(
         key: rust_key,
         policy: read_policy,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -139,7 +141,7 @@ pub struct SelectArgs {
     pub bin_names: Vec<String>,
     pub policy: ReadPolicyChoice,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_select_args(
@@ -147,7 +149,7 @@ pub fn prepare_select_args(
     key: &Bound<'_, PyAny>,
     bins: &Bound<'_, PyList>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<SelectArgs> {
     let rust_key = py_to_key(key)?;
     let bin_names: Vec<String> = bins.extract()?;
@@ -162,7 +164,7 @@ pub fn prepare_select_args(
         bin_names,
         policy: read_policy,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -186,14 +188,14 @@ pub struct ExistsArgs {
     pub key: Key,
     pub read_policy: ReadPolicy,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_exists_args(
     py: Python<'_>,
     key: &Bound<'_, PyAny>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<ExistsArgs> {
     let rust_key = py_to_key(key)?;
     let read_policy = if policy.is_none() {
@@ -206,7 +208,7 @@ pub fn prepare_exists_args(
         key: rust_key,
         read_policy,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -216,7 +218,7 @@ pub struct RemoveArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_remove_args(
@@ -224,7 +226,7 @@ pub fn prepare_remove_args(
     key: &Bound<'_, PyAny>,
     meta: Option<&Bound<'_, PyDict>>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<RemoveArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, meta)?;
@@ -233,7 +235,7 @@ pub fn prepare_remove_args(
         key: rust_key,
         write_policy,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -243,7 +245,7 @@ pub struct TouchArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_touch_args(
@@ -252,7 +254,7 @@ pub fn prepare_touch_args(
     val: u32,
     meta: Option<&Bound<'_, PyDict>>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<TouchArgs> {
     let rust_key = py_to_key(key)?;
     let mut write_policy = parse_write_policy(policy, meta)?;
@@ -264,7 +266,7 @@ pub fn prepare_touch_args(
         key: rust_key,
         write_policy,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -275,7 +277,7 @@ pub struct SingleBinWriteArgs {
     pub write_policy: WritePolicy,
     pub bins: Vec<Bin>,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_single_bin_write_args(
@@ -285,7 +287,7 @@ pub fn prepare_single_bin_write_args(
     val: &Bound<'_, PyAny>,
     meta: Option<&Bound<'_, PyDict>>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<SingleBinWriteArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, meta)?;
@@ -297,7 +299,7 @@ pub fn prepare_single_bin_write_args(
         write_policy,
         bins,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -310,7 +312,7 @@ pub fn prepare_increment_args(
     offset: &Bound<'_, PyAny>,
     meta: Option<&Bound<'_, PyDict>>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<SingleBinWriteArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, meta)?;
@@ -322,7 +324,7 @@ pub fn prepare_increment_args(
         write_policy,
         bins,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -333,7 +335,7 @@ pub struct RemoveBinArgs {
     pub write_policy: WritePolicy,
     pub bins: Vec<Bin>,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_remove_bin_args(
@@ -342,7 +344,7 @@ pub fn prepare_remove_bin_args(
     bin_names: &Bound<'_, PyList>,
     meta: Option<&Bound<'_, PyDict>>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<RemoveBinArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, meta)?;
@@ -354,7 +356,7 @@ pub fn prepare_remove_bin_args(
         write_policy,
         bins,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -365,7 +367,7 @@ pub struct OperateArgs {
     pub write_policy: WritePolicy,
     pub ops: Vec<Operation>,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_operate_args(
@@ -374,7 +376,7 @@ pub fn prepare_operate_args(
     ops: &Bound<'_, PyList>,
     meta: Option<&Bound<'_, PyDict>>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<OperateArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, meta)?;
@@ -385,7 +387,7 @@ pub fn prepare_operate_args(
         write_policy,
         ops: rust_ops,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -398,7 +400,7 @@ pub struct BatchReadArgs {
     pub batch_ns: String,
     pub batch_set: String,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_batch_read_args(
@@ -406,7 +408,7 @@ pub fn prepare_batch_read_args(
     keys: &Bound<'_, PyList>,
     bins: &Option<Vec<String>>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchReadArgs> {
     let batch_policy = parse_batch_policy(policy)?;
     let bins_selector = match bins {
@@ -435,7 +437,7 @@ pub fn prepare_batch_read_args(
         batch_ns,
         batch_set,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -458,7 +460,7 @@ pub struct BatchOperateArgs {
     pub batch_ns: String,
     pub batch_set: String,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_batch_operate_args(
@@ -466,7 +468,7 @@ pub fn prepare_batch_operate_args(
     keys: &Bound<'_, PyList>,
     ops: &Bound<'_, PyList>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchOperateArgs> {
     let batch_policy = parse_batch_policy(policy)?;
     let rust_ops = py_ops_to_rust(ops)?;
@@ -487,7 +489,7 @@ pub fn prepare_batch_operate_args(
         batch_ns,
         batch_set,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
@@ -509,14 +511,14 @@ pub struct BatchRemoveArgs {
     pub batch_ns: String,
     pub batch_set: String,
     pub parent_ctx: ParentContext,
-    pub conn_info: ConnectionInfo,
+    pub conn_info: Arc<ConnectionInfo>,
 }
 
 pub fn prepare_batch_remove_args(
     py: Python<'_>,
     keys: &Bound<'_, PyList>,
     policy: Option<&Bound<'_, PyDict>>,
-    conn_info: &ConnectionInfo,
+    conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchRemoveArgs> {
     let batch_policy = parse_batch_policy(policy)?;
     let rust_keys: Vec<Key> = keys
@@ -535,7 +537,7 @@ pub fn prepare_batch_remove_args(
         batch_ns,
         batch_set,
         parent_ctx: extract_parent_context(py),
-        conn_info: conn_info.clone(),
+        conn_info: Arc::clone(conn_info),
     })
 }
 
