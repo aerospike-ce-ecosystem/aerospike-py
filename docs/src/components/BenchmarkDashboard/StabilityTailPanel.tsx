@@ -1,7 +1,7 @@
 import React from 'react';
 import BrowserOnly from '@docusaurus/BrowserOnly';
 import CollapsibleSection from './ui/CollapsibleSection';
-import {fmtMs, fmtPct} from './helpers';
+import {fmtMs, fmtPct, fmtEff} from './helpers';
 import {OPERATIONS, OP_LABELS} from './constants';
 import tableStyles from './styles/Tables.module.css';
 import dashStyles from './styles/BenchmarkDashboard.module.css';
@@ -99,8 +99,11 @@ function TailLatencyTable({data}: {data: FullBenchmarkData}) {
 }
 
 function CpuBreakdownTable({data}: {data: FullBenchmarkData}) {
+  const hasC = data.c_sync != null;
   const ops = OPERATIONS.filter(
-    (op) => data.rust_sync[op]?.cpu_pct != null || data.rust_async[op]?.cpu_pct != null,
+    (op) =>
+      data.rust_sync[op]?.cpu_p50_ms != null ||
+      data.rust_sync[op]?.process_cpu_ms != null,
   );
   if (ops.length === 0) return null;
 
@@ -110,52 +113,63 @@ function CpuBreakdownTable({data}: {data: FullBenchmarkData}) {
         <thead>
           <tr>
             <th>Operation</th>
-            <th>Sync CPU p50</th>
-            <th>Sync I/O Wait</th>
-            <th>Sync CPU %</th>
-            <th>Async CPU p50</th>
-            <th>Async I/O Wait</th>
-            <th>Async CPU %</th>
-            <th>Comparison</th>
+            <th>Wall p50</th>
+            <th>Thr.CPU</th>
+            <th>Proc.CPU</th>
+            <th>Proc.CPU%</th>
+            <th>Ops/CPU-s</th>
+            {hasC && <th>Off.Wall</th>}
+            {hasC && <th>Off.Proc</th>}
+            {hasC && <th>Off.CPU%</th>}
+            {hasC && <th>Off.Ops/CPU</th>}
+            {hasC && <th>Eff. vs Official</th>}
           </tr>
         </thead>
         <tbody>
           {ops.map((op) => {
             const sm = data.rust_sync[op];
-            const am = data.rust_async[op];
-            const syncCpu = sm?.cpu_pct;
-            const asyncCpu = am?.cpu_pct;
-            let cpuComp: SpeedupResult | null = null;
-            if (syncCpu != null && asyncCpu != null && syncCpu > 0) {
-              const ratio = syncCpu / asyncCpu;
-              if (ratio >= 1.0) {
-                const pct = (ratio - 1) * 100;
-                cpuComp = {text: `Async ${pct.toFixed(0)}% less CPU`, className: 'faster'};
-              } else {
-                const pct = (1 / ratio - 1) * 100;
-                cpuComp = {text: `Async ${pct.toFixed(0)}% more CPU`, className: 'slower'};
+            const cm = hasC ? data.c_sync![op] : null;
+            const rustWall = sm?.p50_ms ?? sm?.avg_ms;
+
+            let effComp: SpeedupResult | null = null;
+            if (cm != null) {
+              const rustEff = sm?.ops_per_cpu_sec;
+              const cEff = cm?.ops_per_cpu_sec;
+              if (rustEff != null && cEff != null && cEff > 0) {
+                const pct = ((rustEff - cEff) / cEff) * 100;
+                if (pct >= 0) {
+                  effComp = {text: `+${pct.toFixed(0)}% more efficient`, className: 'faster'};
+                } else {
+                  effComp = {text: `${pct.toFixed(0)}% less efficient`, className: 'slower'};
+                }
               }
             }
+
             return (
               <tr key={op}>
                 <td data-label="Operation">{OP_LABELS[op]}</td>
-                <td data-label="Sync CPU p50" className={tableStyles.numCell}>{fmtMs(sm?.cpu_p50_ms)}</td>
-                <td data-label="Sync I/O Wait" className={tableStyles.numCell}>{fmtMs(sm?.io_wait_p50_ms)}</td>
-                <td data-label="Sync CPU %" className={tableStyles.numCell}>{fmtPct(sm?.cpu_pct)}</td>
-                <td data-label="Async CPU p50" className={tableStyles.numCell}>{fmtMs(am?.cpu_p50_ms)}</td>
-                <td data-label="Async I/O Wait" className={tableStyles.numCell}>{fmtMs(am?.io_wait_p50_ms)}</td>
-                <td data-label="Async CPU %" className={tableStyles.numCell}>{fmtPct(am?.cpu_pct)}</td>
-                <td data-label="Comparison" className={`${tableStyles.numCell} ${cpuComp ? tableStyles[cpuComp.className] : ''}`}>
-                  {cpuComp?.text ?? '-'}
-                </td>
+                <td data-label="Wall p50" className={tableStyles.numCell}>{fmtMs(rustWall)}</td>
+                <td data-label="Thr.CPU" className={tableStyles.numCell}>{fmtMs(sm?.cpu_p50_ms)}</td>
+                <td data-label="Proc.CPU" className={tableStyles.numCell}>{fmtMs(sm?.process_cpu_ms)}</td>
+                <td data-label="Proc.CPU%" className={tableStyles.numCell}>{fmtPct(sm?.process_cpu_pct)}</td>
+                <td data-label="Ops/CPU-s" className={tableStyles.numCell}>{fmtEff(sm?.ops_per_cpu_sec)}</td>
+                {hasC && <td data-label="Off.Wall" className={tableStyles.numCell}>{fmtMs(cm?.p50_ms ?? cm?.avg_ms)}</td>}
+                {hasC && <td data-label="Off.Proc" className={tableStyles.numCell}>{fmtMs(cm?.process_cpu_ms)}</td>}
+                {hasC && <td data-label="Off.CPU%" className={tableStyles.numCell}>{fmtPct(cm?.process_cpu_pct)}</td>}
+                {hasC && <td data-label="Off.Ops/CPU" className={tableStyles.numCell}>{fmtEff(cm?.ops_per_cpu_sec)}</td>}
+                {hasC && (
+                  <td data-label="Eff. vs Official" className={`${tableStyles.numCell} ${effComp ? tableStyles[effComp.className] : ''}`}>
+                    {effComp?.text ?? '-'}
+                  </td>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
       <p style={{fontSize: '0.85em', color: 'var(--ifm-color-emphasis-600)', marginTop: 4}}>
-        CPU % = CPU time / wall time. Lower values indicate more I/O-bound operations (network latency dominant).
-        {' "less CPU" means AsyncClient uses less CPU time per operation than SyncClient.'}
+        Thr.CPU: Python calling thread CPU only. Proc.CPU: entire process CPU (Tokio workers included).
+        Proc.CPU% can exceed 100% with multiple threads. Ops/CPU-s: operations per CPU-second (higher = more efficient).
       </p>
     </div>
   );
@@ -163,7 +177,7 @@ function CpuBreakdownTable({data}: {data: FullBenchmarkData}) {
 
 export default function StabilityTailPanel({data, colorMode}: Props) {
   const hasTail = OPERATIONS.some((op) => data.rust_sync[op]?.p50_ms != null);
-  const hasCpu = OPERATIONS.some((op) => data.rust_sync[op]?.cpu_pct != null || data.rust_async[op]?.cpu_pct != null);
+  const hasCpu = OPERATIONS.some((op) => data.rust_sync[op]?.cpu_p50_ms != null || data.rust_sync[op]?.process_cpu_ms != null);
 
   return (
     <div>
@@ -184,9 +198,10 @@ export default function StabilityTailPanel({data, colorMode}: Props) {
 
       {hasCpu && (
         <>
-          <h3>CPU Time Breakdown</h3>
+          <h3>CPU Efficiency</h3>
           <p className={dashStyles.sectionDesc}>
-            Separates CPU computation time from I/O wait (network latency). Measured via <code>time.process_time()</code> vs <code>time.perf_counter()</code>.
+            Process-level CPU measurement (all threads including Tokio workers) via <code>resource.getrusage(RUSAGE_SELF)</code>.
+            Ops/CPU-sec = operations per CPU-second (higher = more efficient).
           </p>
           <BrowserOnly fallback={<div style={{height: 350}}>Loading chart...</div>}>
             {() => {
@@ -194,7 +209,7 @@ export default function StabilityTailPanel({data, colorMode}: Props) {
               return <CpuComparisonChart data={data} colorMode={colorMode} />;
             }}
           </BrowserOnly>
-          <CollapsibleSection title="CPU Breakdown Detail Table">
+          <CollapsibleSection title="CPU Efficiency Detail Table">
             <CpuBreakdownTable data={data} />
           </CollapsibleSection>
         </>

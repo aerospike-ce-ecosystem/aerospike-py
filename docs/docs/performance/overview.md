@@ -57,7 +57,7 @@ flowchart TD
 3. **Pre-seeded data** for reads
 4. **GC disabled** during measurement
 5. **Isolated key prefixes** per client
-6. **CPU time separation** -- `thread_time()` vs `perf_counter()` for CPU vs I/O breakdown (measures calling thread only, excludes Tokio workers)
+6. **CPU time separation** -- `thread_time()` for calling thread CPU, `resource.getrusage(RUSAGE_SELF)` for process-level CPU (all threads including Tokio workers)
 7. **Extended percentiles** -- p50, p75, p90, p95, p99, p99.9
 
 ## Comparison
@@ -130,8 +130,8 @@ python benchmark/bench_compare.py --scenario all --count 2000 --rounds 5 --repor
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `BENCH_COUNT` | 5,000 | Operations per round |
-| `BENCH_ROUNDS` | 20 | Rounds per operation |
+| `BENCH_COUNT` | 1,000 | Operations per round |
+| `BENCH_ROUNDS` | 5 | Rounds per operation |
 | `BENCH_CONCURRENCY` | 50 | Async concurrency |
 | `BENCH_BATCH_GROUPS` | 10 | Batch read groups |
 
@@ -144,9 +144,12 @@ python benchmark/bench_compare.py --scenario all --count 2000 --rounds 5 --repor
 | ops_per_sec | Median of round throughputs (higher is better) |
 | stdev_ms | Stdev of round medians (lower = more stable) |
 | mad_ms | Median Absolute Deviation (robust stability) |
-| cpu_p50_ms | CPU time per operation (excludes I/O wait) |
+| cpu_p50_ms | Thread CPU time per operation (excludes I/O wait) |
 | io_wait_p50_ms | I/O wait time (wall time - CPU time) |
-| cpu_pct | CPU% of wall time (lower = more I/O bound) |
+| cpu_pct | Thread CPU% of wall time (lower = more I/O bound) |
+| process_cpu_ms | Process CPU per operation (all threads including Tokio workers) |
+| process_cpu_pct | Process CPU% of wall time (can exceed 100% with multi-threading) |
+| ops_per_cpu_sec | Operations per CPU-second (higher = more efficient) |
 
 ## Results
 
