@@ -24,6 +24,13 @@ export function fmtPct(val: number | null | undefined): string {
   return `${val.toFixed(1)}%`;
 }
 
+export function fmtEff(val: number | null | undefined): string {
+  if (val == null) return '-';
+  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
+  if (val >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
+  return `${val.toFixed(0)}`;
+}
+
 // ── Speedup Calculators ─────────────────────────────────────
 
 export function calcSpeedup(

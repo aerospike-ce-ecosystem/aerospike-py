@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import {ChartTooltip, themeColors} from './shared';
-import {OPERATIONS, OP_LABELS, COLOR_SYNC, COLOR_ASYNC} from '../constants';
+import {OPERATIONS, OP_LABELS, COLOR_SYNC, COLOR_OFFICIAL, COLOR_ASYNC} from '../constants';
 import type {FullBenchmarkData, ColorMode} from '../types';
 
 interface Props {
@@ -20,17 +20,24 @@ interface Props {
 
 export function CpuComparisonChart({data, colorMode}: Props) {
   const theme = themeColors(colorMode);
+  const hasC = data.c_sync != null;
 
   const ops = OPERATIONS.filter(
-    (op) => data.rust_sync[op]?.cpu_pct != null || data.rust_async[op]?.cpu_pct != null,
+    (op) => data.rust_sync[op]?.process_cpu_pct != null || data.rust_sync[op]?.cpu_pct != null,
   );
   if (ops.length === 0) return null;
 
-  const chartData = ops.map((op) => ({
-    operation: OP_LABELS[op],
-    'Sync CPU%': data.rust_sync[op]?.cpu_pct ?? 0,
-    'Async CPU%': data.rust_async[op]?.cpu_pct ?? 0,
-  }));
+  const chartData = ops.map((op) => {
+    const entry: Record<string, string | number> = {
+      operation: OP_LABELS[op],
+      'Sync Proc.CPU%': data.rust_sync[op]?.process_cpu_pct ?? 0,
+    };
+    if (hasC) {
+      entry['Official Proc.CPU%'] = data.c_sync![op]?.process_cpu_pct ?? 0;
+    }
+    entry['Async Proc.CPU%'] = data.rust_async[op]?.process_cpu_pct ?? 0;
+    return entry;
+  });
 
   return (
     <div style={{width: '100%', minHeight: 350, margin: '1rem 0'}}>
@@ -41,12 +48,13 @@ export function CpuComparisonChart({data, colorMode}: Props) {
           <YAxis
             tick={{fill: theme.text}}
             domain={[0, 'auto']}
-            label={{value: 'CPU %', angle: -90, position: 'insideLeft', fill: theme.text}}
+            label={{value: 'Process CPU %', angle: -90, position: 'insideLeft', fill: theme.text}}
           />
           <Tooltip content={<ChartTooltip colorMode={colorMode} unit="pct" />} />
           <Legend wrapperStyle={{color: theme.text}} />
-          <Bar dataKey="Sync CPU%" name="SyncClient CPU%" fill={COLOR_SYNC} />
-          <Bar dataKey="Async CPU%" name="AsyncClient CPU%" fill={COLOR_ASYNC} />
+          <Bar dataKey="Sync Proc.CPU%" name="SyncClient" fill={COLOR_SYNC} />
+          {hasC && <Bar dataKey="Official Proc.CPU%" name="Official" fill={COLOR_OFFICIAL} />}
+          <Bar dataKey="Async Proc.CPU%" name="AsyncClient" fill={COLOR_ASYNC} />
         </BarChart>
       </ResponsiveContainer>
     </div>
