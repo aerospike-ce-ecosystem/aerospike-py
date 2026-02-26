@@ -34,7 +34,29 @@ const config: Config = {
     },
   },
 
-  plugins: [],
+  plugins: [
+    function context7Widget(): import('@docusaurus/types').Plugin {
+      return {
+        name: 'context7-widget',
+        injectHtmlTags() {
+          return {
+            postBodyTags: [
+              {
+                tagName: 'script',
+                attributes: {
+                  src: 'https://context7.com/widget.js',
+                  async: true,
+                  'data-library': '/kimsoungryoul/aerospike-py',
+                  'data-color': '#059669',
+                  'data-position': 'bottom-right',
+                },
+              },
+            ],
+          };
+        },
+      };
+    },
+  ],
 
   presets: [
     [
