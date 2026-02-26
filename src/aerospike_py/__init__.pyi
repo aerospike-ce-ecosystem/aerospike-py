@@ -1024,8 +1024,11 @@ class AsyncClient:
 
         Example:
             ```python
+            # Without authentication
             client = await aerospike_py.AsyncClient(config).connect()
-            await client.connect("admin", "admin")
+
+            # With authentication
+            client = await aerospike_py.AsyncClient(config).connect("admin", "admin")
             ```
         """
         ...

@@ -19,7 +19,7 @@ use crate::policy::read_policy::{parse_read_policy, DEFAULT_READ_POLICY};
 use crate::policy::write_policy::parse_write_policy;
 use crate::tracing::ConnectionInfo;
 use crate::types::bin::py_dict_to_bins;
-use crate::types::key::py_to_key;
+use crate::types::key::{py_to_key, py_to_keys};
 
 // ── OTel context extraction ──────────────────────────────────────────────────
 
@@ -420,10 +420,7 @@ pub fn prepare_batch_read_args(
         }
     };
 
-    let rust_keys: Vec<Key> = keys
-        .iter()
-        .map(|k| py_to_key(&k))
-        .collect::<PyResult<_>>()?;
+    let rust_keys = py_to_keys(keys)?;
 
     let (batch_ns, batch_set) = rust_keys
         .first()
@@ -472,10 +469,7 @@ pub fn prepare_batch_operate_args(
 ) -> PyResult<BatchOperateArgs> {
     let batch_policy = parse_batch_policy(policy)?;
     let rust_ops = py_ops_to_rust(ops)?;
-    let rust_keys: Vec<Key> = keys
-        .iter()
-        .map(|k| py_to_key(&k))
-        .collect::<PyResult<_>>()?;
+    let rust_keys = py_to_keys(keys)?;
 
     let (batch_ns, batch_set) = rust_keys
         .first()
@@ -521,10 +515,7 @@ pub fn prepare_batch_remove_args(
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchRemoveArgs> {
     let batch_policy = parse_batch_policy(policy)?;
-    let rust_keys: Vec<Key> = keys
-        .iter()
-        .map(|k| py_to_key(&k))
-        .collect::<PyResult<_>>()?;
+    let rust_keys = py_to_keys(keys)?;
 
     let (batch_ns, batch_set) = rust_keys
         .first()

@@ -110,9 +110,18 @@ test-all: build run-aerospike-ce ## Run all tests
 test-matrix: build ## Run unit tests across all Python versions
 	uvx --with tox-uv tox
 
+.PHONY: coverage
+coverage: build ## Generate test coverage report
+	uv run pytest tests/unit/ --cov=aerospike_py --cov-report=term --cov-report=html
+	@echo "Coverage report: htmlcov/index.html"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+.PHONY: check
+check: ## Compile check without building (fast)
+	cargo check --manifest-path rust/Cargo.toml --features otel
 
 # ---------------------------------------------------------------------------
 # Documentation
@@ -137,7 +146,8 @@ docs-version: ## Create a new docs version (usage: make docs-version VERSION=0.1
 
 .PHONY: clean
 clean: ## Remove venv and build artifacts
-	rm -rf .venv target/ dist/ *.egg-info
+	rm -rf .venv target/ dist/ *.egg-info .pytest_cache htmlcov/ .coverage
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 .PHONY: help
 help: ## Show this help
