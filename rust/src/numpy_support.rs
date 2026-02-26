@@ -130,7 +130,9 @@ fn get_array_data_ptr(array: &Bound<'_, PyAny>) -> PyResult<*mut u8> {
     if readonly {
         return Err(PyValueError::new_err("numpy array is read-only"));
     }
-    debug_assert!(ptr_int != 0, "numpy array data pointer is null");
+    if ptr_int == 0 {
+        return Err(PyValueError::new_err("numpy array data pointer is null"));
+    }
     Ok(ptr_int as *mut u8)
 }
 
@@ -536,7 +538,11 @@ pub fn batch_to_numpy_py(
 ///   `field.offset + field.itemsize` bytes.
 /// - The buffer must remain valid for the duration of the read.
 unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyResult<Value> {
-    debug_assert!(!row_ptr.is_null());
+    if row_ptr.is_null() {
+        return Err(PyValueError::new_err(
+            "null buffer pointer in read_value_from_buffer",
+        ));
+    }
     let src = row_ptr.add(field.offset);
     match field.kind {
         DtypeKind::Int => {
@@ -606,7 +612,9 @@ fn get_array_data_ptr_readonly(array: &Bound<'_, PyAny>) -> PyResult<*const u8> 
     let iface = array.getattr("__array_interface__")?;
     let data_tuple = iface.get_item("data")?;
     let ptr_int: usize = data_tuple.get_item(0)?.extract()?;
-    debug_assert!(ptr_int != 0, "numpy array data pointer is null");
+    if ptr_int == 0 {
+        return Err(PyValueError::new_err("numpy array data pointer is null"));
+    }
     Ok(ptr_int as *const u8)
 }
 
@@ -688,7 +696,7 @@ pub fn numpy_to_records(
                 Value::Blob(b) => {
                     // Trim trailing null bytes for fixed-length fields
                     let trimmed = &b[..b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1)];
-                    String::from_utf8_lossy(trimmed).to_string()
+                    String::from_utf8_lossy(trimmed).into_owned()
                 }
                 Value::String(s) => s,
                 _ => namespace.to_string(),
@@ -702,7 +710,7 @@ pub fn numpy_to_records(
             match unsafe { read_value_from_buffer(row_ptr, set_fi)? } {
                 Value::Blob(b) => {
                     let trimmed = &b[..b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1)];
-                    String::from_utf8_lossy(trimmed).to_string()
+                    String::from_utf8_lossy(trimmed).into_owned()
                 }
                 Value::String(s) => s,
                 _ => set_name.to_string(),

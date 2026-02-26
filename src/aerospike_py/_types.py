@@ -5,7 +5,23 @@ from typing import Any, TypedDict
 __all__ = ["Operation", "ListPolicy", "MapPolicy"]
 
 Operation = dict[str, Any]
-"""Operation dict with 'op', 'bin', 'val' keys, for use with client.operate()."""
+"""Operation dict for use with ``client.operate()`` and ``client.operate_ordered()``.
+
+Required keys:
+    ``op`` (int): Operation code — ``OPERATOR_READ``, ``OPERATOR_WRITE``,
+        ``OPERATOR_INCR``, ``OPERATOR_APPEND``, ``OPERATOR_PREPEND``,
+        ``OPERATOR_TOUCH``, ``OPERATOR_DELETE``, or CDT codes (1000+).
+    ``bin`` (str): Bin name to operate on.
+    ``val`` (Any): Value for write operations; ``None`` for read ops.
+
+Optional keys (CDT operations):
+    ``return_type`` (int): ``LIST_RETURN_*`` or ``MAP_RETURN_*`` constant.
+    ``list_policy`` (ListPolicy): Policy for list CDT operations.
+    ``map_policy`` (MapPolicy): Policy for map CDT operations.
+
+Use ``aerospike_py.list_operations`` or ``aerospike_py.map_operations``
+helper modules to build CDT operation dicts.
+"""
 
 
 class ListPolicy(TypedDict, total=False):

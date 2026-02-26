@@ -160,8 +160,9 @@ docs-version: ## Create a new docs version (usage: make docs-version VERSION=0.1
 	bash docs/scripts/create-version.sh $(VERSION)
 
 .PHONY: clean
-clean: ## Remove venv and build artifacts
+clean: ## Remove venv, build artifacts, and docs build cache
 	rm -rf .venv target/ dist/ *.egg-info .pytest_cache htmlcov/ .coverage
+	rm -rf docs/build docs/.docusaurus
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 .PHONY: help

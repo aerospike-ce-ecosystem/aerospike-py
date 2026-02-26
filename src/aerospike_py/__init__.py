@@ -871,6 +871,29 @@ def client(config: dict) -> Client:
     return Client(config)
 
 
+def async_client(config: dict) -> AsyncClient:
+    """Create a new async Aerospike client instance.
+
+    Args:
+        config: Configuration dictionary. Must contain a ``"hosts"`` key
+            with a list of ``(host, port)`` tuples.
+
+    Returns:
+        A new ``AsyncClient`` instance (not yet connected).
+
+    Example:
+        ```python
+        import aerospike_py
+
+        client = aerospike_py.async_client({
+            "hosts": [("127.0.0.1", 3000)],
+        })
+        await client.connect()
+        ```
+    """
+    return AsyncClient(config)
+
+
 def get_metrics() -> str:
     """Return collected metrics in Prometheus text format."""
     return _get_metrics_text()
@@ -964,6 +987,7 @@ __all__ = [
     "BatchRecords",
     "NumpyBatchRecords",
     "client",
+    "async_client",
     "set_log_level",
     "get_metrics",
     "start_metrics_server",
