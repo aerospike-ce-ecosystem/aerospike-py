@@ -21,6 +21,13 @@ def test_client_factory():
     assert not c.is_connected()
 
 
+def test_async_client_factory():
+    """Test that aerospike_py.async_client() creates an AsyncClient."""
+    c = aerospike_py.async_client({"hosts": [("127.0.0.1", 3000)]})
+    assert isinstance(c, aerospike_py.AsyncClient)
+    assert not c.is_connected()
+
+
 def test_client_not_connected_raises():
     """Test that calling methods on unconnected client raises ClientError."""
     c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
