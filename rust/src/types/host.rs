@@ -45,7 +45,11 @@ pub fn parse_hosts_from_config(config: &Bound<'_, PyDict>) -> PyResult<ParsedHos
                 // Parse "host:port" or just "host"
                 if let Some((h, p)) = s.rsplit_once(':') {
                     first_address = h.to_string();
-                    first_port = p.parse().unwrap_or(3000);
+                    first_port = p.parse().map_err(|_| {
+                        pyo3::exceptions::PyValueError::new_err(format!(
+                            "Invalid port in host string '{s}': '{p}' is not a valid port number"
+                        ))
+                    })?;
                 } else {
                     first_address = s.clone();
                     first_port = 3000;

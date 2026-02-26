@@ -123,6 +123,21 @@ coverage: build ## Generate test coverage report
 check: ## Compile check without building (fast)
 	cargo check --manifest-path rust/Cargo.toml --features otel
 
+.PHONY: typecheck
+typecheck: ## Run type checker (pyright)
+	uv run pyright src/aerospike_py
+
+.PHONY: validate
+validate: fmt lint typecheck test-unit ## Run full validation (format, lint, typecheck, unit tests)
+
+.PHONY: dev-build
+dev-build: install ## Fast debug build without release optimizations
+	uv run maturin develop
+
+.PHONY: pre-commit-install
+pre-commit-install: ## Install pre-commit hooks
+	pre-commit install
+
 # ---------------------------------------------------------------------------
 # Documentation
 # ---------------------------------------------------------------------------

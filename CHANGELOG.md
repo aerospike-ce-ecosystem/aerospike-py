@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+[Unreleased]: https://github.com/KimSoungRyoul/aerospike-py/compare/v0.0.1.beta2...HEAD
+
 ### Added
 - NumPy-based batch write support (`batch_write_numpy`) for high-throughput ingestion
 - OpenTelemetry distributed tracing with OTLP export and connection-level attributes

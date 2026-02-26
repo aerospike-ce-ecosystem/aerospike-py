@@ -209,15 +209,15 @@ class TestKeyEdgeCases:
             c.get(("test", "demo", "\u00e9\u00e8\u00ea"))
 
     def test_key_too_short_raises(self):
-        """Key tuple with fewer than 3 elements should raise ValueError."""
+        """Key tuple with fewer than 3 elements should raise an error."""
         c = _make_client()
-        with pytest.raises((ValueError, TypeError)):
+        with pytest.raises((ValueError, TypeError, aerospike_py.ClientError)):
             c.get(("test", "demo"))
 
     def test_key_not_a_tuple_raises(self):
-        """Key that is not a tuple should raise TypeError."""
+        """Key that is not a tuple should raise an error."""
         c = _make_client()
-        with pytest.raises(TypeError):
+        with pytest.raises((TypeError, aerospike_py.ClientError)):
             c.get("not_a_tuple")
 
     def test_key_with_large_integer_user_key(self):

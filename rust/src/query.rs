@@ -69,6 +69,12 @@ enum Predicate {
 
 /// Parse a Python predicate tuple (from `aerospike_py.predicates`) into a [`Predicate`].
 fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
+    if pred.len() < 3 {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "Predicate tuple must have at least 3 elements (kind, bin, value, ...), got {}",
+            pred.len()
+        )));
+    }
     let kind: String = pred.get_item(0)?.extract()?;
     let bin: String = pred.get_item(1)?.extract()?;
     trace!("Parsing predicate: kind={} bin={}", kind, bin);
