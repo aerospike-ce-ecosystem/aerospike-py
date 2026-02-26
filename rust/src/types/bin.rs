@@ -13,6 +13,13 @@ pub fn py_dict_to_bins(dict: &Bound<'_, PyDict>) -> PyResult<Vec<Bin>> {
     let mut bins = Vec::with_capacity(dict.len());
     for (key, val) in dict.iter() {
         let name: String = key.cast::<PyString>()?.to_str()?.to_owned();
+        if name.len() > 15 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Bin name '{}' exceeds the 15-byte limit ({} bytes)",
+                name,
+                name.len()
+            )));
+        }
         let value = py_to_value(&val)?;
         bins.push(Bin::new(name, value));
     }

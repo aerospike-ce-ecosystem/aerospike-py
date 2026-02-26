@@ -135,6 +135,13 @@ def test_exception_aliases():
         ("append", (("test", "demo", "key1"), "a", "val")),
         ("prepend", (("test", "demo", "key1"), "a", "val")),
         ("increment", (("test", "demo", "key1"), "a", 1)),
+        ("operate", (("test", "demo", "key1"), [{"op": 1, "bin": "a", "val": 1}])),
+        ("operate_ordered", (("test", "demo", "key1"), [{"op": 1, "bin": "a", "val": 1}])),
+        ("remove_bin", (("test", "demo", "key1"), ["a"])),
+        ("batch_read", ([("test", "demo", "key1")],)),
+        ("batch_operate", ([("test", "demo", "key1")], [{"op": 1, "bin": "a", "val": 1}])),
+        ("batch_remove", ([("test", "demo", "key1")],)),
+        ("info_all", ("status",)),
     ],
 )
 def test_client_not_connected_operations(method, args):

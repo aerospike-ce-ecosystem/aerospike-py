@@ -37,6 +37,18 @@ rust/target/
 # Playwright
 .playwright-cli/
 
+# Security-sensitive files
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+.env
+.env.*
+!.env.example
+credentials.json
+secrets/
+
 # Docusaurus
 docs/node_modules/
 docs/build/

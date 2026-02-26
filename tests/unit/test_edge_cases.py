@@ -499,3 +499,31 @@ class TestBoundaryIntegers:
         meta = RecordMetadata(gen=gen, ttl=ttl)
         assert meta.gen == gen
         assert meta.ttl == ttl
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Host parsing validation
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestHostParsing:
+    """Verify host string parsing and error handling.
+
+    Note: Host parsing happens during connect(), not client() creation.
+    """
+
+    def test_invalid_port_in_string_host_raises_error(self):
+        """String host with non-numeric port should raise ValueError on connect()."""
+        c = aerospike_py.client({"hosts": ["192.168.1.1:abc"]})
+        with pytest.raises(ValueError, match="Invalid port"):
+            c.connect()
+
+    def test_string_host_without_port_defaults_to_3000(self):
+        """String host without port should use default 3000 (no error at creation)."""
+        c = aerospike_py.client({"hosts": ["myhost.local"]})
+        assert c is not None
+
+    def test_valid_string_host_with_port(self):
+        """String host with valid port should succeed at creation."""
+        c = aerospike_py.client({"hosts": ["192.168.1.1:3000"]})
+        assert c is not None

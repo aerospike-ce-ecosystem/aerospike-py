@@ -3,7 +3,7 @@
 use aerospike_core::{Key, Value};
 use log::trace;
 use pyo3::prelude::*;
-use pyo3::types::{PyString, PyTuple};
+use pyo3::types::{PyList, PyString, PyTuple};
 
 use super::value::{py_to_value, value_to_py};
 
@@ -64,4 +64,9 @@ pub fn key_to_py(py: Python<'_>, key: &Key) -> PyResult<Py<PyAny>> {
         ],
     )?;
     Ok(tuple.into_any().unbind())
+}
+
+/// Convert a Python list of key tuples to a `Vec<Key>`.
+pub fn py_to_keys(keys: &Bound<'_, PyList>) -> PyResult<Vec<Key>> {
+    keys.iter().map(|k| py_to_key(&k)).collect()
 }
