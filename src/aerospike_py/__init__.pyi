@@ -2053,6 +2053,28 @@ def client(config: dict[str, Any]) -> Client:
     """
     ...
 
+def async_client(config: dict[str, Any]) -> AsyncClient:
+    """Create a new async Aerospike client instance.
+
+    Args:
+        config: [`ClientConfig`](types.md#clientconfig) dictionary. Must contain a ``"hosts"`` key
+            with a list of ``(host, port)`` tuples.
+
+    Returns:
+        A new ``AsyncClient`` instance (not yet connected).
+
+    Example:
+        ```python
+        import aerospike_py
+
+        client = aerospike_py.async_client({
+            "hosts": [("127.0.0.1", 3000)],
+        })
+        await client.connect()
+        ```
+    """
+    ...
+
 def set_log_level(level: int) -> None:
     """Set the aerospike_py log level.
 

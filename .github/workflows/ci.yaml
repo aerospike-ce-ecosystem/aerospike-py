@@ -30,6 +30,13 @@ on:
         default: ''
         type: string
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   AEROSPIKE_PORT: "3000"
@@ -38,6 +45,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -68,6 +76,7 @@ jobs:
   build:
     name: Build & Unit Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -108,6 +117,7 @@ jobs:
   build-freethreaded:
     name: Build & Unit Tests (Python 3.14t free-threaded)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -137,6 +147,7 @@ jobs:
   integration:
     name: Integration Tests (AS ${{ matrix.server_version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -186,6 +197,7 @@ jobs:
   test-concurrency:
     name: Concurrency Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       aerospike:
         image: aerospike/aerospike-server:latest
@@ -231,6 +243,7 @@ jobs:
   test-concurrency-freethreaded:
     name: Concurrency Tests (Python 3.14t free-threaded)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       aerospike:
         image: aerospike/aerospike-server:latest
@@ -280,6 +293,7 @@ jobs:
   feasibility:
     name: Feasibility (${{ matrix.test }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -329,6 +343,7 @@ jobs:
   compatibility:
     name: Compatibility Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       aerospike:
         image: aerospike/aerospike-server:latest
