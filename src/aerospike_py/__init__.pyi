@@ -2108,6 +2108,37 @@ def get_metrics() -> str:
     """
     ...
 
+def set_metrics_enabled(enabled: bool) -> None:
+    """Enable or disable Prometheus metrics collection.
+
+    When disabled, operation timers are skipped entirely (~1ns atomic check).
+    Useful for benchmarking without metrics overhead.
+
+    Args:
+        enabled: ``True`` to enable (default), ``False`` to disable.
+
+    Example:
+        ```python
+        aerospike_py.set_metrics_enabled(False)   # disable for benchmark
+        aerospike_py.set_metrics_enabled(True)     # re-enable
+        ```
+    """
+    ...
+
+def is_metrics_enabled() -> bool:
+    """Check if Prometheus metrics collection is currently enabled.
+
+    Returns:
+        ``True`` if metrics are enabled (default), ``False`` otherwise.
+
+    Example:
+        ```python
+        if aerospike_py.is_metrics_enabled():
+            print(aerospike_py.get_metrics())
+        ```
+    """
+    ...
+
 def start_metrics_server(port: int = 9464) -> None:
     """Start a background HTTP server serving ``/metrics`` for Prometheus.
 
