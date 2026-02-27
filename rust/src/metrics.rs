@@ -5,8 +5,25 @@
 //! Metrics are exposed in Prometheus text format via [`get_text`].
 
 use std::borrow::Cow;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
+
+/// Global toggle for metrics collection.
+/// When `false`, `timed_op!` skips timer creation entirely (~1ns atomic load).
+static METRICS_ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Enable or disable metrics collection.
+#[inline]
+pub fn set_metrics_enabled(enabled: bool) {
+    METRICS_ENABLED.store(enabled, Ordering::Release);
+}
+
+/// Check if metrics collection is currently enabled.
+#[inline]
+pub fn is_metrics_enabled() -> bool {
+    METRICS_ENABLED.load(Ordering::Acquire)
+}
 
 use aerospike_core::{Error as AsError, ResultCode};
 use prometheus_client::encoding::EncodeLabelSet;
@@ -51,20 +68,23 @@ static METRICS: LazyLock<MetricsState> = LazyLock::new(|| {
 ///
 /// Created via [`OperationTimer::start`]; must be explicitly finished
 /// (not dropped) to record the metric with the correct error type.
-pub struct OperationTimer {
+///
+/// Uses borrowed references to avoid heap allocations at start time.
+/// String conversion only happens in `finish()` for label creation.
+pub struct OperationTimer<'a> {
     start: Instant,
-    op_name: String,
-    namespace: String,
-    set_name: String,
+    op_name: &'a str,
+    namespace: &'a str,
+    set_name: &'a str,
 }
 
-impl OperationTimer {
-    pub fn start(op_name: &str, namespace: &str, set_name: &str) -> Self {
+impl<'a> OperationTimer<'a> {
+    pub fn start(op_name: &'a str, namespace: &'a str, set_name: &'a str) -> Self {
         Self {
             start: Instant::now(),
-            op_name: op_name.to_string(),
-            namespace: namespace.to_string(),
-            set_name: set_name.to_string(),
+            op_name,
+            namespace,
+            set_name,
         }
     }
 
@@ -72,9 +92,9 @@ impl OperationTimer {
         let duration = self.start.elapsed().as_secs_f64();
         let labels = OperationLabels {
             db_system_name: Cow::Borrowed("aerospike"),
-            db_namespace: Cow::Owned(self.namespace),
-            db_collection_name: Cow::Owned(self.set_name),
-            db_operation_name: Cow::Owned(self.op_name),
+            db_namespace: Cow::Owned(self.namespace.to_string()),
+            db_collection_name: Cow::Owned(self.set_name.to_string()),
+            db_operation_name: Cow::Owned(self.op_name.to_string()),
             error_type: if error_type.is_empty() {
                 Cow::Borrowed("")
             } else {
@@ -128,18 +148,26 @@ pub fn get_text() -> String {
 ///
 /// The expression must return `Result<T, AsError>`.
 /// Returns `Result<T, PyErr>`.
+///
+/// When metrics are disabled via [`set_metrics_enabled(false)`], skips timer
+/// creation entirely (single atomic load, ~1ns overhead).
 #[macro_export]
 macro_rules! timed_op {
     ($op:expr, $ns:expr, $set:expr, $body:expr) => {{
-        let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
-        let result = $body;
-        match &result {
-            Ok(_) => timer.finish(""),
-            Err(e) => {
-                let err_type = $crate::metrics::error_type_from_aerospike_error(e);
-                timer.finish(&err_type);
+        if $crate::metrics::is_metrics_enabled() {
+            let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
+            let result = $body;
+            match &result {
+                Ok(_) => timer.finish(""),
+                Err(e) => {
+                    let err_type = $crate::metrics::error_type_from_aerospike_error(e);
+                    timer.finish(&err_type);
+                }
             }
+            result.map_err($crate::errors::as_to_pyerr)
+        } else {
+            let result = $body;
+            result.map_err($crate::errors::as_to_pyerr)
         }
-        result.map_err($crate::errors::as_to_pyerr)
     }};
 }
