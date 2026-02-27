@@ -39,7 +39,3 @@
 - [Logging](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/logging): Rust-to-Python logging bridge for observing Aerospike client internals.
 - [Prometheus Metrics](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/metrics): Prometheus metrics for monitoring Aerospike operations.
 - [Distributed Tracing](https://kimsoungryoul.github.io/aerospike-py/docs/integrations/observability/tracing): OpenTelemetry distributed tracing for Aerospike operations.
-
-## Performance
-
-- [Performance Overview](https://kimsoungryoul.github.io/aerospike-py/docs/performance/overview)
