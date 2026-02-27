@@ -217,7 +217,7 @@ impl PyClient {
                             &args.key.set_name,
                             args.parent_ctx,
                             args.conn_info,
-                            { client.put(wp, &args.key, &args.bins).await }
+                            client.put(wp, &args.key, &args.bins).await
                         )
                     })
                 })
@@ -230,7 +230,7 @@ impl PyClient {
                         &args.key.set_name,
                         args.parent_ctx,
                         args.conn_info,
-                        { client.put(wp, &args.key, &args.bins).await }
+                        client.put(wp, &args.key, &args.bins).await
                     )
                 })
             }),
@@ -261,7 +261,7 @@ impl PyClient {
                     &args.key.set_name,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.get(rp, &args.key, Bins::All).await }
+                    client.get(rp, &args.key, Bins::All).await
                 )
             })
         })?;
@@ -299,7 +299,7 @@ impl PyClient {
                     &args.key.set_name,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.get(rp, &args.key, bins_selector).await }
+                    client.get(rp, &args.key, bins_selector).await
                 )
             })
         })?;
@@ -331,7 +331,7 @@ impl PyClient {
                     &args.key.set_name,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.get(&args.read_policy, &args.key, Bins::None).await }
+                    client.get(&args.read_policy, &args.key, Bins::None).await
                 )
             })
         });
@@ -375,7 +375,7 @@ impl PyClient {
                     &args.key.set_name,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.delete(&args.write_policy, &args.key).await }
+                    client.delete(&args.write_policy, &args.key).await
                 )
             })
         })?;
@@ -411,7 +411,7 @@ impl PyClient {
                     &args.key.set_name,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.touch(&args.write_policy, &args.key).await }
+                    client.touch(&args.write_policy, &args.key).await
                 )
             })
         })
@@ -539,7 +539,7 @@ impl PyClient {
                     &args.key.set_name,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.add(&args.write_policy, &args.key, &args.bins).await }
+                    client.add(&args.write_policy, &args.key, &args.bins).await
                 )
             })
         })
@@ -573,7 +573,7 @@ impl PyClient {
                     &args.key.set_name,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.put(&args.write_policy, &args.key, &args.bins).await }
+                    client.put(&args.write_policy, &args.key, &args.bins).await
                 )
             })
         })
@@ -1342,7 +1342,7 @@ impl PyClient {
                     &args.batch_set,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.batch(&args.batch_policy, &ops).await }
+                    client.batch(&args.batch_policy, &ops).await
                 )
             })
         })?;
@@ -1384,7 +1384,7 @@ impl PyClient {
                     &args.batch_set,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.batch(&args.batch_policy, &batch_ops).await }
+                    client.batch(&args.batch_policy, &batch_ops).await
                 )
             })
         })?;
@@ -1441,7 +1441,7 @@ impl PyClient {
                     set_name,
                     parent_ctx,
                     conn_info,
-                    { client.batch(&batch_policy, &batch_ops).await }
+                    client.batch(&batch_policy, &batch_ops).await
                 )
             })
         })?;
@@ -1471,7 +1471,7 @@ impl PyClient {
                     &args.batch_set,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.batch(&args.batch_policy, &ops).await }
+                    client.batch(&args.batch_policy, &ops).await
                 )
             })
         })?;
