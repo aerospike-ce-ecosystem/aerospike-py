@@ -9,7 +9,7 @@ const CONC_DATA = [
     sTH: 1, aTH: 1, rTH: 4,
     sMem: 0.1, aMem: 8, rMem: 2,
     insight:
-      '<b>Sync \u2248 Async</b> \u2014 동시 요청 1개에서는 executor 오버헤드 때문에 Sync가 오히려 비슷. aerospike-py만 1.9\u00d7 빠름.',
+      '<b>Sync \u2248 Async</b> \u2014 At 1 concurrent request, executor overhead makes Sync roughly equivalent. Only aerospike-py is 1.9\u00d7 faster.',
   },
   {
     conc: '10',
@@ -17,7 +17,7 @@ const CONC_DATA = [
     sTH: 1, aTH: 10, rTH: 4,
     sMem: 0.1, aMem: 80, rMem: 3,
     insight:
-      '<b>Sync 정체 시작.</b> 순차 처리라 throughput 변화 없음. Async는 10 thread로 확장, aerospike-py는 2.2\u00d7 앞섬.',
+      '<b>Sync starts stalling.</b> No throughput change due to sequential processing. Async scales to 10 threads, aerospike-py leads by 2.2\u00d7.',
   },
   {
     conc: '100',
@@ -25,7 +25,7 @@ const CONC_DATA = [
     sTH: 1, aTH: 36, rTH: 4,
     sMem: 0.1, aMem: 288, rMem: 5,
     insight:
-      '<b>Sync 완전 뒤처짐.</b> Async 스레드풀 거의 포화. GIL 경합 선형 증가. aerospike-py 2.9\u00d7 리드.',
+      '<b>Sync falls far behind.</b> Async thread pool nearly saturated. GIL contention grows linearly. aerospike-py leads by 2.9\u00d7.',
   },
   {
     conc: '1,000',
@@ -33,7 +33,7 @@ const CONC_DATA = [
     sTH: 1, aTH: 36, rTH: 4,
     sMem: 0.1, aMem: 288, rMem: 15,
     insight:
-      '<b>Async 스레드풀 포화</b> \u2014 964개 큐 대기. Sync는 999개 대기. aerospike-py만 전부 동시 처리.',
+      '<b>Async thread pool saturated</b> \u2014 964 requests queued. Sync has 999 queued. Only aerospike-py processes all concurrently.',
   },
   {
     conc: '10,000',
@@ -41,7 +41,7 @@ const CONC_DATA = [
     sTH: 1, aTH: 36, rTH: 4,
     sMem: 0.1, aMem: 288, rMem: 50,
     insight:
-      '<b>aerospike-py 독주.</b> Sync 6.5K vs Async 150K vs aerospike-py 550K. 격차 최대.',
+      '<b>aerospike-py dominates.</b> Sync 6.5K vs Async 150K vs aerospike-py 550K. Maximum gap.',
   },
 ];
 const MAX_TP = 550000;
@@ -141,19 +141,19 @@ export function RequestFlow(): React.ReactElement {
         <div className={`${styles.panel} ${styles.panelSync}`}>
           <div className={styles.panelTitle}>
             OFFICIAL SYNC{' '}
-            <span className={`${styles.tag} ${styles.tagSlow}`}>동기 블로킹</span>
+            <span className={`${styles.tag} ${styles.tagSlow}`}>Sync Blocking</span>
           </div>
           <div className={styles.flow}>
-            <FlowStep num={1} variant="neutral" label={<>Python &rarr; <b>C 확장 호출</b></>} />
+            <FlowStep num={1} variant="neutral" label={<>Python &rarr; <b>C Extension Call</b></>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={2} variant="bad" label={<><b>GIL 해제</b> &rarr; 동기 블로킹 I/O</>} />
+            <FlowStep num={2} variant="bad" label={<><b>Release GIL</b> &rarr; Sync Blocking I/O</>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={3} variant="bad" label={<><b>스레드 완전 정지</b> (응답 대기)</>} />
+            <FlowStep num={3} variant="bad" label={<><b>Thread Fully Blocked</b> (Waiting for Response)</>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={4} variant="neutral" label={<><b>GIL 획득</b> &rarr; 결과 변환 &rarr; 리턴</>} />
+            <FlowStep num={4} variant="neutral" label={<><b>Acquire GIL</b> &rarr; Convert Result &rarr; Return</>} />
           </div>
           <div className={styles.flowFooter} style={{ color: 'var(--arch-red)' }}>
-            호출 스레드 완전 차단 &middot; 동시 처리 불가
+            Calling thread fully blocked &middot; No concurrency
           </div>
         </div>
 
@@ -161,21 +161,21 @@ export function RequestFlow(): React.ReactElement {
         <div className={`${styles.panel} ${styles.panelAsync}`}>
           <div className={styles.panelTitle}>
             OFFICIAL ASYNC{' '}
-            <span className={`${styles.tag} ${styles.tagMid}`}>스레드 위임</span>
+            <span className={`${styles.tag} ${styles.tagMid}`}>Thread Delegation</span>
           </div>
           <div className={styles.flow}>
             <FlowStep num={1} variant="neutral" label={<>asyncio &rarr; <b>executor.submit()</b></>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={2} variant="bad" label={<><b>OS Thread 할당</b> (스레드풀)</>} />
+            <FlowStep num={2} variant="bad" label={<><b>Allocate OS Thread</b> (Thread Pool)</>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={3} variant="bad" label={<><b>GIL 획득</b> &rarr; C 진입 &rarr; GIL 해제</>} />
+            <FlowStep num={3} variant="bad" label={<><b>Acquire GIL</b> &rarr; Enter C &rarr; Release GIL</>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={4} variant="neutral" label={<>동기 블로킹 I/O (Thread 점유)</>} />
+            <FlowStep num={4} variant="neutral" label={<>Sync Blocking I/O (Thread Occupied)</>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={5} variant="bad" label={<><b>GIL 재획득</b> &rarr; 변환 &rarr; Future 완료</>} />
+            <FlowStep num={5} variant="bad" label={<><b>Re-acquire GIL</b> &rarr; Convert &rarr; Complete Future</>} />
           </div>
           <div className={styles.flowFooter} style={{ color: 'var(--arch-yellow)' }}>
-            GIL 3~4회 &middot; 경계 4회 &middot; Thread 점유
+            GIL 3~4x &middot; 4 Boundary Crossings &middot; Thread Occupied
           </div>
         </div>
 
@@ -183,19 +183,19 @@ export function RequestFlow(): React.ReactElement {
         <div className={`${styles.panel} ${styles.panelRust}`}>
           <div className={styles.panelTitle}>
             AEROSPIKE-PY{' '}
-            <span className={`${styles.tag} ${styles.tagFast}`}>네이티브 async</span>
+            <span className={`${styles.tag} ${styles.tagFast}`}>Native Async</span>
           </div>
           <div className={styles.flow}>
             <FlowStep num={1} variant="neutral" label={<>asyncio &rarr; <b>future_into_py()</b></>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={2} variant="good" label={<>인자 파싱 + key 사전 변환 + <b>GIL 해제</b></>} />
+            <FlowStep num={2} variant="good" label={<>Parse Args + Pre-convert Key + <b>Release GIL</b></>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={3} variant="good" label={<><b>Tokio</b> epoll/kqueue 논블로킹 I/O</>} />
+            <FlowStep num={3} variant="good" label={<><b>Tokio</b> epoll/kqueue Non-blocking I/O</>} />
             <div className={styles.flowArrow}>&darr;</div>
-            <FlowStep num={4} variant="good" label={<>Pending 반환 &rarr; <b>pyo3 자동 변환</b></>} />
+            <FlowStep num={4} variant="good" label={<>Return Pending &rarr; <b>pyo3 Auto Convert</b></>} />
           </div>
           <div className={styles.flowFooter} style={{ color: 'var(--arch-green)' }}>
-            GIL 1회 &middot; 경계 1회 &middot; Thread 생성 없음
+            GIL 1x &middot; 1 Boundary Crossing &middot; No Thread Creation
           </div>
         </div>
       </div>
@@ -208,26 +208,26 @@ export function GilTimeline(): React.ReactElement {
     <div className={styles.wrapper}>
       <div className={styles.triGrid}>
         <div className={`${styles.panel} ${styles.panelSync}`}>
-          <div className={styles.panelTitle}>SYNC — GIL 타임라인</div>
+          <div className={styles.panelTitle}>SYNC — GIL Timeline</div>
           <div className={styles.gilTimeline}>
             <div className={styles.gilRow}>
               <span className={styles.gilLabel}>Main</span>
               <div className={styles.gilBlocks}>
                 <GilBlock type="held" width="12%">GIL</GilBlock>
-                <GilBlock type="io" width="65%">I/O 블로킹 (GIL 해제됨)</GilBlock>
+                <GilBlock type="io" width="65%">Blocking I/O (GIL Released)</GilBlock>
                 <GilBlock type="held" width="12%">GIL</GilBlock>
                 <GilBlock type="empty" width="11%" />
               </div>
             </div>
           </div>
           <div className={styles.gilFooter}>
-            GIL <span style={{ color: 'var(--arch-c-sync)' }}>2회</span> &middot; 하지만{' '}
-            <span style={{ color: 'var(--arch-red)' }}>스레드가 블로킹</span>
+            GIL <span style={{ color: 'var(--arch-c-sync)' }}>2x</span> &middot; But{' '}
+            <span style={{ color: 'var(--arch-red)' }}>thread is blocked</span>
           </div>
         </div>
 
         <div className={`${styles.panel} ${styles.panelAsync}`}>
-          <div className={styles.panelTitle}>ASYNC — GIL 타임라인</div>
+          <div className={styles.panelTitle}>ASYNC — GIL Timeline</div>
           <div className={styles.gilTimeline}>
             <div className={styles.gilRow}>
               <span className={styles.gilLabel}>asyncio</span>
@@ -243,26 +243,26 @@ export function GilTimeline(): React.ReactElement {
               <div className={styles.gilBlocks}>
                 <GilBlock type="empty" width="8%" />
                 <GilBlock type="held" width="8%">GIL</GilBlock>
-                <GilBlock type="io" width="48%">블로킹 I/O</GilBlock>
+                <GilBlock type="io" width="48%">Blocking I/O</GilBlock>
                 <GilBlock type="held" width="10%">GIL</GilBlock>
-                <GilBlock type="free" width="6%">해제</GilBlock>
+                <GilBlock type="free" width="6%">Free</GilBlock>
                 <GilBlock type="empty" width="20%" />
               </div>
             </div>
           </div>
           <div className={styles.gilFooter}>
-            GIL <span style={{ color: 'var(--arch-red)' }}>3~4회</span> &middot; 스레드 간 핸드오프
+            GIL <span style={{ color: 'var(--arch-red)' }}>3~4x</span> &middot; Inter-thread handoff
           </div>
         </div>
 
         <div className={`${styles.panel} ${styles.panelRust}`}>
-          <div className={styles.panelTitle}>AEROSPIKE-PY — GIL 타임라인</div>
+          <div className={styles.panelTitle}>AEROSPIKE-PY — GIL Timeline</div>
           <div className={styles.gilTimeline}>
             <div className={styles.gilRow}>
               <span className={styles.gilLabel}>asyncio</span>
               <div className={styles.gilBlocks}>
                 <GilBlock type="held" width="10%">GIL</GilBlock>
-                <GilBlock type="free" width="80%">GIL 해제 — Pending 반환 → pyo3 자동 변환</GilBlock>
+                <GilBlock type="free" width="80%">GIL Released — Return Pending → pyo3 Auto Convert</GilBlock>
                 <GilBlock type="empty" width="10%" />
               </div>
             </div>
@@ -270,13 +270,13 @@ export function GilTimeline(): React.ReactElement {
               <span className={styles.gilLabel}>Tokio</span>
               <div className={styles.gilBlocks}>
                 <GilBlock type="empty" width="10%" />
-                <GilBlock type="tokio" width="70%">비동기 I/O (GIL 없음)</GilBlock>
+                <GilBlock type="tokio" width="70%">Async I/O (No GIL)</GilBlock>
                 <GilBlock type="empty" width="20%" />
               </div>
             </div>
           </div>
           <div className={styles.gilFooter}>
-            GIL <span style={{ color: 'var(--arch-green)' }}>1회</span> &middot; 핸드오프 없음
+            GIL <span style={{ color: 'var(--arch-green)' }}>1x</span> &middot; No handoff
           </div>
         </div>
       </div>
@@ -289,7 +289,7 @@ export function ConcurrencyViz(): React.ReactElement {
     <div className={styles.wrapper}>
       <div className={styles.triGrid}>
         <div className={`${styles.panel} ${styles.panelSync}`}>
-          <div className={styles.panelTitle}>SYNC — 순차 처리</div>
+          <div className={styles.panelTitle}>SYNC — Sequential Processing</div>
           <div className={styles.threadViz}>
             <div className={styles.threadRow}>
               <span className={styles.threadLabel}>Main</span>
@@ -300,18 +300,18 @@ export function ConcurrencyViz(): React.ReactElement {
                 <div className={`${styles.threadBar} ${styles.barSyncIo}`} style={{ left: '22%', width: '12%' }} />
                 <div className={`${styles.threadBar} ${styles.barSync}`} style={{ left: '34%', width: '5%' }}>3</div>
                 <div className={`${styles.threadBar} ${styles.barSyncIo}`} style={{ left: '39%', width: '12%' }} />
-                <div className={`${styles.threadBar} ${styles.barIdle}`} style={{ left: '51%', width: '49%' }}>&rarr; 997개 남음...</div>
+                <div className={`${styles.threadBar} ${styles.barIdle}`} style={{ left: '51%', width: '49%' }}>&rarr; 997 remaining...</div>
               </div>
             </div>
             <div className={styles.threadRow}>
-              <span className={styles.threadLabel} style={{ color: 'var(--arch-red)' }}>처리량</span>
+              <span className={styles.threadLabel} style={{ color: 'var(--arch-red)' }}>Throughput</span>
               <div className={styles.threadBarCt}>
-                <div className={`${styles.threadBar} ${styles.barBlocked}`} style={{ left: 0, width: '100%' }}>한 번에 1개씩 순차 처리 — 동시성 없음</div>
+                <div className={`${styles.threadBar} ${styles.barBlocked}`} style={{ left: 0, width: '100%' }}>One at a time, sequential — no concurrency</div>
               </div>
             </div>
           </div>
           <div className={styles.panelFooter} style={{ color: 'var(--arch-red)' }}>
-            1개씩 순차 처리 &middot; 1,000번째 요청은 ~150초 후 완료
+            Sequential, one at a time &middot; 1,000th request completes after ~150s
           </div>
         </div>
 
@@ -322,7 +322,7 @@ export function ConcurrencyViz(): React.ReactElement {
               <span className={styles.threadLabel}>Thread-1</span>
               <div className={styles.threadBarCt}>
                 <div className={`${styles.threadBar} ${styles.barCpu}`} style={{ left: 0, width: '6%' }} />
-                <div className={`${styles.threadBar} ${styles.barIo}`} style={{ left: '6%', width: '68%' }}>I/O 대기</div>
+                <div className={`${styles.threadBar} ${styles.barIo}`} style={{ left: '6%', width: '68%' }}>I/O Wait</div>
                 <div className={`${styles.threadBar} ${styles.barCpu}`} style={{ left: '74%', width: '6%' }} />
               </div>
             </div>
@@ -330,7 +330,7 @@ export function ConcurrencyViz(): React.ReactElement {
               <span className={styles.threadLabel}>Thread-2</span>
               <div className={styles.threadBarCt}>
                 <div className={`${styles.threadBar} ${styles.barCpu}`} style={{ left: '3%', width: '6%' }} />
-                <div className={`${styles.threadBar} ${styles.barIo}`} style={{ left: '9%', width: '68%' }}>I/O 대기</div>
+                <div className={`${styles.threadBar} ${styles.barIo}`} style={{ left: '9%', width: '68%' }}>I/O Wait</div>
               </div>
             </div>
             <div className={styles.threadRow}>
@@ -342,12 +342,12 @@ export function ConcurrencyViz(): React.ReactElement {
             <div className={styles.threadRow}>
               <span className={styles.threadLabel} style={{ color: 'var(--arch-red)' }}>Queue</span>
               <div className={styles.threadBarCt}>
-                <div className={`${styles.threadBar} ${styles.barWait}`} style={{ left: 0, width: '100%' }}>&#x23F3; 984개 대기 중...</div>
+                <div className={`${styles.threadBar} ${styles.barWait}`} style={{ left: 0, width: '100%' }}>&#x23F3; 984 requests waiting...</div>
               </div>
             </div>
           </div>
           <div className={styles.panelFooter} style={{ color: 'var(--arch-yellow)' }}>
-            16개 동시 처리 &middot; 984개 큐 대기
+            16 concurrent &middot; 984 queued
           </div>
         </div>
 
@@ -375,12 +375,12 @@ export function ConcurrencyViz(): React.ReactElement {
             <div className={styles.threadRow}>
               <span className={styles.threadLabel} style={{ color: 'var(--arch-green)' }}>Status</span>
               <div className={styles.threadBarCt}>
-                <div className={`${styles.threadBar} ${styles.barStatusGood}`} style={{ left: 0, width: '100%' }}>&#x2713; 1,000개 모두 동시 처리</div>
+                <div className={`${styles.threadBar} ${styles.barStatusGood}`} style={{ left: 0, width: '100%' }}>&#x2713; All 1,000 processed concurrently</div>
               </div>
             </div>
           </div>
           <div className={styles.panelFooter} style={{ color: 'var(--arch-green)' }}>
-            4개 워커로 전부 동시 처리 &middot; 대기열 없음
+            All concurrent with 4 workers &middot; No queue
           </div>
         </div>
       </div>
@@ -402,9 +402,9 @@ export function ThroughputSlider(): React.ReactElement {
     <div className={styles.wrapper}>
       <div className={styles.concurrencyViz}>
         <div className={styles.concurrencyHeader}>
-          <h3>동시 요청 수에 따른 Throughput</h3>
+          <h3>Throughput by Concurrent Requests</h3>
           <div className={styles.sliderGroup}>
-            <span>동시 요청:</span>
+            <span>Concurrent Requests:</span>
             <input
               type="range"
               min={0}
@@ -452,18 +452,18 @@ export function ThroughputSlider(): React.ReactElement {
 
 export function ConditionGrid(): React.ReactElement {
   const rows = [
-    ['네트워크', 'localhost (~0.01ms)', '네트워크 홉 (0.5~2ms)'],
-    ['동시 요청', '50개', '수백~수천'],
-    ['서비스 수명', '수 초', '수 시간~수 일'],
-    ['다른 async 작업', '없음', 'HTTP, DB 쿼리 등 혼재'],
-    ['GIL 경쟁자', 'Aerospike만', '웹 프레임워크 + ORM + ...'],
+    ['Network', 'localhost (~0.01ms)', 'Network hops (0.5~2ms)'],
+    ['Concurrent Requests', '50', 'Hundreds to thousands'],
+    ['Service Lifetime', 'Seconds', 'Hours to days'],
+    ['Other Async Tasks', 'None', 'Mixed HTTP, DB queries, etc.'],
+    ['GIL Contenders', 'Aerospike only', 'Web framework + ORM + ...'],
   ];
   return (
     <div className={styles.wrapper}>
       <div className={styles.condGrid}>
-        <div className={styles.condHead}>조건</div>
-        <div className={`${styles.condHead} ${styles.condHeadBench}`}>벤치마크</div>
-        <div className={`${styles.condHead} ${styles.condHeadProd}`}>실 운영</div>
+        <div className={styles.condHead}>Condition</div>
+        <div className={`${styles.condHead} ${styles.condHeadBench}`}>Benchmark</div>
+        <div className={`${styles.condHead} ${styles.condHeadProd}`}>Production</div>
         {rows.map(([label, bench, prod]) => (
           <React.Fragment key={label}>
             <div className={styles.condCell}>{label}</div>
@@ -519,10 +519,10 @@ export function ThroughputSim(): React.ReactElement {
     <div className={styles.wrapper}>
       <div className={styles.concurrencyViz}>
         <div className={styles.concurrencyHeader}>
-          <h3>Throughput 시뮬레이션</h3>
+          <h3>Throughput Simulation</h3>
         </div>
         <div style={{ fontSize: '0.72rem', color: 'var(--arch-text-muted)', marginBottom: 14 }}>
-          아키텍처 모델 기반 예측 — 실 벤치마크 데이터 + 스레드/태스크 이론값
+          Architecture model-based prediction — Real benchmark data + thread/task theoretical values
         </div>
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 18 }}>
           <div className={styles.sliderGroup}>
@@ -532,7 +532,7 @@ export function ThroughputSim(): React.ReactElement {
             <span className={styles.sliderValue}>{rtt}ms</span>
           </div>
           <div className={styles.sliderGroup}>
-            <span>동시 요청:</span>
+            <span>Concurrent Requests:</span>
             <input type="range" min={0} max={CO_STEPS.length - 1} step={1} value={concIdx}
               onChange={(e) => setConcIdx(Number(e.target.value))} />
             <span className={styles.sliderValue}>{conc >= 1000 ? `${conc / 1000}K` : conc}</span>
@@ -552,7 +552,7 @@ export function ThroughputSim(): React.ReactElement {
               <span className={styles.duoRowValue}>{off.threads}</span>
             </div>
             <div className={styles.duoRow}>
-              <span className={styles.duoRowLabel}>Queue 대기</span>
+              <span className={styles.duoRowLabel}>Queued</span>
               <span className={styles.duoRowValue} style={{ color: off.queue > 0 ? 'var(--arch-red)' : undefined }}>
                 {off.queue >= 1000 ? `${Math.floor(off.queue / 1000)}K+` : off.queue}
               </span>
@@ -571,7 +571,7 @@ export function ThroughputSim(): React.ReactElement {
               <span className={styles.duoRowValue}>{rus.workers}</span>
             </div>
             <div className={styles.duoRow}>
-              <span className={styles.duoRowLabel}>Queue 대기</span>
+              <span className={styles.duoRowLabel}>Queued</span>
               <span className={styles.duoRowValue} style={{ color: 'var(--arch-green)' }}>0</span>
             </div>
           </div>
@@ -580,7 +580,7 @@ export function ThroughputSim(): React.ReactElement {
         <div className={styles.duoResult}>
           <span className={styles.duoResultNum} style={rT < oT ? { color: 'var(--arch-c-async)' } : undefined}>{ratio}&times;</span>
           <span className={styles.duoResultSub}>
-            {rT > oT ? 'aerospike-py가 빠름' : rT < oT ? 'Official이 빠름 (localhost 한정)' : '동등'}
+            {rT > oT ? 'aerospike-py is faster' : rT < oT ? 'Official is faster (localhost only)' : 'Equal'}
           </span>
         </div>
       </div>
@@ -607,13 +607,13 @@ export function MemorySim(): React.ReactElement {
     <div className={styles.wrapper}>
       <div className={styles.concurrencyViz}>
         <div className={styles.concurrencyHeader}>
-          <h3>K8s Pod 512MB 제한에서의 동시 처리 한계</h3>
+          <h3>Concurrency Limits Under K8s Pod 512MB</h3>
         </div>
         <div style={{ fontSize: '0.72rem', color: 'var(--arch-text-muted)', marginBottom: 14 }}>
-          OS 스레드(~8MB 스택) vs Tokio 태스크(~수KB). 동시 요청이 늘어날수록 차이가 극명해집니다.
+          OS threads (~8MB stack) vs Tokio tasks (~few KB). The difference becomes dramatic as concurrent requests increase.
         </div>
         <div className={styles.sliderGroup} style={{ marginBottom: 18 }}>
-          <span>동시 요청:</span>
+          <span>Concurrent Requests:</span>
           <input type="range" min={0} max={MEM_CONC.length - 1} step={1} value={idx}
             onChange={(e) => setIdx(Number(e.target.value))} />
           <span className={styles.sliderValue}>{conc >= 1000 ? `${conc / 1000}K` : conc}</span>
@@ -638,14 +638,14 @@ export function MemorySim(): React.ReactElement {
             </div>
             <span className={`${styles.memTowerValue} ${styles.memTowerValueRust}`}>{fmtMB(rusMem)}</span>
             <span className={styles.memTowerLabel}>aerospike-py</span>
-            <span className={styles.memTowerLabel}>(~수KB &times; tasks)</span>
+            <span className={styles.memTowerLabel}>(~few KB &times; tasks)</span>
           </div>
         </div>
 
         <div className={styles.sliderInsight}>
           {oom
-            ? <><b>Pod 512MB 제한 초과!</b> Official async는 동시 {conc}개에서 {fmtMB(offMem)}이 필요해 OOM Kill. aerospike-py는 <b>{fmtMB(rusMem)}</b>로 여유.</>
-            : <>동시 {conc}개: Official {fmtMB(offMem)} vs aerospike-py {fmtMB(rusMem)} &rarr; <b>{Math.round(offMem / rusMem)}배</b> 메모리 절감.</>
+            ? <><b>Pod 512MB limit exceeded!</b> Official async needs {fmtMB(offMem)} for {conc} concurrent requests — OOM Kill. aerospike-py uses only <b>{fmtMB(rusMem)}</b>.</>
+            : <>{conc} concurrent: Official {fmtMB(offMem)} vs aerospike-py {fmtMB(rusMem)} &rarr; <b>{Math.round(offMem / rusMem)}x</b> memory savings.</>
           }
         </div>
       </div>
@@ -715,7 +715,7 @@ export function GilChart(): React.ReactElement {
       x.font = '9.5px sans-serif';
       x.fillText(v >= 1000 ? `${v / 1000}K` : String(v), xPos(v), H - P.b + 15);
     });
-    x.fillText('동시 요청 수', W / 2, H - 3);
+    x.fillText('Concurrent Requests', W / 2, H - 3);
 
     // OOM line
     const oomX = xPos(64);
@@ -798,10 +798,10 @@ export function GilChart(): React.ReactElement {
     <div className={styles.wrapper}>
       <div className={styles.concurrencyViz}>
         <div className={styles.concurrencyHeader}>
-          <h3>p99 Latency vs 동시 요청 수</h3>
+          <h3>p99 Latency vs Concurrent Requests</h3>
         </div>
         <div style={{ fontSize: '0.72rem', color: 'var(--arch-text-muted)', marginBottom: 8 }}>
-          아키텍처 모델 기반 예측 — GIL 경합 + 서버 큐잉 효과 반영
+          Architecture model-based prediction — Reflects GIL contention + server queuing effects
         </div>
 
         <div className={styles.timeline}>
@@ -809,16 +809,16 @@ export function GilChart(): React.ReactElement {
             <div className={styles.timelineDot} />
             <div className={styles.timelineName} style={{ color: 'var(--arch-c-async)' }}>Official run_in_executor</div>
             <div className={styles.timelineDesc}>
-              동시 요청 N개 &rarr; <b>OS 스레드 N개</b>가 GIL 경쟁<br />
-              N&uarr; &rarr; GIL 경합 시간&uarr; &rarr; tail latency가 <b>N에 비례</b>해서 악화
+              N concurrent requests &rarr; <b>N OS threads</b> competing for GIL<br />
+              N&uarr; &rarr; GIL contention time&uarr; &rarr; Tail latency degrades <b>proportional to N</b>
             </div>
           </div>
           <div className={styles.timelineItem}>
             <div className={styles.timelineDot} style={{ borderColor: 'var(--arch-rust)' }} />
             <div className={styles.timelineName} style={{ color: 'var(--arch-rust)' }}>aerospike-py future_into_py</div>
             <div className={styles.timelineDesc}>
-              동시 요청 N개 &rarr; <b>Tokio 태스크 N개</b> (GIL 불필요)<br />
-              GIL 잡는 건 결과 변환 시 워커만 &rarr; 경쟁자 <b>4개 고정</b> &rarr; tail latency 안정
+              N concurrent requests &rarr; <b>N Tokio tasks</b> (no GIL needed)<br />
+              Only workers acquire GIL for result conversion &rarr; <b>Fixed 4 contenders</b> &rarr; Stable tail latency
             </div>
           </div>
         </div>
@@ -827,7 +827,7 @@ export function GilChart(): React.ReactElement {
         <div className={styles.chartLegend}>
           <span><span className={styles.chartLegendDot} style={{ background: 'var(--arch-c-async)' }} />Official Async (run_in_executor)</span>
           <span><span className={styles.chartLegendDot} style={{ background: 'var(--arch-rust)' }} />aerospike-py (Tokio)</span>
-          <span><span className={styles.chartLegendDot} style={{ background: 'var(--arch-red)', opacity: 0.4 }} />512MB OOM 한계선</span>
+          <span><span className={styles.chartLegendDot} style={{ background: 'var(--arch-red)', opacity: 0.4 }} />512MB OOM Limit</span>
         </div>
       </div>
     </div>
@@ -842,23 +842,23 @@ export function BenchmarkSummary(): React.ReactElement {
       <div className={styles.summaryStrip}>
         <div className={styles.summaryCard}>
           <div className={styles.summaryCardValue}>~1.3&times;</div>
-          <div className={styles.summaryCardLabel}>벤치마크 Throughput</div>
+          <div className={styles.summaryCardLabel}>Benchmark Throughput</div>
           <div className={styles.summaryCardSub}>localhost, 50 conc</div>
         </div>
         <div className={styles.summaryCard}>
           <div className={styles.summaryCardValue}>5~10&times;</div>
-          <div className={styles.summaryCardLabel}>실 운영 Throughput</div>
+          <div className={styles.summaryCardLabel}>Production Throughput</div>
           <div className={styles.summaryCardSub}>1ms RTT, 500+ conc</div>
         </div>
         <div className={styles.summaryCard}>
           <div className={styles.summaryCardValue}>100&times;+</div>
-          <div className={styles.summaryCardLabel}>메모리 효율</div>
-          <div className={styles.summaryCardSub}>1K 동시 요청</div>
+          <div className={styles.summaryCardLabel}>Memory Efficiency</div>
+          <div className={styles.summaryCardSub}>1K concurrent requests</div>
         </div>
         <div className={styles.summaryCard}>
-          <div className={styles.summaryCardValue}>안정</div>
+          <div className={styles.summaryCardValue}>Stable</div>
           <div className={styles.summaryCardLabel}>p99 Tail Latency</div>
-          <div className={styles.summaryCardSub}>N과 무관</div>
+          <div className={styles.summaryCardSub}>Independent of N</div>
         </div>
       </div>
     </div>
@@ -872,7 +872,7 @@ export function MemoryViz(): React.ReactElement {
         <div className={styles.memoryCircleGroup}>
           <div className={`${styles.memoryCircle} ${styles.memorySyncCircle}`} style={{ width: 100, height: 100, fontSize: '1rem' }}>N/A</div>
           <span className={styles.memoryLabel}>Sync</span>
-          <span className={styles.memorySub} style={{ color: 'var(--arch-c-sync)' }}>순차 처리 (동시 불가)</span>
+          <span className={styles.memorySub} style={{ color: 'var(--arch-c-sync)' }}>Sequential (no concurrency)</span>
         </div>
         <span className={styles.memVs}>&middot;</span>
         <div className={styles.memoryCircleGroup}>
@@ -884,7 +884,7 @@ export function MemoryViz(): React.ReactElement {
         <div className={styles.memoryCircleGroup}>
           <div className={`${styles.memoryCircle} ${styles.memoryRustCircle}`} style={{ width: 44, height: 44, fontSize: '0.65rem' }}>15MB</div>
           <span className={styles.memoryLabel}>aerospike-py</span>
-          <span className={styles.memorySub} style={{ color: 'var(--arch-rust)' }}>~수KB &times; 1,000 tasks</span>
+          <span className={styles.memorySub} style={{ color: 'var(--arch-rust)' }}>~few KB &times; 1,000 tasks</span>
         </div>
       </div>
     </div>
