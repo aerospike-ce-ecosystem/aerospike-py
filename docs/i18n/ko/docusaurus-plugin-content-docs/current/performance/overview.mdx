@@ -1,0 +1,130 @@
+---
+title: 성능 개요
+sidebar_label: Overview
+sidebar_position: 1
+description: aerospike-py 아키텍처 비교, GIL 최적화, 동시성 스케일링, 벤치마크 결과 분석
+---
+
+import BrowserOnly from '@docusaurus/BrowserOnly';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import { RequestFlow, GilTimeline, ConcurrencyViz, ThroughputSlider, MemoryViz, ConditionGrid, ThroughputSim, MemorySim, GilChart } from '@site/src/components/ArchitectureComparison';
+
+## Comparison with Official Client
+
+### 요청이 처리되는 방식
+
+`client.get(key)` / `await client.get(key)` 뒤에서 일어나는 일이 세 가지 패턴에서 각각 다릅니다.
+
+<BrowserOnly>
+  {() => <RequestFlow />}
+</BrowserOnly>
+
+:::info Sync는 가장 단순하지만 가장 제한적
+호출 스레드 자체가 I/O 동안 완전히 멈추기 때문에, 한 번에 하나의 요청만 처리할 수 있습니다.
+동시 처리를 하려면 Python threading을 직접 관리해야 합니다.
+:::
+
+<Tabs>
+  <TabItem value="gil" label="GIL 점유 시간" default>
+
+CPython GIL은 한 번에 하나의 스레드만 Python 코드를 실행할 수 있게 합니다.
+패턴별로 GIL 보유 방식이 다릅니다.
+
+<BrowserOnly>
+  {() => <GilTimeline />}
+</BrowserOnly>
+
+:::caution
+**Sync가 GIL 전환은 가장 적지만**, I/O 동안 호출 스레드 자체가 블로킹되므로 동시 처리가 불가능합니다.
+Async executor는 동시 처리는 가능하지만 스레드 수만큼 GIL 경쟁자가 늘어납니다.
+aerospike-py만 GIL 최소 + 동시 처리를 동시에 달성합니다.
+:::
+
+  </TabItem>
+  <TabItem value="concurrency" label="동시 요청 처리">
+
+<BrowserOnly>
+  {() => <ConcurrencyViz />}
+</BrowserOnly>
+
+  </TabItem>
+  <TabItem value="throughput" label="처리량 스케일링">
+
+<BrowserOnly>
+  {() => <ThroughputSlider />}
+</BrowserOnly>
+
+  </TabItem>
+  <TabItem value="memory" label="메모리 사용량">
+
+<BrowserOnly>
+  {() => <MemoryViz />}
+</BrowserOnly>
+
+:::caution K8s 환경
+Sync는 동시 처리 자체가 불가능합니다.
+Async executor는 Pod memory limit 512MB에서 동시 64개가 한계.
+aerospike-py는 수만 개 동시 요청이 가능합니다.
+:::
+
+  </TabItem>
+</Tabs>
+
+:::tip 핵심
+**Sync**는 단일 요청 latency는 낮지만 동시 처리가 불가능해 서버 환경에 부적합합니다.
+**Async executor**는 동시성을 추가하지만 스레드풀 한계와 GIL 경합이 병목입니다.
+**aerospike-py**는 단일 요청에서도 빠르고, 동시성이 올라갈수록 격차가 벌어지는 유일한 패턴입니다.
+:::
+
+## Benchmark Limitations
+
+현재 벤치마크는 aerospike-py의 이점이 가장 **작게** 나타나는 조건입니다. 실 운영 환경에서 어떤 차이가 생기는지 시각화합니다.
+
+<BrowserOnly>
+  {() => <ConditionGrid />}
+</BrowserOnly>
+
+:::caution
+localhost 환경은 I/O 대기가 거의 없어서 **스레드 블로킹의 비용이 사실상 0**입니다. 실 네트워크에서 I/O 대기가 길어지면 thread pool 모델과 Tokio 모델의 격차가 급격히 벌어집니다.
+:::
+
+<Tabs>
+  <TabItem value="io-sim" label="I/O × 동시성" default>
+
+슬라이더를 조절하며 Official async (`run_in_executor`)와 aerospike-py (Tokio)의 throughput 변화를 비교하세요.
+
+<BrowserOnly>
+  {() => <ThroughputSim />}
+</BrowserOnly>
+
+
+  </TabItem>
+  <TabItem value="memory-sim" label="메모리 효율">
+
+<BrowserOnly>
+  {() => <MemorySim />}
+</BrowserOnly>
+
+  </TabItem>
+  <TabItem value="gil-chart" label="GIL 경합 패턴">
+
+<BrowserOnly>
+  {() => <GilChart />}
+</BrowserOnly>
+
+:::tip
+concurrency=50에서는 차이가 미미하지만, **500+** 이 되면 Official의 p99가 급등합니다. 현재 벤치마크는 50에서 측정하므로 이 격차를 포착하지 못합니다.
+:::
+
+  </TabItem>
+</Tabs>
+
+:::info 결론
+현재 벤치마크는 "단일 요청 latency에서 C 확장을 이길 수 있는가?"를 검증합니다. 답은 **"약간 빠르다"**.
+하지만 aerospike-py의 진짜 존재 이유는 **"높은 동시성 + 실 네트워크에서 스레드 기반 모델의 한계를 넘는 것"**이고, 이건 현재 벤치마크로는 측정되지 않는 영역입니다.
+:::
+
+## Results
+
+- [벤치마크 결과](./benchmark-results) — 인터랙티브 벤치마크 대시보드
