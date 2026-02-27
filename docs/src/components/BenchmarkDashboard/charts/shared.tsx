@@ -17,15 +17,26 @@ export function ChartTooltip({
   label,
   colorMode,
   unit,
+  formatter,
 }: {
   active?: boolean;
   payload?: Array<{name: string; value: number; color: string}>;
   label?: string;
   colorMode: ColorMode;
   unit: string;
+  formatter?: (name: string, value: number) => string;
 }) {
   if (!active || !payload?.length) return null;
   const theme = themeColors(colorMode);
+
+  const formatValue = (name: string, value: number): string => {
+    if (formatter) return formatter(name, value);
+    if (unit === 'ms') return `${value.toFixed(3)}ms`;
+    if (unit === 'kb') return `${value.toLocaleString()} KB`;
+    if (unit === 'pct') return `${value.toFixed(1)}%`;
+    return `${value.toLocaleString()}/s`;
+  };
+
   return (
     <div
       style={{
@@ -39,14 +50,7 @@ export function ChartTooltip({
       <p style={{margin: 0, fontWeight: 600, color: theme.text}}>{label}</p>
       {payload.map((entry, i) => (
         <p key={i} style={{margin: '4px 0 0', color: entry.color}}>
-          {entry.name}:{' '}
-          {unit === 'ms'
-            ? `${entry.value.toFixed(3)}ms`
-            : unit === 'kb'
-              ? `${entry.value.toLocaleString()} KB`
-              : unit === 'pct'
-                ? `${entry.value.toFixed(1)}%`
-                : `${entry.value.toLocaleString()}/s`}
+          {entry.name}: {formatValue(entry.name, entry.value)}
         </p>
       ))}
     </div>

@@ -3,27 +3,8 @@
 export interface OpMetrics {
   avg_ms: number | null;
   p50_ms: number | null;
-  p75_ms: number | null;
-  p90_ms: number | null;
-  p95_ms: number | null;
   p99_ms: number | null;
-  p999_ms: number | null;
   ops_per_sec: number | null;
-  stdev_ms: number | null;
-  mad_ms: number | null;
-  cpu_p50_ms: number | null;
-  io_wait_p50_ms: number | null;
-  cpu_pct: number | null;
-  process_cpu_ms: number | null;
-  process_cpu_pct: number | null;
-  ops_per_cpu_sec: number | null;
-  per_op?: {
-    p50_ms: number | null;
-    p95_ms: number | null;
-    p99_ms: number | null;
-    p999_ms: number | null;
-    mad_ms: number | null;
-  };
 }
 
 export type ClientSection = Record<string, OpMetrics>;
@@ -63,6 +44,8 @@ export interface MemoryEntry {
   put_peak_kb: number;
   get_peak_kb: number;
   batch_read_peak_kb: number;
+  official_get_peak_kb?: number;
+  official_batch_read_peak_kb?: number;
   c_get_peak_kb?: number;
   c_batch_read_peak_kb?: number;
 }
@@ -70,6 +53,7 @@ export interface MemoryEntry {
 export interface MemoryResult {
   count: number;
   has_c: boolean;
+  has_official: boolean;
   data: MemoryEntry[];
 }
 
@@ -116,13 +100,15 @@ export interface FullBenchmarkData {
   timestamp: string;
   date: string;
   environment: EnvironmentConfig;
-  rust_sync: ClientSection;
-  c_sync: ClientSection | null;
-  rust_async: ClientSection;
+  aerospike_py_sync: ClientSection;
+  official_sync: ClientSection | null;
+  aerospike_py_async: ClientSection;
+  official_async: ClientSection | null;
   data_size?: DataSizeResult;
   concurrency_scaling?: ConcurrencyResult;
   memory_profiling?: MemoryResult;
   mixed_workload?: MixedResult;
+  numpy_batch?: NumpyBenchmarkData;
   takeaways: string[];
 }
 
@@ -167,10 +153,10 @@ export interface NumpyMemoryEntry {
 }
 
 export interface NumpyBenchmarkData {
-  timestamp: string;
-  date: string;
-  report_type: string;
-  environment: {
+  timestamp?: string;
+  date?: string;
+  report_type?: string;
+  environment?: {
     platform: string;
     python_version: string;
     rounds: number;
