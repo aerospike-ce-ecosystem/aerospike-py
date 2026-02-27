@@ -1,0 +1,20 @@
+---
+title: 벤치마크 결과
+sidebar_label: Benchmark Results
+sidebar_position: 2
+---
+
+import BenchmarkDashboard from '@site/src/components/BenchmarkDashboard';
+
+# 벤치마크 결과
+
+:::tip 생성 방법
+```bash
+make run-benchmark-report                      # 기본 벤치마크 + 리포트
+make run-benchmark-report BENCH_SCENARIO=all   # 전체 시나리오 (advanced + numpy) + 리포트
+```
+:::
+
+aerospike-py (Rust/PyO3) vs 공식 aerospike Python 클라이언트 (C 확장).
+
+<BenchmarkDashboard />
