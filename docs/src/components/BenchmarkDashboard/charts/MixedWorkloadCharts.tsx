@@ -10,7 +10,9 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import {ChartTooltip, themeColors} from './shared';
+import {shortLabel} from '../helpers';
 import {COLOR_THROUGHPUT, COLOR_READ, COLOR_WRITE} from '../constants';
+import chartStyles from '../styles/Charts.module.css';
 import type {MixedResult, ColorMode} from '../types';
 
 interface Props {
@@ -22,12 +24,12 @@ export function MixedWorkloadChart({result, colorMode}: Props) {
   const theme = themeColors(colorMode);
 
   const chartData = result.data.map((d) => ({
-    workload: d.label.split(' (')[0],
+    workload: shortLabel(d.label),
     Throughput: d.throughput_ops_sec,
   }));
 
   return (
-    <div style={{width: '100%', minHeight: 350, margin: '1rem 0'}}>
+    <div className={chartStyles.chartWrap}>
       <ResponsiveContainer width="100%" height={350}>
         <BarChart data={chartData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
@@ -49,7 +51,7 @@ export function MixedLatencyChart({result, colorMode}: Props) {
   const theme = themeColors(colorMode);
 
   const chartData = result.data.map((d) => ({
-    workload: d.label.split(' (')[0],
+    workload: shortLabel(d.label),
     'Read p50': d.read?.p50_ms ?? 0,
     'Read p95': d.read?.p95_ms ?? 0,
     'Write p50': d.write?.p50_ms ?? 0,
@@ -57,7 +59,7 @@ export function MixedLatencyChart({result, colorMode}: Props) {
   }));
 
   return (
-    <div style={{width: '100%', minHeight: 350, margin: '1rem 0'}}>
+    <div className={chartStyles.chartWrap}>
       <ResponsiveContainer width="100%" height={350}>
         <BarChart data={chartData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />

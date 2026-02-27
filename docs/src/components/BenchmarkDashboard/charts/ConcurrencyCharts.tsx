@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import {ChartTooltip, themeColors} from './shared';
 import {COLOR_PUT_P50, COLOR_PUT_P99, COLOR_GET_P50, COLOR_GET_P99} from '../constants';
+import chartStyles from '../styles/Charts.module.css';
 import type {ConcurrencyResult, ColorMode} from '../types';
 
 interface Props {
@@ -28,7 +29,7 @@ export function ConcurrencyThroughputChart({result, colorMode}: Props) {
   }));
 
   return (
-    <div style={{width: '100%', minHeight: 400, margin: '1rem 0'}}>
+    <div className={chartStyles.chartWrap}>
       <ResponsiveContainer width="100%" height={400}>
         <LineChart data={chartData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
@@ -63,7 +64,7 @@ export function ConcurrencyLatencyChart({result, colorMode}: Props) {
   });
 
   return (
-    <div style={{width: '100%', minHeight: 400, margin: '1rem 0'}}>
+    <div className={chartStyles.chartWrap}>
       <ResponsiveContainer width="100%" height={400}>
         <LineChart data={chartData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
