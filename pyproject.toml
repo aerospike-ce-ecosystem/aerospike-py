@@ -161,5 +161,5 @@ commands = [["pytest", "tests/", "-v"]]
 python-source = "src"
 module-name = "aerospike_py._aerospike"
 manifest-path = "rust/Cargo.toml"
-features = ["pyo3/extension-module", "otel"]
+features = ["extension-module", "otel"]
 include = ["LICENSE"]

@@ -6,10 +6,12 @@ license = "Apache-2.0"
 
 [lib]
 name = "_aerospike"
-crate-type = ["cdylib"]
+# rlib enables `cargo test` (cdylib alone does not produce a test binary).
+# See: https://pyo3.rs/latest/building-and-distribution.html#testing
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module"] }
+pyo3 = { version = "0.28" }
 pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
 aerospike = { version = "2.0.0-alpha.9", features = ["async", "rt-tokio"], default-features = false }
 aerospike-core = { version = "2.0.0-alpha.9" }
@@ -17,6 +19,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "
 arc-swap = "1"
 futures = "0.3"
 half = "2"
+ripemd = "0.1"
 log = "0.4"
 prometheus-client = "0.24"
 opentelemetry = { version = "0.31", optional = true }
@@ -24,6 +27,10 @@ opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"], optional = true
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"], optional = true }
 
 [features]
+# extension-module activates pyo3/extension-module which avoids linking Python.
+# Must be enabled when building the Python extension (maturin handles this).
+# Do NOT enable during `cargo test` — omitting it lets the linker find Python.
+extension-module = ["pyo3/extension-module"]
 default = []
 otel = [
     "dep:opentelemetry",
