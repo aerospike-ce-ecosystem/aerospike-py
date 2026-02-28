@@ -1,0 +1,10 @@
+{
+  "label": "가이드",
+  "position": 3,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "가이드",
+    "description": "CRUD, 쿼리, 표현식 필터, CDT, UDF, 관리 가이드"
+  }
+}

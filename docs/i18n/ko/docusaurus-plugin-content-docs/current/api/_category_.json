@@ -1,0 +1,10 @@
+{
+  "label": "API 레퍼런스",
+  "position": 2,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "API 레퍼런스",
+    "description": "aerospike-py Client, AsyncClient, Query, Scan, Exceptions, Constants API 문서"
+  }
+}
