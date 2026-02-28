@@ -9,8 +9,6 @@ import math
 
 import pytest
 
-import aerospike_py
-
 aerospike = pytest.importorskip("aerospike")
 
 NS = "test"
@@ -260,7 +258,7 @@ class TestBytesKeyDigest:
         # The official C client truncates bytes at the first null byte, so it
         # computes a different digest for b"\xff\xfe\x00\x01" (treats it as
         # b"\xff\xfe") and cannot find the record written by aerospike-py.
-        with pytest.raises(aerospike_py.exception.RecordNotFound):
+        with pytest.raises(aerospike.exception.RecordNotFound):
             official_client.get((NS, SET, b"\xff\xfe\x00\x01"))
 
         # But aerospike-py can read its own record back correctly
