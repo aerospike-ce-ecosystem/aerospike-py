@@ -116,3 +116,55 @@ pub fn key_to_py(py: Python<'_>, key: &Key) -> PyResult<Py<PyAny>> {
 pub fn py_to_keys(keys: &Bound<'_, PyList>) -> PyResult<Vec<Key>> {
     keys.iter().map(|k| py_to_key(&k)).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that `compute_bytes_key_digest` produces the expected RIPEMD-160
+    /// output for a known input. The expected values were derived by computing
+    /// RIPEMD-160(set_name + [3u8] + bytes_data) with OpenSSL and cross-checked
+    /// against the official Aerospike Python C client digest for the same key.
+    #[test]
+    fn test_bytes_key_digest_known_value() {
+        // RIPEMD-160("compat_edge" + [3] + b"\xde\xad\xbe\xef")
+        let digest = compute_bytes_key_digest("compat_edge", &[0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(
+            digest,
+            [
+                0x9a, 0x34, 0x10, 0x64, 0xe9, 0x9c, 0xdf, 0x47, 0x32, 0xc5, 0xfc, 0x53, 0x8a, 0x47,
+                0x84, 0x6b, 0x59, 0x87, 0x0f, 0x70,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_bytes_key_digest_empty_bytes() {
+        // RIPEMD-160("compat_edge" + [3] + b"")
+        let digest = compute_bytes_key_digest("compat_edge", &[]);
+        assert_eq!(
+            digest,
+            [
+                0x94, 0xbc, 0x78, 0x3d, 0x99, 0x12, 0xca, 0x79, 0x0f, 0x3e, 0x31, 0x88, 0x29, 0xd3,
+                0xcc, 0x6a, 0xfd, 0xba, 0xef, 0x4d,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_bytes_key_digest_uses_string_particle_type() {
+        // STRING particle type is 3; BLOB is 4. The two must produce different digests.
+        let digest_string = compute_bytes_key_digest("myset", b"hello");
+        // Manually compute BLOB variant (particle type 4) for comparison.
+        let mut hash = ripemd::Ripemd160::new();
+        ripemd::Digest::update(&mut hash, b"myset");
+        ripemd::Digest::update(&mut hash, [4u8]); // BLOB
+        ripemd::Digest::update(&mut hash, b"hello");
+        let digest_blob: [u8; 20] = ripemd::Digest::finalize(hash).into();
+
+        assert_ne!(
+            digest_string, digest_blob,
+            "STRING and BLOB particle types must yield different digests"
+        );
+    }
+}

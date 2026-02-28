@@ -257,11 +257,13 @@ class TestBytesKeyDigest:
 
         rust_client.put(key, {"val": "has_null"})
 
-        # Official client cannot find the record (different digest)
+        # The official C client truncates bytes at the first null byte, so it
+        # computes a different digest for b"\xff\xfe\x00\x01" (treats it as
+        # b"\xff\xfe") and cannot find the record written by aerospike-py.
         with pytest.raises(aerospike_py.exception.RecordNotFound):
-            rust_client.get(("test", SET, b"\xff\xfe"))
+            official_client.get((NS, SET, b"\xff\xfe\x00\x01"))
 
-        # But rust can read its own record back correctly
+        # But aerospike-py can read its own record back correctly
         _, _, r_bins = rust_client.get(key)
         assert r_bins["val"] == "has_null"
 
