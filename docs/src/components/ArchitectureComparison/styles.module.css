@@ -1,0 +1,745 @@
+/* ── Color tokens ─────────────────────────────────── */
+.wrapper {
+  --arch-surface: #f8fafc;
+  --arch-surface-2: #f1f5f9;
+  --arch-border: #e2e8f0;
+  --arch-text: #1e293b;
+  --arch-text-dim: #64748b;
+  --arch-text-muted: #94a3b8;
+  --arch-rust: #f97316;
+  --arch-rust-dim: rgba(249, 115, 22, 0.1);
+  --arch-c-async: #6366f1;
+  --arch-c-async-dim: rgba(99, 102, 241, 0.1);
+  --arch-c-sync: #8b5cf6;
+  --arch-c-sync-dim: rgba(139, 92, 246, 0.1);
+  --arch-green: #10b981;
+  --arch-green-dim: rgba(16, 185, 129, 0.1);
+  --arch-red: #ef4444;
+  --arch-red-dim: rgba(239, 68, 68, 0.1);
+  --arch-yellow: #eab308;
+  --arch-yellow-dim: rgba(234, 179, 8, 0.1);
+
+  margin-bottom: 8px;
+}
+
+[data-theme='dark'] .wrapper {
+  --arch-surface: #111827;
+  --arch-surface-2: #1a2235;
+  --arch-border: #2a3550;
+  --arch-text: #e2e8f0;
+  --arch-text-dim: #8892a8;
+  --arch-text-muted: #5a6580;
+}
+
+/* ── 3-column grid ───────────────────────────────── */
+.triGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .triGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Panel ────────────────────────────────────────── */
+.panel {
+  background: var(--arch-surface);
+  border: 1px solid var(--arch-border);
+  border-radius: 12px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.panelSync::before { background: var(--arch-c-sync); }
+.panelAsync::before { background: var(--arch-c-async); }
+.panelRust::before { background: var(--arch-rust); }
+
+.panelTitle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.panelSync .panelTitle { color: var(--arch-c-sync); }
+.panelAsync .panelTitle { color: var(--arch-c-async); }
+.panelRust .panelTitle { color: var(--arch-rust); }
+
+.panelFooter {
+  font-size: 0.72rem;
+  margin-top: 6px;
+}
+
+/* ── Tags ─────────────────────────────────────────── */
+.tag {
+  font-size: 0.6rem;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.tagFast { background: var(--arch-green-dim); color: var(--arch-green); }
+.tagMid { background: var(--arch-yellow-dim); color: var(--arch-yellow); }
+.tagSlow { background: var(--arch-red-dim); color: var(--arch-red); }
+
+/* ── Flow steps ───────────────────────────────────── */
+.flow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.flowStep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  font-size: 0.75rem;
+}
+
+.flowStepNum {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.panelSync .flowStepNum { background: var(--arch-c-sync-dim); color: var(--arch-c-sync); }
+.panelAsync .flowStepNum { background: var(--arch-c-async-dim); color: var(--arch-c-async); }
+.panelRust .flowStepNum { background: var(--arch-rust-dim); color: var(--arch-rust); }
+
+.flowStepLabel {
+  color: var(--arch-text-dim);
+  font-size: 0.73rem;
+}
+
+.flowStepLabel b {
+  color: var(--arch-text);
+  font-weight: 500;
+}
+
+.stepBad { background: var(--arch-red-dim); }
+.stepGood { background: var(--arch-green-dim); }
+.stepNeutral { background: var(--arch-surface-2); }
+
+.flowArrow {
+  display: flex;
+  justify-content: center;
+  color: var(--arch-text-muted);
+  font-size: 0.6rem;
+}
+
+.flowFooter {
+  font-size: 0.68rem;
+  margin-top: 10px;
+}
+
+/* ── GIL timeline ─────────────────────────────────── */
+.gilTimeline {
+  margin: 12px 0;
+  padding: 12px;
+  background: var(--arch-surface-2);
+  border-radius: 8px;
+}
+
+.gilRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.gilRow:last-child { margin-bottom: 0; }
+
+.gilLabel {
+  width: 62px;
+  font-size: 0.6rem;
+  color: var(--arch-text-muted);
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 6px;
+}
+
+.gilBlocks {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 20px;
+  gap: 2px;
+}
+
+.gilBlock {
+  height: 100%;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.5rem;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 0 3px;
+}
+
+.gilHeld { background: var(--arch-red); color: white; }
+.gilFree { background: var(--arch-green-dim); color: var(--arch-green); }
+.gilIo { background: var(--arch-surface); color: var(--arch-text-muted); border: 1px dashed var(--arch-border); }
+.gilEmpty { background: transparent; }
+.gilTokio { background: var(--arch-rust-dim); color: var(--arch-rust); border: 1px solid var(--arch-rust); }
+
+.gilFooter {
+  font-size: 0.68rem;
+  color: var(--arch-text-muted);
+  margin-top: 6px;
+}
+
+/* ── Thread visualization ─────────────────────────── */
+.threadViz { margin: 14px 0; }
+
+.threadRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  font-size: 0.68rem;
+}
+
+.threadLabel {
+  width: 72px;
+  text-align: right;
+  color: var(--arch-text-muted);
+  flex-shrink: 0;
+  font-size: 0.63rem;
+}
+
+.threadBarCt {
+  flex: 1;
+  height: 22px;
+  background: var(--arch-surface-2);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.threadBar {
+  position: absolute;
+  height: 100%;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  font-weight: 600;
+  color: white;
+}
+
+.barSync { background: var(--arch-c-sync); }
+.barSyncIo { background: rgba(139, 92, 246, 0.3); }
+.barCpu { background: var(--arch-c-async); }
+.barIo { background: rgba(99, 102, 241, 0.3); }
+.barWait { background: rgba(239, 68, 68, 0.15); color: var(--arch-red); }
+.barTask { background: var(--arch-rust); }
+.barIdle { background: rgba(90, 101, 128, 0.15); color: var(--arch-text-muted); }
+.barBlocked { background: rgba(239, 68, 68, 0.25); color: var(--arch-red); }
+.barStatusGood { background: var(--arch-green-dim); color: var(--arch-green); }
+
+/* ── Concurrency slider section ───────────────────── */
+.concurrencyViz {
+  padding: 20px;
+  background: var(--arch-surface);
+  border: 1px solid var(--arch-border);
+  border-radius: 12px;
+}
+
+.concurrencyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.concurrencyHeader h3 {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.sliderGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.73rem;
+  color: var(--arch-text-dim);
+}
+
+.sliderGroup input[type='range'] {
+  -webkit-appearance: none;
+  width: 140px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--arch-border);
+  outline: none;
+}
+
+.sliderGroup input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--arch-rust);
+  cursor: pointer;
+}
+
+.sliderValue {
+  font-weight: 600;
+  color: var(--arch-rust);
+  min-width: 50px;
+}
+
+.triBars {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .triBars {
+    grid-template-columns: 1fr;
+  }
+}
+
+.barGroup h4 {
+  font-size: 0.68rem;
+  margin-bottom: 10px;
+}
+
+.syncGroup h4 { color: var(--arch-c-sync); }
+.asyncGroup h4 { color: var(--arch-c-async); }
+.rustGroup h4 { color: var(--arch-rust); }
+
+.metricBarRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.metricBarLabel {
+  width: 66px;
+  font-size: 0.6rem;
+  color: var(--arch-text-muted);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.metricBarTrack {
+  flex: 1;
+  height: 18px;
+  background: var(--arch-surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.metricBarFill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  font-size: 0.55rem;
+  font-weight: 600;
+  color: white;
+}
+
+.syncGroup .metricBarFill { background: var(--arch-c-sync); }
+.asyncGroup .metricBarFill { background: var(--arch-c-async); }
+.rustGroup .metricBarFill { background: var(--arch-rust); }
+
+.metricBarValue {
+  font-size: 0.65rem;
+  font-weight: 600;
+  min-width: 68px;
+  text-align: right;
+}
+
+.syncGroup .metricBarValue { color: var(--arch-c-sync); }
+.asyncGroup .metricBarValue { color: var(--arch-c-async); }
+.rustGroup .metricBarValue { color: var(--arch-rust); }
+
+.sliderInsight {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--arch-rust-dim);
+  border-left: 3px solid var(--arch-rust);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--arch-text);
+}
+
+/* ── Memory circles ───────────────────────────────── */
+.memoryViz {
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  justify-content: center;
+  padding: 24px 0;
+  flex-wrap: wrap;
+}
+
+.memoryCircleGroup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.memoryCircle {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.memorySyncCircle { background: var(--arch-c-sync-dim); border: 2px solid var(--arch-c-sync); color: var(--arch-c-sync); }
+.memoryAsyncCircle { background: var(--arch-c-async-dim); border: 2px solid var(--arch-c-async); color: var(--arch-c-async); }
+.memoryRustCircle { background: var(--arch-rust-dim); border: 2px solid var(--arch-rust); color: var(--arch-rust); }
+
+.memoryLabel {
+  font-size: 0.65rem;
+  color: var(--arch-text-muted);
+}
+
+.memorySub {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.memVs {
+  font-size: 1.2rem;
+  color: var(--arch-text-muted);
+  align-self: center;
+}
+
+/* (Network impact styles removed — replaced by ThroughputSim) */
+
+/* ── Condition grid (bench vs prod) ─────────────── */
+.condGrid {
+  display: grid;
+  grid-template-columns: minmax(90px, 130px) 1fr 1fr;
+  border: 1px solid var(--arch-border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.78rem;
+}
+
+.condHead {
+  background: var(--arch-surface-2);
+  padding: 8px 12px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--arch-text-muted);
+  border-bottom: 1px solid var(--arch-border);
+}
+
+.condHeadBench { color: var(--arch-yellow); }
+.condHeadProd { color: var(--arch-green); }
+
+.condCell {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.15);
+  color: var(--arch-text-dim);
+}
+
+.condCell:nth-child(3n+1) {
+  background: var(--arch-surface);
+  font-weight: 500;
+  color: var(--arch-text);
+}
+
+.condCellHl { color: var(--arch-green); font-weight: 500; }
+
+/* ── Duo cards (throughput sim) ──────────────────── */
+.duoGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .duoGrid { grid-template-columns: 1fr; }
+}
+
+.duoCard {
+  background: var(--arch-surface-2);
+  border: 1px solid var(--arch-border);
+  border-radius: 10px;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.duoCard::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2.5px;
+}
+
+.duoCardAsync::before { background: var(--arch-c-async); }
+.duoCardRust::before { background: var(--arch-rust); }
+
+.duoCardTitle {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  margin-bottom: 10px;
+}
+
+.duoCardAsync .duoCardTitle { color: var(--arch-c-async); }
+.duoCardRust .duoCardTitle { color: var(--arch-rust); }
+
+.duoRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 7px;
+}
+
+.duoRowLabel { font-size: 0.72rem; color: var(--arch-text-dim); }
+
+.duoRowValue { font-size: 0.82rem; font-weight: 700; }
+.duoCardAsync .duoRowValue { color: var(--arch-c-async); }
+.duoCardRust .duoRowValue { color: var(--arch-rust); }
+
+.duoBarTrack {
+  height: 7px;
+  background: var(--arch-surface);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.duoBarFill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.duoCardAsync .duoBarFill { background: var(--arch-c-async); }
+.duoCardRust .duoBarFill { background: var(--arch-rust); }
+
+.duoResult {
+  text-align: center;
+  padding: 8px;
+  margin-top: 4px;
+}
+
+.duoResultNum {
+  font-size: 1.7rem;
+  font-weight: 800;
+  color: var(--arch-rust);
+  line-height: 1;
+}
+
+.duoResultSub {
+  font-size: 0.68rem;
+  color: var(--arch-text-dim);
+  display: block;
+  margin-top: 2px;
+}
+
+/* ── Memory sim towers ──────────────────────────── */
+.memSimWrap {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 36px;
+  flex-wrap: wrap;
+  padding: 16px 0 4px;
+}
+
+.memCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.memTower {
+  width: 56px;
+  height: 180px;
+  background: var(--arch-surface-2);
+  border: 1px solid var(--arch-border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.memTowerFill {
+  width: 100%;
+  border-radius: 0 0 7px 7px;
+  transition: height 0.5s ease;
+}
+
+.memTowerFillAsync { background: var(--arch-c-async); }
+.memTowerFillRust { background: var(--arch-rust); }
+
+.memTowerValue { font-size: 0.75rem; font-weight: 700; }
+.memTowerValueAsync { color: var(--arch-c-async); }
+.memTowerValueRust { color: var(--arch-rust); }
+
+.memTowerLabel {
+  font-size: 0.58rem;
+  color: var(--arch-text-muted);
+  text-align: center;
+}
+
+.memTowerVs {
+  font-size: 1rem;
+  color: var(--arch-text-muted);
+  align-self: center;
+}
+
+.memOom {
+  font-size: 0.6rem;
+  color: var(--arch-red);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* ── GIL chart ──────────────────────────────────── */
+.chartWrap {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  margin-top: 8px;
+}
+
+.chartWrap canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.chartLegend {
+  display: flex;
+  gap: 18px;
+  margin-top: 10px;
+  font-size: 0.66rem;
+  color: var(--arch-text-dim);
+  flex-wrap: wrap;
+}
+
+.chartLegendDot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+
+/* ── Timeline (GIL contention) ──────────────────── */
+.timeline {
+  position: relative;
+  margin: 18px 0;
+  padding-left: 20px;
+  border-left: 2px solid var(--arch-border);
+}
+
+.timelineItem {
+  padding: 4px 0 22px 16px;
+  position: relative;
+}
+
+.timelineItem:last-child { padding-bottom: 0; }
+
+.timelineDot {
+  position: absolute;
+  left: -27px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--arch-c-async);
+  background: var(--arch-surface);
+}
+
+.timelineName {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.timelineDesc {
+  font-size: 0.78rem;
+  color: var(--arch-text-dim);
+  margin-top: 2px;
+}
+
+.timelineDesc b { color: var(--arch-text); font-weight: 600; }
+
+/* ── Summary cards ──────────────────────────────── */
+.summaryStrip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 18px 0;
+}
+
+@media (max-width: 600px) {
+  .summaryStrip { grid-template-columns: 1fr 1fr; }
+}
+
+.summaryCard {
+  background: var(--arch-surface);
+  border: 1px solid var(--arch-border);
+  border-radius: 10px;
+  padding: 16px 10px;
+  text-align: center;
+}
+
+.summaryCardValue {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--arch-rust);
+  line-height: 1;
+}
+
+.summaryCardLabel {
+  font-size: 0.68rem;
+  color: var(--arch-text-dim);
+  margin-top: 4px;
+}
+
+.summaryCardSub {
+  font-size: 0.54rem;
+  color: var(--arch-text-muted);
+  margin-top: 2px;
+}

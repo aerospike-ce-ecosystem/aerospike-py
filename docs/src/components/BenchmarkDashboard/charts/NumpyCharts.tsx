@@ -13,7 +13,22 @@ import {
 } from 'recharts';
 import {ChartTooltip, themeColors} from './shared';
 import {COLOR_DICT_SYNC, COLOR_NUMPY_SYNC, COLOR_DICT_ASYNC, COLOR_NUMPY_ASYNC} from '../constants';
+import chartStyles from '../styles/Charts.module.css';
 import type {NumpyBenchmarkData, ColorMode} from '../types';
+
+function mapNumpyMetrics(entry: {
+  batch_read_sync: {avg_ms: number | null};
+  batch_read_numpy_sync: {avg_ms: number | null};
+  batch_read_async: {avg_ms: number | null};
+  batch_read_numpy_async: {avg_ms: number | null};
+}) {
+  return {
+    'batch_read (Sync)': entry.batch_read_sync.avg_ms ?? 0,
+    'numpy (Sync)': entry.batch_read_numpy_sync.avg_ms ?? 0,
+    'batch_read (Async)': entry.batch_read_async.avg_ms ?? 0,
+    'numpy (Async)': entry.batch_read_numpy_async.avg_ms ?? 0,
+  };
+}
 
 interface Props {
   data: NumpyBenchmarkData;
@@ -26,14 +41,11 @@ export function RecordScalingChart({data, colorMode}: Props) {
 
   const chartData = data.record_scaling.data.map((d) => ({
     records: d.record_count.toLocaleString(),
-    'batch_read (Sync)': d.batch_read_sync.avg_ms ?? 0,
-    'numpy (Sync)': d.batch_read_numpy_sync.avg_ms ?? 0,
-    'batch_read (Async)': d.batch_read_async.avg_ms ?? 0,
-    'numpy (Async)': d.batch_read_numpy_async.avg_ms ?? 0,
+    ...mapNumpyMetrics(d),
   }));
 
   return (
-    <div style={{width: '100%', minHeight: 400, margin: '1rem 0'}}>
+    <div className={chartStyles.chartWrap}>
       <ResponsiveContainer width="100%" height={400}>
         <LineChart data={chartData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
@@ -60,14 +72,11 @@ export function BinScalingChart({data, colorMode}: Props) {
 
   const chartData = data.bin_scaling.data.map((d) => ({
     bins: d.bin_count.toString(),
-    'batch_read (Sync)': d.batch_read_sync.avg_ms ?? 0,
-    'numpy (Sync)': d.batch_read_numpy_sync.avg_ms ?? 0,
-    'batch_read (Async)': d.batch_read_async.avg_ms ?? 0,
-    'numpy (Async)': d.batch_read_numpy_async.avg_ms ?? 0,
+    ...mapNumpyMetrics(d),
   }));
 
   return (
-    <div style={{width: '100%', minHeight: 400, margin: '1rem 0'}}>
+    <div className={chartStyles.chartWrap}>
       <ResponsiveContainer width="100%" height={400}>
         <LineChart data={chartData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
@@ -94,14 +103,11 @@ export function PostProcessingChart({data, colorMode}: Props) {
 
   const chartData = data.post_processing.data.map((d) => ({
     stage: d.stage_label,
-    'batch_read (Sync)': d.batch_read_sync.avg_ms ?? 0,
-    'numpy (Sync)': d.batch_read_numpy_sync.avg_ms ?? 0,
-    'batch_read (Async)': d.batch_read_async.avg_ms ?? 0,
-    'numpy (Async)': d.batch_read_numpy_async.avg_ms ?? 0,
+    ...mapNumpyMetrics(d),
   }));
 
   return (
-    <div style={{width: '100%', minHeight: 400, margin: '1rem 0'}}>
+    <div className={chartStyles.chartWrap}>
       <ResponsiveContainer width="100%" height={400}>
         <BarChart data={chartData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
@@ -133,7 +139,7 @@ export function NumpyMemoryChart({data, colorMode}: Props) {
   }));
 
   return (
-    <div style={{width: '100%', minHeight: 400, margin: '1rem 0'}}>
+    <div className={chartStyles.chartWrap}>
       <ResponsiveContainer width="100%" height={400}>
         <BarChart data={chartData} margin={{top: 20, right: 30, left: 20, bottom: 5}}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />

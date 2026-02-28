@@ -58,12 +58,6 @@ run-benchmark-report: build run-aerospike-ce ## Run benchmark + generate JSON re
 	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
 	uv run python benchmark/bench_compare.py \
 		$(BENCH_ARGS) --scenario $(BENCH_SCENARIO) --report; \
-	if [ "$(BENCH_SCENARIO)" = "all" ]; then \
-		uv run python benchmark/bench_batch_numpy.py \
-			--scenario all --rounds $(NUMPY_BENCH_ROUNDS) \
-			--concurrency $(NUMPY_BENCH_CONCURRENCY) --batch-groups $(NUMPY_BENCH_BATCH_GROUPS) \
-			--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT) --report; \
-	fi; \
 	$(MAKE) stop-aerospike-ce
 
 # ---------------------------------------------------------------------------

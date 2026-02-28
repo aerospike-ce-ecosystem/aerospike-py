@@ -10,7 +10,7 @@
 }
 
 .chartContainerSmall {
-  min-height: 300px;
+  min-height: 350px;
 }
 
 @media (max-width: 768px) {

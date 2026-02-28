@@ -46,10 +46,7 @@ function HomepageHeader() {
           </Link>
         </div>
         <CopyBlock text="pip install aerospike-py" />
-        <p className={styles.agentLabel}>
-          For AI Agents — copy this prompt to give your agent full context:
-        </p>
-        <CopyBlock className={styles.agentPrompt} text="Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to understand the aerospike-py Python client API, then write code based on that documentation." />
+
       </div>
     </header>
   );

@@ -45,48 +45,41 @@ OP_LABELS = {
 def _generate_takeaways(results: BenchmarkResults) -> list[str]:
     """Generate auto-generated key insights from benchmark results."""
     takeaways = []
-    has_c = results.c_sync is not None
+    has_off = results.official_sync is not None
 
-    if has_c:
-        # Find biggest latency win for Rust sync vs C
-        best_op = None
-        best_ratio = 0
-        for op in OPERATIONS:
-            rv = results.rust_sync[op].get("avg_ms", 0)
-            cv = results.c_sync[op].get("avg_ms", 0)
-            if rv and cv and rv > 0:
-                ratio = cv / rv
-                if ratio > best_ratio:
-                    best_ratio = ratio
-                    best_op = op
+    if has_off:
+        # Find biggest latency win for aerospike-py sync vs official sync
+        best_op, best_ratio = _find_best_op(
+            OPERATIONS,
+            results.aerospike_py_sync,
+            results.official_sync,
+            "avg_ms",
+        )
         if best_op and best_ratio > 1:
             takeaways.append(
                 f"aerospike-py (SyncClient) shows **{best_ratio:.1f}x** faster latency "
                 f"than the official client in {OP_LABELS[best_op]} operations"
             )
 
-        # Find biggest async win vs C
-        best_async_op = None
-        best_async_ratio = 0
-        for op in OPERATIONS:
-            av = results.rust_async[op].get("avg_ms", 0)
-            cv = results.c_sync[op].get("avg_ms", 0)
-            if av and cv and av > 0:
-                ratio = cv / av
-                if ratio > best_async_ratio:
-                    best_async_ratio = ratio
-                    best_async_op = op
-        if best_async_op and best_async_ratio > 1:
-            takeaways.append(
-                f"AsyncClient shows **{best_async_ratio:.1f}x** faster latency "
-                f"than the official client in {OP_LABELS[best_async_op]} operations"
+        # Find biggest async win: aerospike-py async vs official async
+        if results.official_async:
+            best_async_op, best_async_ratio = _find_best_op(
+                OPERATIONS,
+                results.aerospike_py_async,
+                results.official_async,
+                "avg_ms",
             )
+            if best_async_op and best_async_ratio > 1:
+                takeaways.append(
+                    f"AsyncClient shows **{best_async_ratio:.1f}x** faster latency "
+                    f"than the official async client in {OP_LABELS[best_async_op]} operations"
+                )
 
     # batch_read_numpy (Sync/Async) vs Official batch_read comparison
-    if has_c:
-        numpy_sync = results.rust_sync.get("batch_read_numpy", {}).get("avg_ms", 0)
-        numpy_async = results.rust_async.get("batch_read_numpy", {}).get("avg_ms", 0)
-        official_br = results.c_sync.get("batch_read", {}).get("avg_ms", 0)
+    if has_off:
+        numpy_sync = results.aerospike_py_sync.get("batch_read_numpy", {}).get("avg_ms", 0)
+        numpy_async = results.aerospike_py_async.get("batch_read_numpy", {}).get("avg_ms", 0)
+        official_br = results.official_sync.get("batch_read", {}).get("avg_ms", 0)
         if numpy_sync and official_br and numpy_sync > 0 and official_br > 0:
             ratio = official_br / numpy_sync
             if ratio >= 1.0:
@@ -114,29 +107,13 @@ def _generate_takeaways(results: BenchmarkResults) -> list[str]:
                     f"official BATCH_READ (returns numpy structured array vs Python dict)"
                 )
 
-    # CPU efficiency comparison (ops/CPU-sec)
-    if has_c:
-        for op in ["put", "get"]:
-            r_eff = results.rust_sync[op].get("ops_per_cpu_sec", 0)
-            c_eff = results.c_sync[op].get("ops_per_cpu_sec", 0)
-            if r_eff and c_eff and c_eff > 0:
-                ratio = r_eff / c_eff
-                if ratio > 1:
-                    takeaways.append(
-                        f"aerospike-py {OP_LABELS[op]} processes **{ratio:.1f}x** more ops per CPU-second (ops/CPU-sec)"
-                    )
-
-    # Async vs sync advantage
-    best_async_sync_op = None
-    best_async_sync_ratio = 0
-    for op in OPERATIONS:
-        av = results.rust_async[op].get("ops_per_sec", 0)
-        rv = results.rust_sync[op].get("ops_per_sec", 0)
-        if av and rv and rv > 0:
-            ratio = av / rv
-            if ratio > best_async_sync_ratio:
-                best_async_sync_ratio = ratio
-                best_async_sync_op = op
+    # Async vs sync advantage (aerospike-py internal)
+    best_async_sync_op, best_async_sync_ratio = _find_best_op(
+        OPERATIONS,
+        results.aerospike_py_sync,
+        results.aerospike_py_async,
+        "ops_per_sec",
+    )
     if best_async_sync_op and best_async_sync_ratio > 1:
         takeaways.append(
             f"AsyncClient shows **{best_async_sync_ratio:.1f}x** higher throughput "
@@ -153,39 +130,20 @@ def _generate_takeaways(results: BenchmarkResults) -> list[str]:
 
 
 def _op_dict(data: dict, op: str) -> dict:
-    """Extract metrics for a single operation (enhanced with full percentiles and CPU breakdown)."""
+    """Extract metrics for a single operation."""
     d = data.get(op, {})
     result = {
         "avg_ms": d.get("avg_ms"),
         "p50_ms": d.get("p50_ms"),
-        "p75_ms": d.get("p75_ms"),
-        "p90_ms": d.get("p90_ms"),
-        "p95_ms": d.get("p95_ms"),
         "p99_ms": d.get("p99_ms"),
-        "p999_ms": d.get("p999_ms"),
         "ops_per_sec": d.get("ops_per_sec"),
-        "stdev_ms": d.get("stdev_ms"),
-        "mad_ms": d.get("mad_ms"),
     }
-    # CPU time breakdown (sync only)
-    if d.get("cpu_p50_ms") is not None:
-        result["cpu_p50_ms"] = d["cpu_p50_ms"]
-        result["io_wait_p50_ms"] = d.get("io_wait_p50_ms")
-        result["cpu_pct"] = d.get("cpu_pct")
-    # Process-level CPU (all threads including Tokio workers)
-    if d.get("process_cpu_ms") is not None:
-        result["process_cpu_ms"] = d["process_cpu_ms"]
-        result["process_cpu_pct"] = d.get("process_cpu_pct")
-        result["ops_per_cpu_sec"] = d.get("ops_per_cpu_sec")
     # Async per-op latency distribution
     if d.get("per_op") is not None:
         po = d["per_op"]
         result["per_op"] = {
             "p50_ms": po.get("p50_ms"),
-            "p95_ms": po.get("p95_ms"),
             "p99_ms": po.get("p99_ms"),
-            "p999_ms": po.get("p999_ms"),
-            "mad_ms": po.get("mad_ms"),
         }
     return result
 
@@ -338,13 +296,70 @@ def _numpy_takeaways(results) -> list[str]:
     return takeaways
 
 
+def _numpy_takeaways_from_results(results: BenchmarkResults) -> list[str]:
+    """Generate numpy takeaways directly from BenchmarkResults fields."""
+
+    class _Adapter:
+        """Lightweight adapter to reuse _numpy_takeaways with BenchmarkResults."""
+
+        def __init__(self, r: BenchmarkResults):
+            self.record_scaling = r.numpy_record_scaling
+            self.bin_scaling = r.numpy_bin_scaling
+            self.post_processing = r.numpy_post_processing
+            self.memory = r.numpy_memory
+
+    return _numpy_takeaways(_Adapter(results))
+
+
 def _metrics_dict(d: dict) -> dict:
-    """Extract avg_ms, ops_per_sec, stdev_ms from a bulk_median result."""
+    """Extract avg_ms, ops_per_sec from a bulk_median result."""
     return {
         "avg_ms": d.get("avg_ms"),
         "ops_per_sec": d.get("ops_per_sec"),
-        "stdev_ms": d.get("stdev_ms"),
     }
+
+
+def _build_scaling_entry(d: dict, key_field: str) -> dict:
+    """Build a single scaling entry with the key field + 4 metrics dicts."""
+    entry = {key_field: d[key_field]}
+    for k in ("batch_read_sync", "batch_read_numpy_sync"):
+        entry[k] = _metrics_dict(d[k])
+    for k in ("batch_read_async", "batch_read_numpy_async"):
+        entry[k] = _metrics_dict(d.get(k, {}))
+    return entry
+
+
+def _build_scaling_data(raw: dict, key_field: str) -> list[dict]:
+    """Convert raw scaling data entries into report-ready dicts."""
+    return [_build_scaling_entry(d, key_field) for d in raw["data"]]
+
+
+def _find_best_op(ops: list[str], data_a: dict, data_b: dict, metric: str) -> tuple[str | None, float]:
+    """Find the op with the best ratio data_b[op][metric] / data_a[op][metric]."""
+    best_op = None
+    best_ratio = 0.0
+    for op in ops:
+        av = data_a[op].get(metric, 0)
+        bv = data_b[op].get(metric, 0)
+        if av and bv and av > 0:
+            ratio = bv / av
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_op = op
+    return best_op, best_ratio
+
+
+def _write_json_report(report: dict, json_dir: str, json_filename: str, date_slug: str) -> None:
+    """Write JSON report and update index."""
+    json_path = os.path.join(json_dir, json_filename)
+    with open(json_path, "w") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False, default=str)
+        f.write("\n")
+    print(f"    JSON: {json_filename}")
+
+    _update_index(json_dir, date_slug, json_filename)
+    print("    Index: index.json updated")
+    print("  Done.\n")
 
 
 def generate_numpy_report(results, json_dir: str, date_slug: str) -> None:
@@ -375,32 +390,14 @@ def generate_numpy_report(results, json_dir: str, date_slug: str) -> None:
     if results.record_scaling:
         report["record_scaling"] = {
             "fixed_bins": results.record_scaling["fixed_bins"],
-            "data": [
-                {
-                    "record_count": d["record_count"],
-                    "batch_read_sync": _metrics_dict(d["batch_read_sync"]),
-                    "batch_read_numpy_sync": _metrics_dict(d["batch_read_numpy_sync"]),
-                    "batch_read_async": _metrics_dict(d.get("batch_read_async", {})),
-                    "batch_read_numpy_async": _metrics_dict(d.get("batch_read_numpy_async", {})),
-                }
-                for d in results.record_scaling["data"]
-            ],
+            "data": _build_scaling_data(results.record_scaling, "record_count"),
         }
 
     # Bin scaling
     if results.bin_scaling:
         report["bin_scaling"] = {
             "fixed_records": results.bin_scaling["fixed_records"],
-            "data": [
-                {
-                    "bin_count": d["bin_count"],
-                    "batch_read_sync": _metrics_dict(d["batch_read_sync"]),
-                    "batch_read_numpy_sync": _metrics_dict(d["batch_read_numpy_sync"]),
-                    "batch_read_async": _metrics_dict(d.get("batch_read_async", {})),
-                    "batch_read_numpy_async": _metrics_dict(d.get("batch_read_numpy_async", {})),
-                }
-                for d in results.bin_scaling["data"]
-            ],
+            "data": _build_scaling_data(results.bin_scaling, "bin_count"),
         }
 
     # Post-processing
@@ -430,17 +427,7 @@ def generate_numpy_report(results, json_dir: str, date_slug: str) -> None:
 
     report["takeaways"] = _numpy_takeaways(results)
 
-    # Write JSON
-    json_path = os.path.join(json_dir, json_filename)
-    with open(json_path, "w") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    print(f"    JSON: {json_filename}")
-
-    # Update index.json
-    _update_index(json_dir, date_slug, json_filename)
-    print("    Index: index.json updated")
-    print("  Done.\n")
+    _write_json_report(report, json_dir, json_filename, date_slug)
 
 
 # ── main entry point ─────────────────────────────────────────
@@ -514,12 +501,14 @@ def generate_report(results: BenchmarkResults, json_dir: str, date_slug: str) ->
     }
 
     # Basic benchmark results
-    if results.rust_sync:
-        report["rust_sync"] = _build_client_section(results.rust_sync)
-    if results.c_sync:
-        report["c_sync"] = _build_client_section(results.c_sync)
-    if results.rust_async:
-        report["rust_async"] = _build_client_section(results.rust_async)
+    if results.aerospike_py_sync:
+        report["aerospike_py_sync"] = _build_client_section(results.aerospike_py_sync)
+    if results.official_sync:
+        report["official_sync"] = _build_client_section(results.official_sync)
+    if results.aerospike_py_async:
+        report["aerospike_py_async"] = _build_client_section(results.aerospike_py_async)
+    if results.official_async:
+        report["official_async"] = _build_client_section(results.official_async)
 
     # Advanced scenario results
     if results.data_size:
@@ -531,21 +520,67 @@ def generate_report(results: BenchmarkResults, json_dir: str, date_slug: str) ->
     if results.mixed_workload:
         report["mixed_workload"] = results.mixed_workload
 
+    # NumPy batch benchmark results (embedded in same JSON)
+    has_numpy = any(
+        [
+            results.numpy_record_scaling,
+            results.numpy_bin_scaling,
+            results.numpy_post_processing,
+            results.numpy_memory,
+        ]
+    )
+    if has_numpy:
+        numpy_section: dict = {
+            "environment": {
+                "platform": results.platform_info,
+                "python_version": results.python_version,
+                "rounds": results.numpy_rounds,
+                "warmup": results.numpy_warmup,
+                "concurrency": results.numpy_concurrency,
+                "batch_groups": results.numpy_batch_groups,
+            },
+        }
+        if results.numpy_record_scaling:
+            numpy_section["record_scaling"] = {
+                "fixed_bins": results.numpy_record_scaling["fixed_bins"],
+                "data": _build_scaling_data(results.numpy_record_scaling, "record_count"),
+            }
+        if results.numpy_bin_scaling:
+            numpy_section["bin_scaling"] = {
+                "fixed_records": results.numpy_bin_scaling["fixed_records"],
+                "data": _build_scaling_data(results.numpy_bin_scaling, "bin_count"),
+            }
+        if results.numpy_post_processing:
+            numpy_section["post_processing"] = {
+                "record_count": results.numpy_post_processing["record_count"],
+                "bin_count": results.numpy_post_processing["bin_count"],
+                "data": [
+                    {
+                        "stage": d["stage"],
+                        "stage_label": d["stage_label"],
+                        "batch_read_sync": _metrics_dict(d["batch_read_sync"]),
+                        "batch_read_numpy_sync": _metrics_dict(d["batch_read_numpy_sync"]),
+                        "batch_read_async": _metrics_dict(d.get("batch_read_async", {})),
+                        "batch_read_numpy_async": _metrics_dict(d.get("batch_read_numpy_async", {})),
+                    }
+                    for d in results.numpy_post_processing["data"]
+                ],
+            }
+        if results.numpy_memory:
+            numpy_section["memory"] = {
+                "bin_count": results.numpy_memory["bin_count"],
+                "data": results.numpy_memory["data"],
+            }
+
+        # Generate numpy takeaways using a lightweight adapter
+        numpy_section["takeaways"] = _numpy_takeaways_from_results(results)
+        report["numpy_batch"] = numpy_section
+
     # Takeaways
-    takeaways = _generate_takeaways(results) if results.rust_sync else []
+    takeaways = _generate_takeaways(results) if results.aerospike_py_sync else []
     takeaways.extend(_advanced_takeaways(results))
     if not takeaways:
         takeaways.append("Benchmark results collected successfully")
     report["takeaways"] = takeaways
 
-    # Write JSON
-    json_path = os.path.join(json_dir, json_filename)
-    with open(json_path, "w") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False, default=str)
-        f.write("\n")
-    print(f"    JSON: {json_filename}")
-
-    # Update index.json
-    _update_index(json_dir, date_slug, json_filename)
-    print("    Index: index.json updated")
-    print("  Done.\n")
+    _write_json_report(report, json_dir, json_filename, date_slug)
