@@ -2,12 +2,26 @@
 
 import asyncio
 import functools
+import inspect
 import time
 
 import pytest
 
 import aerospike_py
 from aerospike_py import predicates as p
+
+
+async def invoke(client, method_name, *args, **kwargs):
+    """Call a method on either sync or async client transparently.
+
+    If the result is a coroutine, awaits it. Otherwise returns directly.
+    This avoids the need to duplicate test bodies for sync vs async clients.
+    """
+    method = getattr(client, method_name)
+    result = method(*args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 def wait_for_index(client, ns, set_name, bin_name, timeout=5.0, interval=0.2):

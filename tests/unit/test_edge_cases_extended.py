@@ -1,17 +1,18 @@
 """Extended edge case unit tests (no Aerospike server required).
 
 Covers:
-- Empty batch operations on unconnected client
+- Empty batch operations on unconnected client (sync + async via parametrize)
 - Invalid policy value types
 - Key edge cases (empty namespace/set, various user key types)
 - Bin name edge cases (long names, special chars, empty)
-- Admin methods exist on unconnected async client
+- Admin methods exist on both sync and async clients
 """
 
 import pytest
 
 import aerospike_py
 from aerospike_py import AsyncClient, Client
+from tests.helpers import invoke
 
 # ═══════════════════════════════════════════════════════════════════
 # Helpers
@@ -29,7 +30,7 @@ def _make_async_client() -> AsyncClient:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 1. Empty batch operations
+# 1. Empty batch operations  (sync + async via parametrize)
 # ═══════════════════════════════════════════════════════════════════
 
 
@@ -37,45 +38,24 @@ class TestEmptyBatchOperations:
     """Batch operations with empty key lists should raise ClientError
     on an unconnected client (connection check happens after arg prep)."""
 
-    def test_batch_read_empty_keys(self):
-        """batch_read([]) on unconnected client raises ClientError."""
-        c = _make_client()
+    @pytest.mark.parametrize("make_client", [_make_client, _make_async_client], ids=["sync", "async"])
+    async def test_batch_read_empty_keys(self, make_client):
+        c = make_client()
         with pytest.raises(aerospike_py.ClientError):
-            c.batch_read([])
+            await invoke(c, "batch_read", [])
 
-    def test_batch_operate_empty_keys(self):
-        """batch_operate([], []) on unconnected client raises ClientError."""
-        c = _make_client()
+    @pytest.mark.parametrize("make_client", [_make_client, _make_async_client], ids=["sync", "async"])
+    async def test_batch_operate_empty_keys(self, make_client):
+        c = make_client()
         ops = [{"op": aerospike_py.OPERATOR_READ, "bin": "a"}]
         with pytest.raises(aerospike_py.ClientError):
-            c.batch_operate([], ops)
+            await invoke(c, "batch_operate", [], ops)
 
-    def test_batch_remove_empty_keys(self):
-        """batch_remove([]) on unconnected client raises ClientError."""
-        c = _make_client()
+    @pytest.mark.parametrize("make_client", [_make_client, _make_async_client], ids=["sync", "async"])
+    async def test_batch_remove_empty_keys(self, make_client):
+        c = make_client()
         with pytest.raises(aerospike_py.ClientError):
-            c.batch_remove([])
-
-
-class TestEmptyBatchOperationsAsync:
-    """Async batch operations with empty key lists should raise ClientError
-    on an unconnected async client."""
-
-    async def test_batch_read_empty_keys_async(self):
-        c = _make_async_client()
-        with pytest.raises(aerospike_py.ClientError):
-            await c.batch_read([])
-
-    async def test_batch_operate_empty_keys_async(self):
-        c = _make_async_client()
-        ops = [{"op": aerospike_py.OPERATOR_READ, "bin": "a"}]
-        with pytest.raises(aerospike_py.ClientError):
-            await c.batch_operate([], ops)
-
-    async def test_batch_remove_empty_keys_async(self):
-        c = _make_async_client()
-        with pytest.raises(aerospike_py.ClientError):
-            await c.batch_remove([])
+            await invoke(c, "batch_remove", [])
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -280,36 +260,25 @@ class TestBinNameEdgeCases:
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestAdminMethodsExistAsync:
-    """Verify async admin methods exist and raise ClientError on unconnected client."""
+class TestAdminMethodsExist:
+    """Verify admin methods exist on both sync and async clients
+    and raise ClientError on unconnected client."""
 
-    async def test_admin_set_quotas_exists(self):
-        """admin_set_quotas should exist on AsyncClient and raise ClientError."""
-        c = _make_async_client()
-        assert hasattr(c, "admin_set_quotas"), "AsyncClient missing admin_set_quotas method"
+    @pytest.mark.parametrize("make_client", [_make_client, _make_async_client], ids=["sync", "async"])
+    async def test_admin_set_quotas_exists(self, make_client):
+        """admin_set_quotas should exist and raise ClientError."""
+        c = make_client()
+        assert hasattr(c, "admin_set_quotas"), f"{type(c).__name__} missing admin_set_quotas method"
         with pytest.raises(aerospike_py.ClientError):
-            await c.admin_set_quotas("test-role", read_quota=100, write_quota=200)
+            await invoke(c, "admin_set_quotas", "test-role", read_quota=100, write_quota=200)
 
-    async def test_admin_set_whitelist_exists(self):
-        """admin_set_whitelist should exist on AsyncClient and raise ClientError."""
-        c = _make_async_client()
-        assert hasattr(c, "admin_set_whitelist"), "AsyncClient missing admin_set_whitelist method"
+    @pytest.mark.parametrize("make_client", [_make_client, _make_async_client], ids=["sync", "async"])
+    async def test_admin_set_whitelist_exists(self, make_client):
+        """admin_set_whitelist should exist and raise ClientError."""
+        c = make_client()
+        assert hasattr(c, "admin_set_whitelist"), f"{type(c).__name__} missing admin_set_whitelist method"
         with pytest.raises(aerospike_py.ClientError):
-            await c.admin_set_whitelist("test-role", ["10.0.0.0/8"])
-
-    async def test_admin_set_quotas_exists_sync(self):
-        """admin_set_quotas should exist on sync Client and raise ClientError."""
-        c = _make_client()
-        assert hasattr(c, "admin_set_quotas"), "Client missing admin_set_quotas method"
-        with pytest.raises(aerospike_py.ClientError):
-            c.admin_set_quotas("test-role", read_quota=100, write_quota=200)
-
-    async def test_admin_set_whitelist_exists_sync(self):
-        """admin_set_whitelist should exist on sync Client and raise ClientError."""
-        c = _make_client()
-        assert hasattr(c, "admin_set_whitelist"), "Client missing admin_set_whitelist method"
-        with pytest.raises(aerospike_py.ClientError):
-            c.admin_set_whitelist("test-role", ["10.0.0.0/8"])
+            await invoke(c, "admin_set_whitelist", "test-role", ["10.0.0.0/8"])
 
 
 # ═══════════════════════════════════════════════════════════════════
