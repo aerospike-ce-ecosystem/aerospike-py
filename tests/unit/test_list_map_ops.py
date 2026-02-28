@@ -1,5 +1,7 @@
 """Unit tests for list_operations and map_operations helpers (no server required)."""
 
+import pytest
+
 from aerospike_py import list_operations, map_operations
 from aerospike_py.list_operations import (
     list_append,
@@ -42,215 +44,305 @@ from aerospike_py.map_operations import (
 
 
 class TestListOperations:
-    def test_list_append(self):
-        op = list_append("mybin", 42)
-        assert op["op"] == 1001
+    @pytest.mark.parametrize(
+        "func,args,expected_op,extra",
+        [
+            (list_append, ("mybin", 42), 1001, {"val": 42}),
+            (list_append_items, ("mybin", [1, 2, 3]), 1002, {"val": [1, 2, 3]}),
+            (list_insert, ("mybin", 0, "hello"), 1003, {"index": 0, "val": "hello"}),
+            (list_pop, ("mybin", 2), 1005, {"index": 2}),
+            (list_pop_range, ("mybin", 0, 3), 1006, {"count": 3}),
+            (list_remove, ("mybin", 1), 1007, {"index": 1}),
+            (list_remove_range, ("mybin", 0, 5), 1008, {"count": 5}),
+            (list_set, ("mybin", 3, "value"), 1009, {"index": 3}),
+            (list_trim, ("mybin", 1, 3), 1010, {}),
+            (list_clear, ("mybin",), 1011, {}),
+            (list_size, ("mybin",), 1012, {}),
+            (list_get, ("mybin", 0), 1013, {"index": 0}),
+            (list_get_range, ("mybin", 0, 5), 1014, {"count": 5}),
+            (list_increment, ("mybin", 0, 5), 1029, {"val": 5}),
+        ],
+        ids=[
+            "list_append",
+            "list_append_items",
+            "list_insert",
+            "list_pop",
+            "list_pop_range",
+            "list_remove",
+            "list_remove_range",
+            "list_set",
+            "list_trim",
+            "list_clear",
+            "list_size",
+            "list_get",
+            "list_get_range",
+            "list_increment",
+        ],
+    )
+    def test_list_operation_structure(self, func, args, expected_op, extra):
+        op = func(*args)
+        assert op["op"] == expected_op
         assert op["bin"] == "mybin"
-        assert op["val"] == 42
-
-    def test_list_append_with_policy(self):
-        op = list_append("mybin", "val", policy={"order": 1, "flags": 0})
-        assert op["list_policy"]["order"] == 1
-
-    def test_list_append_items(self):
-        op = list_append_items("mybin", [1, 2, 3])
-        assert op["op"] == 1002
-        assert op["val"] == [1, 2, 3]
-
-    def test_list_insert(self):
-        op = list_insert("mybin", 0, "hello")
-        assert op["op"] == 1003
-        assert op["index"] == 0
-        assert op["val"] == "hello"
-
-    def test_list_pop(self):
-        op = list_pop("mybin", 2)
-        assert op["op"] == 1005
-        assert op["index"] == 2
-
-    def test_list_pop_range(self):
-        op = list_pop_range("mybin", 0, 3)
-        assert op["op"] == 1006
-        assert op["count"] == 3
-
-    def test_list_remove(self):
-        op = list_remove("mybin", 1)
-        assert op["op"] == 1007
-        assert op["index"] == 1
-
-    def test_list_remove_range(self):
-        op = list_remove_range("mybin", 0, 5)
-        assert op["op"] == 1008
-        assert op["count"] == 5
-
-    def test_list_set(self):
-        op = list_set("mybin", 3, "value")
-        assert op["op"] == 1009
-        assert op["index"] == 3
-
-    def test_list_trim(self):
-        op = list_trim("mybin", 1, 3)
-        assert op["op"] == 1010
-
-    def test_list_clear(self):
-        op = list_clear("mybin")
-        assert op["op"] == 1011
-
-    def test_list_size(self):
-        op = list_size("mybin")
-        assert op["op"] == 1012
-
-    def test_list_get(self):
-        op = list_get("mybin", 0)
-        assert op["op"] == 1013
-        assert op["index"] == 0
-
-    def test_list_get_range(self):
-        op = list_get_range("mybin", 0, 5)
-        assert op["op"] == 1014
-        assert op["count"] == 5
-
-    def test_list_get_by_index(self):
-        op = list_get_by_index("mybin", 2, return_type=7)
-        assert op["op"] == 1016
-        assert op["return_type"] == 7
-
-    def test_list_get_by_rank(self):
-        op = list_get_by_rank("mybin", 0, return_type=7)
-        assert op["op"] == 1018
-        assert op["rank"] == 0
-        assert op["return_type"] == 7
-
-    def test_list_get_by_rank_range(self):
-        op = list_get_by_rank_range("mybin", 1, return_type=5, count=3)
-        assert op["op"] == 1019
-        assert op["rank"] == 1
-        assert op["return_type"] == 5
-        assert op["count"] == 3
-
-    def test_list_get_by_rank_range_no_count(self):
-        op = list_get_by_rank_range("mybin", 0, return_type=7)
-        assert op["op"] == 1019
-        assert op["rank"] == 0
-        assert "count" not in op
-
-    def test_list_remove_by_rank(self):
-        op = list_remove_by_rank("mybin", 2, return_type=0)
-        assert op["op"] == 1027
-        assert op["rank"] == 2
-        assert op["return_type"] == 0
-
-    def test_list_remove_by_rank_range(self):
-        op = list_remove_by_rank_range("mybin", 0, return_type=5, count=2)
-        assert op["op"] == 1028
-        assert op["rank"] == 0
-        assert op["return_type"] == 5
-        assert op["count"] == 2
-
-    def test_list_remove_by_rank_range_no_count(self):
-        op = list_remove_by_rank_range("mybin", 1, return_type=0)
-        assert op["op"] == 1028
-        assert op["rank"] == 1
-        assert "count" not in op
-
-    def test_list_increment(self):
-        op = list_increment("mybin", 0, 5)
-        assert op["op"] == 1029
-        assert op["val"] == 5
+        for k, v in extra.items():
+            assert op[k] == v
 
     def test_list_sort(self):
         op = list_sort("mybin", sort_flags=2)
         assert op["op"] == 1030
         assert op["val"] == 2
 
+    def test_list_append_with_policy(self):
+        op = list_append("mybin", "val", policy={"order": 1, "flags": 0})
+        assert op["list_policy"]["order"] == 1
+
+    @pytest.mark.parametrize(
+        "func,args,kwargs,expected_op,extra",
+        [
+            (
+                list_get_by_index,
+                ("mybin", 2),
+                {"return_type": 7},
+                1016,
+                {"return_type": 7},
+            ),
+            (
+                list_get_by_rank,
+                ("mybin", 0),
+                {"return_type": 7},
+                1018,
+                {"rank": 0, "return_type": 7},
+            ),
+            (
+                list_remove_by_rank,
+                ("mybin", 2),
+                {"return_type": 0},
+                1027,
+                {"rank": 2, "return_type": 0},
+            ),
+        ],
+        ids=[
+            "list_get_by_index",
+            "list_get_by_rank",
+            "list_remove_by_rank",
+        ],
+    )
+    def test_list_return_type_operations(self, func, args, kwargs, expected_op, extra):
+        op = func(*args, **kwargs)
+        assert op["op"] == expected_op
+        assert op["bin"] == "mybin"
+        for k, v in extra.items():
+            assert op[k] == v
+
+    @pytest.mark.parametrize(
+        "func,args,kwargs,expected_op,extra",
+        [
+            (
+                list_get_by_rank_range,
+                ("mybin", 1),
+                {"return_type": 5, "count": 3},
+                1019,
+                {"rank": 1, "return_type": 5, "count": 3},
+            ),
+            (
+                list_remove_by_rank_range,
+                ("mybin", 0),
+                {"return_type": 5, "count": 2},
+                1028,
+                {"rank": 0, "return_type": 5, "count": 2},
+            ),
+        ],
+        ids=[
+            "list_get_by_rank_range",
+            "list_remove_by_rank_range",
+        ],
+    )
+    def test_list_rank_range_with_count(self, func, args, kwargs, expected_op, extra):
+        op = func(*args, **kwargs)
+        assert op["op"] == expected_op
+        assert op["bin"] == "mybin"
+        for k, v in extra.items():
+            assert op[k] == v
+
+    @pytest.mark.parametrize(
+        "func,args,kwargs,expected_op,expected_rank",
+        [
+            (
+                list_get_by_rank_range,
+                ("mybin", 0),
+                {"return_type": 7},
+                1019,
+                0,
+            ),
+            (
+                list_remove_by_rank_range,
+                ("mybin", 1),
+                {"return_type": 0},
+                1028,
+                1,
+            ),
+        ],
+        ids=[
+            "list_get_by_rank_range_no_count",
+            "list_remove_by_rank_range_no_count",
+        ],
+    )
+    def test_list_rank_range_no_count(self, func, args, kwargs, expected_op, expected_rank):
+        op = func(*args, **kwargs)
+        assert op["op"] == expected_op
+        assert op["rank"] == expected_rank
+        assert "count" not in op
+
 
 class TestMapOperations:
-    def test_map_put(self):
-        op = map_put("mybin", "key1", "value1")
-        assert op["op"] == 2002
-        assert op["map_key"] == "key1"
-        assert op["val"] == "value1"
+    @pytest.mark.parametrize(
+        "func,args,expected_op,extra",
+        [
+            (map_put, ("mybin", "key1", "value1"), 2002, {"map_key": "key1", "val": "value1"}),
+            (map_put_items, ("mybin", {"a": 1, "b": 2}), 2003, {"val": {"a": 1, "b": 2}}),
+            (map_increment, ("mybin", "counter", 5), 2004, {"map_key": "counter"}),
+            (map_decrement, ("mybin", "counter", 3), 2005, {}),
+            (map_clear, ("mybin",), 2006, {}),
+            (map_size, ("mybin",), 2017, {}),
+        ],
+        ids=[
+            "map_put",
+            "map_put_items",
+            "map_increment",
+            "map_decrement",
+            "map_clear",
+            "map_size",
+        ],
+    )
+    def test_map_operation_structure(self, func, args, expected_op, extra):
+        op = func(*args)
+        assert op["op"] == expected_op
+        assert op["bin"] == "mybin"
+        for k, v in extra.items():
+            assert op[k] == v
 
     def test_map_put_with_policy(self):
         op = map_put("mybin", "k", "v", policy={"order": 1, "write_mode": 0})
         assert op["map_policy"]["order"] == 1
 
-    def test_map_put_items(self):
-        op = map_put_items("mybin", {"a": 1, "b": 2})
-        assert op["op"] == 2003
-        assert op["val"] == {"a": 1, "b": 2}
+    @pytest.mark.parametrize(
+        "func,args,kwargs,expected_op,extra",
+        [
+            (
+                map_remove_by_key,
+                ("mybin", "key1"),
+                {"return_type": 0},
+                2007,
+                {"return_type": 0},
+            ),
+            (
+                map_get_by_key,
+                ("mybin", "key1"),
+                {"return_type": 7},
+                2018,
+                {"return_type": 7},
+            ),
+            (
+                map_get_by_value,
+                ("mybin", 42),
+                {"return_type": 5},
+                2020,
+                {},
+            ),
+            (
+                map_get_by_index,
+                ("mybin", 0),
+                {"return_type": 7},
+                2022,
+                {},
+            ),
+            (
+                map_get_by_rank,
+                ("mybin", 0),
+                {"return_type": 7},
+                2024,
+                {"rank": 0, "return_type": 7},
+            ),
+            (
+                map_remove_by_rank,
+                ("mybin", 2),
+                {"return_type": 0},
+                2015,
+                {"rank": 2, "return_type": 0},
+            ),
+        ],
+        ids=[
+            "map_remove_by_key",
+            "map_get_by_key",
+            "map_get_by_value",
+            "map_get_by_index",
+            "map_get_by_rank",
+            "map_remove_by_rank",
+        ],
+    )
+    def test_map_return_type_operations(self, func, args, kwargs, expected_op, extra):
+        op = func(*args, **kwargs)
+        assert op["op"] == expected_op
+        assert op["bin"] == "mybin"
+        for k, v in extra.items():
+            assert op[k] == v
 
-    def test_map_increment(self):
-        op = map_increment("mybin", "counter", 5)
-        assert op["op"] == 2004
-        assert op["map_key"] == "counter"
+    @pytest.mark.parametrize(
+        "func,args,kwargs,expected_op,extra",
+        [
+            (
+                map_get_by_rank_range,
+                ("mybin", 1),
+                {"return_type": 5, "count": 3},
+                2025,
+                {"rank": 1, "return_type": 5, "count": 3},
+            ),
+            (
+                map_remove_by_rank_range,
+                ("mybin", 0),
+                {"return_type": 5, "count": 2},
+                2016,
+                {"rank": 0, "return_type": 5, "count": 2},
+            ),
+        ],
+        ids=[
+            "map_get_by_rank_range",
+            "map_remove_by_rank_range",
+        ],
+    )
+    def test_map_rank_range_with_count(self, func, args, kwargs, expected_op, extra):
+        op = func(*args, **kwargs)
+        assert op["op"] == expected_op
+        assert op["bin"] == "mybin"
+        for k, v in extra.items():
+            assert op[k] == v
 
-    def test_map_decrement(self):
-        op = map_decrement("mybin", "counter", 3)
-        assert op["op"] == 2005
-
-    def test_map_clear(self):
-        op = map_clear("mybin")
-        assert op["op"] == 2006
-
-    def test_map_remove_by_key(self):
-        op = map_remove_by_key("mybin", "key1", return_type=0)
-        assert op["op"] == 2007
-        assert op["return_type"] == 0
-
-    def test_map_size(self):
-        op = map_size("mybin")
-        assert op["op"] == 2017
-
-    def test_map_get_by_key(self):
-        op = map_get_by_key("mybin", "key1", return_type=7)
-        assert op["op"] == 2018
-        assert op["return_type"] == 7
-
-    def test_map_get_by_value(self):
-        op = map_get_by_value("mybin", 42, return_type=5)
-        assert op["op"] == 2020
-
-    def test_map_get_by_index(self):
-        op = map_get_by_index("mybin", 0, return_type=7)
-        assert op["op"] == 2022
-
-    def test_map_get_by_rank(self):
-        op = map_get_by_rank("mybin", 0, return_type=7)
-        assert op["op"] == 2024
-        assert op["rank"] == 0
-        assert op["return_type"] == 7
-
-    def test_map_get_by_rank_range(self):
-        op = map_get_by_rank_range("mybin", 1, return_type=5, count=3)
-        assert op["op"] == 2025
-        assert op["rank"] == 1
-        assert op["return_type"] == 5
-        assert op["count"] == 3
-
-    def test_map_get_by_rank_range_no_count(self):
-        op = map_get_by_rank_range("mybin", 0, return_type=7)
-        assert op["op"] == 2025
-        assert op["rank"] == 0
-        assert "count" not in op
-
-    def test_map_remove_by_rank(self):
-        op = map_remove_by_rank("mybin", 2, return_type=0)
-        assert op["op"] == 2015
-        assert op["rank"] == 2
-        assert op["return_type"] == 0
-
-    def test_map_remove_by_rank_range(self):
-        op = map_remove_by_rank_range("mybin", 0, return_type=5, count=2)
-        assert op["op"] == 2016
-        assert op["rank"] == 0
-        assert op["return_type"] == 5
-        assert op["count"] == 2
-
-    def test_map_remove_by_rank_range_no_count(self):
-        op = map_remove_by_rank_range("mybin", 1, return_type=0)
-        assert op["op"] == 2016
-        assert op["rank"] == 1
+    @pytest.mark.parametrize(
+        "func,args,kwargs,expected_op,expected_rank",
+        [
+            (
+                map_get_by_rank_range,
+                ("mybin", 0),
+                {"return_type": 7},
+                2025,
+                0,
+            ),
+            (
+                map_remove_by_rank_range,
+                ("mybin", 1),
+                {"return_type": 0},
+                2016,
+                1,
+            ),
+        ],
+        ids=[
+            "map_get_by_rank_range_no_count",
+            "map_remove_by_rank_range_no_count",
+        ],
+    )
+    def test_map_rank_range_no_count(self, func, args, kwargs, expected_op, expected_rank):
+        op = func(*args, **kwargs)
+        assert op["op"] == expected_op
+        assert op["rank"] == expected_rank
         assert "count" not in op
 
 

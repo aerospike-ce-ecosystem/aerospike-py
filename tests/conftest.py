@@ -4,6 +4,7 @@ import pytest
 
 import aerospike_py
 from tests import AEROSPIKE_CONFIG
+from tests.helpers import invoke
 
 
 @pytest.fixture(scope="module")
@@ -27,6 +28,32 @@ async def async_client():
         pytest.skip(f"Aerospike server not available: {e}")
     yield c
     await c.close()
+
+
+@pytest.fixture(params=["sync", "async"], ids=["sync", "async"])
+async def any_client(request, client, async_client):
+    """Yield either the sync or async client, parametrized.
+
+    Each test using this fixture runs twice: once with the sync client
+    and once with the async client. Use ``invoke()`` from ``tests.helpers``
+    to call methods transparently.
+    """
+    if request.param == "sync":
+        yield client
+    else:
+        yield async_client
+
+
+@pytest.fixture
+async def any_cleanup(any_client):
+    """Clean up test keys after each test, works with any_client."""
+    keys = []
+    yield keys
+    for key in keys:
+        try:
+            await invoke(any_client, "remove", key)
+        except Exception:
+            pass
 
 
 @pytest.fixture
