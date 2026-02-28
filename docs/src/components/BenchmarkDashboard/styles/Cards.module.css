@@ -11,7 +11,7 @@
 
 .metricCard:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(103, 58, 183, 0.12);
+  box-shadow: 0 4px 12px rgba(230, 74, 25, 0.12);
 }
 
 [data-theme='dark'] .metricCard {
@@ -19,7 +19,7 @@
 }
 
 [data-theme='dark'] .metricCard:hover {
-  box-shadow: 0 4px 12px rgba(103, 58, 183, 0.25);
+  box-shadow: 0 4px 12px rgba(230, 74, 25, 0.25);
 }
 
 .metricValue {

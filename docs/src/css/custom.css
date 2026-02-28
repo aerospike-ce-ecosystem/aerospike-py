@@ -1,29 +1,66 @@
 /* ============================================================
-   Color Theme
+   Color Theme — Aerospike Orange-Red
    ============================================================ */
 :root {
-  --ifm-color-primary: #673ab7;
-  --ifm-color-primary-dark: #5c34a4;
-  --ifm-color-primary-darker: #57319b;
-  --ifm-color-primary-darkest: #472880;
-  --ifm-color-primary-light: #7344c4;
-  --ifm-color-primary-lighter: #7a4ec8;
-  --ifm-color-primary-lightest: #9170d3;
+  /* Aerospike brand: Deep Orange 700 */
+  --ifm-color-primary:          #E64A19;
+  --ifm-color-primary-dark:     #D84315;
+  --ifm-color-primary-darker:   #CC3D11;
+  --ifm-color-primary-darkest:  #BF360C;
+  --ifm-color-primary-light:    #F4511E;
+  --ifm-color-primary-lighter:  #FF5722;
+  --ifm-color-primary-lightest: #FF8A65;
+
   --ifm-code-font-size: 95%;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+
+  /* Custom brand variables */
+  --apy-color-accent:   #FF6D00;
+  --apy-color-rust:     #B7410E;
+  --apy-color-navy:     #1B2838;
+  --apy-color-charcoal: #263238;
+
+  /* Typography */
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
+  --ifm-heading-font-family: 'Plus Jakarta Sans', var(--ifm-font-family-base);
+  --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --ifm-line-height-base: 1.75;
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #b39ddb;
-  --ifm-color-primary-dark: #9e82d0;
-  --ifm-color-primary-darker: #9375cb;
-  --ifm-color-primary-darkest: #744dbb;
-  --ifm-color-primary-light: #c8b8e6;
-  --ifm-color-primary-lighter: #d3c5eb;
-  --ifm-color-primary-lightest: #ede7f6;
+  /* Deep Orange 300 for dark mode */
+  --ifm-color-primary:          #FF8A65;
+  --ifm-color-primary-dark:     #FF7043;
+  --ifm-color-primary-darker:   #FF5722;
+  --ifm-color-primary-darkest:  #F4511E;
+  --ifm-color-primary-light:    #FFAB91;
+  --ifm-color-primary-lighter:  #FFCCBC;
+  --ifm-color-primary-lightest: #FBE9E7;
+
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
 }
 
+/* ============================================================
+   Navbar
+   ============================================================ */
+.navbar {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] .navbar {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* ============================================================
+   Footer
+   ============================================================ */
+.footer--dark {
+  background: var(--apy-color-navy);
+}
+
+/* ============================================================
+   Hero
+   ============================================================ */
 .hero--primary {
   --ifm-hero-background-color: var(--ifm-color-primary);
   --ifm-hero-text-color: #ffffff;
@@ -34,6 +71,7 @@
    ============================================================ */
 .markdown {
   line-height: 1.75;
+  max-width: 75ch;
 }
 
 .markdown p {
@@ -44,10 +82,12 @@
   margin-top: 2.5rem;
   padding-bottom: 0.4rem;
   border-bottom: 1px solid var(--ifm-toc-border-color);
+  font-family: var(--ifm-heading-font-family);
 }
 
 .markdown h3 {
   margin-top: 2rem;
+  font-family: var(--ifm-heading-font-family);
 }
 
 /* ============================================================
@@ -61,6 +101,7 @@
 
 [data-theme='dark'] .prism-code {
   border-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--apy-color-charcoal) !important;
 }
 
 /* Inline code */
@@ -149,11 +190,11 @@ table td code {
 
 .feature-card:hover {
   border-color: var(--ifm-color-primary);
-  box-shadow: 0 2px 12px rgba(103, 58, 183, 0.1);
+  box-shadow: 0 2px 12px rgba(230, 74, 25, 0.12);
 }
 
 [data-theme='dark'] .feature-card:hover {
-  box-shadow: 0 2px 12px rgba(179, 157, 219, 0.15);
+  box-shadow: 0 2px 12px rgba(255, 138, 101, 0.15);
 }
 
 .feature-card h3 {
