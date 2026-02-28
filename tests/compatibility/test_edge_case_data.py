@@ -9,8 +9,6 @@ import math
 
 import pytest
 
-import aerospike_py
-
 aerospike = pytest.importorskip("aerospike")
 
 NS = "test"
@@ -182,10 +180,12 @@ class TestLongBinNames:
 class TestBytesKeyDigest:
     """Test bytes-type primary keys.
 
-    Note: aerospike-py uses BLOB particle type (4) for bytes keys, while the
-    official Python client uses STRING particle type (3). This produces
-    different digests, so cross-client bytes-key lookups are not compatible.
-    Each client can read back its own bytes-key records correctly.
+    aerospike-py computes bytes key digests using STRING particle type (3)
+    to match the official Python client, enabling cross-client compatibility.
+
+    Caveat: The official C client truncates bytes at the first null byte
+    (``\\x00``) due to C-string semantics. Bytes keys containing embedded
+    nulls are therefore NOT cross-client compatible.
     """
 
     def test_bytes_key_rust_roundtrip(self, rust_client, cleanup):
@@ -200,49 +200,70 @@ class TestBytesKeyDigest:
     def test_bytes_key_official_roundtrip(self, official_client, cleanup):
         """Official client can write and read back a bytes key."""
         key = (NS, SET, b"\xff\xfe\xfd")
+        cleanup.append(key)
 
         official_client.put(key, {"val": "from_official"})
         _, _, o_bins = official_client.get(key)
         assert o_bins["val"] == "from_official"
 
-        # Cleanup via official client since digest differs
-        official_client.remove(key)
-
-    def test_bytes_key_digest_differs_from_official(self, rust_client, official_client, cleanup):
-        """Document: bytes key digests differ because of particle type.
-
-        aerospike-py: BLOB type (4), official: STRING type (3).
-        """
-        key = (NS, SET, b"\xaa\xbb\xcc")
+    def test_bytes_key_cross_client_rust_write_official_read(self, rust_client, official_client, cleanup):
+        """Rust writes with bytes key, official reads it."""
+        key = (NS, SET, b"\xde\xad\xbe\xef")
         cleanup.append(key)
 
-        rust_client.put(
-            key,
-            {"val": 1},
-            policy={"key": aerospike_py.POLICY_KEY_SEND},
-        )
-        r_key, _, _ = rust_client.get(
-            key,
-            policy={"key": aerospike_py.POLICY_KEY_SEND},
-        )
+        rust_client.put(key, {"source": "rust"})
+        _, _, o_bins = official_client.get(key)
+        assert o_bins["source"] == "rust"
 
-        official_client.put(
-            key,
-            {"val": 2},
-            policy={"key": aerospike.POLICY_KEY_SEND},
-        )
-        o_key, _, _ = official_client.get(
-            key,
-            policy={"key": aerospike.POLICY_KEY_SEND},
-        )
+    def test_bytes_key_cross_client_official_write_rust_read(self, rust_client, official_client, cleanup):
+        """Official writes with bytes key, rust reads it."""
+        key = (NS, SET, b"\xca\xfe\xba\xbe")
+        cleanup.append(key)
 
-        # Digests should differ (BLOB=4 vs STRING=3 particle type in RIPEMD-160)
-        r_digest = r_key[3]
-        o_digest = o_key[3]
-        assert r_digest != o_digest, "Unexpected digest match. aerospike-py uses BLOB(4), official uses STRING(3)."
+        official_client.put(key, {"source": "official"})
+        _, _, r_bins = rust_client.get(key)
+        assert r_bins["source"] == "official"
 
-        # Cleanup official's record separately
-        official_client.remove(key)
+    def test_bytes_key_non_utf8_no_null(self, rust_client, official_client, cleanup):
+        """Non-UTF-8 bytes keys (without null bytes) work across clients."""
+        key = (NS, SET, b"\xff\xfe\x80\x81")
+        cleanup.append(key)
+
+        rust_client.put(key, {"val": "non_utf8"})
+        _, _, o_bins = official_client.get(key)
+        assert o_bins["val"] == "non_utf8"
+
+    def test_bytes_key_empty(self, rust_client, official_client, cleanup):
+        """Empty bytes key works across clients."""
+        key = (NS, SET, b"")
+        cleanup.append(key)
+
+        rust_client.put(key, {"val": "empty_bytes"})
+        _, _, o_bins = official_client.get(key)
+        assert o_bins["val"] == "empty_bytes"
+
+    def test_bytes_key_null_bytes_not_cross_compatible(self, rust_client, official_client, cleanup):
+        """Bytes keys with embedded null bytes are NOT cross-client compatible.
+
+        The official C client truncates bytes at the first null byte (C-string
+        semantics), so ``b'\\xff\\xfe\\x00\\x01'`` and ``b'\\xff\\xfe'`` map
+        to the same record in the official client. aerospike-py correctly
+        hashes the full bytes, so digests diverge.
+        """
+        key = (NS, SET, b"\xff\xfe\x00\x01")
+        cleanup.append(key)
+
+        rust_client.put(key, {"val": "has_null"})
+
+        # The official C client truncates bytes at the first null byte, so it
+        # computes a different digest for b"\xff\xfe\x00\x01" (treats it as
+        # b"\xff\xfe") and cannot find the record written by aerospike-py.
+        with pytest.raises(aerospike.exception.RecordNotFound):
+            official_client.get((NS, SET, b"\xff\xfe\x00\x01"))
+
+        # But aerospike-py can read its own record back correctly
+        _, _, r_bins = rust_client.get(key)
+        assert r_bins["val"] == "has_null"
 
 
 # ── None/Null in Collections ──────────────────────────────────────
