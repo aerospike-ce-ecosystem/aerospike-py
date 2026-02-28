@@ -68,7 +68,6 @@ __all__ = [
     "RecordError",
     "ClusterError",
     "AerospikeTimeoutError",
-    "TimeoutError",  # deprecated alias
     "InvalidArgError",
     "RecordNotFound",
     "RecordExistsError",
@@ -80,7 +79,6 @@ __all__ = [
     "BinTypeError",
     "FilteredOut",
     "AerospikeIndexError",
-    "IndexError",  # deprecated alias
     "IndexNotFound",
     "IndexFoundError",
     "QueryError",
