@@ -17,24 +17,15 @@ export interface DataSizeEntry {
   value_size: number;
   put: Record<string, number | null>;
   get: Record<string, number | null>;
+  official_put?: Record<string, number | null>;
+  official_get?: Record<string, number | null>;
 }
 
 export interface DataSizeResult {
   count: number;
   rounds: number;
+  has_official?: boolean;
   data: DataSizeEntry[];
-}
-
-export interface ConcurrencyEntry {
-  concurrency: number;
-  put: Record<string, number | null> & {per_op?: Record<string, number | null>};
-  get: Record<string, number | null> & {per_op?: Record<string, number | null>};
-}
-
-export interface ConcurrencyResult {
-  count: number;
-  rounds: number;
-  data: ConcurrencyEntry[];
 }
 
 export interface MemoryEntry {
@@ -75,13 +66,88 @@ export interface MixedEntry {
     p99_ms: number;
     avg_ms: number;
   };
+  official_throughput_ops_sec?: number;
+  official_read?: {
+    count: number;
+    p50_ms: number;
+    p95_ms: number;
+    p99_ms: number;
+    avg_ms: number;
+  };
+  official_write?: {
+    count: number;
+    p50_ms: number;
+    p95_ms: number;
+    p99_ms: number;
+    avg_ms: number;
+  };
 }
 
 export interface MixedResult {
   count: number;
   rounds: number;
   concurrency: number;
+  has_official?: boolean;
   data: MixedEntry[];
+}
+
+// ── High Concurrency Scaling Types ─────────────────────────
+
+export interface HighConcurrencyEntry {
+  concurrency: number;
+  aerospike_py: {
+    ops_per_sec: number | null;
+    per_op?: {
+      p50_ms: number | null;
+      p95_ms: number | null;
+      p99_ms: number | null;
+    };
+  };
+  official?: {
+    ops_per_sec: number | null;
+    per_op?: {
+      p50_ms: number | null;
+      p95_ms: number | null;
+      p99_ms: number | null;
+    };
+  };
+}
+
+export interface HighConcurrencyResult {
+  count: number;
+  rounds: number;
+  has_official: boolean;
+  data: HighConcurrencyEntry[];
+}
+
+// ── Latency Simulation Types ────────────────────────────────
+
+export interface LatencySimEntry {
+  rtt_ms: number;
+  concurrency: number;
+  aerospike_py: {
+    ops_per_sec: number | null;
+    per_op?: {
+      p50_ms: number | null;
+      p99_ms: number | null;
+    };
+  };
+  official?: {
+    ops_per_sec: number | null;
+    per_op?: {
+      p50_ms: number | null;
+      p99_ms: number | null;
+    };
+  };
+}
+
+export interface LatencySimResult {
+  count: number;
+  rounds: number;
+  concurrency: number;
+  has_official: boolean;
+  simulation: boolean;
+  data: LatencySimEntry[];
 }
 
 // ── Full Benchmark Data ─────────────────────────────────────
@@ -105,9 +171,10 @@ export interface FullBenchmarkData {
   aerospike_py_async: ClientSection;
   official_async: ClientSection | null;
   data_size?: DataSizeResult;
-  concurrency_scaling?: ConcurrencyResult;
   memory_profiling?: MemoryResult;
   mixed_workload?: MixedResult;
+  high_concurrency_scaling?: HighConcurrencyResult;
+  latency_sim?: LatencySimResult;
   numpy_batch?: NumpyBenchmarkData;
   takeaways: string[];
 }

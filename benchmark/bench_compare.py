@@ -10,7 +10,7 @@ Methodology for consistent results:
 Usage:
     python benchmark/bench_compare.py [--count N] [--rounds R] [--warmup W]
                                       [--concurrency C] [--batch-groups G]
-                                      [--scenario basic|data_size|concurrency|memory|mixed|all]
+                                      [--scenario latency|memory|concurrency|all]
                                       [--host HOST] [--port PORT]
                                       [--report] [--report-dir DIR]
                                       [--no-color]
@@ -99,9 +99,10 @@ class BenchmarkResults:
     batch_groups: int = 0
     # Advanced scenario results
     data_size: dict | None = None
-    concurrency_scaling: dict | None = None
     memory_profiling: dict | None = None
     mixed_workload: dict | None = None
+    high_concurrency_scaling: dict | None = None
+    latency_sim: dict | None = None
     # NumPy batch benchmark results
     numpy_record_scaling: dict | None = None
     numpy_bin_scaling: dict | None = None
@@ -1371,7 +1372,8 @@ DATA_SIZE_PROFILES = [
     ("xlarge (50 bins, 1KB)", 50, 1000),
 ]
 
-CONCURRENCY_LEVELS = [1, 2, 4, 8, 16, 32]
+CONCURRENCY_LEVELS_HIGH = [1, 4, 16, 64, 128, 256, 512, 1000]
+LATENCY_LEVELS_MS = [0.0, 0.5, 1.0, 2.0, 5.0]
 
 MIXED_RATIOS = [
     ("read_heavy (90:10)", 0.9),
@@ -1423,6 +1425,16 @@ def bench_data_size(host: str, port: int, count: int, rounds: int, warmup: int) 
 
     _warmup_sync(client, warmup, "_warm_ds_")
 
+    has_official = False
+    c_client = None
+    try:
+        import aerospike as aerospike_c
+
+        c_client = aerospike_c.client({"hosts": [(host, port)], "policies": {"timeout": CLIENT_TIMEOUT_MS}}).connect()
+        has_official = True
+    except ImportError:
+        pass
+
     data = []
     for label, num_bins, value_size in DATA_SIZE_PROFILES:
         prefix = f"ds_{num_bins}_{value_size}_"
@@ -1461,18 +1473,58 @@ def bench_data_size(host: str, port: int, count: int, rounds: int, warmup: int) 
         _cleanup_sync(client.remove, prefix, count)
         _settle()
 
-        data.append(
-            {
-                "label": label,
-                "num_bins": num_bins,
-                "value_size": value_size,
-                "put": _median_of_medians(put_rounds),
-                "get": _median_of_medians(get_rounds),
-            }
-        )
+        # Official client comparison
+        c_put_rounds = []
+        c_get_rounds = []
+        if has_official and c_client:
+            c_prefix = f"ds_c_{num_bins}_{value_size}_"
+            _log(f"  Official PUT {count} ops x {rounds} rounds")
+            for r in range(rounds):
+                gc.disable()
+                wt = _measure_loop(
+                    lambda i, _r=r: c_client.put(
+                        (NAMESPACE, SET_NAME, f"{c_prefix}p{_r}_{i}"),
+                        _make_bins_sized(num_bins, value_size, i),
+                    ),
+                    count,
+                )
+                gc.enable()
+                c_put_rounds.append(wt)
+                for i in range(count):
+                    try:
+                        c_client.remove((NAMESPACE, SET_NAME, f"{c_prefix}p{r}_{i}"))
+                    except Exception:
+                        pass
+
+            _seed_sized(c_client, c_prefix, count, num_bins, value_size)
+            _settle()
+
+            _log(f"  Official GET {count} ops x {rounds} rounds")
+            for _ in range(rounds):
+                gc.disable()
+                wt = _measure_loop(lambda i: c_client.get((NAMESPACE, SET_NAME, f"{c_prefix}{i}")), count)
+                gc.enable()
+                c_get_rounds.append(wt)
+
+            _cleanup_sync(c_client.remove, c_prefix, count)
+            _settle()
+
+        entry = {
+            "label": label,
+            "num_bins": num_bins,
+            "value_size": value_size,
+            "put": _median_of_medians(put_rounds),
+            "get": _median_of_medians(get_rounds),
+        }
+        if has_official and c_client:
+            entry["official_put"] = _median_of_medians(c_put_rounds)
+            entry["official_get"] = _median_of_medians(c_get_rounds)
+        data.append(entry)
 
     client.close()
-    return {"count": count, "rounds": rounds, "data": data}
+    if c_client:
+        c_client.close()
+    return {"count": count, "rounds": rounds, "has_official": has_official, "data": data}
 
 
 def _print_data_size(result: dict):
@@ -1489,108 +1541,6 @@ def _print_data_size(result: dict):
         line = f"  {e['label']:<26}"
         line += f" | {_fmt_ms(e['put'].get('p50_ms')):>10} | {_fmt_ms(e['put'].get('p99_ms')):>10}"
         line += f" | {_fmt_ms(e['get'].get('p50_ms')):>10} | {_fmt_ms(e['get'].get('p99_ms')):>10}"
-        print(line)
-
-
-# ── Scenario: Concurrency Scaling ─────────────────────────────
-
-
-def bench_concurrency_scaling(host: str, port: int, count: int, rounds: int, warmup: int) -> dict:
-    from aerospike_py import AsyncClient
-
-    data = []
-
-    async def _run():
-        client = AsyncClient({"hosts": [(host, port)], "cluster_name": "docker", "timeout": CLIENT_TIMEOUT_MS})
-        await client.connect()
-        await _warmup_async(client, warmup, 1, "_warm_cs_")
-
-        prefix = "cs_"
-        _log(f"seeding {count} records ...")
-        await _seed_sized_async(client, prefix, count, 5, 10, 4)
-        _settle()
-
-        for conc in CONCURRENCY_LEVELS:
-            _log(f"Concurrency={conc}: PUT+GET {count} ops x {rounds} rounds")
-            sem = asyncio.Semaphore(conc)
-
-            try:
-                put_bulk, put_po = [], []
-                for r in range(rounds):
-                    per_op = []
-
-                    async def _put(i, _r=r):
-                        async with sem:
-                            t0 = time.perf_counter()
-                            await client.put((NAMESPACE, SET_NAME, f"{prefix}cp{_r}_{i}"), {"n": f"u{i}", "a": i})
-                            per_op.append(time.perf_counter() - t0)
-
-                    gc.disable()
-                    t0 = time.perf_counter()
-                    await asyncio.gather(*[_put(i) for i in range(count)])
-                    elapsed = time.perf_counter() - t0
-                    gc.enable()
-                    put_bulk.append(elapsed)
-                    put_po.append(per_op)
-                    await _chunked_batch_remove(
-                        client, [(NAMESPACE, SET_NAME, f"{prefix}cp{r}_{i}") for i in range(count)]
-                    )
-
-                pm = _bulk_median(put_bulk, count)
-                pm["per_op"] = _median_of_medians(put_po)
-
-                get_bulk, get_po = [], []
-                for _ in range(rounds):
-                    per_op = []
-
-                    async def _get(i):
-                        async with sem:
-                            t0 = time.perf_counter()
-                            await client.get((NAMESPACE, SET_NAME, f"{prefix}{i}"))
-                            per_op.append(time.perf_counter() - t0)
-
-                    gc.disable()
-                    t0 = time.perf_counter()
-                    await asyncio.gather(*[_get(i) for i in range(count)])
-                    elapsed = time.perf_counter() - t0
-                    gc.enable()
-                    get_bulk.append(elapsed)
-                    get_po.append(per_op)
-
-                gm = _bulk_median(get_bulk, count)
-                gm["per_op"] = _median_of_medians(get_po)
-                _settle()
-                data.append({"concurrency": conc, "put": pm, "get": gm})
-            except Exception as exc:
-                _log(f"Concurrency={conc}: skipped ({exc!r})")
-                gc.enable()
-                _settle()
-
-        await _chunked_batch_remove(client, [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)])
-        await client.close()
-
-    asyncio.run(_run())
-    return {"count": count, "rounds": rounds, "data": data}
-
-
-def _print_concurrency_scaling(result: dict):
-    header = f"Concurrency Scaling ({result['count']:,} ops x {result['rounds']} rounds, AsyncClient)"
-    print(f"\n  {_c(Color.BOLD_CYAN, header) if _use_color else header}")
-    w = 12 + 14 * 6 + 20
-    sep = "─" * w
-    print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
-    h = f"  {'Conc':>6} | {'PUT ops/s':>12} | {'PUT p50':>10} | {'PUT p99':>10}"
-    h += f" | {'GET ops/s':>12} | {'GET p50':>10} | {'GET p99':>10}"
-    print(h)
-    print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
-    for e in result["data"]:
-        ppo = e["put"].get("per_op", {})
-        gpo = e["get"].get("per_op", {})
-        line = f"  {e['concurrency']:>6}"
-        line += f" | {_fmt_ops(e['put'].get('ops_per_sec')):>12}"
-        line += f" | {_fmt_ms(ppo.get('p50_ms')):>10} | {_fmt_ms(ppo.get('p99_ms')):>10}"
-        line += f" | {_fmt_ops(e['get'].get('ops_per_sec')):>12}"
-        line += f" | {_fmt_ms(gpo.get('p50_ms')):>10} | {_fmt_ms(gpo.get('p99_ms')):>10}"
         print(line)
 
 
@@ -1728,7 +1678,18 @@ def _print_memory(result: dict):
 
 
 def bench_mixed(host: str, port: int, count: int, rounds: int, warmup: int, concurrency: int) -> dict:
+    import concurrent.futures
+    from functools import partial
+
     from aerospike_py import AsyncClient
+
+    has_official = False
+    try:
+        import aerospike as aerospike_c  # noqa: F811
+
+        has_official = True
+    except ImportError:
+        pass
 
     data = []
 
@@ -1743,15 +1704,24 @@ def bench_mixed(host: str, port: int, count: int, rounds: int, warmup: int, conc
         await _seed_sized_async(client, prefix, seed_count, 5, 10, concurrency)
         _settle()
 
+        off_client = None
+        off_executor = None
+        loop = asyncio.get_event_loop()
+        if has_official:
+            off_client = aerospike_c.client(
+                {"hosts": [(host, port)], "policies": {"timeout": CLIENT_TIMEOUT_MS}}
+            ).connect()
+            off_executor = concurrent.futures.ThreadPoolExecutor(max_workers=concurrency)
+
         for label, read_ratio in MIXED_RATIOS:
             _log(f"Mixed: {label}, {count} ops x {rounds} rounds")
             sem = asyncio.Semaphore(concurrency)
 
             round_results = []
+            read_count = int(count * read_ratio)
+            write_count = count - read_count
             for _ in range(rounds):
                 read_lats, write_lats = [], []
-                read_count = int(count * read_ratio)
-                write_count = count - read_count
 
                 async def _read(i):
                     async with sem:
@@ -1810,11 +1780,90 @@ def bench_mixed(host: str, port: int, count: int, rounds: int, warmup: int, conc
             _settle()
             data.append(entry)
 
+            # Official client comparison
+            if has_official and off_client and off_executor:
+                _log(f"Official Mixed: {label}, {count} ops x {rounds} rounds (run_in_executor)")
+                off_sem = asyncio.Semaphore(concurrency)
+                off_round_results = []
+                for _ in range(rounds):
+                    off_read_lats, off_write_lats = [], []
+
+                    async def _off_read(i):
+                        async with off_sem:
+                            t0 = time.perf_counter()
+                            await loop.run_in_executor(
+                                off_executor,
+                                partial(off_client.get, (NAMESPACE, SET_NAME, f"{prefix}{i % seed_count}")),
+                            )
+                            off_read_lats.append(time.perf_counter() - t0)
+
+                    async def _off_write(i):
+                        async with off_sem:
+                            t0 = time.perf_counter()
+                            await loop.run_in_executor(
+                                off_executor,
+                                partial(
+                                    off_client.put, (NAMESPACE, SET_NAME, f"{prefix}ow{i}"), {"n": f"u{i}", "a": i}
+                                ),
+                            )
+                            off_write_lats.append(time.perf_counter() - t0)
+
+                    off_tasks = [_off_read(i) for i in range(read_count)] + [_off_write(i) for i in range(write_count)]
+                    random.seed(42)
+                    random.shuffle(off_tasks)
+
+                    gc.disable()
+                    t0 = time.perf_counter()
+                    await asyncio.gather(*off_tasks)
+                    off_elapsed = time.perf_counter() - t0
+                    gc.enable()
+
+                    off_round_results.append(
+                        {"elapsed": off_elapsed, "read_lats": off_read_lats, "write_lats": off_write_lats}
+                    )
+                    off_wk = [(NAMESPACE, SET_NAME, f"{prefix}ow{i}") for i in range(write_count)]
+                    if off_wk:
+                        for k in off_wk:
+                            try:
+                                off_client.remove(k)
+                            except Exception:
+                                pass
+
+                off_throughputs = _trim_iqr([count / r["elapsed"] for r in off_round_results])
+                off_all_r = sorted(t * 1000 for r in off_round_results for t in r["read_lats"])
+                off_all_w = sorted(t * 1000 for r in off_round_results for t in r["write_lats"])
+
+                entry["official_throughput_ops_sec"] = statistics.median(off_throughputs) if off_throughputs else 0
+                if off_all_r:
+                    nr = len(off_all_r)
+                    entry["official_read"] = {
+                        "count": nr,
+                        "p50_ms": _compute_percentile(off_all_r, 50),
+                        "p95_ms": _compute_percentile(off_all_r, 95),
+                        "p99_ms": _compute_percentile(off_all_r, 99) if nr >= 100 else off_all_r[-1],
+                        "avg_ms": statistics.mean(off_all_r),
+                    }
+                if off_all_w:
+                    nw = len(off_all_w)
+                    entry["official_write"] = {
+                        "count": nw,
+                        "p50_ms": _compute_percentile(off_all_w, 50),
+                        "p95_ms": _compute_percentile(off_all_w, 95),
+                        "p99_ms": _compute_percentile(off_all_w, 99) if nw >= 100 else off_all_w[-1],
+                        "avg_ms": statistics.mean(off_all_w),
+                    }
+                _settle()
+
+        if off_executor:
+            off_executor.shutdown(wait=False)
+        if off_client:
+            off_client.close()
+
         await _chunked_batch_remove(client, [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(seed_count)])
         await client.close()
 
     asyncio.run(_run())
-    return {"count": count, "rounds": rounds, "concurrency": concurrency, "data": data}
+    return {"count": count, "rounds": rounds, "concurrency": concurrency, "has_official": has_official, "data": data}
 
 
 def _print_mixed(result: dict):
@@ -1842,9 +1891,341 @@ def _print_mixed(result: dict):
         print(line)
 
 
+# ── Scenario: High Concurrency Scaling ────────────────────────
+
+
+def bench_high_concurrency(host: str, port: int, count: int, rounds: int, warmup: int) -> dict:
+    """Head-to-head: Official async (run_in_executor) vs aerospike-py AsyncClient at high concurrency."""
+    import concurrent.futures
+    from functools import partial
+
+    from aerospike_py import AsyncClient
+
+    # Check if official client is available
+    has_official = False
+    try:
+        import aerospike as aerospike_c  # noqa: F811
+
+        has_official = True
+    except ImportError:
+        pass
+
+    data = []
+
+    async def _run():
+        # Set up aerospike-py client
+        apy_client = AsyncClient({"hosts": [(host, port)], "cluster_name": "docker", "timeout": CLIENT_TIMEOUT_MS})
+        await apy_client.connect()
+        await _warmup_async(apy_client, warmup, 1, "_warm_hc_")
+
+        # Seed data
+        prefix = "hc_"
+        _log(f"seeding {count} records ...")
+        await _seed_sized_async(apy_client, prefix, count, 5, 10, 16)
+        _settle()
+
+        # Set up official client if available
+        off_client = None
+        loop = asyncio.get_event_loop()
+        if has_official:
+            off_client = aerospike_c.client(
+                {"hosts": [(host, port)], "policies": {"timeout": CLIENT_TIMEOUT_MS}}
+            ).connect()
+
+        for conc in CONCURRENCY_LEVELS_HIGH:
+            _log(f"High Concurrency={conc}: GET {count} ops x {rounds} rounds")
+            entry = {"concurrency": conc}
+
+            # -- aerospike-py AsyncClient --
+            apy_sem = asyncio.Semaphore(conc)
+            apy_bulk = []
+            apy_per_op = []
+            try:
+                for _ in range(rounds):
+                    per_op = []
+
+                    async def _apy_get(i):
+                        async with apy_sem:
+                            t0 = time.perf_counter()
+                            await apy_client.get((NAMESPACE, SET_NAME, f"{prefix}{i % count}"))
+                            per_op.append(time.perf_counter() - t0)
+
+                    gc.disable()
+                    t0 = time.perf_counter()
+                    await asyncio.gather(*[_apy_get(i) for i in range(count)])
+                    elapsed = time.perf_counter() - t0
+                    gc.enable()
+                    apy_bulk.append(elapsed)
+                    apy_per_op.append(per_op)
+
+                apy_metrics = _bulk_median(apy_bulk, count)
+                apy_metrics["per_op"] = _median_of_medians(apy_per_op)
+                entry["aerospike_py"] = apy_metrics
+            except Exception as exc:
+                _log(f"  aerospike-py conc={conc}: error ({exc!r})")
+                gc.enable()
+                entry["aerospike_py"] = _NULL_METRICS.copy()
+
+            _settle()
+
+            # -- Official client via run_in_executor --
+            if has_official and off_client:
+                off_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(conc, 256))
+                off_sem = asyncio.Semaphore(conc)
+                off_bulk = []
+                off_per_op = []
+                try:
+                    for _ in range(rounds):
+                        per_op = []
+
+                        async def _off_get(i):
+                            async with off_sem:
+                                t0 = time.perf_counter()
+                                await loop.run_in_executor(
+                                    off_executor,
+                                    partial(off_client.get, (NAMESPACE, SET_NAME, f"{prefix}{i % count}")),
+                                )
+                                per_op.append(time.perf_counter() - t0)
+
+                        gc.disable()
+                        t0 = time.perf_counter()
+                        await asyncio.gather(*[_off_get(i) for i in range(count)])
+                        elapsed = time.perf_counter() - t0
+                        gc.enable()
+                        off_bulk.append(elapsed)
+                        off_per_op.append(per_op)
+
+                    off_executor.shutdown(wait=False)
+                    off_executor = None
+                    off_metrics = _bulk_median(off_bulk, count)
+                    off_metrics["per_op"] = _median_of_medians(off_per_op)
+                    entry["official"] = off_metrics
+                except Exception as exc:
+                    _log(f"  official conc={conc}: error ({exc!r})")
+                    gc.enable()
+                    if off_executor:
+                        off_executor.shutdown(wait=False)
+                        off_executor = None
+                    entry["official"] = _NULL_METRICS.copy()
+
+                _settle()
+
+            data.append(entry)
+
+        # Cleanup
+        await _chunked_batch_remove(apy_client, [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)])
+        await apy_client.close()
+        if off_client:
+            off_client.close()
+
+    asyncio.run(_run())
+    return {"count": count, "rounds": rounds, "has_official": has_official, "data": data}
+
+
+def _print_high_concurrency(result: dict):
+    header = f"High Concurrency Scaling ({result['count']:,} ops x {result['rounds']} rounds)"
+    print(f"\n  {_c(Color.BOLD_CYAN, header) if _use_color else header}")
+    has_official = result.get("has_official", False)
+    w = 8 + (14 * 4 if has_official else 14 * 2) + 20
+    sep = "─" * w
+    print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
+    h = f"  {'Conc':>6} | {'APY ops/s':>12} | {'APY p99':>10}"
+    if has_official:
+        h += f" | {'Off ops/s':>12} | {'Off p99':>10} | {'Speedup':>8}"
+    print(h)
+    print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
+    for e in result["data"]:
+        apy = e.get("aerospike_py", {})
+        apy_po = apy.get("per_op", {}) or {}
+        line = f"  {e['concurrency']:>6} | {_fmt_ops(apy.get('ops_per_sec')):>12} | {_fmt_ms(apy_po.get('p99_ms')):>10}"
+        if has_official:
+            off = e.get("official", {})
+            off_po = off.get("per_op", {}) or {}
+            apy_ops = apy.get("ops_per_sec") or 0
+            off_ops = off.get("ops_per_sec") or 0
+            speedup = f"{apy_ops / off_ops:.1f}x" if off_ops > 0 else "-"
+            line += f" | {_fmt_ops(off.get('ops_per_sec')):>12} | {_fmt_ms(off_po.get('p99_ms')):>10} | {speedup:>8}"
+        print(line)
+
+
+# ── Scenario: Latency Simulation ─────────────────────────────
+
+
+def bench_latency_sim(host: str, port: int, count: int, rounds: int, warmup: int) -> dict:
+    """Latency simulation: inject asyncio.sleep to model network RTT impact.
+
+    Uses asyncio.sleep AFTER the actual operation to simulate round-trip latency.
+    Official async: sleep occupies an OS thread (sleep inside run_in_executor).
+    aerospike-py: sleep yields the event loop (asyncio.sleep after await).
+    """
+    import concurrent.futures
+    from functools import partial
+
+    from aerospike_py import AsyncClient
+
+    has_official = False
+    try:
+        import aerospike as aerospike_c  # noqa: F811
+
+        has_official = True
+    except ImportError:
+        pass
+
+    FIXED_CONCURRENCY = 100
+    data = []
+
+    async def _run():
+        apy_client = AsyncClient({"hosts": [(host, port)], "cluster_name": "docker", "timeout": CLIENT_TIMEOUT_MS})
+        await apy_client.connect()
+        await _warmup_async(apy_client, warmup, 1, "_warm_ls_")
+
+        prefix = "ls_"
+        _log(f"seeding {count} records ...")
+        await _seed_sized_async(apy_client, prefix, count, 5, 10, 16)
+        _settle()
+
+        off_client = None
+        loop = asyncio.get_event_loop()
+        if has_official:
+            off_client = aerospike_c.client(
+                {"hosts": [(host, port)], "policies": {"timeout": CLIENT_TIMEOUT_MS}}
+            ).connect()
+
+        for latency_ms in LATENCY_LEVELS_MS:
+            _log(f"Latency sim: RTT={latency_ms}ms, conc={FIXED_CONCURRENCY}, {count} ops x {rounds} rounds")
+            entry = {"rtt_ms": latency_ms, "concurrency": FIXED_CONCURRENCY}
+
+            # -- aerospike-py: await get + asyncio.sleep (yields event loop) --
+            apy_sem = asyncio.Semaphore(FIXED_CONCURRENCY)
+            apy_bulk = []
+            apy_per_op = []
+            try:
+                for _ in range(rounds):
+                    per_op = []
+
+                    async def _apy_get_sim(i):
+                        async with apy_sem:
+                            t0 = time.perf_counter()
+                            await apy_client.get((NAMESPACE, SET_NAME, f"{prefix}{i % count}"))
+                            if latency_ms > 0:
+                                await asyncio.sleep(latency_ms / 1000.0)
+                            per_op.append(time.perf_counter() - t0)
+
+                    gc.disable()
+                    t0 = time.perf_counter()
+                    await asyncio.gather(*[_apy_get_sim(i) for i in range(count)])
+                    elapsed = time.perf_counter() - t0
+                    gc.enable()
+                    apy_bulk.append(elapsed)
+                    apy_per_op.append(per_op)
+
+                apy_metrics = _bulk_median(apy_bulk, count)
+                apy_metrics["per_op"] = _median_of_medians(apy_per_op)
+                entry["aerospike_py"] = apy_metrics
+            except Exception as exc:
+                _log(f"  aerospike-py RTT={latency_ms}: error ({exc!r})")
+                gc.enable()
+                entry["aerospike_py"] = _NULL_METRICS.copy()
+
+            _settle()
+
+            # -- Official: run_in_executor where sleep happens inside the thread --
+            if has_official and off_client:
+                off_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(FIXED_CONCURRENCY, 256))
+                off_sem = asyncio.Semaphore(FIXED_CONCURRENCY)
+                off_bulk = []
+                off_per_op = []
+                try:
+
+                    def _off_get_with_sleep(key):
+                        """Blocking get + blocking sleep -- occupies OS thread."""
+                        result = off_client.get(key)
+                        if latency_ms > 0:
+                            time.sleep(latency_ms / 1000.0)
+                        return result
+
+                    for _ in range(rounds):
+                        per_op = []
+
+                        async def _off_get_sim(i):
+                            async with off_sem:
+                                t0 = time.perf_counter()
+                                await loop.run_in_executor(
+                                    off_executor,
+                                    partial(_off_get_with_sleep, (NAMESPACE, SET_NAME, f"{prefix}{i % count}")),
+                                )
+                                per_op.append(time.perf_counter() - t0)
+
+                        gc.disable()
+                        t0 = time.perf_counter()
+                        await asyncio.gather(*[_off_get_sim(i) for i in range(count)])
+                        elapsed = time.perf_counter() - t0
+                        gc.enable()
+                        off_bulk.append(elapsed)
+                        off_per_op.append(per_op)
+
+                    off_executor.shutdown(wait=False)
+                    off_metrics = _bulk_median(off_bulk, count)
+                    off_metrics["per_op"] = _median_of_medians(off_per_op)
+                    entry["official"] = off_metrics
+                except Exception as exc:
+                    _log(f"  official RTT={latency_ms}: error ({exc!r})")
+                    gc.enable()
+                    off_executor.shutdown(wait=False)
+                    entry["official"] = _NULL_METRICS.copy()
+
+                _settle()
+
+            data.append(entry)
+
+        await _chunked_batch_remove(apy_client, [(NAMESPACE, SET_NAME, f"{prefix}{i}") for i in range(count)])
+        await apy_client.close()
+        if off_client:
+            off_client.close()
+
+    asyncio.run(_run())
+    return {
+        "count": count,
+        "rounds": rounds,
+        "concurrency": FIXED_CONCURRENCY,
+        "has_official": has_official,
+        "simulation": True,
+        "data": data,
+    }
+
+
+def _print_latency_sim(result: dict):
+    header = (
+        f"Latency Simulation (RTT injection, conc={result['concurrency']}, "
+        f"{result['count']:,} ops x {result['rounds']} rounds)"
+    )
+    print(f"\n  {_c(Color.BOLD_CYAN, header) if _use_color else header}")
+    has_official = result.get("has_official", False)
+    w = 10 + (14 * 4 if has_official else 14 * 2) + 20
+    sep = "─" * w
+    print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
+    h = f"  {'RTT(ms)':>8} | {'APY ops/s':>12} | {'APY p99':>10}"
+    if has_official:
+        h += f" | {'Off ops/s':>12} | {'Off p99':>10} | {'Speedup':>8}"
+    print(h)
+    print(f"  {_c(Color.DIM, sep) if _use_color else sep}")
+    for e in result["data"]:
+        apy = e.get("aerospike_py", {})
+        apy_po = apy.get("per_op", {}) or {}
+        line = f"  {e['rtt_ms']:>8.1f} | {_fmt_ops(apy.get('ops_per_sec')):>12} | {_fmt_ms(apy_po.get('p99_ms')):>10}"
+        if has_official:
+            off = e.get("official", {})
+            off_po = off.get("per_op", {}) or {}
+            apy_ops = apy.get("ops_per_sec") or 0
+            off_ops = off.get("ops_per_sec") or 0
+            speedup = f"{apy_ops / off_ops:.1f}x" if off_ops > 0 else "-"
+            line += f" | {_fmt_ops(off.get('ops_per_sec')):>12} | {_fmt_ms(off_po.get('p99_ms')):>10} | {speedup:>8}"
+        print(f"{line}  (sim)")
+
+
 # ── main ─────────────────────────────────────────────────────
 
-SCENARIOS = ["basic", "data_size", "concurrency", "memory", "mixed", "all"]
+SCENARIOS = ["latency", "memory", "concurrency", "all"]
 
 
 def main():
@@ -1863,9 +2244,9 @@ def main():
     )
     parser.add_argument(
         "--scenario",
-        default="basic",
+        default="latency",
         choices=SCENARIOS,
-        help="Scenario: basic (default), data_size, concurrency, memory, mixed, all",
+        help="Scenario: latency (default), memory, concurrency, all",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=int(os.environ.get("AEROSPIKE_PORT", 3000)))
@@ -1886,12 +2267,9 @@ def main():
     if args.no_color or not sys.stdout.isatty():
         _use_color = False
 
-    run_basic = args.scenario in ("basic", "all")
-    extras = (
-        ["data_size", "concurrency", "memory", "mixed"]
-        if args.scenario == "all"
-        else ([args.scenario] if args.scenario not in ("basic", "all") else [])
-    )
+    run_latency = args.scenario in ("latency", "all")
+    run_memory = args.scenario in ("memory", "all")
+    run_concurrency = args.scenario in ("concurrency", "all")
 
     print("Benchmark config:")
     print(f"  ops/round    = {args.count:,}")
@@ -1904,8 +2282,13 @@ def main():
     print()
 
     off_s, off_a, apy_s, apy_a = None, None, {}, {}
+    data_size_result = None
+    memory_result = None
+    mixed_result = None
+    high_concurrency_result = None
+    latency_sim_result = None
 
-    if run_basic:
+    if run_latency:
         print(_c(Color.BOLD_CYAN, "[1/4]") + " official sync (C) ...")
         off_s = bench_official_sync(args.host, args.port, args.count, args.rounds, args.warmup, args.batch_groups)
         if off_s is None:
@@ -1960,50 +2343,15 @@ def main():
             color=_use_color,
         )
 
-    # Advanced scenarios
-    data_size_result = None
-    concurrency_result = None
-    memory_result = None
-    mixed_result = None
+        print(_c(Color.BOLD_CYAN, "\n[latency extra 1/2]") + " Data Size Scaling ...")
+        data_size_result = bench_data_size(args.host, args.port, args.count, args.rounds, args.warmup)
+        _print_data_size(data_size_result)
 
-    if extras:
-        step = 0
-        total = len(extras)
+        print(_c(Color.BOLD_CYAN, "\n[latency extra 2/2]") + " Latency Simulation ...")
+        latency_sim_result = bench_latency_sim(args.host, args.port, args.count, args.rounds, args.warmup)
+        _print_latency_sim(latency_sim_result)
 
-        if "data_size" in extras:
-            step += 1
-            print(_c(Color.BOLD_CYAN, f"\n[extra {step}/{total}]") + " Data Size Scaling ...")
-            data_size_result = bench_data_size(args.host, args.port, args.count, args.rounds, args.warmup)
-            _print_data_size(data_size_result)
-
-        if "concurrency" in extras:
-            step += 1
-            print(_c(Color.BOLD_CYAN, f"\n[extra {step}/{total}]") + " Concurrency Scaling ...")
-            concurrency_result = bench_concurrency_scaling(args.host, args.port, args.count, args.rounds, args.warmup)
-            _print_concurrency_scaling(concurrency_result)
-
-        if "memory" in extras:
-            step += 1
-            print(_c(Color.BOLD_CYAN, f"\n[extra {step}/{total}]") + " Memory Profiling ...")
-            memory_result = bench_memory(args.host, args.port, args.count, args.warmup)
-            _print_memory(memory_result)
-
-        if "mixed" in extras:
-            step += 1
-            print(_c(Color.BOLD_CYAN, f"\n[extra {step}/{total}]") + " Mixed Workload ...")
-            mixed_result = bench_mixed(
-                args.host,
-                args.port,
-                args.count,
-                args.rounds,
-                args.warmup,
-                args.concurrency,
-            )
-            _print_mixed(mixed_result)
-
-        print()
-
-    # NumPy batch benchmarks (included when scenario=all)
+    # NumPy batch benchmarks
     numpy_record_scaling = None
     numpy_bin_scaling = None
     numpy_post_processing = None
@@ -2012,7 +2360,12 @@ def main():
     numpy_concurrency = args.concurrency
     numpy_batch_groups = args.batch_groups
 
-    if args.scenario == "all":
+    if run_memory:
+        print(_c(Color.BOLD_CYAN, "\n[memory 1/1]") + " Memory Profiling ...")
+        memory_result = bench_memory(args.host, args.port, args.count, args.warmup)
+        _print_memory(memory_result)
+
+        # NumPy batch benchmarks
         from bench_batch_numpy import (
             _run_bin_scaling as _np_run_bin_scaling,
             _run_memory as _np_run_memory,
@@ -2080,6 +2433,24 @@ def main():
         _np_print_memory_table(numpy_memory, numpy_rounds)
         print()
 
+    if run_concurrency:
+        print(_c(Color.BOLD_CYAN, "\n[concurrency 1/2]") + " High Concurrency Scaling ...")
+        high_concurrency_result = bench_high_concurrency(args.host, args.port, args.count, args.rounds, args.warmup)
+        _print_high_concurrency(high_concurrency_result)
+
+        print(_c(Color.BOLD_CYAN, "\n[concurrency 2/2]") + " Mixed Workload ...")
+        mixed_result = bench_mixed(
+            args.host,
+            args.port,
+            args.count,
+            args.rounds,
+            args.warmup,
+            args.concurrency,
+        )
+        _print_mixed(mixed_result)
+
+    print()
+
     if args.report:
         from datetime import datetime as _dt
 
@@ -2098,9 +2469,10 @@ def main():
             concurrency=args.concurrency,
             batch_groups=args.batch_groups,
             data_size=data_size_result,
-            concurrency_scaling=concurrency_result,
             memory_profiling=memory_result,
             mixed_workload=mixed_result,
+            high_concurrency_scaling=high_concurrency_result,
+            latency_sim=latency_sim_result,
             numpy_record_scaling=numpy_record_scaling,
             numpy_bin_scaling=numpy_bin_scaling,
             numpy_post_processing=numpy_post_processing,

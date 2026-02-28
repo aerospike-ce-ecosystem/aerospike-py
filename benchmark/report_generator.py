@@ -449,14 +449,6 @@ def _advanced_takeaways(results: BenchmarkResults) -> list[str]:
                         f"GET latency increases **{ratio:.1f}x** from {smallest['label']} to {largest['label']}"
                     )
 
-    if results.concurrency_scaling:
-        data = results.concurrency_scaling["data"]
-        if len(data) >= 2:
-            peak = max(data, key=lambda e: e["get"].get("ops_per_sec", 0))
-            takeaways.append(
-                f"Peak GET throughput **{peak['get']['ops_per_sec']:,.0f} ops/s** at concurrency={peak['concurrency']}"
-            )
-
     if results.memory_profiling:
         data = results.memory_profiling["data"]
         if data:
@@ -472,7 +464,102 @@ def _advanced_takeaways(results: BenchmarkResults) -> list[str]:
             best = max(data, key=lambda e: e.get("throughput_ops_sec", 0))
             takeaways.append(f"Highest mixed throughput: **{best['throughput_ops_sec']:,.0f} ops/s** ({best['label']})")
 
+    if results.high_concurrency_scaling:
+        data = results.high_concurrency_scaling["data"]
+        has_official = results.high_concurrency_scaling.get("has_official", False)
+        if data and has_official:
+            # Find the concurrency level with the best speedup
+            best_entry = None
+            best_ratio = 0.0
+            for e in data:
+                apy_ops = (e.get("aerospike_py") or {}).get("ops_per_sec") or 0
+                off_ops = (e.get("official") or {}).get("ops_per_sec") or 0
+                if off_ops > 0 and apy_ops / off_ops > best_ratio:
+                    best_ratio = apy_ops / off_ops
+                    best_entry = e
+            if best_entry and best_ratio > 1:
+                takeaways.append(
+                    f"At concurrency={best_entry['concurrency']}, aerospike-py is "
+                    f"**{best_ratio:.1f}x** faster throughput than official async"
+                )
+        elif data:
+            peak = max(data, key=lambda e: (e.get("aerospike_py") or {}).get("ops_per_sec") or 0)
+            apy_ops = (peak.get("aerospike_py") or {}).get("ops_per_sec")
+            if apy_ops:
+                takeaways.append(
+                    f"Peak GET throughput at concurrency={peak['concurrency']}: **{apy_ops:,.0f} ops/s** (aerospike-py)"
+                )
+
+    if results.latency_sim:
+        data = results.latency_sim["data"]
+        has_official = results.latency_sim.get("has_official", False)
+        if data and has_official:
+            # Show the impact at highest latency level
+            highest = data[-1]
+            apy_ops = (highest.get("aerospike_py") or {}).get("ops_per_sec") or 0
+            off_ops = (highest.get("official") or {}).get("ops_per_sec") or 0
+            if off_ops > 0 and apy_ops > 0:
+                ratio = apy_ops / off_ops
+                takeaways.append(
+                    f"At RTT={highest['rtt_ms']}ms, aerospike-py maintains **{ratio:.1f}x** "
+                    f"higher throughput (latency sim, concurrency={results.latency_sim['concurrency']})"
+                )
+
     return takeaways
+
+
+def generate_architecture_data(results: BenchmarkResults, json_dir: str) -> None:
+    """Generate architecture comparison data from real benchmark results.
+
+    Outputs architecture-data.json for the ArchitectureComparison React component.
+    Falls back gracefully if data is not available.
+    """
+    arch_data: dict = {"source": "measured", "date": datetime.now().strftime("%Y-%m-%d")}
+
+    # High concurrency scaling data (for ThroughputSlider)
+    if results.high_concurrency_scaling:
+        hc = results.high_concurrency_scaling
+        arch_data["high_concurrency"] = {
+            "has_official": hc.get("has_official", False),
+            "data": [
+                {
+                    "concurrency": e["concurrency"],
+                    "aerospike_py_ops": (e.get("aerospike_py") or {}).get("ops_per_sec"),
+                    "aerospike_py_p99": ((e.get("aerospike_py") or {}).get("per_op") or {}).get("p99_ms"),
+                    "official_ops": (e.get("official") or {}).get("ops_per_sec"),
+                    "official_p99": ((e.get("official") or {}).get("per_op") or {}).get("p99_ms"),
+                }
+                for e in hc["data"]
+            ],
+        }
+
+    # Latency simulation data
+    if results.latency_sim:
+        ls = results.latency_sim
+        arch_data["latency_sim"] = {
+            "has_official": ls.get("has_official", False),
+            "concurrency": ls.get("concurrency", 100),
+            "simulation": True,
+            "data": [
+                {
+                    "rtt_ms": e["rtt_ms"],
+                    "aerospike_py_ops": (e.get("aerospike_py") or {}).get("ops_per_sec"),
+                    "official_ops": (e.get("official") or {}).get("ops_per_sec"),
+                }
+                for e in ls["data"]
+            ],
+        }
+
+    if len(arch_data) <= 2:
+        # No useful data to write
+        return
+
+    arch_path = os.path.join(json_dir, "..", "architecture-data.json")
+    arch_path = os.path.normpath(arch_path)
+    with open(arch_path, "w") as f:
+        json.dump(arch_data, f, indent=2, ensure_ascii=False, default=str)
+        f.write("\n")
+    print("    Architecture data: architecture-data.json")
 
 
 def generate_report(results: BenchmarkResults, json_dir: str, date_slug: str) -> None:
@@ -513,12 +600,14 @@ def generate_report(results: BenchmarkResults, json_dir: str, date_slug: str) ->
     # Advanced scenario results
     if results.data_size:
         report["data_size"] = results.data_size
-    if results.concurrency_scaling:
-        report["concurrency_scaling"] = results.concurrency_scaling
     if results.memory_profiling:
         report["memory_profiling"] = results.memory_profiling
     if results.mixed_workload:
         report["mixed_workload"] = results.mixed_workload
+    if results.high_concurrency_scaling:
+        report["high_concurrency_scaling"] = results.high_concurrency_scaling
+    if results.latency_sim:
+        report["latency_sim"] = results.latency_sim
 
     # NumPy batch benchmark results (embedded in same JSON)
     has_numpy = any(
@@ -584,3 +673,4 @@ def generate_report(results: BenchmarkResults, json_dir: str, date_slug: str) ->
     report["takeaways"] = takeaways
 
     _write_json_report(report, json_dir, json_filename, date_slug)
+    generate_architecture_data(results, json_dir)

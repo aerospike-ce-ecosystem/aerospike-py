@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import {ChartTooltip, themeColors} from './shared';
 import {shortLabel} from '../helpers';
-import {COLOR_THROUGHPUT, COLOR_READ, COLOR_WRITE} from '../constants';
+import {COLOR_THROUGHPUT, COLOR_READ, COLOR_WRITE, COLOR_OFFICIAL_ASYNC} from '../constants';
 import chartStyles from '../styles/Charts.module.css';
 import type {MixedResult, ColorMode} from '../types';
 
@@ -22,10 +22,14 @@ interface Props {
 
 export function MixedWorkloadChart({result, colorMode}: Props) {
   const theme = themeColors(colorMode);
+  const hasOfficial = result.has_official ?? false;
 
   const chartData = result.data.map((d) => ({
     workload: shortLabel(d.label),
-    Throughput: d.throughput_ops_sec,
+    'aerospike-py': d.throughput_ops_sec,
+    ...(hasOfficial && d.official_throughput_ops_sec !== undefined ? {
+      'Official': d.official_throughput_ops_sec,
+    } : {}),
   }));
 
   return (
@@ -40,7 +44,8 @@ export function MixedWorkloadChart({result, colorMode}: Props) {
           />
           <Tooltip content={<ChartTooltip colorMode={colorMode} unit="ops" />} />
           <Legend wrapperStyle={{color: theme.text}} />
-          <Bar dataKey="Throughput" fill={COLOR_THROUGHPUT} />
+          <Bar dataKey="aerospike-py" fill={COLOR_THROUGHPUT} />
+          {hasOfficial && <Bar dataKey="Official" fill={COLOR_OFFICIAL_ASYNC} />}
         </BarChart>
       </ResponsiveContainer>
     </div>
