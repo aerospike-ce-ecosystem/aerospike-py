@@ -1,0 +1,97 @@
+{
+  "source": "measured",
+  "date": "2026-02-28",
+  "high_concurrency": {
+    "has_official": true,
+    "data": [
+      {
+        "concurrency": 1,
+        "aerospike_py_ops": 4464.896148983818,
+        "aerospike_py_p99": 0.36212499253451824,
+        "official_ops": 4700.543189751512,
+        "official_p99": 0.3741250839084387
+      },
+      {
+        "concurrency": 4,
+        "aerospike_py_ops": 11241.562914489159,
+        "aerospike_py_p99": 0.6598748732358217,
+        "official_ops": 11860.533244768647,
+        "official_p99": 0.6340001709759235
+      },
+      {
+        "concurrency": 16,
+        "aerospike_py_ops": 19370.52022175039,
+        "aerospike_py_p99": 2.7792921755462885,
+        "official_ops": 18000.219748962165,
+        "official_p99": 2.180208917707205
+      },
+      {
+        "concurrency": 64,
+        "aerospike_py_ops": 24721.396362574797,
+        "aerospike_py_p99": 12.793458998203278,
+        "official_ops": 22501.042664089684,
+        "official_p99": 6.532834144309163
+      },
+      {
+        "concurrency": 128,
+        "aerospike_py_ops": 26654.199454527068,
+        "aerospike_py_p99": 14.323166105896235,
+        "official_ops": null,
+        "official_p99": null
+      },
+      {
+        "concurrency": 256,
+        "aerospike_py_ops": 22773.531501930134,
+        "aerospike_py_p99": 514.4587499089539,
+        "official_ops": null,
+        "official_p99": null
+      },
+      {
+        "concurrency": 512,
+        "aerospike_py_ops": null,
+        "aerospike_py_p99": null,
+        "official_ops": null,
+        "official_p99": null
+      },
+      {
+        "concurrency": 1000,
+        "aerospike_py_ops": null,
+        "aerospike_py_p99": null,
+        "official_ops": null,
+        "official_p99": null
+      }
+    ]
+  },
+  "latency_sim": {
+    "has_official": true,
+    "concurrency": 100,
+    "simulation": true,
+    "data": [
+      {
+        "rtt_ms": 0.0,
+        "aerospike_py_ops": 26438.635548736907,
+        "official_ops": 22978.753642958603
+      },
+      {
+        "rtt_ms": 0.5,
+        "aerospike_py_ops": 23843.40956651263,
+        "official_ops": 19166.7161804344
+      },
+      {
+        "rtt_ms": 1.0,
+        "aerospike_py_ops": 23068.14834327255,
+        "official_ops": 18528.737349828123
+      },
+      {
+        "rtt_ms": 2.0,
+        "aerospike_py_ops": 21285.02049949549,
+        "official_ops": 18196.033750832612
+      },
+      {
+        "rtt_ms": 5.0,
+        "aerospike_py_ops": 14116.808298061806,
+        "official_ops": 13733.323895904616
+      }
+    ]
+  }
+}
