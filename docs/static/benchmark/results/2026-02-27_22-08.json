@@ -1,0 +1,998 @@
+{
+  "timestamp": "2026-02-27T22:08:17.730835",
+  "date": "2026-02-27_22-08",
+  "environment": {
+    "platform": "Darwin arm64",
+    "python_version": "3.13.11",
+    "count": 1000,
+    "rounds": 5,
+    "warmup": 500,
+    "concurrency": 50,
+    "batch_groups": 10
+  },
+  "aerospike_py_sync": {
+    "put": {
+      "avg_ms": 0.1643895710585639,
+      "p50_ms": 0.16318750567734241,
+      "p99_ms": 0.21108286455273628,
+      "ops_per_sec": 6083.148282402882
+    },
+    "get": {
+      "avg_ms": 0.16891736804973334,
+      "p50_ms": 0.16759370919317007,
+      "p99_ms": 0.3060409799218178,
+      "ops_per_sec": 5920.054953676559
+    },
+    "operate": {
+      "avg_ms": 0.16905118618160486,
+      "p50_ms": 0.1674166414886713,
+      "p99_ms": 0.361874932423234,
+      "ops_per_sec": 5915.368135457745
+    },
+    "remove": {
+      "avg_ms": 0.1635626011993736,
+      "p50_ms": 0.1622914569452405,
+      "p99_ms": 0.2142908051609993,
+      "ops_per_sec": 6113.87071815988
+    },
+    "batch_read": {
+      "avg_ms": 0.026508167036809027,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 37483.718096520235
+    },
+    "batch_read_numpy": {
+      "avg_ms": 0.022069687489420176,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 45361.212231879916
+    },
+    "batch_write": {
+      "avg_ms": 0.02185287489555776,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 45760.569480186765
+    },
+    "batch_write_numpy": {
+      "avg_ms": 0.02141141693573445,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 46894.23565263234
+    },
+    "query": {
+      "avg_ms": 0.008964749984443188,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 111548.00766728926
+    }
+  },
+  "official_sync": {
+    "put": {
+      "avg_ms": 0.15100997546687722,
+      "p50_ms": 0.14864560216665268,
+      "p99_ms": 0.19445898942649364,
+      "ops_per_sec": 6622.079083903577
+    },
+    "get": {
+      "avg_ms": 0.1483704870333895,
+      "p50_ms": 0.1466562389396131,
+      "p99_ms": 0.294750090688467,
+      "ops_per_sec": 6739.885224565542
+    },
+    "operate": {
+      "avg_ms": 0.14778951823245734,
+      "p50_ms": 0.1464370870962739,
+      "p99_ms": 0.313041964545846,
+      "ops_per_sec": 6766.808999977597
+    },
+    "remove": {
+      "avg_ms": 0.13869015034288168,
+      "p50_ms": 0.1354999840259552,
+      "p99_ms": 0.18833298236131668,
+      "ops_per_sec": 7210.31736952995
+    },
+    "batch_read": {
+      "avg_ms": 0.026334167108871043,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 35855.733961151
+    },
+    "batch_read_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null
+    },
+    "batch_write": {
+      "avg_ms": 0.013435479020699859,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 74429.79983904253
+    },
+    "batch_write_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null
+    },
+    "query": {
+      "avg_ms": 0.007435020641423762,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 134499.39704442804
+    }
+  },
+  "aerospike_py_async": {
+    "put": {
+      "avg_ms": 0.041639958042651415,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 24015.39403511669,
+      "per_op": {
+        "p50_ms": 1.6562504461035132,
+        "p99_ms": 5.802416009828448
+      }
+    },
+    "get": {
+      "avg_ms": 0.053986874991096556,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 18527.505125890202,
+      "per_op": {
+        "p50_ms": 2.2761872387491167,
+        "p99_ms": 6.151250097900629
+      }
+    },
+    "operate": {
+      "avg_ms": 0.05169739597477019,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 19343.57981415527,
+      "per_op": {
+        "p50_ms": 2.1345835993997753,
+        "p99_ms": 6.425624946132302
+      }
+    },
+    "remove": {
+      "avg_ms": 0.040216333931311965,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 24865.51861509713,
+      "per_op": {
+        "p50_ms": 1.5603540232405066,
+        "p99_ms": 5.777542013674974
+      }
+    },
+    "batch_read": {
+      "avg_ms": 0.007767478935420513,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 123972.07163614016
+    },
+    "batch_read_numpy": {
+      "avg_ms": 0.0071204788982868195,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 140763.49742522513
+    },
+    "batch_write": {
+      "avg_ms": 0.008396583027206361,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 113683.73484113788
+    },
+    "batch_write_numpy": {
+      "avg_ms": 0.009457437554374337,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 101758.30198288993
+    },
+    "query": {
+      "avg_ms": 0.010542833479121327,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 90702.94677005826
+    }
+  },
+  "official_async": {
+    "put": {
+      "avg_ms": 0.04825412482023239,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 20724.409358680845,
+      "per_op": {
+        "p50_ms": 2.047791611403227,
+        "p99_ms": 4.979667020961642
+      }
+    },
+    "get": {
+      "avg_ms": 0.04701529198791832,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 21269.685061638163,
+      "per_op": {
+        "p50_ms": 1.92137504927814,
+        "p99_ms": 5.653791828081012
+      }
+    },
+    "operate": {
+      "avg_ms": 0.04605591599829495,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 21713.807666090113,
+      "per_op": {
+        "p50_ms": 1.8236145260743797,
+        "p99_ms": 7.309457985684276
+      }
+    },
+    "remove": {
+      "avg_ms": 0.04562425008043647,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 21918.16847919648,
+      "per_op": {
+        "p50_ms": 1.8468124326318502,
+        "p99_ms": 5.6972079910337925
+      }
+    },
+    "batch_read": {
+      "avg_ms": 0.009706833167001605,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 103020.21089633039
+    },
+    "batch_read_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null
+    },
+    "batch_write": {
+      "avg_ms": 0.008318583946675062,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 100624.47463802903
+    },
+    "batch_write_numpy": {
+      "avg_ms": null,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": null
+    },
+    "query": {
+      "avg_ms": 0.004645395907573402,
+      "p50_ms": null,
+      "p99_ms": null,
+      "ops_per_sec": 215669.42376980648
+    }
+  },
+  "data_size": {
+    "count": 1000,
+    "rounds": 5,
+    "data": [
+      {
+        "label": "tiny (3 bins, 10B)",
+        "num_bins": 3,
+        "value_size": 10,
+        "put": {
+          "avg_ms": 0.16390705481171608,
+          "p50_ms": 0.16241695266216993,
+          "p99_ms": 0.21179206669330597,
+          "ops_per_sec": 6101.018660537362
+        },
+        "get": {
+          "avg_ms": 0.16421088227070868,
+          "p50_ms": 0.16316608525812626,
+          "p99_ms": 0.21970784291625023,
+          "ops_per_sec": 6089.7303891922165
+        }
+      },
+      {
+        "label": "small (5 bins, 10B)",
+        "num_bins": 5,
+        "value_size": 10,
+        "put": {
+          "avg_ms": 0.16493219137191772,
+          "p50_ms": 0.16353128012269735,
+          "p99_ms": 0.2702081110328436,
+          "ops_per_sec": 6063.105023772648
+        },
+        "get": {
+          "avg_ms": 0.16641185828484595,
+          "p50_ms": 0.1647810568101704,
+          "p99_ms": 0.2905000001192093,
+          "ops_per_sec": 6009.2175093446
+        }
+      },
+      {
+        "label": "medium (10 bins, 100B)",
+        "num_bins": 10,
+        "value_size": 100,
+        "put": {
+          "avg_ms": 0.16768668277654797,
+          "p50_ms": 0.16577105270698667,
+          "p99_ms": 0.27466705068945885,
+          "ops_per_sec": 5963.505367326053
+        },
+        "get": {
+          "avg_ms": 0.1652729210909456,
+          "p50_ms": 0.163666729349643,
+          "p99_ms": 0.32591610215604305,
+          "ops_per_sec": 6050.599147972762
+        }
+      },
+      {
+        "label": "large (20 bins, 1KB)",
+        "num_bins": 20,
+        "value_size": 1000,
+        "put": {
+          "avg_ms": 0.26664588204585016,
+          "p50_ms": 0.26129139587283134,
+          "p99_ms": 0.475709093734622,
+          "ops_per_sec": 3750.2989176580713
+        },
+        "get": {
+          "avg_ms": 0.17374298151116818,
+          "p50_ms": 0.17201050650328398,
+          "p99_ms": 0.3352088388055563,
+          "ops_per_sec": 5755.659279549012
+        }
+      },
+      {
+        "label": "xlarge (50 bins, 1KB)",
+        "num_bins": 50,
+        "value_size": 1000,
+        "put": {
+          "avg_ms": 0.41083945299033076,
+          "p50_ms": 0.3994267317466438,
+          "p99_ms": 0.708624953404069,
+          "ops_per_sec": 2435.728436244458
+        },
+        "get": {
+          "avg_ms": 0.1965816468000412,
+          "p50_ms": 0.1952605089172721,
+          "p99_ms": 0.4732909146696329,
+          "ops_per_sec": 5086.944871395748
+        }
+      }
+    ]
+  },
+  "concurrency_scaling": {
+    "count": 1000,
+    "rounds": 5,
+    "data": [
+      {
+        "concurrency": 1,
+        "put": {
+          "avg_ms": 0.2129768329905346,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 4695.378410278907,
+          "per_op": {
+            "avg_ms": 0.19493315974250436,
+            "p50_ms": 0.1931249862536788,
+            "p99_ms": 0.3975839354097843,
+            "ops_per_sec": 5130.031369401352
+          }
+        },
+        "get": {
+          "avg_ms": 0.22126174997538328,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 4519.533991353029,
+          "per_op": {
+            "avg_ms": 0.20295972400344908,
+            "p50_ms": 0.2000001259148121,
+            "p99_ms": 0.2600420266389847,
+            "ops_per_sec": 4927.085927565639
+          }
+        }
+      },
+      {
+        "concurrency": 2,
+        "put": {
+          "avg_ms": 0.12643041706178337,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 7909.635514946674,
+          "per_op": {
+            "avg_ms": 0.2330289864912629,
+            "p50_ms": 0.22918748436495662,
+            "p99_ms": 0.5625830963253975,
+            "ops_per_sec": 4291.404849230043
+          }
+        },
+        "get": {
+          "avg_ms": 0.12813822901807725,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 7804.0758638984735,
+          "per_op": {
+            "avg_ms": 0.23680910165421665,
+            "p50_ms": 0.23454148322343826,
+            "p99_ms": 0.3044579643756151,
+            "ops_per_sec": 4222.8106648543335
+          }
+        }
+      },
+      {
+        "concurrency": 4,
+        "put": {
+          "avg_ms": 0.08186158421449363,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 12215.742091917024,
+          "per_op": {
+            "avg_ms": 0.3014054640661925,
+            "p50_ms": 0.29456254560500383,
+            "p99_ms": 0.7235840894281864,
+            "ops_per_sec": 3317.7898851242694
+          }
+        },
+        "get": {
+          "avg_ms": 0.08809829107485712,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 11350.95797885909,
+          "per_op": {
+            "avg_ms": 0.32342920056544244,
+            "p50_ms": 0.3154900041408837,
+            "p99_ms": 0.530624995008111,
+            "ops_per_sec": 3091.866777185632
+          }
+        }
+      },
+      {
+        "concurrency": 8,
+        "put": {
+          "avg_ms": 0.05948729207739234,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 16810.313011037895,
+          "per_op": {
+            "avg_ms": 0.4364263687748462,
+            "p50_ms": 0.4058749182149768,
+            "p99_ms": 1.3177089858800173,
+            "ops_per_sec": 2291.3372599534728
+          }
+        },
+        "get": {
+          "avg_ms": 0.06863666698336601,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 14569.472032235313,
+          "per_op": {
+            "avg_ms": 0.4951447767671198,
+            "p50_ms": 0.468916492536664,
+            "p99_ms": 0.9542498737573624,
+            "ops_per_sec": 2019.611327679071
+          }
+        }
+      },
+      {
+        "concurrency": 16,
+        "put": {
+          "avg_ms": 0.05058391694910824,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 19769.12940542121,
+          "per_op": {
+            "avg_ms": 0.7293440973153338,
+            "p50_ms": 0.6458329735323787,
+            "p99_ms": 2.742874901741743,
+            "ops_per_sec": 1371.103784064046
+          }
+        },
+        "get": {
+          "avg_ms": 0.06110441649798304,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 16365.479662772552,
+          "per_op": {
+            "avg_ms": 0.8696180891711265,
+            "p50_ms": 0.8360834326595068,
+            "p99_ms": 1.760208047926426,
+            "ops_per_sec": 1149.9300813224188
+          }
+        }
+      },
+      {
+        "concurrency": 32,
+        "put": {
+          "avg_ms": 0.04373364592902362,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 22866.72464292487,
+          "per_op": {
+            "avg_ms": 1.2311818186426535,
+            "p50_ms": 1.1158962734043598,
+            "p99_ms": 5.971207981929183,
+            "ops_per_sec": 812.2333843787522
+          }
+        },
+        "get": {
+          "avg_ms": 0.055311250034719706,
+          "p50_ms": null,
+          "p99_ms": null,
+          "ops_per_sec": 18079.50461022459,
+          "per_op": {
+            "avg_ms": 1.5506757346447557,
+            "p50_ms": 1.5040830476209521,
+            "p99_ms": 3.2824580557644367,
+            "ops_per_sec": 644.8801497684427
+          }
+        }
+      }
+    ]
+  },
+  "memory_profiling": {
+    "count": 1000,
+    "has_c": true,
+    "data": [
+      {
+        "label": "tiny (3 bins, 10B)",
+        "num_bins": 3,
+        "value_size": 10,
+        "put_peak_kb": 1.2,
+        "get_peak_kb": 2.9,
+        "batch_read_peak_kb": 1231.6,
+        "c_get_peak_kb": 1.2,
+        "c_batch_read_peak_kb": 1318.2
+      },
+      {
+        "label": "small (5 bins, 10B)",
+        "num_bins": 5,
+        "value_size": 10,
+        "put_peak_kb": 2.1,
+        "get_peak_kb": 3.4,
+        "batch_read_peak_kb": 1479.0,
+        "c_get_peak_kb": 2.0,
+        "c_batch_read_peak_kb": 1503.8
+      },
+      {
+        "label": "medium (10 bins, 100B)",
+        "num_bins": 10,
+        "value_size": 100,
+        "put_peak_kb": 3.5,
+        "get_peak_kb": 5.0,
+        "batch_read_peak_kb": 3016.1,
+        "c_get_peak_kb": 3.2,
+        "c_batch_read_peak_kb": 2833.0
+      },
+      {
+        "label": "large (20 bins, 1KB)",
+        "num_bins": 20,
+        "value_size": 1000,
+        "put_peak_kb": 23.3,
+        "get_peak_kb": 24.3,
+        "batch_read_peak_kb": 22410.4,
+        "c_get_peak_kb": 22.5,
+        "c_batch_read_peak_kb": 21799.7
+      },
+      {
+        "label": "xlarge (50 bins, 1KB)",
+        "num_bins": 50,
+        "value_size": 1000,
+        "put_peak_kb": 56.4,
+        "get_peak_kb": 57.1,
+        "batch_read_peak_kb": 55321.6,
+        "c_get_peak_kb": 55.2,
+        "c_batch_read_peak_kb": 53421.2
+      }
+    ]
+  },
+  "mixed_workload": {
+    "count": 1000,
+    "rounds": 5,
+    "concurrency": 50,
+    "data": [
+      {
+        "label": "read_heavy (90:10)",
+        "read_ratio": 0.9,
+        "throughput_ops_sec": 19946.509613117916,
+        "read": {
+          "count": 4500,
+          "p50_ms": 2.1710421424359083,
+          "p95_ms": 3.997625084593892,
+          "p99_ms": 6.441457895562053,
+          "avg_ms": 2.34103491400472
+        },
+        "write": {
+          "count": 500,
+          "p50_ms": 1.835583010688424,
+          "p95_ms": 3.341707866638899,
+          "p99_ms": 5.404209019616246,
+          "avg_ms": 1.9732840117067099
+        }
+      },
+      {
+        "label": "balanced (50:50)",
+        "read_ratio": 0.5,
+        "throughput_ops_sec": 20983.62503114895,
+        "read": {
+          "count": 2500,
+          "p50_ms": 2.024875022470951,
+          "p95_ms": 3.7700410466641188,
+          "p99_ms": 4.867959069088101,
+          "avg_ms": 2.162258574552834
+        },
+        "write": {
+          "count": 2500,
+          "p50_ms": 1.719375140964985,
+          "p95_ms": 3.3041660208255053,
+          "p99_ms": 4.837999818846583,
+          "avg_ms": 1.8595383458770811
+        }
+      },
+      {
+        "label": "write_heavy (10:90)",
+        "read_ratio": 0.1,
+        "throughput_ops_sec": 23951.641473976615,
+        "read": {
+          "count": 500,
+          "p50_ms": 1.8977918662130833,
+          "p95_ms": 5.113666877150536,
+          "p99_ms": 8.189958985894918,
+          "avg_ms": 2.2538072424940765
+        },
+        "write": {
+          "count": 4500,
+          "p50_ms": 1.7179169226437807,
+          "p95_ms": 4.514792002737522,
+          "p99_ms": 7.401584181934595,
+          "avg_ms": 2.0427865706798105
+        }
+      }
+    ]
+  },
+  "numpy_batch": {
+    "environment": {
+      "platform": "Darwin arm64",
+      "python_version": "3.13.11",
+      "rounds": 10,
+      "warmup": 500,
+      "concurrency": 50,
+      "batch_groups": 10
+    },
+    "record_scaling": {
+      "fixed_bins": 5,
+      "data": [
+        {
+          "record_count": 100,
+          "batch_read_sync": {
+            "avg_ms": 0.06236666580662131,
+            "ops_per_sec": 16044.794184992094
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.03826146014034748,
+            "ops_per_sec": 26143.912228749985
+          },
+          "batch_read_async": {
+            "avg_ms": 0.023747499799355865,
+            "ops_per_sec": 42270.38424307577
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.02291874960064888,
+            "ops_per_sec": 43632.397815092314
+          }
+        },
+        {
+          "record_count": 500,
+          "batch_read_sync": {
+            "avg_ms": 0.03331433399580419,
+            "ops_per_sec": 30017.10915565492
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.023624499095603824,
+            "ops_per_sec": 42379.3245842735
+          },
+          "batch_read_async": {
+            "avg_ms": 0.009698583744466305,
+            "ops_per_sec": 103107.83783978432
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.005206708097830415,
+            "ops_per_sec": 191772.93197550217
+          }
+        },
+        {
+          "record_count": 1000,
+          "batch_read_sync": {
+            "avg_ms": 0.011958249844610691,
+            "ops_per_sec": 81495.99158347902
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.009814250050112605,
+            "ops_per_sec": 101892.6555665378
+          },
+          "batch_read_async": {
+            "avg_ms": 0.006459416588768363,
+            "ops_per_sec": 154820.38277527527
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.003620290895923972,
+            "ops_per_sec": 274121.68028812064
+          }
+        },
+        {
+          "record_count": 5000,
+          "batch_read_sync": {
+            "avg_ms": 0.008161841565743089,
+            "ops_per_sec": 121300.13126742218
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.007309008296579123,
+            "ops_per_sec": 136825.91776382533
+          },
+          "batch_read_async": {
+            "avg_ms": 0.00252960417419672,
+            "ops_per_sec": 395405.33398635563
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.0017453124979510902,
+            "ops_per_sec": 572295.1978404253
+          }
+        },
+        {
+          "record_count": 10000,
+          "batch_read_sync": {
+            "avg_ms": 0.007813120889477432,
+            "ops_per_sec": 127989.82815519745
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.0070753937936387954,
+            "ops_per_sec": 141335.89955633486
+          },
+          "batch_read_async": {
+            "avg_ms": 0.002230404200963676,
+            "ops_per_sec": 441210.48003714834
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.0014900437439791857,
+            "ops_per_sec": 671689.7070105029
+          }
+        }
+      ]
+    },
+    "bin_scaling": {
+      "fixed_records": 1000,
+      "data": [
+        {
+          "bin_count": 1,
+          "batch_read_sync": {
+            "avg_ms": 0.022285916144028306,
+            "ops_per_sec": 44520.41892296945
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.01713147887494415,
+            "ops_per_sec": 58389.10056276803
+          },
+          "batch_read_async": {
+            "avg_ms": 0.0065527710830792785,
+            "ops_per_sec": 152724.01154793316
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.003574353992007673,
+            "ops_per_sec": 279837.2418212035
+          }
+        },
+        {
+          "bin_count": 3,
+          "batch_read_sync": {
+            "avg_ms": 0.01584022887982428,
+            "ops_per_sec": 63131.04416214976
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.010558396112173796,
+            "ops_per_sec": 94711.38471726717
+          },
+          "batch_read_async": {
+            "avg_ms": 0.005122417118400335,
+            "ops_per_sec": 192775.75351627183
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.003963708411902189,
+            "ops_per_sec": 252339.21003837045
+          }
+        },
+        {
+          "bin_count": 5,
+          "batch_read_sync": {
+            "avg_ms": 0.024684708449058235,
+            "ops_per_sec": 40530.86078654777
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.017675145878456533,
+            "ops_per_sec": 56586.83436486347
+          },
+          "batch_read_async": {
+            "avg_ms": 0.0076339381048455834,
+            "ops_per_sec": 130536.93322187208
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.004913229029625654,
+            "ops_per_sec": 203532.15788355167
+          }
+        },
+        {
+          "bin_count": 10,
+          "batch_read_sync": {
+            "avg_ms": 0.025114041985943913,
+            "ops_per_sec": 39663.925519749035
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.012242333497852087,
+            "ops_per_sec": 83032.01191807826
+          },
+          "batch_read_async": {
+            "avg_ms": 0.0052832914516329765,
+            "ops_per_sec": 189371.34943238046
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.00480056251399219,
+            "ops_per_sec": 208308.97522932378
+          }
+        },
+        {
+          "bin_count": 20,
+          "batch_read_sync": {
+            "avg_ms": 0.027545124990865588,
+            "ops_per_sec": 36228.213916491164
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.02677237498573959,
+            "ops_per_sec": 37291.69107359142
+          },
+          "batch_read_async": {
+            "avg_ms": 0.008654792094603181,
+            "ops_per_sec": 115542.92570743141
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.004791604354977608,
+            "ops_per_sec": 208742.04499432282
+          }
+        }
+      ]
+    },
+    "post_processing": {
+      "record_count": 1000,
+      "bin_count": 5,
+      "data": [
+        {
+          "stage": "raw_read",
+          "stage_label": "Raw Read",
+          "batch_read_sync": {
+            "avg_ms": 0.022384040988981724,
+            "ops_per_sec": 44240.86865628046
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.022042416501790285,
+            "ops_per_sec": 45371.41171435764
+          },
+          "batch_read_async": {
+            "avg_ms": 0.004982624901458621,
+            "ops_per_sec": 192044.1698004527
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.004082249943166971,
+            "ops_per_sec": 245150.51811482263
+          }
+        },
+        {
+          "stage": "read_column_access",
+          "stage_label": "Read + Column Access",
+          "batch_read_sync": {
+            "avg_ms": 0.022831062553450465,
+            "ops_per_sec": 43801.778309091635
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.02103254199028015,
+            "ops_per_sec": 47545.370429410475
+          },
+          "batch_read_async": {
+            "avg_ms": 0.004331083036959171,
+            "ops_per_sec": 230967.1963721247
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.003460812964476645,
+            "ops_per_sec": 288951.75256068655
+          }
+        },
+        {
+          "stage": "read_filter",
+          "stage_label": "Read + Filter",
+          "batch_read_sync": {
+            "avg_ms": 0.012194937444292009,
+            "ops_per_sec": 82106.46371496236
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.009116207947954535,
+            "ops_per_sec": 109703.28762509147
+          },
+          "batch_read_async": {
+            "avg_ms": 0.0043992295395582914,
+            "ops_per_sec": 227515.62467414857
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.0041176044614985585,
+            "ops_per_sec": 242869.95334907842
+          }
+        },
+        {
+          "stage": "read_aggregation",
+          "stage_label": "Read + Aggregation",
+          "batch_read_sync": {
+            "avg_ms": 0.011307854438200593,
+            "ops_per_sec": 88470.13251086295
+          },
+          "batch_read_numpy_sync": {
+            "avg_ms": 0.01035491656512022,
+            "ops_per_sec": 96582.78734902668
+          },
+          "batch_read_async": {
+            "avg_ms": 0.004616479389369488,
+            "ops_per_sec": 216620.27008320828
+          },
+          "batch_read_numpy_async": {
+            "avg_ms": 0.0037108336109668016,
+            "ops_per_sec": 269662.3311656907
+          }
+        }
+      ]
+    },
+    "memory": {
+      "bin_count": 5,
+      "data": [
+        {
+          "record_count": 100,
+          "dict_peak_kb": 170.3,
+          "numpy_peak_kb": 64.3,
+          "savings_pct": 62.2
+        },
+        {
+          "record_count": 500,
+          "dict_peak_kb": 666.3,
+          "numpy_peak_kb": 127.5,
+          "savings_pct": 80.9
+        },
+        {
+          "record_count": 1000,
+          "dict_peak_kb": 1279.4,
+          "numpy_peak_kb": 198.4,
+          "savings_pct": 84.5
+        },
+        {
+          "record_count": 5000,
+          "dict_peak_kb": 6181.7,
+          "numpy_peak_kb": 781.5,
+          "savings_pct": 87.4
+        },
+        {
+          "record_count": 10000,
+          "dict_peak_kb": 12319.1,
+          "numpy_peak_kb": 1580.4,
+          "savings_pct": 87.2
+        }
+      ]
+    },
+    "takeaways": [
+      "At 10,000 records, batch_read_numpy is **1.1x** faster than batch_read (Sync)",
+      "At 10,000 records, batch_read_numpy is **1.5x** faster than batch_read (Async)",
+      "Bin scaling: numpy is up to **2.1x** faster at 10 bins (Sync, 1,000 records)",
+      "Bin scaling: numpy is up to **1.8x** faster at 1 bins (Async)",
+      "Post-processing: numpy **Read + Filter** is **1.3x** faster (Sync)",
+      "Post-processing: numpy **Read + Column Access** is **1.3x** faster (Async)",
+      "At 10,000 records, numpy uses **87%** less memory than dict"
+    ]
+  },
+  "takeaways": [
+    "AsyncClient shows **1.2x** faster latency than the official async client in BATCH_READ operations",
+    "BATCH_READ_NUMPY (SyncClient) is **1.2x** faster than official BATCH_READ (returns numpy structured array vs Python dict)",
+    "BATCH_READ_NUMPY (AsyncClient) is **3.7x** faster than official BATCH_READ (returns numpy structured array vs Python dict)",
+    "AsyncClient shows **4.1x** higher throughput than SyncClient in REMOVE operations (concurrency=50)",
+    "GET latency increases **1.2x** from tiny (3 bins, 10B) to xlarge (50 bins, 1KB)",
+    "Peak GET throughput **18,080 ops/s** at concurrency=32",
+    "Peak GET memory for xlarge (50 bins, 1KB): **57.1KB**",
+    "Highest mixed throughput: **23,952 ops/s** (write_heavy (10:90))"
+  ]
+}

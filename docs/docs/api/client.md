@@ -114,8 +114,11 @@ client = aerospike_py.client(config).connect("admin", "admin")
   <TabItem value="async" label="Async Client">
 
 ```python
+# Without authentication
 client = await aerospike_py.AsyncClient(config).connect()
-await client.connect("admin", "admin")
+
+# With authentication
+client = await aerospike_py.AsyncClient(config).connect("admin", "admin")
 ```
 
   </TabItem>

@@ -1,8 +1,8 @@
 import React from 'react';
-import BrowserOnly from '@docusaurus/BrowserOnly';
+import {LazyChart} from './ui/LazyChart';
 import type {ColorMode, FullBenchmarkData} from './types';
-import {OPERATIONS, OP_LABELS, CROSS_OP_BASELINE} from './constants';
-import {fmtMs, fmtOps, calcSpeedup} from './helpers';
+import {OPERATIONS, OP_LABELS, COLOR_APY_SYNC, COLOR_OFFICIAL_SYNC, COLOR_OFFICIAL_ASYNC, COLOR_APY_ASYNC} from './constants';
+import {fmtMs, fmtOps, calcSpeedup, hasOfficialData, getMetric, getOfficialMetric} from './helpers';
 import styles from './styles/Cards.module.css';
 import tableStyles from './styles/Tables.module.css';
 
@@ -11,89 +11,108 @@ interface Props {
   colorMode: ColorMode;
 }
 
+// ── Inline Helper Components ────────────────────────────────
+
+function ClientRow({
+  color,
+  label,
+  latency,
+  ops,
+}: {
+  color: string;
+  label: string;
+  latency: number | null;
+  ops: number | null;
+}) {
+  return (
+    <div className={styles.comparisonRow}>
+      <span className={`${styles.comparisonRowLabel} ${styles.clientRowLabel}`}>
+        <span className={styles.colorDot} style={{background: color}} />
+        {label}
+      </span>
+      <span className={styles.clientRowValues}>
+        <span className={`${styles.comparisonRowValue} ${styles.clientRowValue}`}>{fmtMs(latency)}</span>
+        <span className={`${styles.comparisonRowValue} ${styles.clientRowValue}`}>{fmtOps(ops)}</span>
+      </span>
+    </div>
+  );
+}
+
+function SpeedupRow({
+  label,
+  target,
+  baseline,
+}: {
+  label: string;
+  target: number | null;
+  baseline: number | null;
+}) {
+  const result = calcSpeedup(target, baseline, true);
+  return (
+    <div className={styles.comparisonRow}>
+      <span className={styles.comparisonRowLabel}>{label}</span>
+      <span className={`${styles.comparisonRowValue} ${tableStyles[result.className] || ''}`}>
+        {result.text}
+      </span>
+    </div>
+  );
+}
+
+// ── Main Component ──────────────────────────────────────────
+
 export default function OverviewPanel({data, colorMode}: Props) {
-  const hasC = data.c_sync != null;
+  const hasOfficial = hasOfficialData(data);
 
   return (
     <div>
       {/* Speedup Summary Chart */}
-      {hasC && (
-        <BrowserOnly fallback={<div style={{height: 400}}>Loading chart...</div>}>
-          {() => {
-            const {SpeedupSummaryChart} = require('./charts/SpeedupSummaryChart');
-            return <SpeedupSummaryChart data={data} colorMode={colorMode} />;
-          }}
-        </BrowserOnly>
+      {hasOfficial && (
+        <LazyChart render={() => {
+          const {SpeedupSummaryChart} = require('./charts/SpeedupSummaryChart');
+          return <SpeedupSummaryChart data={data} colorMode={colorMode} />;
+        }} />
       )}
 
       {/* Quick Comparison Grid */}
       <h3>Quick Comparison</h3>
       <div className={styles.comparisonGrid}>
         {OPERATIONS.map((op) => {
-          const syncAvg = data.rust_sync[op]?.avg_ms ?? null;
-          const asyncAvg = data.rust_async[op]?.avg_ms ?? null;
-          const syncOps = data.rust_sync[op]?.ops_per_sec ?? null;
-          const asyncOps = data.rust_async[op]?.ops_per_sec ?? null;
+          // Use p50 when available, fall back to avg (bulk ops have no p50)
+          const syncLatency = getMetric(data.aerospike_py_sync, op, 'p50_ms') ?? getMetric(data.aerospike_py_sync, op, 'avg_ms');
+          const asyncLatency = getMetric(data.aerospike_py_async, op, 'p50_ms') ?? getMetric(data.aerospike_py_async, op, 'avg_ms');
+          const syncOps = getMetric(data.aerospike_py_sync, op, 'ops_per_sec');
+          const asyncOps = getMetric(data.aerospike_py_async, op, 'ops_per_sec');
 
-          const officialOp = CROSS_OP_BASELINE[op] ?? op;
-          const officialAvg = hasC ? (data.c_sync![officialOp]?.avg_ms ?? null) : null;
-          const officialOpsVal = hasC ? (data.c_sync![officialOp]?.ops_per_sec ?? null) : null;
+          const officialP50 = getOfficialMetric(data, op, 'p50_ms');
+          const officialAvg = getOfficialMetric(data, op, 'avg_ms');
+          const officialLatency = {
+            sync: officialP50.sync ?? officialAvg.sync,
+            async_: officialP50.async_ ?? officialAvg.async_,
+          };
+          const officialOps = getOfficialMetric(data, op, 'ops_per_sec');
 
-          const syncVsOfficial = hasC ? calcSpeedup(syncAvg, officialAvg, true) : null;
-          const asyncVsOfficial = hasC ? calcSpeedup(asyncAvg, officialAvg, true) : null;
-
-          // Skip ops with no data
-          if (syncAvg == null && asyncAvg == null) return null;
+          // Skip ops with no data at all
+          if (syncLatency == null && asyncLatency == null && syncOps == null && asyncOps == null) return null;
 
           return (
             <div key={op} className={styles.comparisonCard}>
               <div className={styles.comparisonCardHeader}>{OP_LABELS[op]}</div>
 
-              <div className={styles.comparisonRow}>
-                <span className={styles.comparisonRowLabel}>Sync</span>
-                <span className={styles.comparisonRowValue}>{fmtMs(syncAvg)}</span>
-              </div>
-              <div className={styles.comparisonRow}>
-                <span className={styles.comparisonRowLabel}>Sync ops/s</span>
-                <span className={styles.comparisonRowValue}>{fmtOps(syncOps)}</span>
-              </div>
-
-              {hasC && (
-                <>
-                  <div className={styles.comparisonRow}>
-                    <span className={styles.comparisonRowLabel}>Official</span>
-                    <span className={styles.comparisonRowValue}>{fmtMs(officialAvg)}</span>
-                  </div>
-                  <div className={styles.comparisonRow}>
-                    <span className={styles.comparisonRowLabel}>Official ops/s</span>
-                    <span className={styles.comparisonRowValue}>{fmtOps(officialOpsVal)}</span>
-                  </div>
-                </>
+              {/* 4-client rows */}
+              <ClientRow color={COLOR_APY_SYNC} label="APY Sync" latency={syncLatency} ops={syncOps} />
+              {hasOfficial && (
+                <ClientRow color={COLOR_OFFICIAL_SYNC} label="Official Sync" latency={officialLatency.sync} ops={officialOps.sync} />
               )}
-
-              <div className={styles.comparisonRow}>
-                <span className={styles.comparisonRowLabel}>Async</span>
-                <span className={styles.comparisonRowValue}>{fmtMs(asyncAvg)}</span>
-              </div>
-              <div className={styles.comparisonRow}>
-                <span className={styles.comparisonRowLabel}>Async ops/s</span>
-                <span className={styles.comparisonRowValue}>{fmtOps(asyncOps)}</span>
-              </div>
-
-              {hasC && syncVsOfficial && (
-                <div className={styles.comparisonRow} style={{marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--ifm-color-emphasis-200)'}}>
-                  <span className={styles.comparisonRowLabel}>Sync vs Official</span>
-                  <span className={`${styles.comparisonRowValue} ${tableStyles[syncVsOfficial.className]}`}>
-                    {syncVsOfficial.text}
-                  </span>
-                </div>
+              {hasOfficial && (
+                <ClientRow color={COLOR_OFFICIAL_ASYNC} label="Off. Async" latency={officialLatency.async_} ops={officialOps.async_} />
               )}
-              {hasC && asyncVsOfficial && (
-                <div className={styles.comparisonRow}>
-                  <span className={styles.comparisonRowLabel}>Async vs Official</span>
-                  <span className={`${styles.comparisonRowValue} ${tableStyles[asyncVsOfficial.className]}`}>
-                    {asyncVsOfficial.text}
-                  </span>
+              <ClientRow color={COLOR_APY_ASYNC} label="APY Async" latency={asyncLatency} ops={asyncOps} />
+
+              {/* Speedup comparisons */}
+              {hasOfficial && (
+                <div className={styles.speedupDivider}>
+                  <SpeedupRow label="Sync vs Official" target={syncLatency} baseline={officialLatency.sync} />
+                  <SpeedupRow label="Async vs Official" target={asyncLatency} baseline={officialLatency.async_} />
                 </div>
               )}
             </div>

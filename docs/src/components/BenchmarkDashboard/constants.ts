@@ -18,11 +18,12 @@ export const CROSS_OP_BASELINE: Record<string, string> = {
   batch_write_numpy: 'batch_write',
 };
 
-// ── Chart Colors ────────────────────────────────────────────
+// ── Chart Colors (4-client) ─────────────────────────────────
 
-export const COLOR_SYNC = '#673ab7';
-export const COLOR_OFFICIAL = '#78909c';
-export const COLOR_ASYNC = '#4caf50';
+export const COLOR_APY_SYNC = '#673ab7';       // purple
+export const COLOR_OFFICIAL_SYNC = '#78909c';   // gray
+export const COLOR_OFFICIAL_ASYNC = '#ff9800';  // orange
+export const COLOR_APY_ASYNC = '#4caf50';       // green
 
 export const COLOR_PUT_P50 = '#7e57c2';
 export const COLOR_PUT_P99 = '#b39ddb';

@@ -48,6 +48,38 @@
   letter-spacing: 0.02em;
 }
 
+/* ── ClientRow Helpers ────────────────────────────────────── */
+
+.colorDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.clientRowLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clientRowValues {
+  display: flex;
+  gap: 1rem;
+}
+
+.clientRowValue {
+  min-width: 70px;
+  text-align: right;
+}
+
+.speedupDivider {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+}
+
 /* ── QuickComparisonGrid ─────────────────────────────────── */
 
 .comparisonGrid {

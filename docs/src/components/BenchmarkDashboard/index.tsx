@@ -5,10 +5,9 @@ import {useColorMode} from '@docusaurus/theme-common';
 import HeroBanner from './HeroBanner';
 import OverviewPanel from './OverviewPanel';
 import LatencyThroughputPanel from './LatencyThroughputPanel';
-import StabilityTailPanel from './StabilityTailPanel';
 import AdvancedPanel from './AdvancedPanel';
 import NumpyPanel from './NumpyPanel';
-import {useBenchmarkData, useNumpyData} from './hooks';
+import {useBenchmarkData} from './hooks';
 import styles from './styles/BenchmarkDashboard.module.css';
 
 export default function BenchmarkDashboard(): React.ReactElement {
@@ -20,13 +19,6 @@ export default function BenchmarkDashboard(): React.ReactElement {
     loading,
     error,
   } = useBenchmarkData();
-  const {
-    dates: numpyDates,
-    selectedDate: numpySelectedDate,
-    setSelectedDate: setNumpySelectedDate,
-    data: numpyData,
-    error: numpyError,
-  } = useNumpyData();
   const {colorMode} = useColorMode();
 
   if (error) {
@@ -45,8 +37,9 @@ export default function BenchmarkDashboard(): React.ReactElement {
     return <div className={styles.container}>Loading benchmark data...</div>;
   }
 
-  const hasBasic = data.rust_sync && Object.keys(data.rust_sync).length > 0;
+  const hasBasic = data.aerospike_py_sync && Object.keys(data.aerospike_py_sync).length > 0;
   const hasAdvanced = data.data_size || data.concurrency_scaling || data.memory_profiling || data.mixed_workload;
+  const hasNumpy = !!data.numpy_batch;
 
   return (
     <div className={styles.container}>
@@ -75,14 +68,6 @@ export default function BenchmarkDashboard(): React.ReactElement {
             </TabItem>
           )}
 
-          {hasBasic && (
-            <TabItem value="stability-tail" label="Stability & Tail">
-              <div className={styles.panelContent}>
-                <StabilityTailPanel data={data} colorMode={colorMode} />
-              </div>
-            </TabItem>
-          )}
-
           {hasAdvanced && (
             <TabItem value="advanced" label="Advanced Profiling">
               <div className={styles.panelContent}>
@@ -94,11 +79,7 @@ export default function BenchmarkDashboard(): React.ReactElement {
           <TabItem value="numpy" label="NumPy Batch">
             <div className={styles.panelContent}>
               <NumpyPanel
-                numpyData={numpyData}
-                numpyError={numpyError}
-                numpyDates={numpyDates}
-                numpySelectedDate={numpySelectedDate}
-                onNumpyDateChange={setNumpySelectedDate}
+                numpyData={hasNumpy ? data.numpy_batch! : null}
                 colorMode={colorMode}
               />
             </div>

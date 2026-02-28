@@ -29,6 +29,8 @@ from datetime import datetime
 
 import numpy as np
 
+from _helpers import _fmt_ms, _lpad
+
 # Re-use helpers from bench_compare
 from bench_compare import (
     Color,
@@ -133,29 +135,32 @@ async def _warmup_async(client, warmup: int):
             pass
 
 
+# ── bulk measurement helpers ──────────────────────────────────
+
+
+def _bench_bulk_sync(fn, rounds: int, count: int) -> dict:
+    """Run fn() across rounds, collecting elapsed times; return bulk_median."""
+    times = []
+    for _ in range(rounds):
+        gc.disable()
+        times.append(_measure_bulk(fn))
+        gc.enable()
+    return _bulk_median(times, count)
+
+
+async def _bench_bulk_async(coro_fn, rounds: int, count: int) -> dict:
+    """Await coro_fn() across rounds, collecting elapsed times; return bulk_median."""
+    times = []
+    for _ in range(rounds):
+        gc.disable()
+        t0 = time.perf_counter()
+        await coro_fn()
+        times.append(time.perf_counter() - t0)
+        gc.enable()
+    return _bulk_median(times, count)
+
+
 # ── formatting helpers ────────────────────────────────────────
-
-
-def _visible_len(s: str) -> int:
-    import re
-
-    return len(re.sub(r"\033\[[0-9;]*m", "", s))
-
-
-def _lpad(s: str, width: int) -> str:
-    pad = width - _visible_len(s)
-    return " " * max(0, pad) + s
-
-
-def _rpad(s: str, width: int) -> str:
-    pad = width - _visible_len(s)
-    return s + " " * max(0, pad)
-
-
-def _fmt_ms(val: float | None) -> str:
-    if val is None:
-        return "-"
-    return f"{val:.3f}ms"
 
 
 def _speedup(target: float | None, baseline: float | None) -> str:
@@ -202,23 +207,11 @@ def _run_record_scaling(
 
         # batch_read sync
         _log(f"  batch_read(Sync) {rc} records x {rounds} rounds")
-        br_rounds = []
-        for _ in range(rounds):
-            gc.disable()
-            elapsed = _measure_bulk(lambda: [client.batch_read(g) for g in groups])
-            gc.enable()
-            br_rounds.append(elapsed)
-        br_sync = _bulk_median(br_rounds, rc)
+        br_sync = _bench_bulk_sync(lambda: [client.batch_read(g) for g in groups], rounds, rc)
 
         # batch_read_numpy sync
         _log(f"  batch_read_numpy(Sync) {rc} records x {rounds} rounds")
-        np_rounds = []
-        for _ in range(rounds):
-            gc.disable()
-            elapsed = _measure_bulk(lambda: [client.batch_read(g, _dtype=dtype) for g in groups])
-            gc.enable()
-            np_rounds.append(elapsed)
-        np_sync = _bulk_median(np_rounds, rc)
+        np_sync = _bench_bulk_sync(lambda: [client.batch_read(g, _dtype=dtype) for g in groups], rounds, rc)
 
         _cleanup_data(client, prefix, rc)
         _settle()
@@ -251,27 +244,19 @@ def _run_record_scaling(
 
             # batch_read async
             _log(f"  batch_read(Async) {rc} records x {rounds} rounds")
-            br_rounds = []
-            for _ in range(rounds):
-                gc.disable()
-                t0 = time.perf_counter()
-                await asyncio.gather(*[aclient.batch_read(g) for g in groups])
-                elapsed = time.perf_counter() - t0
-                gc.enable()
-                br_rounds.append(elapsed)
-            entry["batch_read_async"] = _bulk_median(br_rounds, rc)
+            entry["batch_read_async"] = await _bench_bulk_async(
+                lambda: asyncio.gather(*[aclient.batch_read(g) for g in groups]),
+                rounds,
+                rc,
+            )
 
             # batch_read_numpy async
             _log(f"  batch_read_numpy(Async) {rc} records x {rounds} rounds")
-            np_rounds = []
-            for _ in range(rounds):
-                gc.disable()
-                t0 = time.perf_counter()
-                await asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in groups])
-                elapsed = time.perf_counter() - t0
-                gc.enable()
-                np_rounds.append(elapsed)
-            entry["batch_read_numpy_async"] = _bulk_median(np_rounds, rc)
+            entry["batch_read_numpy_async"] = await _bench_bulk_async(
+                lambda: asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in groups]),
+                rounds,
+                rc,
+            )
 
             await _cleanup_data_async(aclient, prefix, rc)
             _settle()
@@ -315,23 +300,11 @@ def _run_bin_scaling(
 
         # batch_read sync
         _log(f"  batch_read(Sync) bins={bc} x {rounds} rounds")
-        br_rounds = []
-        for _ in range(rounds):
-            gc.disable()
-            elapsed = _measure_bulk(lambda: [client.batch_read(g) for g in groups])
-            gc.enable()
-            br_rounds.append(elapsed)
-        br_sync = _bulk_median(br_rounds, fixed_records)
+        br_sync = _bench_bulk_sync(lambda: [client.batch_read(g) for g in groups], rounds, fixed_records)
 
         # batch_read_numpy sync
         _log(f"  batch_read_numpy(Sync) bins={bc} x {rounds} rounds")
-        np_rounds = []
-        for _ in range(rounds):
-            gc.disable()
-            elapsed = _measure_bulk(lambda: [client.batch_read(g, _dtype=dtype) for g in groups])
-            gc.enable()
-            np_rounds.append(elapsed)
-        np_sync = _bulk_median(np_rounds, fixed_records)
+        np_sync = _bench_bulk_sync(lambda: [client.batch_read(g, _dtype=dtype) for g in groups], rounds, fixed_records)
 
         _cleanup_data(client, prefix, fixed_records)
         _settle()
@@ -364,26 +337,18 @@ def _run_bin_scaling(
             groups = [keys[i::batch_groups] for i in range(batch_groups)]
 
             _log(f"  batch_read(Async) bins={bc} x {rounds} rounds")
-            br_rounds = []
-            for _ in range(rounds):
-                gc.disable()
-                t0 = time.perf_counter()
-                await asyncio.gather(*[aclient.batch_read(g) for g in groups])
-                elapsed = time.perf_counter() - t0
-                gc.enable()
-                br_rounds.append(elapsed)
-            entry["batch_read_async"] = _bulk_median(br_rounds, fixed_records)
+            entry["batch_read_async"] = await _bench_bulk_async(
+                lambda: asyncio.gather(*[aclient.batch_read(g) for g in groups]),
+                rounds,
+                fixed_records,
+            )
 
             _log(f"  batch_read_numpy(Async) bins={bc} x {rounds} rounds")
-            np_rounds = []
-            for _ in range(rounds):
-                gc.disable()
-                t0 = time.perf_counter()
-                await asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in groups])
-                elapsed = time.perf_counter() - t0
-                gc.enable()
-                np_rounds.append(elapsed)
-            entry["batch_read_numpy_async"] = _bulk_median(np_rounds, fixed_records)
+            entry["batch_read_numpy_async"] = await _bench_bulk_async(
+                lambda: asyncio.gather(*[aclient.batch_read(g, _dtype=dtype) for g in groups]),
+                rounds,
+                fixed_records,
+            )
 
             await _cleanup_data_async(aclient, prefix, fixed_records)
             _settle()
@@ -478,22 +443,10 @@ def _run_post_processing(
         _log(f"  Post-Processing: {stage_label} (Sync)")
 
         # batch_read sync
-        br_rounds = []
-        for _ in range(rounds):
-            gc.disable()
-            elapsed = _measure_bulk(dict_fn)
-            gc.enable()
-            br_rounds.append(elapsed)
-        br_sync = _bulk_median(br_rounds, record_count)
+        br_sync = _bench_bulk_sync(dict_fn, rounds, record_count)
 
         # batch_read_numpy sync
-        np_rounds = []
-        for _ in range(rounds):
-            gc.disable()
-            elapsed = _measure_bulk(numpy_fn)
-            gc.enable()
-            np_rounds.append(elapsed)
-        np_sync = _bulk_median(np_rounds, record_count)
+        np_sync = _bench_bulk_sync(numpy_fn, rounds, record_count)
 
         data.append(
             {
@@ -576,25 +529,8 @@ def _run_post_processing(
         for entry, adict_fn, anumpy_fn in zip(data, adict_fns, anumpy_fns):
             _log(f"  Post-Processing: {entry['stage_label']} (Async)")
 
-            br_rounds = []
-            for _ in range(rounds):
-                gc.disable()
-                t0 = time.perf_counter()
-                await adict_fn()
-                elapsed = time.perf_counter() - t0
-                gc.enable()
-                br_rounds.append(elapsed)
-            entry["batch_read_async"] = _bulk_median(br_rounds, record_count)
-
-            np_rounds = []
-            for _ in range(rounds):
-                gc.disable()
-                t0 = time.perf_counter()
-                await anumpy_fn()
-                elapsed = time.perf_counter() - t0
-                gc.enable()
-                np_rounds.append(elapsed)
-            entry["batch_read_numpy_async"] = _bulk_median(np_rounds, record_count)
+            entry["batch_read_async"] = await _bench_bulk_async(adict_fn, rounds, record_count)
+            entry["batch_read_numpy_async"] = await _bench_bulk_async(anumpy_fn, rounds, record_count)
 
         await _cleanup_data_async(aclient, a_prefix, record_count)
         await aclient.close()
@@ -799,7 +735,7 @@ class NumpyBenchmarkResults:
     memory: dict | None = None
     rounds: int = 10
     warmup: int = 200
-    concurrency: int = 50
+    concurrency: int = 4
     batch_groups: int = 10
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     python_version: str = field(default_factory=platform.python_version)
@@ -818,7 +754,7 @@ def main():
     )
     parser.add_argument("--rounds", type=int, default=10, help="Rounds per measurement")
     parser.add_argument("--warmup", type=int, default=WARMUP_COUNT, help="Warmup ops")
-    parser.add_argument("--concurrency", type=int, default=50, help="Async concurrency")
+    parser.add_argument("--concurrency", type=int, default=4, help="Async concurrency")
     parser.add_argument(
         "--batch-groups",
         type=int,
@@ -936,7 +872,7 @@ def main():
     if args.report:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         date_slug = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        json_dir = args.report_dir or os.path.join(project_root, "docs", "static", "benchmark", "numpy-results")
+        json_dir = args.report_dir or os.path.join(project_root, "docs", "static", "benchmark", "results")
 
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from report_generator import generate_numpy_report
