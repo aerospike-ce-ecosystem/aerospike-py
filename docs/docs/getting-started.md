@@ -14,7 +14,7 @@ import TabItem from '@theme/TabItem';
 pip install aerospike-py
 ```
 
-**Requirements:** Python 3.10+ (CPython) | Linux (x86_64, aarch64) | macOS (x86_64, arm64) | Windows (x64)
+**Requirements:** Python 3.10+ (CPython)
 
 ## Quick Start
 

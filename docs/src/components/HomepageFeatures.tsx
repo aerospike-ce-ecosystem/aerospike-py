@@ -5,17 +5,36 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import styles from './HomepageFeatures.module.css';
 
-const CODE_DROP_IN = `- import aerospike
-+ import aerospike_py as aerospike
+/* ── Feature Card Data ───────────────────────────────────── */
+const FEATURE_CARDS = [
+  {
+    icon: '🦀',
+    title: 'Rust Performance',
+    desc: 'Native binary via PyO3 — zero Python overhead on the hot path.',
+  },
+  {
+    icon: '⚡',
+    title: 'Sync & Async',
+    desc: 'Both Client and AsyncClient. Works with FastAPI, Django, Gunicorn, and more.',
+  },
+  {
+    icon: '📦',
+    title: 'Zero Python Deps',
+    desc: 'Ships as a compiled wheel. No native C extensions to install separately.',
+  },
+  {
+    icon: '🔍',
+    title: 'Full Type Hints',
+    desc: 'PEP 561 compliant with bundled .pyi stubs. First-class IDE auto-complete.',
+  },
+  {
+    icon: '🔢',
+    title: 'NumPy Support',
+    desc: 'Batch results directly as NumPy arrays — ideal for analytics workloads.',
+  },
+];
 
-config = {'hosts': [('localhost', 3000)]}
-client = aerospike.client(config).connect()
-
-key = ('test', 'demo', 'key1')
-client.put(key, {'name': 'Alice', 'age': 30})
-_, _, bins = client.get(key)
-client.close()`;
-
+/* ── Code Snippets ───────────────────────────────────────── */
 const CODE_SYNC = `from aerospike_py import Client
 
 client = Client({'hosts': [('localhost', 3000)]})
@@ -42,63 +61,74 @@ async def main():
 
 asyncio.run(main())`;
 
-function DropInReplacementSection() {
+/* ── Feature Cards Section ───────────────────────────────── */
+function FeatureCardsSection() {
   return (
-    <section className={styles.section}>
+    <section className={styles.featureCardsSection}>
       <div className="container">
         <div className={styles.sectionHeader}>
           <Heading as="h2" className={styles.sectionTitle}>
-            Drop-in Replacement for Official Client
+            Why aerospike-py?
           </Heading>
           <p className={styles.sectionSubtitle}>
-            Just change the import — your existing code works as-is
+            Built for production workloads where every millisecond counts
           </p>
         </div>
-        <div className={styles.dropInBlock}>
-          <CodeBlock language="diff">
-            {CODE_DROP_IN}
-          </CodeBlock>
+        <div className={styles.featureCardsGrid}>
+          {FEATURE_CARDS.map((card) => (
+            <div key={card.title} className={styles.featureCard}>
+              <span className={styles.featureCardIcon}>{card.icon}</span>
+              <div className={styles.featureCardTitle}>{card.title}</div>
+              <p className={styles.featureCardDesc}>{card.desc}</p>
+            </div>
+          ))}
         </div>
       </div>
     </section>
   );
 }
 
+/* ── Sync & Async Section ────────────────────────────────── */
 function SyncAsyncSection() {
   return (
     <section className={styles.section}>
       <div className="container">
-        <div className={styles.sectionHeader}>
-          <Heading as="h2" className={styles.sectionTitle}>
-            Sync & Async Support
-          </Heading>
-          <p className={styles.sectionSubtitle}>
-            Both Client and AsyncClient are supported
-          </p>
-        </div>
-        <div className={styles.tabsSection}>
-          <Tabs>
-            <TabItem value="sync" label="SyncClient" default>
-              <CodeBlock language="python">
-                {CODE_SYNC}
-              </CodeBlock>
-            </TabItem>
-            <TabItem value="async" label="AsyncClient">
-              <CodeBlock language="python">
-                {CODE_ASYNC}
-              </CodeBlock>
-            </TabItem>
-          </Tabs>
+        <div className={styles.twoColLayout}>
+          <div className={styles.twoColText}>
+            <Heading as="h2">
+              Sync &amp; Async Support
+            </Heading>
+            <p>
+              Use <code>Client</code> for synchronous workloads or{' '}
+              <code>AsyncClient</code> for async frameworks like FastAPI,
+              Starlette, and Django Channels — same API, both fully supported.
+            </p>
+          </div>
+          <div>
+            <Tabs>
+              <TabItem value="sync" label="SyncClient" default>
+                <CodeBlock language="python">
+                  {CODE_SYNC}
+                </CodeBlock>
+              </TabItem>
+              <TabItem value="async" label="AsyncClient">
+                <CodeBlock language="python">
+                  {CODE_ASYNC}
+                </CodeBlock>
+              </TabItem>
+            </Tabs>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
+/* ── Main Export ─────────────────────────────────────────── */
 export default function HomepageFeatures(): ReactNode {
   return (
     <>
-      <DropInReplacementSection />
+      <FeatureCardsSection />
       <SyncAsyncSection />
     </>
   );

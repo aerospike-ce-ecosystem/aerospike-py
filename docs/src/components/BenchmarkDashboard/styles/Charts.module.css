@@ -39,7 +39,7 @@
 
 .dateSelect:focus {
   border-color: var(--ifm-color-primary);
-  box-shadow: 0 0 0 2px rgba(103, 58, 183, 0.15);
+  box-shadow: 0 0 0 2px rgba(230, 74, 25, 0.15);
 }
 
 [data-theme='dark'] .dateSelect {

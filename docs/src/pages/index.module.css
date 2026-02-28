@@ -1,38 +1,147 @@
+/* ============================================================
+   Hero Section
+   ============================================================ */
 .heroBanner {
-  padding: 4rem 0;
+  padding: 6rem 0 5rem;
   text-align: center;
   position: relative;
   overflow: hidden;
-  background: linear-gradient(135deg, var(--ifm-color-primary) 0%, var(--ifm-color-primary-darker) 100%);
+  background: var(--apy-color-navy, #1B2838);
+  color: #fff;
 }
 
-@media screen and (max-width: 996px) {
-  .heroBanner {
-    padding: 2rem;
-  }
+/* Radial glow effect */
+.heroBanner::before {
+  content: '';
+  position: absolute;
+  top: -10%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  height: 60%;
+  background: radial-gradient(ellipse at center, rgba(230, 74, 25, 0.25) 0%, transparent 70%);
+  pointer-events: none;
 }
 
+/* Grid pattern overlay */
+.heroBanner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================================
+   Badge
+   ============================================================ */
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(230, 74, 25, 0.15);
+  border: 1px solid rgba(230, 74, 25, 0.4);
+  border-radius: 100px;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #FF8A65;
+  letter-spacing: 0.03em;
+  margin-bottom: 1.5rem;
+}
+
+/* ============================================================
+   Title
+   ============================================================ */
+.heroTitle {
+  font-size: clamp(2.2rem, 5vw, 3.5rem);
+  font-weight: 800;
+  line-height: 1.15;
+  color: #fff;
+  margin-bottom: 1rem;
+  font-family: 'Plus Jakarta Sans', var(--ifm-heading-font-family, sans-serif);
+}
+
+.heroTitleAccent {
+  color: #FF8A65;
+  position: relative;
+}
+
+.heroSubtitle {
+  font-size: 1.15rem;
+  color: rgba(255, 255, 255, 0.7);
+  max-width: 560px;
+  margin: 0 auto 2.5rem;
+  line-height: 1.6;
+}
+
+/* ============================================================
+   CTA Buttons
+   ============================================================ */
 .buttons {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
 }
 
+.ctaPrimary {
+  background: #E64A19 !important;
+  border-color: #E64A19 !important;
+  color: #fff !important;
+  font-weight: 600;
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s !important;
+}
+
+.ctaPrimary:hover {
+  background: #D84315 !important;
+  border-color: #D84315 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(230, 74, 25, 0.4) !important;
+}
+
+.ctaSecondary {
+  background: transparent !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-weight: 600;
+  transition: border-color 0.2s, color 0.2s, transform 0.15s !important;
+}
+
+.ctaSecondary:hover {
+  border-color: rgba(255, 255, 255, 0.8) !important;
+  color: #fff !important;
+  transform: translateY(-1px);
+}
+
+/* ============================================================
+   Install Command
+   ============================================================ */
 .installCommand {
-  margin-top: 1.5rem;
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   padding: 0.6rem 1.5rem;
+  backdrop-filter: blur(4px);
 }
 
 .installCommand code {
-  color: #fff;
-  font-size: 1.1rem;
-  font-family: var(--ifm-font-family-monospace);
+  color: #FF8A65;
+  font-size: 1rem;
+  font-family: var(--ifm-font-family-monospace, monospace);
   background: none;
   border: none;
   padding: 0;
@@ -40,9 +149,9 @@
 
 .copyButton {
   background: none;
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.7);
   cursor: pointer;
   font-size: 1rem;
   padding: 0.15rem 0.4rem;
@@ -51,7 +160,71 @@
 }
 
 .copyButton:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.12);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+/* ============================================================
+   Stats Bar
+   ============================================================ */
+.statsBar {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0;
+  background: var(--ifm-background-color);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.5rem 3rem;
+  border-right: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.statItem:last-child {
+  border-right: none;
+}
+
+.statValue {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--ifm-color-primary);
+  font-family: 'Plus Jakarta Sans', var(--ifm-heading-font-family, sans-serif);
+  line-height: 1.2;
+}
+
+.statLabel {
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-600);
+  font-weight: 500;
+  margin-top: 0.2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 4rem 1.5rem 3.5rem;
+  }
+
+  .statsBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .statItem {
+    border-right: none;
+    border-bottom: 1px solid var(--ifm-color-emphasis-200);
+    padding: 1rem 2rem;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .statItem:last-child {
+    border-bottom: none;
+  }
 }

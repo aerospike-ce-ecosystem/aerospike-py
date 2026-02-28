@@ -1,3 +1,63 @@
+/* ============================================================
+   Feature Cards Section
+   ============================================================ */
+.featureCardsSection {
+  padding: 4rem 0 2rem;
+  background: var(--ifm-background-color);
+}
+
+.featureCardsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  margin-top: 2.5rem;
+}
+
+.featureCard {
+  padding: 1.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  background: var(--ifm-background-color);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.featureCard:hover {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 4px 20px rgba(230, 74, 25, 0.1);
+  transform: translateY(-2px);
+}
+
+[data-theme='dark'] .featureCard {
+  background: var(--ifm-background-surface-color);
+}
+
+[data-theme='dark'] .featureCard:hover {
+  box-shadow: 0 4px 20px rgba(255, 138, 101, 0.12);
+}
+
+.featureCardIcon {
+  font-size: 2rem;
+  margin-bottom: 0.75rem;
+  display: block;
+}
+
+.featureCardTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+  font-family: var(--ifm-heading-font-family);
+}
+
+.featureCardDesc {
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ============================================================
+   2-Column Sections (Drop-in + Sync/Async)
+   ============================================================ */
 .section {
   padding: 3rem 0;
 }
@@ -14,22 +74,65 @@
 .sectionTitle {
   font-size: 1.8rem;
   margin-bottom: 0.5rem;
+  font-family: var(--ifm-heading-font-family);
 }
 
 .sectionSubtitle {
   color: var(--ifm-color-emphasis-600);
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   margin: 0;
 }
 
-/* Drop-in Replacement: single diff code block */
+.twoColLayout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+  align-items: start;
+}
+
+.twoColText {
+  padding-top: 0.5rem;
+}
+
+.twoColText h2 {
+  font-size: 1.7rem;
+  font-family: var(--ifm-heading-font-family);
+  margin-bottom: 0.75rem;
+}
+
+.twoColText p {
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.7;
+  margin-bottom: 0;
+}
+
+/* Single-column fallbacks */
 .dropInBlock {
   max-width: 720px;
   margin: 0 auto;
 }
 
-/* Sync & Async: tabs section */
 .tabsSection {
   max-width: 720px;
   margin: 0 auto;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media screen and (max-width: 996px) {
+  .featureCardsGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .twoColLayout {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+}
+
+@media screen and (max-width: 640px) {
+  .featureCardsGrid {
+    grid-template-columns: 1fr;
+  }
 }
