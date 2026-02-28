@@ -8,7 +8,7 @@ BENCH_COUNT ?= 1000
 BENCH_ROUNDS ?= 5
 BENCH_CONCURRENCY ?= 50
 BENCH_BATCH_GROUPS ?= 10
-BENCH_SCENARIO ?= basic
+BENCH_SCENARIO ?= latency
 
 NUMPY_BENCH_ROUNDS ?= 10
 NUMPY_BENCH_CONCURRENCY ?= 50
@@ -54,7 +54,7 @@ BENCH_ARGS = --count $(BENCH_COUNT) --rounds $(BENCH_ROUNDS) \
 	--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT)
 
 .PHONY: run-benchmark-report
-run-benchmark-report: build run-aerospike-ce ## Run benchmark + generate JSON report (BENCH_SCENARIO=basic|all, numpy auto-included with all)
+run-benchmark-report: build run-aerospike-ce ## Run benchmark + generate JSON report (BENCH_SCENARIO=latency|memory|concurrency|all)
 	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
 	uv run python benchmark/bench_compare.py \
 		$(BENCH_ARGS) --scenario $(BENCH_SCENARIO) --report; \
