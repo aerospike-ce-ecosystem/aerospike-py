@@ -326,15 +326,20 @@ macro_rules! traced_op {
                 .start_with_context(&tracer, &$parent_ctx);
             let _cx = $parent_ctx.with_span(span);
 
-            let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
-            let result = $body;
-            match &result {
-                Ok(_) => timer.finish(""),
-                Err(e) => {
-                    let err_type = $crate::metrics::error_type_from_aerospike_error(e);
-                    timer.finish(&err_type);
+            let result = if $crate::metrics::is_metrics_enabled() {
+                let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
+                let result = $body;
+                match &result {
+                    Ok(_) => timer.finish(""),
+                    Err(e) => {
+                        let err_type = $crate::metrics::error_type_from_aerospike_error(e);
+                        timer.finish(&err_type);
+                    }
                 }
-            }
+                result
+            } else {
+                $body
+            };
 
             {
                 let span_ref = opentelemetry::trace::TraceContextExt::span(&_cx);
@@ -349,16 +354,7 @@ macro_rules! traced_op {
             // Metrics-only fast path: no span, no Python calls
             let _ = $parent_ctx;
             let _ = &$conn_info;
-            let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
-            let result = $body;
-            match &result {
-                Ok(_) => timer.finish(""),
-                Err(e) => {
-                    let err_type = $crate::metrics::error_type_from_aerospike_error(e);
-                    timer.finish(&err_type);
-                }
-            }
-            result.map_err($crate::errors::as_to_pyerr)
+            $crate::timed_op!($op, $ns, $set, $body)
         }
     }};
 }
@@ -414,21 +410,25 @@ macro_rules! traced_exists_op {
                 .start_with_context(&tracer, &$parent_ctx);
             let _cx = $parent_ctx.with_span(span);
 
-            let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
-            let result = $body;
-
-            match &result {
-                Ok(_) => timer.finish(""),
-                Err(aerospike_core::Error::ServerError(
-                    aerospike_core::ResultCode::KeyNotFoundError,
-                    _,
-                    _,
-                )) => timer.finish(""),
-                Err(e) => {
-                    let err_type = $crate::metrics::error_type_from_aerospike_error(e);
-                    timer.finish(&err_type);
+            let result = if $crate::metrics::is_metrics_enabled() {
+                let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
+                let result = $body;
+                match &result {
+                    Ok(_) => timer.finish(""),
+                    Err(aerospike_core::Error::ServerError(
+                        aerospike_core::ResultCode::KeyNotFoundError,
+                        _,
+                        _,
+                    )) => timer.finish(""),
+                    Err(e) => {
+                        let err_type = $crate::metrics::error_type_from_aerospike_error(e);
+                        timer.finish(&err_type);
+                    }
                 }
-            }
+                result
+            } else {
+                $body
+            };
 
             {
                 let span_ref = opentelemetry::trace::TraceContextExt::span(&_cx);
@@ -452,6 +452,38 @@ macro_rules! traced_exists_op {
             let _ = $parent_ctx;
             let _ = &$conn_info;
 
+            if $crate::metrics::is_metrics_enabled() {
+                let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
+                let result = $body;
+                match &result {
+                    Ok(_) => timer.finish(""),
+                    Err(aerospike_core::Error::ServerError(
+                        aerospike_core::ResultCode::KeyNotFoundError,
+                        _,
+                        _,
+                    )) => timer.finish(""),
+                    Err(e) => {
+                        let err_type = $crate::metrics::error_type_from_aerospike_error(e);
+                        timer.finish(&err_type);
+                    }
+                }
+                result
+            } else {
+                $body
+            }
+        }
+    }};
+}
+
+/// When compiled without `otel`, fall back to plain metrics with exists handling.
+#[cfg(not(feature = "otel"))]
+#[macro_export]
+macro_rules! traced_exists_op {
+    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {{
+        let _ = $parent_ctx;
+        let _ = &$conn_info;
+
+        if $crate::metrics::is_metrics_enabled() {
             let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
             let result = $body;
             match &result {
@@ -467,32 +499,8 @@ macro_rules! traced_exists_op {
                 }
             }
             result
+        } else {
+            $body
         }
-    }};
-}
-
-/// When compiled without `otel`, fall back to plain metrics with exists handling.
-#[cfg(not(feature = "otel"))]
-#[macro_export]
-macro_rules! traced_exists_op {
-    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {{
-        let _ = $parent_ctx;
-        let _ = &$conn_info;
-
-        let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
-        let result = $body;
-        match &result {
-            Ok(_) => timer.finish(""),
-            Err(aerospike_core::Error::ServerError(
-                aerospike_core::ResultCode::KeyNotFoundError,
-                _,
-                _,
-            )) => timer.finish(""),
-            Err(e) => {
-                let err_type = $crate::metrics::error_type_from_aerospike_error(e);
-                timer.finish(&err_type);
-            }
-        }
-        result
     }};
 }

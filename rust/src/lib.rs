@@ -32,10 +32,29 @@ fn get_metrics_text() -> String {
     metrics::get_text()
 }
 
+/// Enable or disable Prometheus metrics collection.
+///
+/// When disabled, operation timers are skipped entirely (~1ns atomic check).
+/// Useful for benchmarking without metrics overhead.
+#[pyfunction]
+fn set_metrics_enabled(enabled: bool) {
+    metrics::set_metrics_enabled(enabled);
+}
+
+/// Check if Prometheus metrics collection is currently enabled.
+#[pyfunction]
+fn is_metrics_enabled() -> bool {
+    metrics::is_metrics_enabled()
+}
+
 /// Native Aerospike Python client module
 #[pymodule(gil_used = true)]
 fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     logging::init();
+
+    // Configure the async Tokio runtime BEFORE any future_into_py() call.
+    // Limits worker threads to reduce GIL contention in AsyncClient.
+    runtime::init_async_runtime();
 
     // Register classes
     m.add_class::<client::PyClient>()?;
@@ -46,6 +65,8 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Register functions
     m.add_function(wrap_pyfunction!(get_metrics_text, m)?)?;
+    m.add_function(wrap_pyfunction!(set_metrics_enabled, m)?)?;
+    m.add_function(wrap_pyfunction!(is_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(tracing::init_tracing, m)?)?;
     m.add_function(wrap_pyfunction!(tracing::shutdown_tracing, m)?)?;
 

@@ -1,14 +1,13 @@
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use crate::client_common::{self, PutPolicy};
 use crate::traced_exists_op;
 use crate::traced_op;
-use aerospike_core::{
-    BatchOperation, BatchWritePolicy, Bins, Client as AsClient, Error as AsError, ResultCode, Task,
-};
+use aerospike_core::{BatchOperation, BatchWritePolicy, Bins, Client as AsClient, Task};
+use arc_swap::ArcSwapOption;
 use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyDict, PyList};
 use pyo3_async_runtimes::tokio::future_into_py;
 
 use crate::batch_types::batch_to_batch_records_py;
@@ -16,26 +15,18 @@ use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::parse_client_policy;
 use crate::policy::write_policy::DEFAULT_WRITE_POLICY;
-use crate::record_helpers::{batch_records_to_py, record_to_meta};
+use crate::record_helpers::{
+    batch_records_to_py, PendingExists, PendingOrderedRecord, PendingRecord,
+};
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
-use crate::types::record::record_to_py_with_key;
 use crate::types::value::value_to_py;
 
 /// Thread-safe shared state for the async client.
 ///
-/// Uses `Mutex<Option<...>>` so that `connect()` can set the client
-/// and `close()` can take it out, while remaining `Send + Sync` for
-/// use inside `future_into_py`.
-type SharedClientState = Arc<Mutex<Option<Arc<AsClient>>>>;
-
-/// Convert a [`PoisonError`] into a Python [`ClientError`].
-fn lock_err<T>(e: PoisonError<T>) -> PyErr {
-    crate::errors::ClientError::new_err(format!(
-        "Internal client lock poisoned (likely caused by a panic in another async operation). \
-         Please recreate the client. Details: {e}"
-    ))
-}
+/// Uses `ArcSwapOption` for lock-free atomic reads (Arc clone).
+/// `connect()` stores the client, `close()` swaps it to `None`.
+type SharedClientState = Arc<ArcSwapOption<AsClient>>;
 
 /// Asynchronous Aerospike client exposed to Python as `AsyncClient`.
 ///
@@ -44,8 +35,8 @@ fn lock_err<T>(e: PoisonError<T>) -> PyErr {
 /// to allow safe concurrent access from multiple Python coroutines.
 #[pyclass(name = "AsyncClient")]
 pub struct PyAsyncClient {
-    /// The underlying async client, wrapped in `Arc<Mutex<Option<...>>>`.
-    /// `None` before `connect()` is called; taken by `close()`.
+    /// The underlying async client, wrapped in `ArcSwapOption` for lock-free access.
+    /// `None` before `connect()` is called; swapped to `None` by `close()`.
     inner: SharedClientState,
     /// Python config dict, retained for potential reconnection.
     config: Py<PyAny>,
@@ -58,7 +49,7 @@ impl PyAsyncClient {
     #[new]
     fn new(config: Py<PyAny>) -> PyResult<Self> {
         Ok(PyAsyncClient {
-            inner: Arc::new(Mutex::new(None)),
+            inner: Arc::new(ArcSwapOption::empty()),
             config,
             connection_info: Arc::new(crate::tracing::ConnectionInfo::default()),
         })
@@ -117,24 +108,21 @@ impl PyAsyncClient {
             .await
             .map_err(as_to_pyerr)?;
 
-            *inner.lock().map_err(lock_err)? = Some(Arc::new(client));
+            inner.store(Some(Arc::new(client)));
             Ok(())
         })
     }
 
-    /// Check if connected (sync, no I/O).
+    /// Check if connected (sync, no I/O, lock-free).
     fn is_connected(&self) -> bool {
         trace!("Checking async client connection status");
-        self.inner
-            .lock()
-            .map(|guard| guard.is_some())
-            .unwrap_or(false)
+        self.inner.load().is_some()
     }
 
     /// Close connection (async).
     fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         info!("Closing async client connection");
-        let client = self.inner.lock().map_err(lock_err)?.take();
+        let client = self.inner.swap(None);
         future_into_py(py, async move {
             if let Some(c) = client {
                 c.close().await.map_err(as_to_pyerr)?;
@@ -212,7 +200,7 @@ impl PyAsyncClient {
         _exc_val: Option<&Bound<'_, PyAny>>,
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let client = self.inner.lock().map_err(lock_err)?.take();
+        let client = self.inner.swap(None);
         future_into_py(py, async move {
             if let Some(c) = client {
                 c.close().await.map_err(as_to_pyerr)?;
@@ -251,7 +239,7 @@ impl PyAsyncClient {
                         &args.key.set_name,
                         args.parent_ctx,
                         args.conn_info,
-                        { client.put(&wp, &args.key, &args.bins).await }
+                        client.put(&wp, &args.key, &args.bins).await
                     )
                 })
             }
@@ -262,7 +250,7 @@ impl PyAsyncClient {
                     &args.key.set_name,
                     args.parent_ctx,
                     args.conn_info,
-                    { client.put(&wp, &args.key, &args.bins).await }
+                    client.put(&wp, &args.key, &args.bins).await
                 )
             }),
         }
@@ -294,10 +282,10 @@ impl PyAsyncClient {
                 &args.key.set_name,
                 args.parent_ctx,
                 args.conn_info,
-                { client.get(&rp, &args.key, Bins::All).await }
+                client.get(&rp, &args.key, Bins::All).await
             )?;
 
-            Python::attach(|py| record_to_py_with_key(py, &record, key_py))
+            Ok(PendingRecord { record, key_py })
         })
     }
 
@@ -331,10 +319,10 @@ impl PyAsyncClient {
                 &args.key.set_name,
                 args.parent_ctx,
                 args.conn_info,
-                { client.get(&rp, &args.key, bins_selector).await }
+                client.get(&rp, &args.key, bins_selector).await
             )?;
 
-            Python::attach(|py| record_to_py_with_key(py, &record, key_py))
+            Ok(PendingRecord { record, key_py })
         })
     }
 
@@ -353,6 +341,9 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name
         );
 
+        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
+        let key_py = key_to_py(py, &args.key)?;
+
         future_into_py(py, async move {
             let result = traced_exists_op!(
                 "exists",
@@ -360,24 +351,10 @@ impl PyAsyncClient {
                 &args.key.set_name,
                 args.parent_ctx,
                 args.conn_info,
-                { client.get(&args.read_policy, &args.key, Bins::None).await }
+                client.get(&args.read_policy, &args.key, Bins::None).await
             );
 
-            Python::attach(|py| {
-                let key_py = key_to_py(py, &args.key)?;
-                match result {
-                    Ok(record) => {
-                        let meta = record_to_meta(py, &record)?;
-                        let tuple = PyTuple::new(py, [key_py, meta])?;
-                        Ok(tuple.into_any().unbind())
-                    }
-                    Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => {
-                        let tuple = PyTuple::new(py, [key_py, py.None()])?;
-                        Ok(tuple.into_any().unbind())
-                    }
-                    Err(e) => Err(as_to_pyerr(e)),
-                }
-            })
+            Ok(PendingExists { result, key_py })
         })
     }
 
@@ -405,7 +382,7 @@ impl PyAsyncClient {
                 &args.key.set_name,
                 args.parent_ctx,
                 args.conn_info,
-                { client.delete(&args.write_policy, &args.key).await }
+                client.delete(&args.write_policy, &args.key).await
             )?;
 
             if !existed {
@@ -442,7 +419,7 @@ impl PyAsyncClient {
                 &args.key.set_name,
                 args.parent_ctx,
                 args.conn_info,
-                { client.touch(&args.write_policy, &args.key).await }
+                client.touch(&args.write_policy, &args.key).await
             )
         })
     }
@@ -480,7 +457,7 @@ impl PyAsyncClient {
                 &args.key.set_name,
                 args.parent_ctx,
                 args.conn_info,
-                { client.add(&args.write_policy, &args.key, &args.bins).await }
+                client.add(&args.write_policy, &args.key, &args.bins).await
             )
         })
     }
@@ -522,7 +499,7 @@ impl PyAsyncClient {
                 }
             )?;
 
-            Python::attach(|py| record_to_py_with_key(py, &record, key_py))
+            Ok(PendingRecord { record, key_py })
         })
     }
 
@@ -639,7 +616,7 @@ impl PyAsyncClient {
                 &args.key.set_name,
                 args.parent_ctx,
                 args.conn_info,
-                { client.put(&args.write_policy, &args.key, &args.bins).await }
+                client.put(&args.write_policy, &args.key, &args.bins).await
             )
         })
     }
@@ -683,32 +660,9 @@ impl PyAsyncClient {
                 }
             )?;
 
-            Python::attach(|py| {
-                let key_py = match &record.key {
-                    Some(k) => key_to_py(py, k)?,
-                    None => pre_key_py,
-                };
-                let meta_dict_obj = record_to_meta(py, &record)?;
-                let bin_items: Vec<Py<PyAny>> = record
-                    .bins
-                    .iter()
-                    .map(|(name, value)| {
-                        let tuple = PyTuple::new(
-                            py,
-                            [
-                                name.as_str().into_pyobject(py)?.into_any().unbind(),
-                                value_to_py(py, value)?,
-                            ],
-                        )?;
-                        Ok(tuple.into_any().unbind())
-                    })
-                    .collect::<PyResult<_>>()?;
-                let ordered_bins = PyList::new(py, &bin_items)?;
-                let result = PyTuple::new(
-                    py,
-                    [key_py, meta_dict_obj, ordered_bins.into_any().unbind()],
-                )?;
-                Ok(result.into_any().unbind())
+            Ok(PendingOrderedRecord {
+                record,
+                key_py: pre_key_py,
             })
         })
     }
@@ -863,7 +817,7 @@ impl PyAsyncClient {
                 &args.batch_set,
                 args.parent_ctx,
                 args.conn_info,
-                { client.batch(&args.batch_policy, &ops).await }
+                client.batch(&args.batch_policy, &ops).await
             )?;
 
             Python::attach(|py| {
@@ -909,7 +863,7 @@ impl PyAsyncClient {
                 &args.batch_set,
                 args.parent_ctx,
                 args.conn_info,
-                { client.batch(&args.batch_policy, &batch_ops).await }
+                client.batch(&args.batch_policy, &batch_ops).await
             )?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
@@ -984,7 +938,7 @@ impl PyAsyncClient {
                 &args.batch_set,
                 args.parent_ctx,
                 args.conn_info,
-                { client.batch(&args.batch_policy, &ops).await }
+                client.batch(&args.batch_policy, &ops).await
             )?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
@@ -1482,17 +1436,12 @@ impl PyAsyncClient {
 
 impl PyAsyncClient {
     /// Returns a cloned `Arc` to the connected client, or an error if not yet connected.
+    ///
+    /// Uses `load_full()` for a lock-free atomic load + Arc clone.
     fn get_client(&self) -> PyResult<Arc<AsClient>> {
-        self.inner
-            .lock()
-            .map_err(lock_err)?
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                crate::errors::ClientError::new_err(
-                    "Client is not connected. Call connect() first.",
-                )
-            })
+        self.inner.load_full().ok_or_else(|| {
+            crate::errors::ClientError::new_err("Client is not connected. Call connect() first.")
+        })
     }
 
     /// Internal helper for index creation (async).

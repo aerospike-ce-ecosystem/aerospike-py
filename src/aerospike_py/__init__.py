@@ -14,6 +14,8 @@ from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query as _NativeQuery  # noqa: F401
 from aerospike_py._aerospike import BatchRecord, BatchRecords  # noqa: F401
 from aerospike_py._aerospike import get_metrics_text as _get_metrics_text
+from aerospike_py._aerospike import set_metrics_enabled as _set_metrics_enabled
+from aerospike_py._aerospike import is_metrics_enabled as _is_metrics_enabled
 from aerospike_py._aerospike import init_tracing as _init_tracing
 from aerospike_py._aerospike import shutdown_tracing as _shutdown_tracing
 
@@ -899,6 +901,34 @@ def get_metrics() -> str:
     return _get_metrics_text()
 
 
+def set_metrics_enabled(enabled: bool) -> None:
+    """Enable or disable Prometheus metrics collection.
+
+    When disabled, operation timers are skipped entirely (~1ns atomic check).
+    Useful for benchmarking without metrics overhead.
+
+    Args:
+        enabled: ``True`` to enable (default), ``False`` to disable.
+
+    Example:
+        ```python
+        aerospike_py.set_metrics_enabled(False)   # disable metrics
+        # ... run benchmark ...
+        aerospike_py.set_metrics_enabled(True)     # re-enable
+        ```
+    """
+    _set_metrics_enabled(enabled)
+
+
+def is_metrics_enabled() -> bool:
+    """Check if Prometheus metrics collection is currently enabled.
+
+    Returns:
+        ``True`` if metrics are enabled (default), ``False`` otherwise.
+    """
+    return _is_metrics_enabled()
+
+
 _metrics_server = None
 _metrics_server_thread = None
 _metrics_lock = threading.Lock()
@@ -990,6 +1020,8 @@ __all__ = [
     "async_client",
     "set_log_level",
     "get_metrics",
+    "set_metrics_enabled",
+    "is_metrics_enabled",
     "start_metrics_server",
     "stop_metrics_server",
     "init_tracing",
