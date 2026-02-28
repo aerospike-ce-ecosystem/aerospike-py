@@ -64,6 +64,7 @@ dependencies = [
  "prometheus-client",
  "pyo3",
  "pyo3-async-runtimes",
+ "ripemd",
  "tokio",
 ]
 
