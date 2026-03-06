@@ -178,6 +178,23 @@ fn values_from_list(val: &Value) -> Vec<Value> {
     }
 }
 
+/// Parse an operation flag value that should be a small integer (i32).
+///
+/// Missing/None values default to `0`.
+fn parse_i32_flag(val: &Option<Value>, op_name: &str, field_name: &str) -> PyResult<i32> {
+    match val {
+        None | Some(Value::Nil) => Ok(0),
+        Some(Value::Int(i)) => i32::try_from(*i).map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "{op_name} operation '{field_name}' must fit in i32 range, got {i}"
+            ))
+        }),
+        Some(other) => Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "{op_name} operation '{field_name}' must be int, got {other:?}"
+        ))),
+    }
+}
+
 // ── Main conversion ─────────────────────────────────────────────
 
 /// Convert a Python list of operation dicts to Rust Operations.
@@ -432,10 +449,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_LIST_SORT => {
                 let name = require_bin(&bin_name, "list_sort")?;
-                let flags: i32 = match &val {
-                    Some(Value::Int(i)) => *i as i32,
-                    _ => 0,
-                };
+                let flags = parse_i32_flag(&val, "list_sort", "val")?;
                 let sort_flags = match flags {
                     2 => ListSortFlags::DropDuplicates,
                     _ => ListSortFlags::Default,
@@ -444,10 +458,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_LIST_SET_ORDER => {
                 let name = require_bin(&bin_name, "list_set_order")?;
-                let order: i32 = match &val {
-                    Some(Value::Int(i)) => *i as i32,
-                    _ => 0,
-                };
+                let order = parse_i32_flag(&val, "list_set_order", "val")?;
                 let order_type = match order {
                     1 => ListOrderType::Ordered,
                     _ => ListOrderType::Unordered,
@@ -458,10 +469,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             // ── Map CDT operations ───────────────────────────
             OP_MAP_SET_ORDER => {
                 let name = require_bin(&bin_name, "map_set_order")?;
-                let order: i32 = match &val {
-                    Some(Value::Int(i)) => *i as i32,
-                    _ => 0,
-                };
+                let order = parse_i32_flag(&val, "map_set_order", "val")?;
                 let map_order = match order {
                     1 => MapOrder::KeyOrdered,
                     3 => MapOrder::KeyValueOrdered,
@@ -655,4 +663,54 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
     }
 
     Ok(rust_ops)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_i32_flag;
+    use aerospike_core::Value;
+    use pyo3::{exceptions::PyTypeError, exceptions::PyValueError, PyErr, Python};
+
+    #[test]
+    fn parse_i32_flag_defaults_to_zero_for_missing_or_nil() {
+        assert_eq!(
+            parse_i32_flag(&None, "list_sort", "val").expect("None should default to 0"),
+            0
+        );
+        assert_eq!(
+            parse_i32_flag(&Some(Value::Nil), "list_sort", "val").expect("Nil should default to 0"),
+            0
+        );
+    }
+
+    #[test]
+    fn parse_i32_flag_accepts_in_range_int() {
+        let parsed = parse_i32_flag(&Some(Value::Int(i64::from(i32::MAX))), "list_sort", "val")
+            .expect("i32 max should be accepted");
+        assert_eq!(parsed, i32::MAX);
+    }
+
+    #[test]
+    fn parse_i32_flag_rejects_out_of_range_int() {
+        let err: PyErr = parse_i32_flag(
+            &Some(Value::Int(i64::from(i32::MAX) + 1)),
+            "list_sort",
+            "val",
+        )
+        .expect_err("out-of-range int should fail");
+        Python::initialize();
+        Python::attach(|py| {
+            assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+
+    #[test]
+    fn parse_i32_flag_rejects_non_int() {
+        let err: PyErr = parse_i32_flag(&Some(Value::String("2".to_string())), "list_sort", "val")
+            .expect_err("non-int should fail");
+        Python::initialize();
+        Python::attach(|py| {
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
+    }
 }
