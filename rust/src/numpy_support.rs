@@ -23,6 +23,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::errors::result_code_to_int;
+use crate::record_helpers::record_ttl_seconds;
 use crate::types::value::value_to_py;
 
 // ── dtype field descriptor ──────────────────────────────────────
@@ -495,10 +496,7 @@ pub fn batch_to_numpy_py(
             if let Some(record) = &br.record {
                 // Write meta: generation and ttl
                 let gen = record.generation;
-                let ttl: u32 = record
-                    .time_to_live()
-                    .map(|d| d.as_secs() as u32)
-                    .unwrap_or(0xFFFFFFFF_u32);
+                let ttl: u32 = record_ttl_seconds(record);
 
                 unsafe {
                     let meta_row = meta_ptr.add(i * meta_stride);
