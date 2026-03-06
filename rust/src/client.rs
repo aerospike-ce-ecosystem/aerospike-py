@@ -74,16 +74,7 @@ impl PyClient {
         let parsed = parse_hosts_from_config(&effective_config)?;
         let client_policy = parse_client_policy(&effective_config)?;
 
-        let cluster_name = effective_config
-            .get_item("cluster_name")?
-            .and_then(|v| {
-                if v.is_none() {
-                    None
-                } else {
-                    v.extract::<String>().ok()
-                }
-            })
-            .unwrap_or_default();
+        let cluster_name = client_common::extract_cluster_name(&effective_config)?;
 
         self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
             server_address: Arc::from(parsed.first_address.as_str()),
