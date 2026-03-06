@@ -15,13 +15,17 @@ pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePoli
 /// Convert a TTL integer value to an [`Expiration`] enum.
 ///
 /// Special values: `0` = namespace default, `-1` = never expire, `-2` = don't update.
-fn parse_ttl(ttl_val: i64) -> Expiration {
+fn parse_ttl(ttl_val: i64) -> PyResult<Expiration> {
     match ttl_val {
-        0 => Expiration::NamespaceDefault,
-        -1 => Expiration::Never,
-        -2 => Expiration::DontUpdate,
-        t if t > 0 => Expiration::Seconds(t as u32),
-        _ => Expiration::NamespaceDefault,
+        0 => Ok(Expiration::NamespaceDefault),
+        -1 => Ok(Expiration::Never),
+        -2 => Ok(Expiration::DontUpdate),
+        t if t > 0 && t <= u32::MAX as i64 => Ok(Expiration::Seconds(t as u32)),
+        t if t > u32::MAX as i64 => Err(crate::errors::InvalidArgError::new_err(format!(
+            "ttl out of range: {t} (max: {})",
+            u32::MAX
+        ))),
+        _ => Ok(Expiration::NamespaceDefault),
     }
 }
 
@@ -40,7 +44,7 @@ pub fn parse_write_policy(
             policy.generation_policy = GenerationPolicy::ExpectGenEqual;
         }
         if let Some(ttl) = meta_dict.get_item("ttl")? {
-            policy.expiration = parse_ttl(ttl.extract::<i64>()?);
+            policy.expiration = parse_ttl(ttl.extract::<i64>()?)?;
         }
     }
 
@@ -98,11 +102,35 @@ pub fn parse_write_policy(
 
     // TTL / expiration
     if let Some(val) = dict.get_item("ttl")? {
-        policy.expiration = parse_ttl(val.extract::<i64>()?);
+        policy.expiration = parse_ttl(val.extract::<i64>()?)?;
     }
 
     // Filter expression
     policy.base_policy.filter_expression = extract_filter_expression(dict)?;
 
     Ok(policy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ttl_accepts_valid_positive_seconds() {
+        assert!(matches!(
+            parse_ttl(300).expect("valid ttl should parse"),
+            Expiration::Seconds(300)
+        ));
+    }
+
+    #[test]
+    fn parse_ttl_rejects_values_above_u32_max() {
+        Python::initialize();
+        Python::attach(|py| {
+            let ttl = u32::MAX as i64 + 1;
+            let err = parse_ttl(ttl).expect_err("ttl above u32::MAX must fail");
+            assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
+            assert!(err.to_string().contains("ttl out of range"));
+        });
+    }
 }
