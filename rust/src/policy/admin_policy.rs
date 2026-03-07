@@ -70,17 +70,19 @@ pub fn parse_privileges(privileges: &Bound<'_, PyList>) -> PyResult<Vec<Privileg
                 crate::errors::InvalidArgError::new_err("Privilege dict must have 'code' key")
             })?
             .extract()?;
-        let ns: Option<String> = match dict.get_item("ns")? {
-            Some(v) => Some(v.extract::<String>()?),
-            None => None,
-        };
-        let set_name: Option<String> = match dict.get_item("set")? {
-            Some(v) => Some(v.extract::<String>()?),
-            None => None,
-        };
+        let ns = extract_optional_string(dict, "ns")?;
+        let set_name = extract_optional_string(dict, "set")?;
         result.push(Privilege::new(code_to_privilege_code(code)?, ns, set_name));
     }
     Ok(result)
+}
+
+fn extract_optional_string(dict: &Bound<'_, PyDict>, field_name: &str) -> PyResult<Option<String>> {
+    match dict.get_item(field_name)? {
+        Some(value) if value.is_none() => Ok(None),
+        Some(value) => Ok(Some(value.extract::<String>()?)),
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +120,24 @@ mod tests {
 
             let err = parse_privileges(&privileges).expect_err("non-string ns must be rejected");
             assert!(err.is_instance_of::<PyTypeError>(py));
+        });
+    }
+
+    #[test]
+    fn parse_privileges_accepts_none_ns_and_set() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            let dict = PyDict::new(py);
+            dict.set_item("code", 10).unwrap();
+            dict.set_item("ns", py.None()).unwrap();
+            dict.set_item("set", py.None()).unwrap();
+            privileges.append(dict).unwrap();
+
+            let parsed = parse_privileges(&privileges).expect("None ns/set should parse");
+            assert_eq!(parsed.len(), 1);
+            assert_eq!(parsed[0].namespace, None);
+            assert_eq!(parsed[0].set_name, None);
         });
     }
 
