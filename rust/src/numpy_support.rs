@@ -352,13 +352,28 @@ unsafe fn write_value_to_buffer(
                 v, field.name
             )));
         }
-        if v > u64::MAX as f64 {
+        if v >= u64::MAX as f64 {
             return Err(PyValueError::new_err(format!(
                 "cannot write out-of-range float {} to unsigned field '{}'",
                 v, field.name
             )));
         }
         Ok(v as u64)
+    }
+    fn finite_f64_to_i64(v: f64, field: &FieldInfo) -> PyResult<i64> {
+        if !v.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "cannot write non-finite float {} to integer field '{}'",
+                v, field.name
+            )));
+        }
+        if v < i64::MIN as f64 || v >= i64::MAX as f64 {
+            return Err(PyValueError::new_err(format!(
+                "cannot write out-of-range float {} to integer field '{}'",
+                v, field.name
+            )));
+        }
+        Ok(v as i64)
     }
 
     match value {
@@ -375,7 +390,7 @@ unsafe fn write_value_to_buffer(
             let v = float_value_to_f64(fv);
             match field.kind {
                 DtypeKind::Float => write_float_to_buffer(row_ptr, field, v),
-                DtypeKind::Int => write_int_to_buffer(row_ptr, field, v as i64),
+                DtypeKind::Int => write_int_to_buffer(row_ptr, field, finite_f64_to_i64(v, field)?),
                 DtypeKind::Uint => {
                     write_uint_to_buffer(row_ptr, field, non_negative_f64_to_u64(v, field)?)
                 }
@@ -1076,6 +1091,74 @@ mod tests {
             assert!(err
                 .to_string()
                 .contains("cannot write negative float -1.5 to unsigned field 'x'"));
+        }
+    }
+
+    #[test]
+    fn test_write_value_large_float_to_uint_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 8,
+            base_itemsize: 8,
+            kind: DtypeKind::Uint,
+        };
+        unsafe {
+            let err = write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64((u64::MAX as f64).to_bits())),
+            )
+            .expect_err("large float to uint should fail");
+            assert!(err.to_string().contains("cannot write out-of-range float"));
+        }
+    }
+
+    #[test]
+    fn test_write_value_nan_float_to_int_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 8,
+            base_itemsize: 8,
+            kind: DtypeKind::Int,
+        };
+        unsafe {
+            let err = write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64(f64::NAN.to_bits())),
+            )
+            .expect_err("NaN float to int should fail");
+            assert!(err
+                .to_string()
+                .contains("cannot write non-finite float NaN to integer field 'x'"));
+        }
+    }
+
+    #[test]
+    fn test_write_value_large_float_to_int_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 8,
+            base_itemsize: 8,
+            kind: DtypeKind::Int,
+        };
+        unsafe {
+            let err = write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64((i64::MAX as f64).to_bits())),
+            )
+            .expect_err("large float to int should fail");
+            assert!(err.to_string().contains("cannot write out-of-range float"));
         }
     }
 
