@@ -85,11 +85,13 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
             Ok(Predicate::Equals { bin, val })
         }
         "between" => {
+            ensure_predicate_min_len(pred, "between", 4)?;
             let min: i64 = pred.get_item(2)?.extract()?;
             let max: i64 = pred.get_item(3)?.extract()?;
             Ok(Predicate::Between { bin, min, max })
         }
         "contains" => {
+            ensure_predicate_min_len(pred, "contains", 4)?;
             let col_type: i32 = pred.get_item(2)?.extract()?;
             let val_any = pred.get_item(3)?;
             if let Ok(v) = val_any.extract::<i64>() {
@@ -112,6 +114,7 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
             Ok(Predicate::GeoWithinRegion { bin, geojson })
         }
         "geo_within_radius" => {
+            ensure_predicate_min_len(pred, "geo_within_radius", 5)?;
             let lat: f64 = pred.get_item(2)?.extract()?;
             let lng: f64 = pred.get_item(3)?.extract()?;
             let radius: f64 = pred.get_item(4)?.extract()?;
@@ -130,6 +133,16 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
             "Unknown predicate type: {kind}"
         ))),
     }
+}
+
+fn ensure_predicate_min_len(pred: &Bound<'_, PyTuple>, kind: &str, min_len: usize) -> PyResult<()> {
+    if pred.len() < min_len {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "Predicate '{kind}' requires at least {min_len} elements, got {}",
+            pred.len()
+        )));
+    }
+    Ok(())
 }
 
 /// Build an `aerospike_core::Statement` from namespace, set, bins, and predicates.
@@ -337,6 +350,77 @@ impl PyQuery {
             predicates: vec![],
             connection_info,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_predicate;
+    use pyo3::prelude::*;
+    use pyo3::types::PyTuple;
+
+    #[test]
+    fn parse_predicate_rejects_short_equals_tuple() {
+        Python::initialize();
+        Python::attach(|py| {
+            let pred = PyTuple::new(py, ["equals", "age"]).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("expected short equals predicate to fail"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("InvalidArgError"));
+                    assert!(msg.contains("at least 3 elements"));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn parse_predicate_rejects_short_between_tuple() {
+        Python::initialize();
+        Python::attach(|py| {
+            let pred = PyTuple::new(py, ["between", "age", "10"]).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("expected short between predicate to fail"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("InvalidArgError"));
+                    assert!(msg.contains("between"));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn parse_predicate_rejects_short_contains_tuple() {
+        Python::initialize();
+        Python::attach(|py| {
+            let pred = PyTuple::new(py, ["contains", "tags", "1"]).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("expected short contains predicate to fail"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("InvalidArgError"));
+                    assert!(msg.contains("contains"));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn parse_predicate_rejects_short_geo_within_radius_tuple() {
+        Python::initialize();
+        Python::attach(|py| {
+            let pred = PyTuple::new(py, ["geo_within_radius", "loc", "1.0", "2.0"]).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("expected short geo_within_radius predicate to fail"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("InvalidArgError"));
+                    assert!(msg.contains("geo_within_radius"));
+                }
+            }
+        });
     }
 }
 

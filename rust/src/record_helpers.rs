@@ -4,6 +4,7 @@ use aerospike_core::{BatchRecord, Error as AsError, Record, ResultCode};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
+use std::time::Duration;
 
 use crate::errors::as_to_pyerr;
 use crate::types::key::key_to_py;
@@ -41,10 +42,18 @@ pub fn batch_records_to_py(py: Python<'_>, results: &[BatchRecord]) -> PyResult<
 ///
 /// Returns `0xFFFFFFFF` when the record has no TTL (never-expire).
 pub fn record_ttl_seconds(record: &aerospike_core::Record) -> u32 {
-    record
-        .time_to_live()
-        .map(|d| d.as_secs() as u32)
-        .unwrap_or(0xFFFFFFFF_u32)
+    ttl_from_duration(record.time_to_live())
+}
+
+/// Convert an optional TTL duration to the Python-exposed u32 TTL value.
+///
+/// `None` means never-expire. Durations above `u32::MAX` are clamped to avoid
+/// wraparound when converting from `u64` seconds.
+pub fn ttl_from_duration(ttl: Option<Duration>) -> u32 {
+    match ttl {
+        Some(duration) => duration.as_secs().min(u32::MAX as u64) as u32,
+        None => 0xFFFFFFFF_u32,
+    }
 }
 
 /// Extract meta dict from a Record.
@@ -145,5 +154,30 @@ impl<'py> IntoPyObject<'py> for PendingOrderedRecord {
         let ordered_bins = PyList::new(py, &bin_items)?;
         let result = PyTuple::new(py, [key_py, meta, ordered_bins.into_any().unbind()])?;
         Ok(result.into_any())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ttl_from_duration;
+    use std::time::Duration;
+
+    #[test]
+    fn ttl_from_duration_none_maps_to_never_expire() {
+        assert_eq!(ttl_from_duration(None), 0xFFFFFFFF_u32);
+    }
+
+    #[test]
+    fn ttl_from_duration_in_range_seconds() {
+        assert_eq!(ttl_from_duration(Some(Duration::from_secs(123))), 123_u32);
+    }
+
+    #[test]
+    fn ttl_from_duration_clamps_above_u32_max() {
+        let overflow = u32::MAX as u64 + 42;
+        assert_eq!(
+            ttl_from_duration(Some(Duration::from_secs(overflow))),
+            u32::MAX
+        );
     }
 }

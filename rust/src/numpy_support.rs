@@ -23,6 +23,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::errors::result_code_to_int;
+use crate::record_helpers::record_ttl_seconds;
 use crate::types::value::value_to_py;
 
 // ── dtype field descriptor ──────────────────────────────────────
@@ -329,10 +330,56 @@ unsafe fn write_value_to_buffer(
     field: &FieldInfo,
     value: &Value,
 ) -> PyResult<()> {
+    fn non_negative_u64(v: i64, field: &FieldInfo) -> PyResult<u64> {
+        if v < 0 {
+            return Err(PyValueError::new_err(format!(
+                "cannot write negative integer {} to unsigned field '{}'",
+                v, field.name
+            )));
+        }
+        Ok(v as u64)
+    }
+    fn non_negative_f64_to_u64(v: f64, field: &FieldInfo) -> PyResult<u64> {
+        if !v.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "cannot write non-finite float {} to unsigned field '{}'",
+                v, field.name
+            )));
+        }
+        if v < 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "cannot write negative float {} to unsigned field '{}'",
+                v, field.name
+            )));
+        }
+        if v >= u64::MAX as f64 {
+            return Err(PyValueError::new_err(format!(
+                "cannot write out-of-range float {} to unsigned field '{}'",
+                v, field.name
+            )));
+        }
+        Ok(v as u64)
+    }
+    fn finite_f64_to_i64(v: f64, field: &FieldInfo) -> PyResult<i64> {
+        if !v.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "cannot write non-finite float {} to integer field '{}'",
+                v, field.name
+            )));
+        }
+        if v < i64::MIN as f64 || v >= i64::MAX as f64 {
+            return Err(PyValueError::new_err(format!(
+                "cannot write out-of-range float {} to integer field '{}'",
+                v, field.name
+            )));
+        }
+        Ok(v as i64)
+    }
+
     match value {
         Value::Int(v) => match field.kind {
             DtypeKind::Int => write_int_to_buffer(row_ptr, field, *v),
-            DtypeKind::Uint => write_uint_to_buffer(row_ptr, field, *v as u64),
+            DtypeKind::Uint => write_uint_to_buffer(row_ptr, field, non_negative_u64(*v, field)?),
             DtypeKind::Float => write_float_to_buffer(row_ptr, field, *v as f64),
             _ => Err(PyTypeError::new_err(format!(
                 "cannot write integer to bytes field '{}'",
@@ -343,8 +390,10 @@ unsafe fn write_value_to_buffer(
             let v = float_value_to_f64(fv);
             match field.kind {
                 DtypeKind::Float => write_float_to_buffer(row_ptr, field, v),
-                DtypeKind::Int => write_int_to_buffer(row_ptr, field, v as i64),
-                DtypeKind::Uint => write_uint_to_buffer(row_ptr, field, v as u64),
+                DtypeKind::Int => write_int_to_buffer(row_ptr, field, finite_f64_to_i64(v, field)?),
+                DtypeKind::Uint => {
+                    write_uint_to_buffer(row_ptr, field, non_negative_f64_to_u64(v, field)?)
+                }
                 _ => Err(PyTypeError::new_err(format!(
                     "cannot write float to bytes field '{}'",
                     field.name
@@ -495,10 +544,7 @@ pub fn batch_to_numpy_py(
             if let Some(record) = &br.record {
                 // Write meta: generation and ttl
                 let gen = record.generation;
-                let ttl: u32 = record
-                    .time_to_live()
-                    .map(|d| d.as_secs() as u32)
-                    .unwrap_or(0xFFFFFFFF_u32);
+                let ttl: u32 = record_ttl_seconds(record);
 
                 unsafe {
                     let meta_row = meta_ptr.add(i * meta_stride);
@@ -1001,6 +1047,142 @@ mod tests {
                 .expect("write Nil value should be no-op and succeed");
             let val = ptr::read_unaligned(buf.as_ptr() as *const i32);
             assert_eq!(val, 0);
+        }
+    }
+
+    #[test]
+    fn test_write_value_negative_int_to_uint_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 2,
+            base_itemsize: 2,
+            kind: DtypeKind::Uint,
+        };
+        unsafe {
+            let err = write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Int(-1))
+                .expect_err("negative int to uint should fail");
+            assert!(err
+                .to_string()
+                .contains("cannot write negative integer -1 to unsigned field 'x'"));
+        }
+    }
+
+    #[test]
+    fn test_write_value_negative_float_to_uint_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 4,
+            base_itemsize: 4,
+            kind: DtypeKind::Uint,
+        };
+        unsafe {
+            let err = write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64((-1.5f64).to_bits())),
+            )
+            .expect_err("negative float to uint should fail");
+            assert!(err
+                .to_string()
+                .contains("cannot write negative float -1.5 to unsigned field 'x'"));
+        }
+    }
+
+    #[test]
+    fn test_write_value_large_float_to_uint_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 8,
+            base_itemsize: 8,
+            kind: DtypeKind::Uint,
+        };
+        unsafe {
+            let err = write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64((u64::MAX as f64).to_bits())),
+            )
+            .expect_err("large float to uint should fail");
+            assert!(err.to_string().contains("cannot write out-of-range float"));
+        }
+    }
+
+    #[test]
+    fn test_write_value_nan_float_to_int_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 8,
+            base_itemsize: 8,
+            kind: DtypeKind::Int,
+        };
+        unsafe {
+            let err = write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64(f64::NAN.to_bits())),
+            )
+            .expect_err("NaN float to int should fail");
+            assert!(err
+                .to_string()
+                .contains("cannot write non-finite float NaN to integer field 'x'"));
+        }
+    }
+
+    #[test]
+    fn test_write_value_large_float_to_int_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 8,
+            base_itemsize: 8,
+            kind: DtypeKind::Int,
+        };
+        unsafe {
+            let err = write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64((i64::MAX as f64).to_bits())),
+            )
+            .expect_err("large float to int should fail");
+            assert!(err.to_string().contains("cannot write out-of-range float"));
+        }
+    }
+
+    #[test]
+    fn test_write_value_nan_float_to_uint_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 4,
+            base_itemsize: 4,
+            kind: DtypeKind::Uint,
+        };
+        unsafe {
+            let err = write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64(f64::NAN.to_bits())),
+            )
+            .expect_err("NaN float to uint should fail");
+            assert!(err
+                .to_string()
+                .contains("cannot write non-finite float NaN to unsigned field 'x'"));
         }
     }
 

@@ -70,11 +70,100 @@ pub fn parse_privileges(privileges: &Bound<'_, PyList>) -> PyResult<Vec<Privileg
                 crate::errors::InvalidArgError::new_err("Privilege dict must have 'code' key")
             })?
             .extract()?;
-        let ns: Option<String> = dict.get_item("ns")?.and_then(|v| v.extract().ok());
-        let set_name: Option<String> = dict.get_item("set")?.and_then(|v| v.extract().ok());
+        let ns = extract_optional_string(dict, "ns")?;
+        let set_name = extract_optional_string(dict, "set")?;
         result.push(Privilege::new(code_to_privilege_code(code)?, ns, set_name));
     }
     Ok(result)
+}
+
+fn extract_optional_string(dict: &Bound<'_, PyDict>, field_name: &str) -> PyResult<Option<String>> {
+    match dict.get_item(field_name)? {
+        Some(value) if value.is_none() => Ok(None),
+        Some(value) => value.extract::<String>().map(Some).map_err(|_| {
+            let type_name = value
+                .get_type()
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "privilege '{field_name}' must be str or None, got {type_name}"
+            ))
+        }),
+        None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::exceptions::PyTypeError;
+
+    #[test]
+    fn parse_privileges_accepts_string_ns_and_set() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            let dict = PyDict::new(py);
+            dict.set_item("code", 10).unwrap();
+            dict.set_item("ns", "test").unwrap();
+            dict.set_item("set", "demo").unwrap();
+            privileges.append(dict).unwrap();
+
+            let parsed = parse_privileges(&privileges).expect("valid privilege list should parse");
+            assert_eq!(parsed.len(), 1);
+            assert_eq!(parsed[0].namespace.as_deref(), Some("test"));
+            assert_eq!(parsed[0].set_name.as_deref(), Some("demo"));
+        });
+    }
+
+    #[test]
+    fn parse_privileges_rejects_non_string_ns() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            let dict = PyDict::new(py);
+            dict.set_item("code", 10).unwrap();
+            dict.set_item("ns", 123).unwrap();
+            privileges.append(dict).unwrap();
+
+            let err = parse_privileges(&privileges).expect_err("non-string ns must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
+    }
+
+    #[test]
+    fn parse_privileges_accepts_none_ns_and_set() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            let dict = PyDict::new(py);
+            dict.set_item("code", 10).unwrap();
+            dict.set_item("ns", py.None()).unwrap();
+            dict.set_item("set", py.None()).unwrap();
+            privileges.append(dict).unwrap();
+
+            let parsed = parse_privileges(&privileges).expect("None ns/set should parse");
+            assert_eq!(parsed.len(), 1);
+            assert_eq!(parsed[0].namespace, None);
+            assert_eq!(parsed[0].set_name, None);
+        });
+    }
+
+    #[test]
+    fn parse_privileges_rejects_non_string_set() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            let dict = PyDict::new(py);
+            dict.set_item("code", 10).unwrap();
+            dict.set_item("set", 456).unwrap();
+            privileges.append(dict).unwrap();
+
+            let err = parse_privileges(&privileges).expect_err("non-string set must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
+    }
 }
 
 /// Convert a slice to a Python list.

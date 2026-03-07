@@ -10,6 +10,7 @@ use aerospike_core::{
     Bin, Bins, Key, ReadPolicy, UDFLang, Value, WritePolicy,
 };
 use pyo3::prelude::*;
+use pyo3::types::PyAnyMethods;
 use pyo3::types::{PyDict, PyList};
 
 use crate::operations::py_ops_to_rust;
@@ -38,6 +39,34 @@ pub fn extract_parent_context(py: Python<'_>) -> ParentContext {
 
 #[cfg(not(feature = "otel"))]
 pub fn extract_parent_context(_py: Python<'_>) -> ParentContext {}
+
+/// Extract optional `cluster_name` used only for tracing connection metadata.
+///
+/// Accepts:
+/// - missing key -> empty string
+/// - `None` -> empty string
+/// - `str` -> that value
+///
+/// Rejects any non-string value with `TypeError`.
+pub fn extract_cluster_name(config: &Bound<'_, PyDict>) -> PyResult<String> {
+    let Some(value) = config.get_item("cluster_name")? else {
+        return Ok(String::new());
+    };
+    if value.is_none() {
+        return Ok(String::new());
+    }
+
+    value.extract::<String>().map_err(|_| {
+        let type_name = value
+            .get_type()
+            .name()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        pyo3::exceptions::PyTypeError::new_err(format!(
+            "cluster_name must be str or None, got {type_name}"
+        ))
+    })
+}
 
 // ── put ──────────────────────────────────────────────────────────────────────
 
@@ -210,6 +239,57 @@ pub fn prepare_exists_args(
         parent_ctx: extract_parent_context(py),
         conn_info: Arc::clone(conn_info),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_cluster_name;
+    use pyo3::exceptions::PyTypeError;
+    use pyo3::prelude::*;
+    use pyo3::types::PyDict;
+
+    #[test]
+    fn extract_cluster_name_returns_empty_for_missing_key() {
+        Python::initialize();
+        Python::attach(|py| {
+            let config = PyDict::new(py);
+            let cluster_name = extract_cluster_name(&config).expect("missing key should parse");
+            assert_eq!(cluster_name, "");
+        });
+    }
+
+    #[test]
+    fn extract_cluster_name_returns_empty_for_none() {
+        Python::initialize();
+        Python::attach(|py| {
+            let config = PyDict::new(py);
+            config.set_item("cluster_name", py.None()).unwrap();
+            let cluster_name = extract_cluster_name(&config).expect("None should parse");
+            assert_eq!(cluster_name, "");
+        });
+    }
+
+    #[test]
+    fn extract_cluster_name_accepts_string() {
+        Python::initialize();
+        Python::attach(|py| {
+            let config = PyDict::new(py);
+            config.set_item("cluster_name", "dev-cluster").unwrap();
+            let cluster_name = extract_cluster_name(&config).expect("string should parse");
+            assert_eq!(cluster_name, "dev-cluster");
+        });
+    }
+
+    #[test]
+    fn extract_cluster_name_rejects_non_string_value() {
+        Python::initialize();
+        Python::attach(|py| {
+            let config = PyDict::new(py);
+            config.set_item("cluster_name", 123).unwrap();
+            let err = extract_cluster_name(&config).expect_err("non-string should fail");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
+    }
 }
 
 // ── remove ───────────────────────────────────────────────────────────────────
