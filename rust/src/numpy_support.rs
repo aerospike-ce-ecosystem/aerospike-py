@@ -673,6 +673,76 @@ fn get_array_data_ptr_readonly(array: &Bound<'_, PyAny>) -> PyResult<*const u8> 
     Ok(ptr_int as *const u8)
 }
 
+/// Resolve the actual byte stride between logical rows in a 1-D numpy structured array.
+///
+/// NumPy views can expose row strides larger than `dtype.itemsize` (for sliced
+/// arrays) or negative strides (for reversed views). The native batch-write path
+/// must honor those strides instead of assuming packed contiguous rows.
+fn get_array_row_stride(array: &Bound<'_, PyAny>, row_size: usize) -> PyResult<isize> {
+    let iface = array.getattr("__array_interface__")?;
+    let shape: Vec<usize> = iface.get_item("shape")?.extract()?;
+    if shape.len() != 1 {
+        return Err(PyValueError::new_err(format!(
+            "numpy structured array must be 1-dimensional, got shape {:?}",
+            shape
+        )));
+    }
+
+    let row_size = isize::try_from(row_size).map_err(|_| {
+        PyValueError::new_err(format!(
+            "dtype itemsize {} exceeds supported pointer stride range",
+            row_size
+        ))
+    })?;
+
+    let strides_obj = iface.get_item("strides")?;
+    if strides_obj.is_none() {
+        return Ok(row_size);
+    }
+
+    let strides: Vec<isize> = strides_obj.extract()?;
+    if strides.len() != 1 {
+        return Err(PyValueError::new_err(format!(
+            "numpy structured array must be 1-dimensional, got strides {:?}",
+            strides
+        )));
+    }
+
+    let stride = strides[0];
+    if stride != 0 {
+        let abs_stride = stride.checked_abs().ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "numpy structured array row stride {} is not supported",
+                stride
+            ))
+        })?;
+        if abs_stride < row_size {
+            return Err(PyValueError::new_err(format!(
+                "numpy structured array row stride {} is smaller than dtype itemsize {}",
+                stride, row_size
+            )));
+        }
+    }
+
+    Ok(stride)
+}
+
+fn checked_row_offset(index: usize, row_stride: isize) -> PyResult<isize> {
+    let index = isize::try_from(index).map_err(|_| {
+        PyValueError::new_err(format!(
+            "array index {} exceeds supported pointer offset range",
+            index
+        ))
+    })?;
+
+    index.checked_mul(row_stride).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "buffer offset overflow: index {} * stride {} exceeds isize",
+            index, row_stride
+        ))
+    })
+}
+
 /// Convert a numpy structured array into a list of ``(Key, Vec<Bin>)`` pairs
 /// suitable for batch_write operations.
 ///
@@ -690,31 +760,31 @@ fn get_array_data_ptr_readonly(array: &Bound<'_, PyAny>) -> PyResult<*const u8> 
 /// * `set_name` - default set name (used when ``_set`` field is absent)
 /// * `key_field` - name of the dtype field to use as the user key (default: ``"_key"``)
 pub fn numpy_to_records(
-    py: Python<'_>,
+    _py: Python<'_>,
     data_array: &Bound<'_, PyAny>,
     dtype_obj: &Bound<'_, PyAny>,
     namespace: &str,
     set_name: &str,
     key_field: &str,
 ) -> PyResult<Vec<(Key, Vec<Bin>)>> {
-    let np = py.import("numpy")?;
     let n: usize = data_array.len()?;
     debug!(
         "numpy_to_records: converting {} rows, key_field='{}'",
         n, key_field
     );
 
-    let (fields, row_stride) = parse_dtype_fields(dtype_obj)?;
+    let (fields, row_size) = parse_dtype_fields(dtype_obj)?;
 
     // Overflow check: ensure n * row_stride does not overflow usize
-    if n.checked_mul(row_stride).is_none() {
+    if n.checked_mul(row_size).is_none() {
         return Err(PyValueError::new_err(format!(
             "buffer size overflow: {} rows * {} bytes/row exceeds usize",
-            n, row_stride,
+            n, row_size,
         )));
     }
 
     let data_ptr = get_array_data_ptr_readonly(data_array)?;
+    let row_stride = get_array_row_stride(data_array, row_size)?;
 
     // Partition fields into key-fields and bin-fields
     let key_field_info = fields.iter().find(|f| f.name == key_field);
@@ -734,13 +804,11 @@ pub fn numpy_to_records(
     let ns_field = fields.iter().find(|f| f.name == "_namespace");
     let set_field = fields.iter().find(|f| f.name == "_set");
 
-    // Validate key field type
-    let _ = np; // keep numpy import alive
-
     let mut result = Vec::with_capacity(n);
 
     for i in 0..n {
-        let row_ptr = unsafe { data_ptr.add(i * row_stride) };
+        let row_offset = checked_row_offset(i, row_stride)?;
+        let row_ptr = unsafe { data_ptr.offset(row_offset) };
 
         // Extract key value
         let key_value = unsafe { read_value_from_buffer(row_ptr, key_fi)? };
@@ -799,6 +867,67 @@ pub fn numpy_to_records(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fake_numpy_stride_module<'py>(
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, pyo3::types::PyModule>> {
+        pyo3::types::PyModule::from_code(
+            py,
+            c"
+import ctypes
+import struct
+
+class FakeFieldDtype:
+    def __init__(self, kind, itemsize):
+        self.kind = kind
+        self.itemsize = itemsize
+        self.base = self
+
+class FakeDtype:
+    def __init__(self):
+        i4 = FakeFieldDtype('i', 4)
+        self.names = ('_key', 'value')
+        self.fields = {
+            '_key': (i4, 0),
+            'value': (i4, 4),
+        }
+        self.itemsize = 8
+
+class FakeArray:
+    def __init__(self, buf, ptr, shape, strides):
+        self._buf = buf
+        self._length = shape[0]
+        self.__array_interface__ = {
+            'data': (ptr, False),
+            'shape': shape,
+            'strides': strides,
+        }
+
+    def __len__(self):
+        return self._length
+
+def _build_buffer():
+    buf = ctypes.create_string_buffer(24)
+    struct.pack_into('<ii', buf, 0, 1, 10)
+    struct.pack_into('<ii', buf, 8, 2, 20)
+    struct.pack_into('<ii', buf, 16, 3, 30)
+    return buf
+
+def make_dtype():
+    return FakeDtype()
+
+def make_step_slice():
+    buf = _build_buffer()
+    return FakeArray(buf, ctypes.addressof(buf), (2,), (16,))
+
+def make_reverse_slice():
+    buf = _build_buffer()
+    return FakeArray(buf, ctypes.addressof(buf) + 16, (3,), (-8,))
+",
+            c"fake_numpy_support.py",
+            c"fake_numpy_support",
+        )
+    }
 
     #[test]
     fn test_write_int_i32() {
@@ -1315,5 +1444,74 @@ mod tests {
                 .expect("roundtrip: read i32 should succeed");
             assert_eq!(val, Value::Int(-123));
         }
+    }
+
+    #[test]
+    fn test_numpy_to_records_reads_positive_stride_slice() {
+        Python::initialize();
+        Python::attach(|py| {
+            let module = fake_numpy_stride_module(py).expect("test helper module should compile");
+            let dtype = module
+                .getattr("make_dtype")
+                .expect("make_dtype should exist")
+                .call0()
+                .expect("dtype construction should succeed");
+            let sliced = module
+                .getattr("make_step_slice")
+                .expect("make_step_slice should exist")
+                .call0()
+                .expect("step slice construction should succeed");
+
+            let records = numpy_to_records(py, &sliced, &dtype, "test", "demo", "_key")
+                .expect("positive-stride slice should convert");
+            assert_eq!(records.len(), 2);
+            assert_eq!(records[0].0.user_key, Some(Value::Int(1)));
+            assert_eq!(
+                records[0].1,
+                vec![Bin::new("value".to_string(), Value::Int(10))]
+            );
+            assert_eq!(records[1].0.user_key, Some(Value::Int(3)));
+            assert_eq!(
+                records[1].1,
+                vec![Bin::new("value".to_string(), Value::Int(30))]
+            );
+        });
+    }
+
+    #[test]
+    fn test_numpy_to_records_reads_negative_stride_slice() {
+        Python::initialize();
+        Python::attach(|py| {
+            let module = fake_numpy_stride_module(py).expect("test helper module should compile");
+            let dtype = module
+                .getattr("make_dtype")
+                .expect("make_dtype should exist")
+                .call0()
+                .expect("dtype construction should succeed");
+            let reversed = module
+                .getattr("make_reverse_slice")
+                .expect("make_reverse_slice should exist")
+                .call0()
+                .expect("reverse slice construction should succeed");
+
+            let records = numpy_to_records(py, &reversed, &dtype, "test", "demo", "_key")
+                .expect("negative-stride slice should convert");
+            assert_eq!(records.len(), 3);
+            assert_eq!(records[0].0.user_key, Some(Value::Int(3)));
+            assert_eq!(
+                records[0].1,
+                vec![Bin::new("value".to_string(), Value::Int(30))]
+            );
+            assert_eq!(records[1].0.user_key, Some(Value::Int(2)));
+            assert_eq!(
+                records[1].1,
+                vec![Bin::new("value".to_string(), Value::Int(20))]
+            );
+            assert_eq!(records[2].0.user_key, Some(Value::Int(1)));
+            assert_eq!(
+                records[2].1,
+                vec![Bin::new("value".to_string(), Value::Int(10))]
+            );
+        });
     }
 }
