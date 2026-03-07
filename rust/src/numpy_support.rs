@@ -18,7 +18,7 @@ use std::ptr;
 use aerospike_core::{BatchRecord, Bin, FloatValue, Key, Value};
 use half::f16;
 use log::{debug, warn};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -584,6 +584,15 @@ pub fn batch_to_numpy_py(
 ///   `field.offset + field.itemsize` bytes.
 /// - The buffer must remain valid for the duration of the read.
 unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyResult<Value> {
+    fn uint_to_i64(v: u64, field: &FieldInfo) -> PyResult<i64> {
+        i64::try_from(v).map_err(|_| {
+            PyOverflowError::new_err(format!(
+                "unsigned value {} in field '{}' exceeds signed 64-bit Aerospike integer range",
+                v, field.name
+            ))
+        })
+    }
+
     if row_ptr.is_null() {
         return Err(PyValueError::new_err(
             "null buffer pointer in read_value_from_buffer",
@@ -611,7 +620,7 @@ unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyRes
                 1 => ptr::read_unaligned(src) as i64,
                 2 => ptr::read_unaligned(src as *const u16) as i64,
                 4 => ptr::read_unaligned(src as *const u32) as i64,
-                8 => ptr::read_unaligned(src as *const u64) as i64,
+                8 => uint_to_i64(ptr::read_unaligned(src as *const u64), field)?,
                 s => {
                     return Err(PyTypeError::new_err(format!(
                         "unsupported uint size: {} bytes",
@@ -1221,6 +1230,30 @@ mod tests {
             let val = read_value_from_buffer(buf.as_ptr(), &field)
                 .expect("read u16 from valid buffer should succeed");
             assert_eq!(val, Value::Int(65535));
+        }
+    }
+
+    #[test]
+    fn test_read_uint_u64_above_i64_max_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 16];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 4,
+            itemsize: 8,
+            base_itemsize: 8,
+            kind: DtypeKind::Uint,
+        };
+        unsafe {
+            ptr::write_unaligned(buf.as_mut_ptr().add(4) as *mut u64, i64::MAX as u64 + 1);
+            let err =
+                read_value_from_buffer(buf.as_ptr(), &field).expect_err("u64 overflow should fail");
+            Python::attach(|py| {
+                assert!(err.is_instance_of::<PyOverflowError>(py));
+            });
+            assert!(err
+                .to_string()
+                .contains("exceeds signed 64-bit Aerospike integer range"));
         }
     }
 
