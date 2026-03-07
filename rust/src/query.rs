@@ -69,9 +69,9 @@ enum Predicate {
 
 /// Parse a Python predicate tuple (from `aerospike_py.predicates`) into a [`Predicate`].
 fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
-    if pred.len() < 3 {
+    if pred.len() < 2 {
         return Err(crate::errors::InvalidArgError::new_err(format!(
-            "Predicate tuple must have at least 3 elements (kind, bin, value, ...), got {}",
+            "Predicate tuple must have at least 2 elements (kind, bin, ...), got {}",
             pred.len()
         )));
     }
@@ -361,6 +361,22 @@ mod tests {
     use super::parse_predicate;
     use pyo3::prelude::*;
     use pyo3::types::PyTuple;
+
+    #[test]
+    fn parse_predicate_rejects_short_equals_tuple() {
+        Python::initialize();
+        Python::attach(|py| {
+            let pred = PyTuple::new(py, ["equals", "age"]).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("expected short equals predicate to fail"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("InvalidArgError"));
+                    assert!(msg.contains("equals"));
+                }
+            }
+        });
+    }
 
     #[test]
     fn parse_predicate_rejects_short_between_tuple() {
