@@ -692,13 +692,13 @@ mod tests {
 
     #[test]
     fn parse_i32_flag_rejects_out_of_range_int() {
+        Python::initialize();
         let err: PyErr = parse_i32_flag(
             &Some(Value::Int(i64::from(i32::MAX) + 1)),
             "list_sort",
             "val",
         )
         .expect_err("out-of-range int should fail");
-        Python::initialize();
         Python::attach(|py| {
             assert!(err.is_instance_of::<PyValueError>(py));
         });

@@ -25,7 +25,9 @@ fn parse_ttl(ttl_val: i64) -> PyResult<Expiration> {
             "ttl out of range: {t} (max: {})",
             u32::MAX
         ))),
-        _ => Ok(Expiration::NamespaceDefault),
+        t => Err(crate::errors::InvalidArgError::new_err(format!(
+            "ttl out of range: {t} (only 0, -1, -2, or positive seconds are valid)"
+        ))),
     }
 }
 
@@ -129,6 +131,16 @@ mod tests {
         Python::attach(|py| {
             let ttl = u32::MAX as i64 + 1;
             let err = parse_ttl(ttl).expect_err("ttl above u32::MAX must fail");
+            assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
+            assert!(err.to_string().contains("ttl out of range"));
+        });
+    }
+
+    #[test]
+    fn parse_ttl_rejects_unknown_negative_values() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = parse_ttl(-100).expect_err("unknown negative ttl must fail");
             assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
             assert!(err.to_string().contains("ttl out of range"));
         });

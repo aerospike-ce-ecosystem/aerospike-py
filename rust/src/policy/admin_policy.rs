@@ -80,7 +80,16 @@ pub fn parse_privileges(privileges: &Bound<'_, PyList>) -> PyResult<Vec<Privileg
 fn extract_optional_string(dict: &Bound<'_, PyDict>, field_name: &str) -> PyResult<Option<String>> {
     match dict.get_item(field_name)? {
         Some(value) if value.is_none() => Ok(None),
-        Some(value) => Ok(Some(value.extract::<String>()?)),
+        Some(value) => value.extract::<String>().map(Some).map_err(|_| {
+            let type_name = value
+                .get_type()
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "privilege '{field_name}' must be str or None, got {type_name}"
+            ))
+        }),
         None => Ok(None),
     }
 }

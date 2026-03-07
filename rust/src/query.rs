@@ -69,9 +69,9 @@ enum Predicate {
 
 /// Parse a Python predicate tuple (from `aerospike_py.predicates`) into a [`Predicate`].
 fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
-    if pred.len() < 2 {
+    if pred.len() < 3 {
         return Err(crate::errors::InvalidArgError::new_err(format!(
-            "Predicate tuple must have at least 2 elements (kind, bin, ...), got {}",
+            "Predicate tuple must have at least 3 elements (kind, bin, value, ...), got {}",
             pred.len()
         )));
     }
@@ -81,7 +81,6 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
 
     match kind.as_str() {
         "equals" => {
-            ensure_predicate_min_len(pred, "equals", 3)?;
             let val = py_to_value(&pred.get_item(2)?)?;
             Ok(Predicate::Equals { bin, val })
         }
@@ -111,7 +110,6 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
             }
         }
         "geo_within_geojson_region" => {
-            ensure_predicate_min_len(pred, "geo_within_geojson_region", 3)?;
             let geojson: String = pred.get_item(2)?.extract()?;
             Ok(Predicate::GeoWithinRegion { bin, geojson })
         }
@@ -128,7 +126,6 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
             })
         }
         "geo_contains_geojson_point" => {
-            ensure_predicate_min_len(pred, "geo_contains_geojson_point", 3)?;
             let geojson: String = pred.get_item(2)?.extract()?;
             Ok(Predicate::GeoContainsPoint { bin, geojson })
         }
@@ -372,7 +369,7 @@ mod tests {
                 Err(err) => {
                     let msg = err.to_string();
                     assert!(msg.contains("InvalidArgError"));
-                    assert!(msg.contains("equals"));
+                    assert!(msg.contains("at least 3 elements"));
                 }
             }
         });
