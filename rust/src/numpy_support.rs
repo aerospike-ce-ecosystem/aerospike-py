@@ -330,10 +330,20 @@ unsafe fn write_value_to_buffer(
     field: &FieldInfo,
     value: &Value,
 ) -> PyResult<()> {
+    fn non_negative_u64(v: i64, field: &FieldInfo) -> PyResult<u64> {
+        if v < 0 {
+            return Err(PyValueError::new_err(format!(
+                "cannot write negative integer {} to unsigned field '{}'",
+                v, field.name
+            )));
+        }
+        Ok(v as u64)
+    }
+
     match value {
         Value::Int(v) => match field.kind {
             DtypeKind::Int => write_int_to_buffer(row_ptr, field, *v),
-            DtypeKind::Uint => write_uint_to_buffer(row_ptr, field, *v as u64),
+            DtypeKind::Uint => write_uint_to_buffer(row_ptr, field, non_negative_u64(*v, field)?),
             DtypeKind::Float => write_float_to_buffer(row_ptr, field, *v as f64),
             _ => Err(PyTypeError::new_err(format!(
                 "cannot write integer to bytes field '{}'",
@@ -999,6 +1009,27 @@ mod tests {
                 .expect("write Nil value should be no-op and succeed");
             let val = ptr::read_unaligned(buf.as_ptr() as *const i32);
             assert_eq!(val, 0);
+        }
+    }
+
+    #[test]
+    fn test_write_value_negative_int_to_uint_rejected() {
+        Python::initialize();
+        let mut buf = [0u8; 8];
+        let field = FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: 2,
+            base_itemsize: 2,
+            kind: DtypeKind::Uint,
+        };
+        unsafe {
+            let err = write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Int(-1))
+                .expect_err("negative int to uint should fail");
+            assert!(
+                err.to_string()
+                    .contains("cannot write negative integer -1 to unsigned field 'x'")
+            );
         }
     }
 
