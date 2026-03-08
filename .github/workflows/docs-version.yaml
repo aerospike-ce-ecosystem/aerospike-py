@@ -1,0 +1,81 @@
+name: Freeze Docs Version
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-version
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    name: Freeze docs for ${{ github.event.release.tag_name }}
+    runs-on: ubuntu-latest
+    # v로 시작하는 태그만 처리 (pre-release 포함)
+    if: startsWith(github.event.release.tag_name, 'v')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          # GITHUB_TOKEN으로 main에 직접 push.
+          # main 브랜치 보호(branch protection)가 활성화된 경우,
+          # PAT 또는 GitHub App 토큰을 별도 Secret으로 등록하고 아래 token을 교체해야 한다.
+          # 예: token: ${{ secrets.DOCS_PUSH_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Freezing docs for version: $VERSION"
+
+      - name: Check if version already exists
+        id: check
+        working-directory: docs
+        run: |
+          if [ -d "versioned_docs/version-${{ steps.version.outputs.version }}" ]; then
+            echo "already_exists=true" >> "$GITHUB_OUTPUT"
+            echo "⚠️ Version ${{ steps.version.outputs.version }} already frozen. Skipping."
+          else
+            echo "already_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Freeze docs with docusaurus docs:version
+        if: steps.check.outputs.already_exists == 'false'
+        working-directory: docs
+        run: npx docusaurus docs:version ${{ steps.version.outputs.version }}
+
+      - name: Update versions-config.json
+        if: steps.check.outputs.already_exists == 'false'
+        run: node docs/scripts/update-version-config.mjs ${{ steps.version.outputs.version }}
+
+      - name: Commit and push versioned docs
+        if: steps.check.outputs.already_exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add \
+            docs/versioned_docs \
+            docs/versioned_sidebars \
+            docs/versions.json \
+            docs/versions-config.json
+          git commit -m "docs: freeze version ${{ steps.version.outputs.version }}"
+          git push origin main
