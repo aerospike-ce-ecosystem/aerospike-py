@@ -65,19 +65,25 @@ def test_delete_user(client, aerospike_client, cleanup):
 
 
 def test_delete_user_not_found(client):
-    # Aerospike remove() does not raise RecordNotFound by default,
-    # so this returns 200 with a success message.
+    # aerospike-py remove()는 존재하지 않는 키에 대해 RecordNotFound를 발생시키므로
+    # 라우터가 404를 반환한다.
     resp = client.delete("/users/nonexistent-del-xyz")
 
-    assert resp.status_code == 200
+    assert resp.status_code == 404
 
 
-def test_list_users(client, aerospike_client, cleanup):
-    key1 = ("test", "users", "list-u1")
-    key2 = ("test", "users", "list-u2")
-    aerospike_client.put(key1, {"name": "Alice", "email": "a@b.com", "age": 30})
-    aerospike_client.put(key2, {"name": "Bob", "email": "b@b.com", "age": 25})
-    cleanup.extend([key1, key2])
+def test_list_users(client, cleanup):
+    # API로 생성해야 bins에 user_id가 포함되어 스캔 시 식별 가능하다.
+    r1 = client.post("/users", json={"name": "Alice", "email": "a@b.com", "age": 30})
+    r2 = client.post("/users", json={"name": "Bob", "email": "b@b.com", "age": 25})
+    assert r1.status_code == 201
+    assert r2.status_code == 201
+    cleanup.extend(
+        [
+            ("test", "users", r1.json()["user_id"]),
+            ("test", "users", r2.json()["user_id"]),
+        ]
+    )
 
     resp = client.get("/users")
 
