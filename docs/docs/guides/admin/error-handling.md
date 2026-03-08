@@ -313,6 +313,10 @@ client.put(key, bins, policy=write_policy)
 | `max_retries` | `int` | `2` | Maximum number of retries |
 | `sleep_between_retries` | `int` | `0` | Delay between retries (ms) |
 
+:::warning[Default timeout interaction]
+With the defaults, `total_timeout` (1000ms) is **shorter** than `socket_timeout` (30000ms). This means the total deadline will be reached before any individual socket timeout fires. In practice, the client will abort the entire operation (including any in-flight socket read/write) after 1 second, regardless of the 30-second socket timeout. If you increase `socket_timeout`, also verify that `total_timeout` accommodates your expected latency and retry count.
+:::
+
 :::tip
 Set `total_timeout` higher than `socket_timeout * (max_retries + 1)` to allow all retries to complete before the total deadline.
 :::

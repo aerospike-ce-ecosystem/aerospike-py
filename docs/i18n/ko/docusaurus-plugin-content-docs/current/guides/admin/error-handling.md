@@ -106,14 +106,14 @@ client.put(key, bins)  # RecordExistsError가 발생하지 않음
 배치 작업은 키별로 결과를 반환합니다. 개별 레코드 상태를 확인하세요:
 
 ```python
-results = client.batch_read(keys)
-for result in results:
-    if result.result_code == aerospike.AEROSPIKE_OK:
-        process(result.bins)
-    elif result.result_code == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
-        handle_missing(result.key)
+batch = client.batch_read(keys)
+for br in batch.batch_records:
+    if br.result == aerospike.AEROSPIKE_OK and br.record:
+        process(br.record.bins)
+    elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
+        handle_missing(br.key)
     else:
-        logger.warning("배치 키 에러: code=%d", result.result_code)
+        logger.warning("배치 키 에러: code=%d", br.result)
 ```
 
 ### 연결 라이프사이클
