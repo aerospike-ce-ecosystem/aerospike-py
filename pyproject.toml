@@ -43,7 +43,7 @@ numpy = ["numpy>=2.0"]
 otel = ["opentelemetry-api>=1.20"]
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "ruff", "maturin>=1.9,<2", "numpy>=2.0", "pyright>=1.1", "pytest-cov>=5.0"]
+dev = ["pytest", "pytest-asyncio", "ruff", "maturin>=1.9,<2", "numpy>=2.0", "pyright>=1.1", "pytest-cov>=5.0", "hypothesis>=6.0"]
 test = ["pytest", "pytest-asyncio", "numpy>=2.0", "pytest-cov>=5.0"]
 test-integration = [{include-group = "test"}, "fastapi", "httpx", "prometheus-client"]
 test-fastapi = ["pytest", "pytest-asyncio", "fastapi", "httpx"]
@@ -96,9 +96,12 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "benchmark/*" = ["B023", "B905", "SIM105", "RUF002", "RUF059", "RUF100", "I001"]
-"tests/*" = ["B011", "B007", "B905", "SIM105", "RUF059", "RUF100"]
+"tests/*" = ["B011", "B007", "B905", "SIM105", "RUF059", "RUF100", "E402"]
 "examples/sample-fastapi/**" = ["B008", "TC001", "TC002"]
 "src/aerospike_py/__init__.py" = ["I001", "RUF100"]
+"src/aerospike_py/_client.py" = ["I001"]
+"src/aerospike_py/_async_client.py" = ["I001"]
+"src/aerospike_py/_observability.py" = ["I001"]
 "src/aerospike_py/exception.py" = ["I001"]
 "*.pyi" = ["I001"]
 

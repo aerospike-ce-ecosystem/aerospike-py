@@ -193,6 +193,57 @@ ops = [{"op": aerospike.OPERATOR_READ, "bin": "score", "val": None}]
 records = client.batch_operate(keys, ops, policy={"filter_expression": expr})
 ```
 
+## Integer Bitwise Operations
+
+| Function | Description |
+|----------|-------------|
+| `int_and(*exprs)` | Bitwise AND |
+| `int_or(*exprs)` | Bitwise OR |
+| `int_xor(*exprs)` | Bitwise XOR |
+| `int_not(expr)` | Bitwise NOT |
+| `int_lshift(value, shift)` | Left shift |
+| `int_rshift(value, shift)` | Logical right shift |
+| `int_arshift(value, shift)` | Arithmetic right shift |
+| `int_count(expr)` | Bit count (popcount) |
+| `int_lscan(value, search)` | Scan from MSB |
+| `int_rscan(value, search)` | Scan from LSB |
+
+```python
+# Check if bit 3 is set in flags
+exp.ne(
+    exp.int_and(exp.int_bin("flags"), exp.int_val(0x08)),
+    exp.int_val(0),
+)
+
+# Shift permissions left by 4 bits
+exp.int_lshift(exp.int_bin("perms"), exp.int_val(4))
+```
+
+## Type Constants
+
+Use `EXP_TYPE_*` constants with `key()` and `bin_type()`:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `exp.EXP_TYPE_NIL` | 0 | Nil |
+| `exp.EXP_TYPE_BOOL` | 1 | Boolean |
+| `exp.EXP_TYPE_INT` | 2 | Integer |
+| `exp.EXP_TYPE_STRING` | 3 | String |
+| `exp.EXP_TYPE_LIST` | 4 | List |
+| `exp.EXP_TYPE_MAP` | 5 | Map |
+| `exp.EXP_TYPE_BLOB` | 6 | Blob (bytes) |
+| `exp.EXP_TYPE_FLOAT` | 7 | Float |
+| `exp.EXP_TYPE_GEO` | 8 | GeoJSON |
+| `exp.EXP_TYPE_HLL` | 9 | HyperLogLog |
+
+```python
+# Get integer primary key
+exp.key(exp.EXP_TYPE_INT)
+
+# Filter records where "data" bin is a list
+exp.eq(exp.bin_type("data"), exp.int_val(exp.EXP_TYPE_LIST))
+```
+
 ## Practical Examples
 
 ```python

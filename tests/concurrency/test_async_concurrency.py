@@ -77,3 +77,79 @@ class TestAsyncConcurrency:
                 await async_client.remove(key)
 
         await asyncio.gather(*(bounded_op(i) for i in range(200)))
+
+    async def test_50_concurrent_coroutines(self, async_client):
+        """50+ coroutines accessing the client simultaneously."""
+
+        async def crud_cycle(i):
+            key = (NS, SET_NAME, f"a50_{i}")
+            await async_client.put(key, {"v": i, "data": f"value_{i}"})
+            record = await async_client.get(key)
+            assert record.bins["v"] == i
+            await async_client.remove(key)
+
+        await asyncio.gather(*(crud_cycle(i) for i in range(50)))
+
+    async def test_concurrent_batch_read_async(self, async_client):
+        """Multiple concurrent batch_read calls from coroutines."""
+        keys = [(NS, SET_NAME, f"abr_{i}") for i in range(30)]
+        await asyncio.gather(*(async_client.put(k, {"v": int(k[2].split("_")[1])}) for k in keys))
+
+        async def batch_read_task():
+            result = await async_client.batch_read(keys, bins=["v"])
+            assert len(result.batch_records) == 30
+
+        await asyncio.gather(*(batch_read_task() for _ in range(4)))
+
+        await asyncio.gather(*(async_client.remove(k) for k in keys))
+
+    async def test_concurrent_batch_operate_async(self, async_client):
+        """Multiple concurrent batch_operate from coroutines."""
+        import aerospike_py
+
+        keys = [(NS, SET_NAME, f"abo_{i}") for i in range(20)]
+        await asyncio.gather(*(async_client.put(k, {"counter": 0}) for k in keys))
+
+        ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1}]
+
+        await asyncio.gather(*(async_client.batch_operate(keys, ops) for _ in range(4)))
+
+        for k in keys:
+            record = await async_client.get(k)
+            assert record.bins["counter"] == 4
+            await async_client.remove(k)
+
+    async def test_concurrent_error_paths_async(self, async_client):
+        """Multiple coroutines hitting RecordNotFound simultaneously."""
+        import aerospike_py
+
+        results = []
+
+        async def read_missing(i):
+            key = (NS, SET_NAME, f"amissing_{i}")
+            try:
+                await async_client.get(key)
+                return False  # should not reach here
+            except aerospike_py.RecordNotFound:
+                return True
+
+        results = await asyncio.gather(*(read_missing(i) for i in range(20)))
+        assert all(results), "Not all coroutines got RecordNotFound"
+
+    async def test_concurrent_numpy_batch_read_async(self, async_client):
+        """Concurrent numpy batch_read from coroutines."""
+        pytest.importorskip("numpy")
+        import numpy as np
+
+        keys = [(NS, SET_NAME, f"anp_{i}") for i in range(20)]
+        await asyncio.gather(*(async_client.put(k, {"score": i * 5}) for i, k in enumerate(keys)))
+
+        dtype = np.dtype([("score", "i4")])
+
+        async def numpy_read():
+            result = await async_client.batch_read(keys, bins=["score"], _dtype=dtype)
+            assert len(result) == 20
+
+        await asyncio.gather(*(numpy_read() for _ in range(4)))
+
+        await asyncio.gather(*(async_client.remove(k) for k in keys))

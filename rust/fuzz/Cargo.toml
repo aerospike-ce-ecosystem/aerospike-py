@@ -1,0 +1,31 @@
+[package]
+name = "aerospike-py-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[[bin]]
+name = "fuzz_write_int"
+path = "fuzz_targets/fuzz_write_int.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_write_bytes"
+path = "fuzz_targets/fuzz_write_bytes.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_write_float"
+path = "fuzz_targets/fuzz_write_float.rs"
+doc = false
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# We only need the FieldInfo struct and DtypeKind enum.
+# The actual write functions are unsafe and we test them via a safe shim module.
+
+[workspace]
+members = ["."]

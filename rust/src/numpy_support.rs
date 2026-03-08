@@ -152,6 +152,11 @@ fn get_array_data_ptr(array: &Bound<'_, PyAny>) -> PyResult<*mut u8> {
 /// the buffer via `np.zeros` and validates field bounds in [`parse_dtype_fields`].
 unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> PyResult<()> {
     debug_assert!(!row_ptr.is_null());
+    debug_assert!(
+        field.offset.checked_add(field.base_itemsize).is_some(),
+        "field '{}': offset + base_itemsize overflows",
+        field.name
+    );
     if row_ptr.is_null() {
         return Err(PyValueError::new_err(
             "null buffer pointer in write_int_to_buffer",
@@ -204,6 +209,11 @@ unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> 
 /// Same preconditions as [`write_int_to_buffer`].
 unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) -> PyResult<()> {
     debug_assert!(!row_ptr.is_null());
+    debug_assert!(
+        field.offset.checked_add(field.base_itemsize).is_some(),
+        "field '{}': offset + base_itemsize overflows",
+        field.name
+    );
     if row_ptr.is_null() {
         return Err(PyValueError::new_err(
             "null buffer pointer in write_uint_to_buffer",
@@ -258,6 +268,11 @@ unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) ->
 /// Same preconditions as [`write_int_to_buffer`].
 unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -> PyResult<()> {
     debug_assert!(!row_ptr.is_null());
+    debug_assert!(
+        field.offset.checked_add(field.base_itemsize).is_some(),
+        "field '{}': offset + base_itemsize overflows",
+        field.name
+    );
     if row_ptr.is_null() {
         return Err(PyValueError::new_err(
             "null buffer pointer in write_float_to_buffer",
@@ -301,6 +316,11 @@ unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -
 /// Same preconditions as [`write_int_to_buffer`].
 unsafe fn write_bytes_to_buffer(row_ptr: *mut u8, field: &FieldInfo, data: &[u8]) -> PyResult<()> {
     debug_assert!(!row_ptr.is_null());
+    debug_assert!(
+        field.offset.checked_add(field.itemsize).is_some(),
+        "field '{}': offset + itemsize overflows",
+        field.name
+    );
     if row_ptr.is_null() {
         return Err(PyValueError::new_err(
             "null buffer pointer in write_bytes_to_buffer",
@@ -310,7 +330,9 @@ unsafe fn write_bytes_to_buffer(row_ptr: *mut u8, field: &FieldInfo, data: &[u8]
     // Clamp copy length to field size to prevent buffer overrun
     let copy_len = data.len().min(field.itemsize);
     if copy_len > 0 {
-        ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_len);
+        // Use bounded slice for safer copy
+        let dst_slice = std::slice::from_raw_parts_mut(dst, field.itemsize);
+        dst_slice[..copy_len].copy_from_slice(&data[..copy_len]);
     }
     // np.zeros already zero-initialized, no need to zero-pad
     Ok(())

@@ -4,7 +4,7 @@ import pytest
 
 import aerospike_py
 
-CONCURRENCY_SETS = ["conc_thread", "conc_ft"]
+CONCURRENCY_SETS = ["conc_thread", "conc_ft", "conc_async", "conc_batch", "conc_numpy"]
 
 
 @pytest.fixture(autouse=True)
