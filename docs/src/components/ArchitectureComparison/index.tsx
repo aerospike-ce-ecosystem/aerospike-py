@@ -1,6 +1,49 @@
 import React, { useState, useCallback } from 'react';
 import styles from './styles.module.css';
 
+// Architecture data from real benchmark (if available)
+interface ArchitectureData {
+  source: 'measured' | 'simulated';
+  date: string;
+  high_concurrency?: {
+    has_official: boolean;
+    data: Array<{
+      concurrency: number;
+      aerospike_py_ops: number | null;
+      aerospike_py_p99: number | null;
+      official_ops: number | null;
+      official_p99: number | null;
+    }>;
+  };
+  latency_sim?: {
+    has_official: boolean;
+    concurrency: number;
+    simulation: boolean;
+    data: Array<{
+      rtt_ms: number;
+      aerospike_py_ops: number | null;
+      official_ops: number | null;
+    }>;
+  };
+}
+
+function useArchitectureData(): { data: ArchitectureData | null; loaded: boolean } {
+  const [archData, setArchData] = React.useState<ArchitectureData | null>(null);
+  const [loaded, setLoaded] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch('/benchmark/architecture-data.json')
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        setArchData(d);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, []);
+
+  return { data: archData, loaded };
+}
+
 /* ── Slider data ─────────────────────────────────── */
 const CONC_DATA = [
   {
@@ -390,7 +433,30 @@ export function ConcurrencyViz(): React.ReactElement {
 
 export function ThroughputSlider(): React.ReactElement {
   const [sliderIdx, setSliderIdx] = useState(0);
-  const d = CONC_DATA[sliderIdx];
+  const { data: archData } = useArchitectureData();
+  const isRealData = archData?.source === 'measured' && archData?.high_concurrency?.data && archData.high_concurrency.data.length > 0;
+  const dataSource = isRealData ? `Measured (${archData!.date})` : 'Simulated (model-based)';
+
+  const displayData = React.useMemo(() => {
+    if (!isRealData || !archData?.high_concurrency) return CONC_DATA;
+    return archData.high_concurrency.data.map((e) => ({
+      conc: e.concurrency >= 1000 ? `${e.concurrency / 1000}K` : String(e.concurrency),
+      sTP: 6500, // Official Sync not measured, use placeholder
+      aTP: e.official_ops ?? 0,
+      rTP: e.aerospike_py_ops ?? 0,
+      sTH: 1,
+      aTH: Math.min(e.concurrency, 256),
+      rTH: 4,
+      sMem: 0.1,
+      aMem: Math.min(e.concurrency * 8, 10000) / 1000, // MB
+      rMem: Math.max(2, Math.ceil(e.concurrency * 0.005 + 4)),
+      insight: `At concurrency=${e.concurrency}: aerospike-py ${e.aerospike_py_ops ? `${Math.round(e.aerospike_py_ops / 1000)}K` : 'N/A'} ops/s` +
+        (e.official_ops ? ` vs Official ${Math.round(e.official_ops / 1000)}K ops/s` : '') +
+        (e.aerospike_py_p99 ? `. p99: ${e.aerospike_py_p99.toFixed(2)}ms` : ''),
+    }));
+  }, [isRealData, archData]);
+
+  const d = displayData[Math.min(sliderIdx, displayData.length - 1)];
 
   const onSlide = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -403,12 +469,15 @@ export function ThroughputSlider(): React.ReactElement {
       <div className={styles.concurrencyViz}>
         <div className={styles.concurrencyHeader}>
           <h3>Throughput by Concurrent Requests</h3>
+          <div style={{ fontSize: '0.72rem', color: 'var(--arch-text-muted)', marginBottom: 8 }}>
+            {dataSource}
+          </div>
           <div className={styles.sliderGroup}>
             <span>Concurrent Requests:</span>
             <input
               type="range"
               min={0}
-              max={CONC_DATA.length - 1}
+              max={displayData.length - 1}
               step={1}
               value={sliderIdx}
               onChange={onSlide}
