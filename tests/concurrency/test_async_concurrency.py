@@ -246,13 +246,17 @@ class TestExtendedAsyncConcurrency:
 
     async def test_rapid_connect_disconnect_concurrent(self):
         """Concurrent rapid connect/close cycles for stability."""
+        # Check server availability before spawning concurrent tasks
+        probe = aerospike_py.AsyncClient(AEROSPIKE_CONFIG)
+        try:
+            await probe.connect()
+        except Exception:
+            pytest.skip("Aerospike server not available")
+        await probe.close()
 
         async def connect_cycle():
             c = aerospike_py.AsyncClient(AEROSPIKE_CONFIG)
-            try:
-                await c.connect()
-            except Exception:
-                pytest.skip("Aerospike server not available")
+            await c.connect()
             assert c.is_connected()
             await c.close()
             assert not c.is_connected()

@@ -292,16 +292,19 @@ class TestExtendedThreadSafety:
         for k in keys:
             client.put(k, {"v": int(k[2].split("_")[1])})
 
+        num_threads = 5
+        barrier = threading.Barrier(num_threads)
         errors = queue.SimpleQueue()
 
         def batch_reader():
             try:
+                barrier.wait()
                 result = client.batch_read(keys, bins=["v"])
                 assert len(result.batch_records) == 100
             except Exception as e:
                 errors.put(e)
 
-        threads = [threading.Thread(target=batch_reader) for _ in range(5)]
+        threads = [threading.Thread(target=batch_reader) for _ in range(num_threads)]
         for t in threads:
             t.start()
         for t in threads:
@@ -425,17 +428,20 @@ class TestExtendedThreadSafety:
         for k in keys:
             client.put(k, {"v": 1})
 
+        num_threads = 5
+        barrier = threading.Barrier(num_threads)
         errors = queue.SimpleQueue()
 
         def exists_checker():
             try:
+                barrier.wait()
                 for k in keys:
                     result = client.exists(k)
                     assert result.meta is not None
             except Exception as e:
                 errors.put(e)
 
-        threads = [threading.Thread(target=exists_checker) for _ in range(5)]
+        threads = [threading.Thread(target=exists_checker) for _ in range(num_threads)]
         for t in threads:
             t.start()
         for t in threads:
@@ -451,10 +457,13 @@ class TestExtendedThreadSafety:
         for k in keys:
             client.put(k, {"a": 1, "b": 2, "c": 3})
 
+        num_threads = 5
+        barrier = threading.Barrier(num_threads)
         errors = queue.SimpleQueue()
 
         def select_worker():
             try:
+                barrier.wait()
                 for k in keys:
                     _, _, bins = client.select(k, ["a", "b"])
                     assert "a" in bins
@@ -462,7 +471,7 @@ class TestExtendedThreadSafety:
             except Exception as e:
                 errors.put(e)
 
-        threads = [threading.Thread(target=select_worker) for _ in range(5)]
+        threads = [threading.Thread(target=select_worker) for _ in range(num_threads)]
         for t in threads:
             t.start()
         for t in threads:
@@ -478,16 +487,19 @@ class TestExtendedThreadSafety:
         for k in keys:
             client.put(k, {"v": 1})
 
+        num_threads = 5
+        barrier = threading.Barrier(num_threads)
         errors = queue.SimpleQueue()
 
         def touch_worker():
             try:
+                barrier.wait()
                 for k in keys:
                     client.touch(k)
             except Exception as e:
                 errors.put(e)
 
-        threads = [threading.Thread(target=touch_worker) for _ in range(5)]
+        threads = [threading.Thread(target=touch_worker) for _ in range(num_threads)]
         for t in threads:
             t.start()
         for t in threads:
@@ -503,10 +515,12 @@ class TestExtendedThreadSafety:
         num_threads = 5
         increments = 50
         client.put(key, {f"bin_{t}": 0 for t in range(num_threads)})
+        barrier = threading.Barrier(num_threads)
         errors = queue.SimpleQueue()
 
         def inc_bin(tid):
             try:
+                barrier.wait()
                 for _ in range(increments):
                     client.increment(key, f"bin_{tid}", 1)
             except Exception as e:
@@ -529,10 +543,12 @@ class TestExtendedThreadSafety:
         key = (NS, self.EXT_SET, "multi_bin_put")
         client.put(key, {"init": True})
         num_threads = 8
+        barrier = threading.Barrier(num_threads)
         errors = queue.SimpleQueue()
 
         def put_bin(tid):
             try:
+                barrier.wait()
                 client.put(key, {f"field_{tid}": f"value_{tid}"})
             except Exception as e:
                 errors.put(e)
