@@ -3,7 +3,7 @@
 import pytest
 
 hypothesis = pytest.importorskip("hypothesis")
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from aerospike_py import exp, predicates
@@ -393,41 +393,39 @@ class TestMapOperationProperties:
 # ── Constants properties ──────────────────────────────────────────
 
 
-class TestConstantsProperties:
-    """Property-based tests for constants consistency."""
+def _get_constants(prefix: str) -> list[str]:
+    """Return all aerospike_py attribute names matching a prefix."""
+    import aerospike_py
 
-    @given(data=st.data())
-    def test_policy_constants_are_valid_ints(self, data):
+    return [a for a in dir(aerospike_py) if a.startswith(prefix)]
+
+
+class TestConstantsProperties:
+    """Deterministic tests for constants consistency (full coverage via parametrize)."""
+
+    @pytest.mark.parametrize("attr", _get_constants("POLICY_"))
+    def test_policy_constants_are_valid_ints(self, attr):
         """All POLICY_* constants should be valid integers."""
         import aerospike_py
 
-        policy_attrs = [a for a in dir(aerospike_py) if a.startswith("POLICY_")]
-        if policy_attrs:
-            attr = data.draw(st.sampled_from(policy_attrs))
-            val = getattr(aerospike_py, attr)
-            assert isinstance(val, int)
+        val = getattr(aerospike_py, attr)
+        assert isinstance(val, int)
 
-    @given(data=st.data())
-    def test_index_type_constants_are_valid_ints(self, data):
+    @pytest.mark.parametrize("attr", _get_constants("INDEX_"))
+    def test_index_type_constants_are_valid_ints(self, attr):
         """All INDEX_* constants should be valid integers."""
         import aerospike_py
 
-        index_attrs = [a for a in dir(aerospike_py) if a.startswith("INDEX_")]
-        if index_attrs:
-            attr = data.draw(st.sampled_from(index_attrs))
-            val = getattr(aerospike_py, attr)
-            assert isinstance(val, int)
+        val = getattr(aerospike_py, attr)
+        assert isinstance(val, int)
 
-    @given(data=st.data())
-    def test_list_constants_are_valid_ints(self, data):
+    @pytest.mark.parametrize("attr", _get_constants("LIST_"))
+    def test_list_constants_are_valid_ints(self, attr):
         """All LIST_* constants should be valid integers."""
         import aerospike_py
 
-        list_attrs = [a for a in dir(aerospike_py) if a.startswith("LIST_")]
-        if list_attrs:
-            attr = data.draw(st.sampled_from(list_attrs))
-            val = getattr(aerospike_py, attr)
-            assert isinstance(val, int)
+        val = getattr(aerospike_py, attr)
+        assert isinstance(val, int)
 
 
 # ── Expression combination properties ────────────────────────────
@@ -444,12 +442,12 @@ class TestExpressionCombinationProperties:
         """Nested AND(OR(...), OR(...)) combinations always produce valid expressions."""
         exprs = [exp.eq(exp.int_bin("b"), exp.int_val(v)) for v in values[:n_exprs]]
         mid = len(exprs) // 2
-        if mid >= 2 and len(exprs) - mid >= 2:
-            left = exp.and_(*exprs[:mid])
-            right = exp.or_(*exprs[mid:])
-            result = exp.and_(left, right)
-            assert result["__expr__"] == "and"
-            assert len(result["exprs"]) == 2
+        assume(mid >= 2 and len(exprs) - mid >= 2)
+        left = exp.and_(*exprs[:mid])
+        right = exp.or_(*exprs[mid:])
+        result = exp.and_(left, right)
+        assert result["__expr__"] == "and"
+        assert len(result["exprs"]) == 2
 
     @given(depth=st.integers(min_value=1, max_value=5))
     def test_deeply_nested_not(self, depth):
