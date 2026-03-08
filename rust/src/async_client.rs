@@ -4,7 +4,7 @@ use crate::client_common;
 use crate::client_ops;
 use aerospike_core::Client as AsClient;
 use arc_swap::ArcSwapOption;
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use pyo3_async_runtimes::tokio::future_into_py;
@@ -104,6 +104,7 @@ impl PyAsyncClient {
 
     /// Check if connected (sync, no I/O, lock-free).
     fn is_connected(&self) -> bool {
+        trace!("Checking async client connection status");
         self.inner.load().is_some()
     }
 

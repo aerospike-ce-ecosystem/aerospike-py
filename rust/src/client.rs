@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::client_common;
 use crate::client_ops;
 use aerospike_core::{Client as AsClient, Error as AsError, ResultCode};
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
@@ -98,6 +98,7 @@ impl PyClient {
 
     /// Check if the client is connected
     fn is_connected(&self, py: Python<'_>) -> PyResult<bool> {
+        trace!("Checking client connection status");
         match &self.inner {
             Some(client) => {
                 let client = client.clone();
@@ -125,6 +126,7 @@ impl PyClient {
     // ── Info ─────────────────────────────────────────────────────
 
     /// Send an info command to all nodes in the cluster.
+    /// Returns a list of (node_name, error_code, response) tuples.
     #[pyo3(signature = (command, policy=None))]
     fn info_all(
         &self,
@@ -138,6 +140,7 @@ impl PyClient {
     }
 
     /// Send an info command to a random node in the cluster.
+    /// Returns the response string.
     #[pyo3(signature = (command, policy=None))]
     fn info_random_node(
         &self,
@@ -1019,6 +1022,10 @@ impl PyClient {
     }
 
     /// Write multiple records from a numpy structured array.
+    ///
+    /// Each row becomes a separate write operation in the batch.
+    /// The dtype must contain a `_key` field (or custom key_field) for the record key,
+    /// and remaining non-underscore-prefixed fields become bins.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (data, namespace, set_name, _dtype, key_field="_key", policy=None))]
     fn batch_write_numpy(
