@@ -1,0 +1,147 @@
+name: Benchmark
+
+on:
+  pull_request:
+    paths:
+      - 'rust/src/**'
+      - 'src/aerospike_py/**'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  AEROSPIKE_PORT: "3000"
+
+jobs:
+  benchmark:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      aerospike:
+        image: aerospike/aerospike-server:latest
+        ports:
+          - 3000:3000
+          - 3001:3001
+          - 3002:3002
+        env:
+          NAMESPACE: test
+          CLUSTER_NAME: docker
+          DEFAULT_TTL: 2592000
+        options: >-
+          --shm-size=1g
+          --health-cmd "asinfo -v status"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "rust-build"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --group dev --group bench
+
+      - name: Build release
+        run: uv run maturin develop --release
+
+      - name: Wait for Aerospike
+        uses: ./.github/actions/wait-for-aerospike
+
+      - name: Run benchmark
+        run: |
+          uv run python benchmark/bench_compare.py \
+            --count 1000 --rounds 5 \
+            --concurrency 50 --batch-groups 10 \
+            --host 127.0.0.1 --port 3000 \
+            --scenario latency \
+            --report --report-dir benchmark-output \
+            --no-color
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-output/
+          retention-days: 30
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            try {
+              const dir = 'benchmark-output';
+              const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+              if (files.length === 0) {
+                console.log('No benchmark JSON files found');
+                return;
+              }
+              const results = JSON.parse(fs.readFileSync(path.join(dir, files[0]), 'utf8'));
+
+              let body = '## Benchmark Results\n\n';
+
+              const sections = [
+                ['aerospike_py_sync', 'aerospike-py (Sync)'],
+                ['aerospike_py_async', 'aerospike-py (Async)'],
+              ];
+
+              for (const [key, label] of sections) {
+                const data = results[key];
+                if (!data) continue;
+
+                body += `### ${label}\n\n`;
+                body += '| Operation | Ops/sec | Avg Latency | P50 | P99 |\n';
+                body += '|-----------|---------|-------------|-----|-----|\n';
+
+                for (const [op, metrics] of Object.entries(data)) {
+                  if (!metrics || !metrics.ops_per_sec) continue;
+                  const opsPerSec = metrics.ops_per_sec ? metrics.ops_per_sec.toFixed(0) : 'N/A';
+                  const avgLatency = metrics.avg_ms != null ? metrics.avg_ms.toFixed(2) + 'ms' : 'N/A';
+                  const p50 = metrics.p50_ms != null ? metrics.p50_ms.toFixed(2) + 'ms' : 'N/A';
+                  const p99 = metrics.p99_ms != null ? metrics.p99_ms.toFixed(2) + 'ms' : 'N/A';
+                  body += `| ${op} | ${opsPerSec} | ${avgLatency} | ${p50} | ${p99} |\n`;
+                }
+
+                body += '\n';
+              }
+
+              const env = results.environment || {};
+              body += `> **Config**: ${env.count || 'N/A'} ops/round, ${env.rounds || 'N/A'} rounds, concurrency ${env.concurrency || 'N/A'}\n`;
+              body += '> Benchmark run on `ubuntu-latest`. Results may vary.';
+
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            } catch (e) {
+              console.log('Could not parse benchmark results:', e.message);
+            }
