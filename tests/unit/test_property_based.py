@@ -6,8 +6,20 @@ hypothesis = pytest.importorskip("hypothesis")
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from aerospike_py import exp
+from aerospike_py import exp, predicates
 from aerospike_py._types import _build_op
+from aerospike_py.list_operations import (
+    list_append,
+    list_append_items,
+    list_get_by_index_range,
+    list_insert,
+)
+from aerospike_py.map_operations import (
+    map_get_by_key,
+    map_put,
+    map_put_items,
+    map_size,
+)
 
 # ── Expression builder properties ──────────────────────────────────
 
@@ -223,3 +235,239 @@ class TestNumPyDtypeProperties:
         # Validate all fields are in allowed kinds
         for name in dtype.names:
             assert dtype[name].base.kind in _ALLOWED_KINDS
+
+
+# ── Predicate properties ──────────────────────────────────────────
+
+
+class TestPredicateProperties:
+    """Property-based tests for query predicates."""
+
+    @given(bin_name=bin_names)
+    def test_equals_produces_valid_predicate(self, bin_name):
+        """equals() always returns a valid 3-tuple."""
+        result = predicates.equals(bin_name, 42)
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        assert result[0] == "equals"
+        assert result[1] == bin_name
+
+    @given(
+        min_val=st.integers(min_value=-(2**63), max_value=2**63 - 1),
+        max_val=st.integers(min_value=-(2**63), max_value=2**63 - 1),
+    )
+    def test_between_produces_valid_predicate(self, min_val, max_val):
+        """between() always returns a valid 4-tuple regardless of min/max order."""
+        result = predicates.between("bin", min_val, max_val)
+        assert isinstance(result, tuple)
+        assert len(result) == 4
+        assert result[0] == "between"
+        assert result[2] == min_val
+        assert result[3] == max_val
+
+    @given(val=st.text(min_size=0, max_size=200))
+    def test_contains_string_predicate(self, val):
+        """contains() with string values always produces a valid 4-tuple."""
+        result = predicates.contains("bin", 0, val)
+        assert isinstance(result, tuple)
+        assert len(result) == 4
+        assert result[0] == "contains"
+
+    @given(
+        bin_name=bin_names,
+        val=st.one_of(st.integers(), st.text(max_size=50), st.floats(allow_nan=False)),
+    )
+    def test_equals_preserves_value_type(self, bin_name, val):
+        """equals() preserves the original value type and content."""
+        result = predicates.equals(bin_name, val)
+        assert result[2] == val
+
+
+# ── List CDT operation properties ─────────────────────────────────
+
+
+class TestListOperationProperties:
+    """Property-based tests for list CDT operations."""
+
+    @given(
+        bin_name=bin_names,
+        value=st.one_of(st.integers(), st.text(max_size=100), st.floats(allow_nan=False)),
+    )
+    def test_list_append_produces_valid_op(self, bin_name, value):
+        """list_append always returns a valid operation dict."""
+        result = list_append(bin_name, value)
+        assert isinstance(result, dict)
+        assert "op" in result
+        assert "bin" in result
+        assert result["bin"] == bin_name
+        assert result["val"] == value
+
+    @given(
+        index=st.integers(min_value=-1000, max_value=1000),
+        return_type=st.integers(min_value=0, max_value=10),
+    )
+    def test_list_get_by_index_range_valid(self, index, return_type):
+        """list_get_by_index_range always produces valid op with any index."""
+        result = list_get_by_index_range("mybin", index, return_type)
+        assert isinstance(result, dict)
+        assert "op" in result
+        assert result["bin"] == "mybin"
+        assert result["index"] == index
+
+    @given(items=st.lists(st.integers(), min_size=1, max_size=20))
+    def test_list_append_items_valid(self, items):
+        """list_append_items always produces valid op with any list."""
+        result = list_append_items("mybin", items)
+        assert isinstance(result, dict)
+        assert result["val"] == items
+
+    @given(
+        bin_name=bin_names,
+        index=st.integers(min_value=-100, max_value=100),
+        value=st.integers(),
+    )
+    def test_list_insert_produces_valid_op(self, bin_name, index, value):
+        """list_insert always returns a valid operation dict."""
+        result = list_insert(bin_name, index, value)
+        assert isinstance(result, dict)
+        assert result["bin"] == bin_name
+        assert result["index"] == index
+        assert result["val"] == value
+
+
+# ── Map CDT operation properties ──────────────────────────────────
+
+
+class TestMapOperationProperties:
+    """Property-based tests for map CDT operations."""
+
+    @given(
+        bin_name=bin_names,
+        key=st.one_of(st.integers(), st.text(max_size=50)),
+        value=st.one_of(st.integers(), st.text(max_size=100), st.floats(allow_nan=False)),
+    )
+    def test_map_put_produces_valid_op(self, bin_name, key, value):
+        """map_put always returns valid operation dict."""
+        result = map_put(bin_name, key, value)
+        assert isinstance(result, dict)
+        assert "op" in result
+        assert "bin" in result
+        assert result["bin"] == bin_name
+        assert result["map_key"] == key
+        assert result["val"] == value
+
+    @given(
+        key=st.one_of(st.integers(), st.text(max_size=50)),
+        return_type=st.integers(min_value=0, max_value=10),
+    )
+    def test_map_get_by_key_valid(self, key, return_type):
+        """map_get_by_key produces valid op with any key type."""
+        result = map_get_by_key("mybin", key, return_type)
+        assert isinstance(result, dict)
+        assert result["map_key"] == key
+        assert result["return_type"] == return_type
+
+    @given(
+        items=st.dictionaries(
+            keys=st.text(min_size=1, max_size=20),
+            values=st.integers(),
+            min_size=1,
+            max_size=10,
+        )
+    )
+    def test_map_put_items_valid(self, items):
+        """map_put_items always produces valid op with any dict."""
+        result = map_put_items("mybin", items)
+        assert isinstance(result, dict)
+        assert result["val"] == items
+
+    @given(bin_name=bin_names)
+    def test_map_size_produces_minimal_op(self, bin_name):
+        """map_size produces an op with only op and bin keys."""
+        result = map_size(bin_name)
+        assert isinstance(result, dict)
+        assert result["op"] is not None
+        assert result["bin"] == bin_name
+
+
+# ── Constants properties ──────────────────────────────────────────
+
+
+class TestConstantsProperties:
+    """Property-based tests for constants consistency."""
+
+    @given(data=st.data())
+    def test_policy_constants_are_valid_ints(self, data):
+        """All POLICY_* constants should be valid integers."""
+        import aerospike_py
+
+        policy_attrs = [a for a in dir(aerospike_py) if a.startswith("POLICY_")]
+        if policy_attrs:
+            attr = data.draw(st.sampled_from(policy_attrs))
+            val = getattr(aerospike_py, attr)
+            assert isinstance(val, int)
+
+    @given(data=st.data())
+    def test_index_type_constants_are_valid_ints(self, data):
+        """All INDEX_* constants should be valid integers."""
+        import aerospike_py
+
+        index_attrs = [a for a in dir(aerospike_py) if a.startswith("INDEX_")]
+        if index_attrs:
+            attr = data.draw(st.sampled_from(index_attrs))
+            val = getattr(aerospike_py, attr)
+            assert isinstance(val, int)
+
+    @given(data=st.data())
+    def test_list_constants_are_valid_ints(self, data):
+        """All LIST_* constants should be valid integers."""
+        import aerospike_py
+
+        list_attrs = [a for a in dir(aerospike_py) if a.startswith("LIST_")]
+        if list_attrs:
+            attr = data.draw(st.sampled_from(list_attrs))
+            val = getattr(aerospike_py, attr)
+            assert isinstance(val, int)
+
+
+# ── Expression combination properties ────────────────────────────
+
+
+class TestExpressionCombinationProperties:
+    """Property-based tests for complex expression combinations."""
+
+    @given(
+        n_exprs=st.integers(min_value=2, max_value=8),
+        values=st.lists(st.integers(min_value=-1000, max_value=1000), min_size=2, max_size=8),
+    )
+    def test_nested_and_or_combination(self, n_exprs, values):
+        """Nested AND(OR(...), OR(...)) combinations always produce valid expressions."""
+        exprs = [exp.eq(exp.int_bin("b"), exp.int_val(v)) for v in values[:n_exprs]]
+        mid = len(exprs) // 2
+        if mid >= 2 and len(exprs) - mid >= 2:
+            left = exp.and_(*exprs[:mid])
+            right = exp.or_(*exprs[mid:])
+            result = exp.and_(left, right)
+            assert result["__expr__"] == "and"
+            assert len(result["exprs"]) == 2
+
+    @given(depth=st.integers(min_value=1, max_value=5))
+    def test_deeply_nested_not(self, depth):
+        """Deeply nested not(not(not(...))) always produces valid expression."""
+        expr = exp.eq(exp.int_bin("b"), exp.int_val(1))
+        for _ in range(depth):
+            expr = exp.not_(expr)
+        assert expr["__expr__"] == "not"
+
+    @given(
+        n_and=st.integers(min_value=2, max_value=5),
+        n_or=st.integers(min_value=2, max_value=5),
+    )
+    def test_and_or_lengths_preserved(self, n_and, n_or):
+        """and_/or_ preserve the number of sub-expressions."""
+        and_exprs = [exp.bool_val(True) for _ in range(n_and)]
+        or_exprs = [exp.bool_val(False) for _ in range(n_or)]
+        and_result = exp.and_(*and_exprs)
+        or_result = exp.or_(*or_exprs)
+        assert len(and_result["exprs"]) == n_and
+        assert len(or_result["exprs"]) == n_or
