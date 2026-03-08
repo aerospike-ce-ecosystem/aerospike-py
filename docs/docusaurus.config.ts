@@ -1,6 +1,12 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
+import versionsConfigRaw from './versions-config.json';
+
+const versionsConfig = versionsConfigRaw as {
+  lastVersion: string;
+  versions: Record<string, {label: string; path: string; banner: string}>;
+};
 
 const config: Config = {
   stylesheets: [
@@ -82,17 +88,11 @@ const config: Config = {
           editUrl:
             'https://github.com/KimSoungRyoul/aerospike-py/tree/main/docs/',
           showLastUpdateTime: true,
-          // Versioning: 릴리스 전에는 current가 기본
-          // 첫 릴리스 후 lastVersion을 해당 버전으로 변경하고
-          // current.path를 'next', current.banner를 'unreleased'로 전환
-          lastVersion: 'current',
-          versions: {
-            current: {
-              label: 'In Development',
-              path: '',
-              banner: 'none',
-            },
-          },
+          // Versioning: versions-config.json에서 관리
+          // 릴리스 시 docs-version.yaml 워크플로우가 자동으로 업데이트
+          lastVersion: versionsConfig.lastVersion,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          versions: versionsConfig.versions as any,
         },
         blog: false,
         theme: {

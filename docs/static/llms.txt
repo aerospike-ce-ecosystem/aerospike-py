@@ -27,6 +27,7 @@
 - [Performance Tuning](https://kimsoungryoul.github.io/aerospike-py/docs/guides/performance-tuning): Tips for optimizing aerospike-py throughput and latency.
 - [NumPy Batch Read Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/numpy-batch): Use batch_read with numpy structured arrays for high-performance columnar analytics directly from Aerospike.
 - [NumPy Batch Write Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/numpy-batch-write): Use batch_write_numpy to write records directly from numpy structured arrays for high-performance bulk ingestion into Aerospike.
+- [NumPy Integration Guide](https://kimsoungryoul.github.io/aerospike-py/docs/guides/numpy-integration): High-performance batch operations using NumPy structured arrays.
 - [List & Map CDT Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/operations): Atomic server-side List (31 ops) and Map (27 ops) collection data type operations via client.operate().
 - [Read Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/read): Get, select, exists, and batch read operations.
 - [Write Operations](https://kimsoungryoul.github.io/aerospike-py/docs/guides/write): Put, update, delete, operate, batch operate, and optimistic locking.

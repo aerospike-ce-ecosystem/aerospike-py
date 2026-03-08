@@ -1,0 +1,64 @@
+name: Freeze Docs Version
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-version
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    name: Freeze docs for ${{ github.event.release.tag_name }}
+    runs-on: ubuntu-latest
+    # v로 시작하는 태그만 처리 (pre-release 포함)
+    if: startsWith(github.event.release.tag_name, 'v')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          # 기본 GITHUB_TOKEN으로 push 가능 (branch protection 없는 경우)
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Freezing docs for version: $VERSION"
+
+      - name: Freeze docs with docusaurus docs:version
+        working-directory: docs
+        run: npx docusaurus docs:version ${{ steps.version.outputs.version }}
+
+      - name: Update versions-config.json
+        run: node docs/scripts/update-version-config.mjs ${{ steps.version.outputs.version }}
+
+      - name: Commit and push versioned docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add \
+            docs/versioned_docs \
+            docs/versioned_sidebars \
+            docs/versions.json \
+            docs/versions-config.json
+          git commit -m "docs: freeze version ${{ steps.version.outputs.version }}"
+          git push origin main
