@@ -40,7 +40,7 @@ async def create_user(body: UserCreate, request: Request):
     user_id = uuid.uuid4().hex
     key = _key(user_id)
 
-    bins = body.model_dump()
+    bins = {"user_id": user_id, **body.model_dump()}
     await client.put(key, bins)
 
     _, meta, bins = await client.get(key)
@@ -93,10 +93,17 @@ async def delete_user(user_id: str, request: Request):
 
 @router.get("", response_model=list[UserResponse])
 async def list_users(request: Request):
-    """List all users via batch read of known keys.
-
-    Note: Full namespace scan is no longer supported.
-    This endpoint returns an empty list as a placeholder.
-    In production, maintain a separate index of user IDs.
-    """
-    return []
+    """List all users by scanning the set via query().results()."""
+    client = _get_client(request)
+    records = await client.query(NS, SET).results()
+    result = []
+    for key, meta, bins in records:
+        if bins is None:
+            continue
+        # query()는 aerospike-core 알파 제한으로 user_key=None을 반환하므로
+        # 생성 시 bins에 저장한 user_id를 우선 사용한다.
+        user_id = bins.get("user_id") or (key[2] if key else None)
+        if user_id is None or not isinstance(bins.get("name"), str):
+            continue
+        result.append(_to_response(str(user_id), meta, bins))
+    return result

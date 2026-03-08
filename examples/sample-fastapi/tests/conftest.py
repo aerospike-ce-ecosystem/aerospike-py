@@ -3,17 +3,39 @@ from __future__ import annotations
 import contextlib
 import os
 import socket
+import stat
 import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
-from testcontainers.core.container import DockerContainer
-from testcontainers.core.waiting_utils import wait_for_logs
 
-import aerospike_py
+# Podman 소켓을 우선 사용하고, 없으면 Docker 소켓으로 폴백.
+# testcontainers 임포트 전에 DOCKER_HOST를 설정해야 하므로 최상단에 위치한다.
+def _is_real_socket(p: Path) -> bool:
+    try:
+        return stat.S_ISSOCK(p.stat().st_mode)
+    except OSError:
+        return False
+
+
+if not os.environ.get("DOCKER_HOST") and not _is_real_socket(Path("/var/run/docker.sock")):
+    _podman_candidates = [
+        Path.home() / ".local/share/containers/podman/machine/podman.sock",
+        Path("/run/podman/podman.sock"),
+        Path("/var/run/podman/podman.sock"),
+    ]
+    for _sock in _podman_candidates:
+        if _is_real_socket(_sock):
+            os.environ["DOCKER_HOST"] = f"unix://{_sock}"
+            break
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from testcontainers.core.container import DockerContainer  # noqa: E402
+from testcontainers.core.waiting_utils import wait_for_logs  # noqa: E402
+
+import aerospike_py  # noqa: E402
 
 # Ensure the app package is importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
