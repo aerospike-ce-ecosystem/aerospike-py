@@ -19,9 +19,13 @@ Optional keys (CDT operations):
     ``list_policy`` (ListPolicy): Policy for list CDT operations.
     ``map_policy`` (MapPolicy): Policy for map CDT operations.
     ``hll_policy`` (HLLPolicy): Policy for HyperLogLog CDT operations.
+    ``bit_policy`` (int): Bit write flags for bitwise CDT operations (``BIT_WRITE_*``).
+    ``bit_offset`` (int): Starting bit position for bitwise CDT operations.
+    ``bit_size`` (int): Number of bits for bitwise CDT operations.
 
 Use ``aerospike_py.list_operations``, ``aerospike_py.map_operations``,
-or ``aerospike_py.hll_operations`` helper modules to build CDT operation dicts.
+``aerospike_py.hll_operations``, or ``aerospike_py.bit_operations`` helper modules
+to build CDT operation dicts.
 """
 
 

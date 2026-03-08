@@ -937,7 +937,17 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let bit_size = get_bit_size(dict)?;
                 let value_int: i64 = match &val {
                     Some(Value::Int(i)) => *i,
-                    _ => 0,
+                    Some(other) => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "bit operation requires an integer value, got {:?}",
+                            other
+                        )))
+                    }
+                    None => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "bit operation requires a 'val' parameter",
+                        ))
+                    }
                 };
                 let signed = get_signed(dict)?;
                 let action = get_overflow_action(dict)?;
@@ -952,7 +962,17 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let bit_size = get_bit_size(dict)?;
                 let value_int: i64 = match &val {
                     Some(Value::Int(i)) => *i,
-                    _ => 0,
+                    Some(other) => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "bit operation requires an integer value, got {:?}",
+                            other
+                        )))
+                    }
+                    None => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "bit operation requires a 'val' parameter",
+                        ))
+                    }
                 };
                 let signed = get_signed(dict)?;
                 let action = get_overflow_action(dict)?;
@@ -967,7 +987,17 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let bit_size = get_bit_size(dict)?;
                 let value_int: i64 = match &val {
                     Some(Value::Int(i)) => *i,
-                    _ => 0,
+                    Some(other) => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "bit operation requires an integer value, got {:?}",
+                            other
+                        )))
+                    }
+                    None => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "bit operation requires a 'val' parameter",
+                        ))
+                    }
                 };
                 let policy = parse_bit_policy(dict)?;
                 bit_ops::set_int(&name, bit_offset, bit_size, value_int, &policy)

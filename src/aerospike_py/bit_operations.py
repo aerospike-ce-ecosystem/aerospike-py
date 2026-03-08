@@ -65,6 +65,11 @@ def bit_resize(
         resize_flags: ``BIT_RESIZE_DEFAULT``, ``BIT_RESIZE_FROM_FRONT``,
             ``BIT_RESIZE_GROW_ONLY``, or ``BIT_RESIZE_SHRINK_ONLY``.
         policy: Optional bit write flags (``BIT_WRITE_*`` constant).
+
+    Note:
+        Flag composition via bitwise OR (e.g.,
+        ``BIT_RESIZE_GROW_ONLY | BIT_RESIZE_FROM_FRONT``) is not currently
+        supported. Use individual flags only.
     """
     return _build_op(
         _OP_BIT_RESIZE,
