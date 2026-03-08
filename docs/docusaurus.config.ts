@@ -1,11 +1,13 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
+import type {VersionBanner} from '@docusaurus/plugin-content-docs';
 import versionsConfigRaw from './versions-config.json';
 
+type VersionEntry = {label: string; path: string; banner: VersionBanner};
 const versionsConfig = versionsConfigRaw as {
   lastVersion: string;
-  versions: Record<string, {label: string; path: string; banner: string}>;
+  versions: Record<string, VersionEntry>;
 };
 
 const config: Config = {
@@ -91,8 +93,7 @@ const config: Config = {
           // Versioning: versions-config.json에서 관리
           // 릴리스 시 docs-version.yaml 워크플로우가 자동으로 업데이트
           lastVersion: versionsConfig.lastVersion,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          versions: versionsConfig.versions as any,
+          versions: versionsConfig.versions,
         },
         blog: false,
         theme: {
