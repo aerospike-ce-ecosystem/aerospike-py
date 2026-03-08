@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use crate::client_common::{self, PutPolicy};
-use crate::traced_exists_op;
-use crate::traced_op;
-use aerospike_core::{BatchOperation, BatchWritePolicy, Bins, Client as AsClient, Task};
+use crate::client_common;
+use crate::client_ops;
+use aerospike_core::Client as AsClient;
 use arc_swap::ArcSwapOption;
-use log::{debug, info, trace, warn};
+use log::{debug, info, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use pyo3_async_runtimes::tokio::future_into_py;
@@ -14,7 +13,6 @@ use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::parse_client_policy;
-use crate::policy::write_policy::DEFAULT_WRITE_POLICY;
 use crate::record_helpers::{
     batch_records_to_py, PendingExists, PendingOrderedRecord, PendingRecord,
 };
@@ -106,7 +104,6 @@ impl PyAsyncClient {
 
     /// Check if connected (sync, no I/O, lock-free).
     fn is_connected(&self) -> bool {
-        trace!("Checking async client connection status");
         self.inner.load().is_some()
     }
 
@@ -140,16 +137,10 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let args = client_common::prepare_info_args(command, policy)?;
-
-        future_into_py(py, async move {
-            let nodes = client.nodes().await;
-            let mut results: Vec<(String, i32, String)> = Vec::new();
-            for node in &nodes {
-                let r = node.info(&args.admin_policy, &[&args.command]).await;
-                results.push(client_common::info_node_result(node, &args.command, r));
-            }
-            Ok(results)
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_info_all(&client, &args).await },
+        )
     }
 
     /// Send an info command to a random node in the cluster (async).
@@ -162,18 +153,8 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let args = client_common::prepare_info_args(command, policy)?;
-
         future_into_py(py, async move {
-            let node = client
-                .cluster
-                .get_random_node()
-                .await
-                .map_err(as_to_pyerr)?;
-            let map = node
-                .info(&args.admin_policy, &[&args.command])
-                .await
-                .map_err(as_to_pyerr)?;
-            Ok(map.get(&args.command).cloned().unwrap_or_default())
+            client_ops::do_info_random_node(&client, &args).await
         })
     }
 
@@ -219,32 +200,7 @@ impl PyAsyncClient {
             "async put: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-
-        match args.policy {
-            PutPolicy::Default => {
-                let wp = DEFAULT_WRITE_POLICY.clone();
-                future_into_py(py, async move {
-                    traced_op!(
-                        "put",
-                        &args.key.namespace,
-                        &args.key.set_name,
-                        args.parent_ctx,
-                        args.conn_info,
-                        client.put(&wp, &args.key, &args.bins).await
-                    )
-                })
-            }
-            PutPolicy::Custom(wp) => future_into_py(py, async move {
-                traced_op!(
-                    "put",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.put(&wp, &args.key, &args.bins).await
-                )
-            }),
-        }
+        future_into_py(py, async move { client_ops::do_put(&client, args).await })
     }
 
     /// Read a record (async).
@@ -261,21 +217,10 @@ impl PyAsyncClient {
             "async get: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-
-        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
         let key_py = key_to_py(py, &args.key)?;
 
-        let rp = args.read_policy().clone();
         future_into_py(py, async move {
-            let record = traced_op!(
-                "get",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                client.get(&rp, &args.key, Bins::All).await
-            )?;
-
+            let record = client_ops::do_get(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
     }
@@ -296,23 +241,10 @@ impl PyAsyncClient {
             "async select: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-
-        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
         let key_py = key_to_py(py, &args.key)?;
 
-        let rp = args.read_policy().clone();
         future_into_py(py, async move {
-            let bin_refs: Vec<&str> = args.bin_names.iter().map(|s| s.as_str()).collect();
-            let bins_selector = Bins::from(bin_refs.as_slice());
-            let record = traced_op!(
-                "select",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                client.get(&rp, &args.key, bins_selector).await
-            )?;
-
+            let record = client_ops::do_select(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
     }
@@ -331,20 +263,10 @@ impl PyAsyncClient {
             "async exists: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-
-        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
-            let result = traced_exists_op!(
-                "exists",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                client.get(&args.read_policy, &args.key, Bins::None).await
-            );
-
+            let result = client_ops::do_exists(&client, &args).await;
             Ok(PendingExists { result, key_py })
         })
     }
@@ -365,24 +287,10 @@ impl PyAsyncClient {
             "async remove: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-
-        future_into_py(py, async move {
-            let existed = traced_op!(
-                "delete",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                client.delete(&args.write_policy, &args.key).await
-            )?;
-
-            if !existed {
-                return Err(crate::errors::RecordNotFound::new_err(
-                    "AEROSPIKE_ERR (2): Record not found",
-                ));
-            }
-            Ok(())
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_remove(&client, args).await },
+        )
     }
 
     /// Touch a record (async).
@@ -402,17 +310,7 @@ impl PyAsyncClient {
             "async touch: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-
-        future_into_py(py, async move {
-            traced_op!(
-                "touch",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                client.touch(&args.write_policy, &args.key).await
-            )
-        })
+        future_into_py(py, async move { client_ops::do_touch(&client, args).await })
     }
 
     /// Increment a bin (async).
@@ -440,17 +338,10 @@ impl PyAsyncClient {
             "async increment: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-
-        future_into_py(py, async move {
-            traced_op!(
-                "increment",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                client.add(&args.write_policy, &args.key, &args.bins).await
-            )
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_increment(&client, args).await },
+        )
     }
 
     /// Operate on a record (async).
@@ -472,24 +363,10 @@ impl PyAsyncClient {
             args.key.set_name,
             args.ops.len()
         );
-
-        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
-            let record = traced_op!(
-                "operate",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                {
-                    client
-                        .operate(&args.write_policy, &args.key, &args.ops)
-                        .await
-                }
-            )?;
-
+            let record = client_ops::do_operate(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
     }
@@ -521,21 +398,10 @@ impl PyAsyncClient {
             "async append: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-
-        future_into_py(py, async move {
-            traced_op!(
-                "append",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                {
-                    client
-                        .append(&args.write_policy, &args.key, &args.bins)
-                        .await
-                }
-            )
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_append(&client, args).await },
+        )
     }
 
     /// Prepend a string to a bin (async).
@@ -563,21 +429,10 @@ impl PyAsyncClient {
             "async prepend: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-
-        future_into_py(py, async move {
-            traced_op!(
-                "prepend",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                {
-                    client
-                        .prepend(&args.write_policy, &args.key, &args.bins)
-                        .await
-                }
-            )
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_prepend(&client, args).await },
+        )
     }
 
     /// Remove bins from a record by setting them to nil (async).
@@ -599,17 +454,10 @@ impl PyAsyncClient {
             policy,
             &self.connection_info,
         )?;
-
-        future_into_py(py, async move {
-            traced_op!(
-                "remove_bin",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                client.put(&args.write_policy, &args.key, &args.bins).await
-            )
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_remove_bin(&client, args).await },
+        )
     }
 
     // ── Multi-operation (ordered) ────────────────────────────────
@@ -633,24 +481,10 @@ impl PyAsyncClient {
             args.key.set_name,
             args.ops.len()
         );
-
-        // Pre-compute Python key to avoid Rust→Python re-conversion after I/O
         let pre_key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
-            let record = traced_op!(
-                "operate_ordered",
-                &args.key.namespace,
-                &args.key.set_name,
-                args.parent_ctx,
-                args.conn_info,
-                {
-                    client
-                        .operate(&args.write_policy, &args.key, &args.ops)
-                        .await
-                }
-            )?;
-
+            let record = client_ops::do_operate_ordered(&client, &args).await?;
             Ok(PendingOrderedRecord {
                 record,
                 key_py: pre_key_py,
@@ -673,18 +507,10 @@ impl PyAsyncClient {
         warn!("Async truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?;
         let args = client_common::prepare_truncate_args(namespace, set_name, nanos, policy)?;
-
-        future_into_py(py, async move {
-            client
-                .truncate(
-                    &args.admin_policy,
-                    &args.namespace,
-                    &args.set_name,
-                    args.nanos,
-                )
-                .await
-                .map_err(as_to_pyerr)
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_truncate(&client, args).await },
+        )
     }
 
     // ── UDF ──────────────────────────────────────────────────
@@ -701,22 +527,10 @@ impl PyAsyncClient {
         info!("Async registering UDF: filename={}", filename);
         let client = self.get_client()?;
         let args = client_common::prepare_udf_put_args(filename, udf_type, policy)?;
-
-        future_into_py(py, async move {
-            let task = client
-                .register_udf(
-                    &args.admin_policy,
-                    &args.udf_body,
-                    &args.server_path,
-                    args.language,
-                )
-                .await
-                .map_err(as_to_pyerr)?;
-            task.wait_till_complete(None::<std::time::Duration>)
-                .await
-                .map_err(as_to_pyerr)?;
-            Ok(())
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_udf_put(&client, args).await },
+        )
     }
 
     /// Remove a UDF module (async).
@@ -730,17 +544,10 @@ impl PyAsyncClient {
         info!("Async removing UDF: module={}", module);
         let client = self.get_client()?;
         let args = client_common::prepare_udf_remove_args(module, policy)?;
-
-        future_into_py(py, async move {
-            let task = client
-                .remove_udf(&args.admin_policy, &args.server_path)
-                .await
-                .map_err(as_to_pyerr)?;
-            task.wait_till_complete(None::<std::time::Duration>)
-                .await
-                .map_err(as_to_pyerr)?;
-            Ok(())
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_udf_remove(&client, args).await },
+        )
     }
 
     /// Execute a UDF on a single record (async).
@@ -762,17 +569,7 @@ impl PyAsyncClient {
         );
 
         future_into_py(py, async move {
-            let result = client
-                .execute_udf(
-                    &a.write_policy,
-                    &a.key,
-                    &a.module,
-                    &a.function,
-                    a.args.as_deref(),
-                )
-                .await
-                .map_err(as_to_pyerr)?;
-
+            let result = client_ops::do_apply(&client, &a).await?;
             Python::attach(|py| match result {
                 Some(val) => value_to_py(py, &val),
                 None => Ok(py.None()),
@@ -801,16 +598,7 @@ impl PyAsyncClient {
         let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
 
         future_into_py(py, async move {
-            let ops = args.to_batch_ops();
-            let results = traced_op!(
-                "batch_read",
-                &args.batch_ns,
-                &args.batch_set,
-                args.parent_ctx,
-                args.conn_info,
-                client.batch(&args.batch_policy, &ops).await
-            )?;
-
+            let results = client_ops::do_batch_read(&client, &args).await?;
             Python::attach(|py| {
                 if use_numpy {
                     let dtype = dtype_py.ok_or_else(|| {
@@ -847,15 +635,7 @@ impl PyAsyncClient {
         )?;
 
         future_into_py(py, async move {
-            let batch_ops = args.to_batch_ops();
-            let results = traced_op!(
-                "batch_operate",
-                &args.batch_ns,
-                &args.batch_set,
-                args.parent_ctx,
-                args.conn_info,
-                client.batch(&args.batch_policy, &batch_ops).await
-            )?;
+            let results = client_ops::do_batch_operate(&client, &args).await?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
@@ -891,19 +671,16 @@ impl PyAsyncClient {
         let set = set_name.to_string();
 
         future_into_py(py, async move {
-            let write_policy = BatchWritePolicy::default();
-            let batch_ops: Vec<BatchOperation> = records
-                .iter()
-                .map(|(key, bins)| {
-                    let ops: Vec<aerospike_core::operations::Operation> =
-                        bins.iter().map(aerospike_core::operations::put).collect();
-                    BatchOperation::write(&write_policy, key.clone(), ops)
-                })
-                .collect();
-
-            let results = traced_op!("batch_write_numpy", &ns, &set, parent_ctx, conn_info, {
-                client.batch(&batch_policy, &batch_ops).await
-            })?;
+            let results = client_ops::do_batch_write(
+                &client,
+                &batch_policy,
+                &records,
+                &ns,
+                &set,
+                parent_ctx,
+                conn_info,
+            )
+            .await?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
@@ -922,15 +699,7 @@ impl PyAsyncClient {
             client_common::prepare_batch_remove_args(py, keys, policy, &self.connection_info)?;
 
         future_into_py(py, async move {
-            let ops = args.to_batch_ops();
-            let results = traced_op!(
-                "batch_remove",
-                &args.batch_ns,
-                &args.batch_set,
-                args.parent_ctx,
-                args.conn_info,
-                client.batch(&args.batch_policy, &ops).await
-            )?;
+            let results = client_ops::do_batch_remove(&client, &args).await?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
     }
@@ -1032,13 +801,8 @@ impl PyAsyncClient {
         );
         let client = self.get_client()?;
         let args = client_common::prepare_index_remove_args(namespace, index_name, policy)?;
-
         future_into_py(py, async move {
-            client
-                .drop_index(&args.admin_policy, &args.namespace, "", &args.index_name)
-                .await
-                .map_err(as_to_pyerr)?;
-            Ok(())
+            client_ops::do_index_remove(&client, args).await
         })
     }
 
@@ -1061,11 +825,8 @@ impl PyAsyncClient {
         let password = password.to_string();
 
         future_into_py(py, async move {
-            let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
-            client
-                .create_user(&admin_policy, &username, &password, &role_refs)
+            client_ops::do_admin_create_user(&client, &admin_policy, &username, &password, &roles)
                 .await
-                .map_err(as_to_pyerr)
         })
     }
 
@@ -1083,10 +844,7 @@ impl PyAsyncClient {
         let username = username.to_string();
 
         future_into_py(py, async move {
-            client
-                .drop_user(&admin_policy, &username)
-                .await
-                .map_err(as_to_pyerr)
+            client_ops::do_admin_drop_user(&client, &admin_policy, &username).await
         })
     }
 
@@ -1106,10 +864,7 @@ impl PyAsyncClient {
         let password = password.to_string();
 
         future_into_py(py, async move {
-            client
-                .change_password(&admin_policy, &username, &password)
-                .await
-                .map_err(as_to_pyerr)
+            client_ops::do_admin_change_password(&client, &admin_policy, &username, &password).await
         })
     }
 
@@ -1128,11 +883,7 @@ impl PyAsyncClient {
         let username = username.to_string();
 
         future_into_py(py, async move {
-            let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
-            client
-                .grant_roles(&admin_policy, &username, &role_refs)
-                .await
-                .map_err(as_to_pyerr)
+            client_ops::do_admin_grant_roles(&client, &admin_policy, &username, &roles).await
         })
     }
 
@@ -1151,11 +902,7 @@ impl PyAsyncClient {
         let username = username.to_string();
 
         future_into_py(py, async move {
-            let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
-            client
-                .revoke_roles(&admin_policy, &username, &role_refs)
-                .await
-                .map_err(as_to_pyerr)
+            client_ops::do_admin_revoke_roles(&client, &admin_policy, &username, &roles).await
         })
     }
 
@@ -1172,11 +919,8 @@ impl PyAsyncClient {
         let username = username.to_string();
 
         future_into_py(py, async move {
-            let users = client
-                .query_users(&admin_policy, Some(&username))
-                .await
-                .map_err(as_to_pyerr)?;
-
+            let users =
+                client_ops::do_admin_query_users(&client, &admin_policy, Some(&username)).await?;
             Python::attach(|py| {
                 if let Some(user) = users.first() {
                     user_to_py(py, user)
@@ -1201,11 +945,7 @@ impl PyAsyncClient {
         let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         future_into_py(py, async move {
-            let users = client
-                .query_users(&admin_policy, None)
-                .await
-                .map_err(as_to_pyerr)?;
-
+            let users = client_ops::do_admin_query_users(&client, &admin_policy, None).await?;
             Python::attach(|py| {
                 let list = PyList::empty(py);
                 for user in &users {
@@ -1243,18 +983,7 @@ impl PyAsyncClient {
         )?;
 
         future_into_py(py, async move {
-            let wl_refs: Vec<&str> = args.whitelist.iter().map(|s| s.as_str()).collect();
-            client
-                .create_role(
-                    &args.admin_policy,
-                    &args.role,
-                    &args.privileges,
-                    &wl_refs,
-                    args.read_quota,
-                    args.write_quota,
-                )
-                .await
-                .map_err(as_to_pyerr)
+            client_ops::do_admin_create_role(&client, args).await
         })
     }
 
@@ -1272,10 +1001,7 @@ impl PyAsyncClient {
         let role = role.to_string();
 
         future_into_py(py, async move {
-            client
-                .drop_role(&admin_policy, &role)
-                .await
-                .map_err(as_to_pyerr)
+            client_ops::do_admin_drop_role(&client, &admin_policy, &role).await
         })
     }
 
@@ -1294,10 +1020,8 @@ impl PyAsyncClient {
         let role = role.to_string();
 
         future_into_py(py, async move {
-            client
-                .grant_privileges(&admin_policy, &role, &rust_privileges)
+            client_ops::do_admin_grant_privileges(&client, &admin_policy, &role, &rust_privileges)
                 .await
-                .map_err(as_to_pyerr)
         })
     }
 
@@ -1316,10 +1040,8 @@ impl PyAsyncClient {
         let role = role.to_string();
 
         future_into_py(py, async move {
-            client
-                .revoke_privileges(&admin_policy, &role, &rust_privileges)
+            client_ops::do_admin_revoke_privileges(&client, &admin_policy, &role, &rust_privileges)
                 .await
-                .map_err(as_to_pyerr)
         })
     }
 
@@ -1336,11 +1058,8 @@ impl PyAsyncClient {
         let role_name = role.to_string();
 
         future_into_py(py, async move {
-            let roles = client
-                .query_roles(&admin_policy, Some(&role_name))
-                .await
-                .map_err(as_to_pyerr)?;
-
+            let roles =
+                client_ops::do_admin_query_roles(&client, &admin_policy, Some(&role_name)).await?;
             Python::attach(|py| {
                 if let Some(r) = roles.first() {
                     role_to_py(py, r)
@@ -1365,11 +1084,7 @@ impl PyAsyncClient {
         let admin_policy = client_common::prepare_admin_policy(policy)?;
 
         future_into_py(py, async move {
-            let roles = client
-                .query_roles(&admin_policy, None)
-                .await
-                .map_err(as_to_pyerr)?;
-
+            let roles = client_ops::do_admin_query_roles(&client, &admin_policy, None).await?;
             Python::attach(|py| {
                 let list = PyList::empty(py);
                 for r in &roles {
@@ -1394,11 +1109,7 @@ impl PyAsyncClient {
         let role = role.to_string();
 
         future_into_py(py, async move {
-            let wl_refs: Vec<&str> = whitelist.iter().map(|s| s.as_str()).collect();
-            client
-                .set_allowlist(&admin_policy, &role, &wl_refs)
-                .await
-                .map_err(as_to_pyerr)
+            client_ops::do_admin_set_whitelist(&client, &admin_policy, &role, &whitelist).await
         })
     }
 
@@ -1417,10 +1128,8 @@ impl PyAsyncClient {
         let role = role.to_string();
 
         future_into_py(py, async move {
-            client
-                .set_quotas(&admin_policy, &role, read_quota, write_quota)
+            client_ops::do_admin_set_quotas(&client, &admin_policy, &role, read_quota, write_quota)
                 .await
-                .map_err(as_to_pyerr)
         })
     }
 }
@@ -1455,25 +1164,8 @@ impl PyAsyncClient {
         let args = client_common::prepare_index_create_args(
             namespace, set_name, bin_name, index_name, index_type, policy,
         )?;
-
         future_into_py(py, async move {
-            let task = client
-                .create_index_on_bin(
-                    &args.admin_policy,
-                    &args.namespace,
-                    &args.set_name,
-                    &args.bin_name,
-                    &args.index_name,
-                    args.index_type,
-                    aerospike_core::CollectionIndexType::Default,
-                    None,
-                )
-                .await
-                .map_err(as_to_pyerr)?;
-            task.wait_till_complete(None::<std::time::Duration>)
-                .await
-                .map_err(as_to_pyerr)?;
-            Ok(())
+            client_ops::do_index_create(&client, args).await
         })
     }
 }

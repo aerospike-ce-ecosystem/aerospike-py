@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
-use crate::client_common::{self, PutPolicy};
-use crate::traced_exists_op;
-use crate::traced_op;
-use aerospike_core::{
-    BatchOperation, BatchWritePolicy, Bins, Client as AsClient, Error as AsError, ResultCode, Task,
-};
-use log::{debug, info, trace, warn};
+use crate::client_common;
+use crate::client_ops;
+use aerospike_core::{Client as AsClient, Error as AsError, ResultCode};
+use log::{debug, info, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
@@ -14,7 +11,6 @@ use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::parse_client_policy;
-use crate::policy::write_policy::DEFAULT_WRITE_POLICY;
 use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::runtime::RUNTIME;
 use crate::types::host::parse_hosts_from_config;
@@ -102,7 +98,6 @@ impl PyClient {
 
     /// Check if the client is connected
     fn is_connected(&self, py: Python<'_>) -> PyResult<bool> {
-        trace!("Checking client connection status");
         match &self.inner {
             Some(client) => {
                 let client = client.clone();
@@ -130,7 +125,6 @@ impl PyClient {
     // ── Info ─────────────────────────────────────────────────────
 
     /// Send an info command to all nodes in the cluster.
-    /// Returns a list of (node_name, error_code, response) tuples.
     #[pyo3(signature = (command, policy=None))]
     fn info_all(
         &self,
@@ -140,22 +134,10 @@ impl PyClient {
     ) -> PyResult<Vec<(String, i32, String)>> {
         let client = self.get_client()?;
         let args = client_common::prepare_info_args(command, policy)?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                let nodes = client.nodes().await;
-                let mut results = Vec::new();
-                for node in &nodes {
-                    let r = node.info(&args.admin_policy, &[&args.command]).await;
-                    results.push(client_common::info_node_result(node, &args.command, r));
-                }
-                Ok(results)
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_info_all(client, &args)))
     }
 
     /// Send an info command to a random node in the cluster.
-    /// Returns the response string.
     #[pyo3(signature = (command, policy=None))]
     fn info_random_node(
         &self,
@@ -165,21 +147,7 @@ impl PyClient {
     ) -> PyResult<String> {
         let client = self.get_client()?;
         let args = client_common::prepare_info_args(command, policy)?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                let node = client
-                    .cluster
-                    .get_random_node()
-                    .await
-                    .map_err(as_to_pyerr)?;
-                let map = node
-                    .info(&args.admin_policy, &[&args.command])
-                    .await
-                    .map_err(as_to_pyerr)?;
-                Ok(map.get(&args.command).cloned().unwrap_or_default())
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_info_random_node(client, &args)))
     }
 
     /// Write a record
@@ -196,36 +164,7 @@ impl PyClient {
             client_common::prepare_put_args(py, key, bins, meta, policy, &self.connection_info)?;
         let client = self.get_client()?;
         debug!("put: ns={} set={}", args.key.namespace, args.key.set_name);
-
-        match args.policy {
-            PutPolicy::Default => {
-                let wp = &*DEFAULT_WRITE_POLICY;
-                py.detach(|| {
-                    RUNTIME.block_on(async {
-                        traced_op!(
-                            "put",
-                            &args.key.namespace,
-                            &args.key.set_name,
-                            args.parent_ctx,
-                            args.conn_info,
-                            client.put(wp, &args.key, &args.bins).await
-                        )
-                    })
-                })
-            }
-            PutPolicy::Custom(ref wp) => py.detach(|| {
-                RUNTIME.block_on(async {
-                    traced_op!(
-                        "put",
-                        &args.key.namespace,
-                        &args.key.set_name,
-                        args.parent_ctx,
-                        args.conn_info,
-                        client.put(wp, &args.key, &args.bins).await
-                    )
-                })
-            }),
-        }
+        py.detach(|| RUNTIME.block_on(client_ops::do_put(client, args)))
     }
 
     /// Read a record
@@ -239,24 +178,8 @@ impl PyClient {
         let client = self.get_client()?;
         let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
         debug!("get: ns={} set={}", args.key.namespace, args.key.set_name);
-
-        // Pre-compute Python key before releasing GIL to avoid Rust→Python re-conversion
         let key_py = key_to_py(py, &args.key)?;
-
-        let rp = args.read_policy();
-        let record = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "get",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.get(rp, &args.key, Bins::All).await
-                )
-            })
-        })?;
-
+        let record = py.detach(|| RUNTIME.block_on(client_ops::do_get(client, &args)))?;
         record_to_py_with_key(py, &record, key_py)
     }
 
@@ -276,25 +199,8 @@ impl PyClient {
             "select: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-
-        // Pre-compute Python key before releasing GIL
         let key_py = key_to_py(py, &args.key)?;
-
-        let rp = args.read_policy();
-        let bins_selector = args.bins_selector();
-        let record = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "select",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.get(rp, &args.key, bins_selector).await
-                )
-            })
-        })?;
-
+        let record = py.detach(|| RUNTIME.block_on(client_ops::do_select(client, &args)))?;
         record_to_py_with_key(py, &record, key_py)
     }
 
@@ -313,19 +219,7 @@ impl PyClient {
             args.key.namespace, args.key.set_name
         );
         let key_py = key_to_py(py, &args.key)?;
-
-        let result = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_exists_op!(
-                    "exists",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.get(&args.read_policy, &args.key, Bins::None).await
-                )
-            })
-        });
+        let result = py.detach(|| RUNTIME.block_on(client_ops::do_exists(&client, &args)));
 
         match result {
             Ok(record) => {
@@ -357,26 +251,7 @@ impl PyClient {
             "remove: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-
-        let existed = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "delete",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.delete(&args.write_policy, &args.key).await
-                )
-            })
-        })?;
-
-        if !existed {
-            return Err(crate::errors::RecordNotFound::new_err(
-                "AEROSPIKE_ERR (2): Record not found",
-            ));
-        }
-        Ok(())
+        py.detach(|| RUNTIME.block_on(client_ops::do_remove(client, args)))
     }
 
     /// Reset record's TTL
@@ -393,19 +268,7 @@ impl PyClient {
         let args =
             client_common::prepare_touch_args(py, key, val, meta, policy, &self.connection_info)?;
         debug!("touch: ns={} set={}", args.key.namespace, args.key.set_name);
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "touch",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.touch(&args.write_policy, &args.key).await
-                )
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_touch(client, args)))
     }
 
     /// Append a string to a bin
@@ -433,23 +296,7 @@ impl PyClient {
             "append: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "append",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    {
-                        client
-                            .append(&args.write_policy, &args.key, &args.bins)
-                            .await
-                    }
-                )
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_append(client, args)))
     }
 
     /// Prepend a string to a bin
@@ -477,23 +324,7 @@ impl PyClient {
             "prepend: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "prepend",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    {
-                        client
-                            .prepend(&args.write_policy, &args.key, &args.bins)
-                            .await
-                    }
-                )
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_prepend(client, args)))
     }
 
     /// Increment an integer bin
@@ -521,19 +352,7 @@ impl PyClient {
             "increment: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "increment",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.add(&args.write_policy, &args.key, &args.bins).await
-                )
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_increment(client, args)))
     }
 
     /// Remove bins from a record by setting them to nil
@@ -555,19 +374,7 @@ impl PyClient {
             policy,
             &self.connection_info,
         )?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "remove_bin",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.put(&args.write_policy, &args.key, &args.bins).await
-                )
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_remove_bin(client, args)))
     }
 
     /// Perform multiple operations on a single record
@@ -589,27 +396,8 @@ impl PyClient {
             args.key.set_name,
             args.ops.len()
         );
-
-        // Pre-compute Python key before releasing GIL
         let key_py = key_to_py(py, &args.key)?;
-
-        let record = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "operate",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    {
-                        client
-                            .operate(&args.write_policy, &args.key, &args.ops)
-                            .await
-                    }
-                )
-            })
-        })?;
-
+        let record = py.detach(|| RUNTIME.block_on(client_ops::do_operate(client, &args)))?;
         record_to_py_with_key(py, &record, key_py)
     }
 
@@ -632,26 +420,9 @@ impl PyClient {
             args.key.set_name,
             args.ops.len()
         );
-
-        // Pre-compute Python key before releasing GIL
         let pre_key_py = key_to_py(py, &args.key)?;
-
-        let record = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "operate_ordered",
-                    &args.key.namespace,
-                    &args.key.set_name,
-                    args.parent_ctx,
-                    args.conn_info,
-                    {
-                        client
-                            .operate(&args.write_policy, &args.key, &args.ops)
-                            .await
-                    }
-                )
-            })
-        })?;
+        let record =
+            py.detach(|| RUNTIME.block_on(client_ops::do_operate_ordered(client, &args)))?;
 
         let key_py = match &record.key {
             Some(k) => key_to_py(py, k)?,
@@ -775,16 +546,7 @@ impl PyClient {
         info!("Removing index: ns={} index={}", namespace, index_name);
         let client = self.get_client()?.clone();
         let args = client_common::prepare_index_remove_args(namespace, index_name, policy)?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .drop_index(&args.admin_policy, &args.namespace, "", &args.index_name)
-                    .await
-                    .map_err(as_to_pyerr)?;
-                Ok(())
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_index_remove(&client, args)))
     }
 
     // ── Truncate ──────────────────────────────────────────────────
@@ -802,20 +564,7 @@ impl PyClient {
         warn!("Truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
         let args = client_common::prepare_truncate_args(namespace, set_name, nanos, policy)?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .truncate(
-                        &args.admin_policy,
-                        &args.namespace,
-                        &args.set_name,
-                        args.nanos,
-                    )
-                    .await
-                    .map_err(as_to_pyerr)
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_truncate(&client, args)))
     }
 
     // ── UDF ───────────────────────────────────────────────────────
@@ -832,24 +581,7 @@ impl PyClient {
         info!("Registering UDF: filename={}", filename);
         let client = self.get_client()?.clone();
         let args = client_common::prepare_udf_put_args(filename, udf_type, policy)?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                let task = client
-                    .register_udf(
-                        &args.admin_policy,
-                        &args.udf_body,
-                        &args.server_path,
-                        args.language,
-                    )
-                    .await
-                    .map_err(as_to_pyerr)?;
-                task.wait_till_complete(None::<std::time::Duration>)
-                    .await
-                    .map_err(as_to_pyerr)?;
-                Ok(())
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_udf_put(&client, args)))
     }
 
     /// Remove a UDF module.
@@ -863,19 +595,7 @@ impl PyClient {
         info!("Removing UDF: module={}", module);
         let client = self.get_client()?.clone();
         let args = client_common::prepare_udf_remove_args(module, policy)?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                let task = client
-                    .remove_udf(&args.admin_policy, &args.server_path)
-                    .await
-                    .map_err(as_to_pyerr)?;
-                task.wait_till_complete(None::<std::time::Duration>)
-                    .await
-                    .map_err(as_to_pyerr)?;
-                Ok(())
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_udf_remove(&client, args)))
     }
 
     /// Execute a UDF on a single record.
@@ -895,22 +615,7 @@ impl PyClient {
             "apply UDF: ns={} set={} module={} function={}",
             a.key.namespace, a.key.set_name, a.module, a.function
         );
-
-        let result = py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .execute_udf(
-                        &a.write_policy,
-                        &a.key,
-                        &a.module,
-                        &a.function,
-                        a.args.as_deref(),
-                    )
-                    .await
-                    .map_err(as_to_pyerr)
-            })
-        })?;
-
+        let result = py.detach(|| RUNTIME.block_on(client_ops::do_apply(&client, &a)))?;
         match result {
             Some(val) => value_to_py(py, &val),
             None => Ok(py.None()),
@@ -932,15 +637,14 @@ impl PyClient {
         info!("Creating user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-        let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .create_user(&admin_policy, username, password, &role_refs)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_create_user(
+                &client,
+                &admin_policy,
+                username,
+                password,
+                &roles,
+            ))
         })
     }
 
@@ -955,14 +659,12 @@ impl PyClient {
         info!("Dropping user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .drop_user(&admin_policy, username)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_drop_user(
+                &client,
+                &admin_policy,
+                username,
+            ))
         })
     }
 
@@ -978,14 +680,13 @@ impl PyClient {
         info!("Changing password for user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .change_password(&admin_policy, username, password)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_change_password(
+                &client,
+                &admin_policy,
+                username,
+                password,
+            ))
         })
     }
 
@@ -1001,15 +702,13 @@ impl PyClient {
         info!("Granting roles to user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-        let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .grant_roles(&admin_policy, username, &role_refs)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_grant_roles(
+                &client,
+                &admin_policy,
+                username,
+                &roles,
+            ))
         })
     }
 
@@ -1025,15 +724,13 @@ impl PyClient {
         info!("Revoking roles from user: username={}", username);
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-        let role_refs: Vec<&str> = roles.iter().map(|s| s.as_str()).collect();
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .revoke_roles(&admin_policy, username, &role_refs)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_revoke_roles(
+                &client,
+                &admin_policy,
+                username,
+                &roles,
+            ))
         })
     }
 
@@ -1048,14 +745,12 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
         let username = username.to_string();
-
         let users = py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .query_users(&admin_policy, Some(&username))
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_query_users(
+                &client,
+                &admin_policy,
+                Some(&username),
+            ))
         })?;
 
         if let Some(user) = users.first() {
@@ -1077,14 +772,12 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-
         let users = py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .query_users(&admin_policy, None)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_query_users(
+                &client,
+                &admin_policy,
+                None,
+            ))
         })?;
 
         let list = PyList::empty(py);
@@ -1117,23 +810,7 @@ impl PyClient {
             read_quota,
             write_quota,
         )?;
-        let wl_refs: Vec<&str> = args.whitelist.iter().map(|s| s.as_str()).collect();
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .create_role(
-                        &args.admin_policy,
-                        &args.role,
-                        &args.privileges,
-                        &wl_refs,
-                        args.read_quota,
-                        args.write_quota,
-                    )
-                    .await
-                    .map_err(as_to_pyerr)
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_admin_create_role(&client, args)))
     }
 
     /// Drop (delete) a role.
@@ -1147,15 +824,7 @@ impl PyClient {
         info!("Dropping role: role={}", role);
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .drop_role(&admin_policy, role)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_admin_drop_role(&client, &admin_policy, role)))
     }
 
     /// Grant privileges to a role.
@@ -1170,14 +839,13 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .grant_privileges(&admin_policy, role, &rust_privileges)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_grant_privileges(
+                &client,
+                &admin_policy,
+                role,
+                &rust_privileges,
+            ))
         })
     }
 
@@ -1193,14 +861,13 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
         let rust_privileges = parse_privileges(privileges)?;
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .revoke_privileges(&admin_policy, role, &rust_privileges)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_revoke_privileges(
+                &client,
+                &admin_policy,
+                role,
+                &rust_privileges,
+            ))
         })
     }
 
@@ -1215,14 +882,12 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
         let role_name = role.to_string();
-
         let roles = py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .query_roles(&admin_policy, Some(&role_name))
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_query_roles(
+                &client,
+                &admin_policy,
+                Some(&role_name),
+            ))
         })?;
 
         if let Some(r) = roles.first() {
@@ -1244,14 +909,12 @@ impl PyClient {
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-
         let roles = py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .query_roles(&admin_policy, None)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_query_roles(
+                &client,
+                &admin_policy,
+                None,
+            ))
         })?;
 
         let list = PyList::empty(py);
@@ -1272,15 +935,13 @@ impl PyClient {
     ) -> PyResult<()> {
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-        let wl_refs: Vec<&str> = whitelist.iter().map(|s| s.as_str()).collect();
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .set_allowlist(&admin_policy, role, &wl_refs)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_set_whitelist(
+                &client,
+                &admin_policy,
+                role,
+                &whitelist,
+            ))
         })
     }
 
@@ -1296,14 +957,14 @@ impl PyClient {
     ) -> PyResult<()> {
         let client = self.get_client()?.clone();
         let admin_policy = client_common::prepare_admin_policy(policy)?;
-
         py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .set_quotas(&admin_policy, role, read_quota, write_quota)
-                    .await
-                    .map_err(as_to_pyerr)
-            })
+            RUNTIME.block_on(client_ops::do_admin_set_quotas(
+                &client,
+                &admin_policy,
+                role,
+                read_quota,
+                write_quota,
+            ))
         })
     }
 
@@ -1323,20 +984,7 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let args =
             client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?;
-        let ops = args.to_batch_ops();
-
-        let results = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "batch_read",
-                    &args.batch_ns,
-                    &args.batch_set,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.batch(&args.batch_policy, &ops).await
-                )
-            })
-        })?;
+        let results = py.detach(|| RUNTIME.block_on(client_ops::do_batch_read(&client, &args)))?;
 
         match _dtype {
             Some(d) => crate::numpy_support::batch_to_numpy_py(py, &results, d),
@@ -1365,29 +1013,12 @@ impl PyClient {
             policy,
             &self.connection_info,
         )?;
-        let batch_ops = args.to_batch_ops();
-
-        let results = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "batch_operate",
-                    &args.batch_ns,
-                    &args.batch_set,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.batch(&args.batch_policy, &batch_ops).await
-                )
-            })
-        })?;
-
+        let results =
+            py.detach(|| RUNTIME.block_on(client_ops::do_batch_operate(&client, &args)))?;
         batch_records_to_py(py, &results)
     }
 
     /// Write multiple records from a numpy structured array.
-    ///
-    /// Each row becomes a separate write operation in the batch.
-    /// The dtype must contain a `_key` field (or custom key_field) for the record key,
-    /// and remaining non-underscore-prefixed fields become bins.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (data, namespace, set_name, _dtype, key_field="_key", policy=None))]
     fn batch_write_numpy(
@@ -1414,27 +1045,19 @@ impl PyClient {
             py, data, _dtype, namespace, set_name, key_field,
         )?;
 
-        let write_policy = BatchWritePolicy::default();
-        let batch_ops: Vec<BatchOperation> = records
-            .iter()
-            .map(|(key, bins)| {
-                let ops: Vec<aerospike_core::operations::Operation> =
-                    bins.iter().map(aerospike_core::operations::put).collect();
-                BatchOperation::write(&write_policy, key.clone(), ops)
-            })
-            .collect();
+        let ns = namespace.to_string();
+        let set = set_name.to_string();
 
         let results = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "batch_write_numpy",
-                    namespace,
-                    set_name,
-                    parent_ctx,
-                    conn_info,
-                    client.batch(&batch_policy, &batch_ops).await
-                )
-            })
+            RUNTIME.block_on(client_ops::do_batch_write(
+                &client,
+                &batch_policy,
+                &records,
+                &ns,
+                &set,
+                parent_ctx,
+                conn_info,
+            ))
         })?;
 
         batch_records_to_py(py, &results)
@@ -1452,21 +1075,8 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let args =
             client_common::prepare_batch_remove_args(py, keys, policy, &self.connection_info)?;
-        let ops = args.to_batch_ops();
-
-        let results = py.detach(|| {
-            RUNTIME.block_on(async {
-                traced_op!(
-                    "batch_remove",
-                    &args.batch_ns,
-                    &args.batch_set,
-                    args.parent_ctx,
-                    args.conn_info,
-                    client.batch(&args.batch_policy, &ops).await
-                )
-            })
-        })?;
-
+        let results =
+            py.detach(|| RUNTIME.block_on(client_ops::do_batch_remove(&client, &args)))?;
         batch_records_to_py(py, &results)
     }
 }
@@ -1499,27 +1109,6 @@ impl PyClient {
         let args = client_common::prepare_index_create_args(
             namespace, set_name, bin_name, index_name, index_type, policy,
         )?;
-
-        py.detach(|| {
-            RUNTIME.block_on(async {
-                let task = client
-                    .create_index_on_bin(
-                        &args.admin_policy,
-                        &args.namespace,
-                        &args.set_name,
-                        &args.bin_name,
-                        &args.index_name,
-                        args.index_type,
-                        aerospike_core::CollectionIndexType::Default,
-                        None,
-                    )
-                    .await
-                    .map_err(as_to_pyerr)?;
-                task.wait_till_complete(None::<std::time::Duration>)
-                    .await
-                    .map_err(as_to_pyerr)?;
-                Ok(())
-            })
-        })
+        py.detach(|| RUNTIME.block_on(client_ops::do_index_create(&client, args)))
     }
 }
