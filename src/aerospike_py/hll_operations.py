@@ -38,7 +38,7 @@ _OP_HLL_SET_UNION = 3010
 def hll_init(
     bin: str,
     index_bit_count: int,
-    minhash_bit_count: int = 0,
+    minhash_bit_count: Optional[int] = None,
     *,
     policy: Optional[HLLPolicy] = None,
 ) -> Operation:
@@ -54,16 +54,16 @@ def hll_init(
         _OP_HLL_INIT,
         bin,
         index_bit_count=index_bit_count,
-        minhash_bit_count=minhash_bit_count if minhash_bit_count else _UNSET,
-        hll_policy=policy or _UNSET,
+        minhash_bit_count=minhash_bit_count if minhash_bit_count is not None else _UNSET,
+        hll_policy=policy if policy is not None else _UNSET,
     )
 
 
 def hll_add(
     bin: str,
     values: list[Any],
-    index_bit_count: int = 0,
-    minhash_bit_count: int = 0,
+    index_bit_count: Optional[int] = None,
+    minhash_bit_count: Optional[int] = None,
     *,
     policy: Optional[HLLPolicy] = None,
 ) -> Operation:
@@ -75,17 +75,17 @@ def hll_add(
     Args:
         bin: Name of the HLL bin.
         values: List of values to add.
-        index_bit_count: Number of index bits for auto-creation (0 = use existing).
-        minhash_bit_count: Number of min-hash bits for auto-creation (0 = use existing).
+        index_bit_count: Number of index bits for auto-creation (None = use existing).
+        minhash_bit_count: Number of min-hash bits for auto-creation (None = use existing).
         policy: Optional HLL write policy.
     """
     return _build_op(
         _OP_HLL_ADD,
         bin,
         val=values,
-        index_bit_count=index_bit_count if index_bit_count else _UNSET,
-        minhash_bit_count=minhash_bit_count if minhash_bit_count else _UNSET,
-        hll_policy=policy or _UNSET,
+        index_bit_count=index_bit_count if index_bit_count is not None else _UNSET,
+        minhash_bit_count=minhash_bit_count if minhash_bit_count is not None else _UNSET,
+        hll_policy=policy if policy is not None else _UNSET,
     )
 
 
@@ -168,5 +168,5 @@ def hll_set_union(
         _OP_HLL_SET_UNION,
         bin,
         val=values,
-        hll_policy=policy or _UNSET,
+        hll_policy=policy if policy is not None else _UNSET,
     )

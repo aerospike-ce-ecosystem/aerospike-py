@@ -9,14 +9,14 @@ Common ``policy`` flags (import from ``aerospike_py``):
     ``HLL_WRITE_ALLOW_FOLD``.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from aerospike_py._types import HLLPolicy, Operation
 
 def hll_init(
     bin: str,
     index_bit_count: int,
-    minhash_bit_count: int = 0,
+    minhash_bit_count: Optional[int] = None,
     *,
     policy: Optional[HLLPolicy] = None,
 ) -> Operation:
@@ -31,9 +31,9 @@ def hll_init(
 
 def hll_add(
     bin: str,
-    values: list,
-    index_bit_count: int = 0,
-    minhash_bit_count: int = 0,
+    values: list[Any],
+    index_bit_count: Optional[int] = None,
+    minhash_bit_count: Optional[int] = None,
     *,
     policy: Optional[HLLPolicy] = None,
 ) -> Operation:
@@ -45,15 +45,15 @@ def hll_add(
     Args:
         bin: Name of the HLL bin.
         values: List of values to add.
-        index_bit_count: Number of index bits for auto-creation (0 = use existing).
-        minhash_bit_count: Number of min-hash bits for auto-creation (0 = use existing).
+        index_bit_count: Number of index bits for auto-creation (None = use existing).
+        minhash_bit_count: Number of min-hash bits for auto-creation (None = use existing).
         policy: Optional HLL write policy.
     """
 
 def hll_get_count(bin: str) -> Operation:
     """Return the estimated element count of the HLL bin. (Read operation)"""
 
-def hll_get_union(bin: str, values: list) -> Operation:
+def hll_get_union(bin: str, values: list[Any]) -> Operation:
     """Return an HLL object that is the union of the bin with the given HLL list. (Read operation)
 
     Args:
@@ -61,7 +61,7 @@ def hll_get_union(bin: str, values: list) -> Operation:
         values: List of HLL bin values to union with.
     """
 
-def hll_get_union_count(bin: str, values: list) -> Operation:
+def hll_get_union_count(bin: str, values: list[Any]) -> Operation:
     """Return the estimated count of the union. (Read operation)
 
     Args:
@@ -69,7 +69,7 @@ def hll_get_union_count(bin: str, values: list) -> Operation:
         values: List of HLL bin values to union with.
     """
 
-def hll_get_intersect_count(bin: str, values: list) -> Operation:
+def hll_get_intersect_count(bin: str, values: list[Any]) -> Operation:
     """Return the estimated count of the intersection. (Read operation)
 
     Args:
@@ -77,7 +77,7 @@ def hll_get_intersect_count(bin: str, values: list) -> Operation:
         values: List of HLL bin values to intersect with.
     """
 
-def hll_get_similarity(bin: str, values: list) -> Operation:
+def hll_get_similarity(bin: str, values: list[Any]) -> Operation:
     """Return the estimated similarity (Jaccard index). (Read operation)
 
     Args:

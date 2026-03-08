@@ -18,9 +18,10 @@ Optional keys (CDT operations):
     ``return_type`` (int): ``LIST_RETURN_*`` or ``MAP_RETURN_*`` constant.
     ``list_policy`` (ListPolicy): Policy for list CDT operations.
     ``map_policy`` (MapPolicy): Policy for map CDT operations.
+    ``hll_policy`` (HLLPolicy): Policy for HyperLogLog CDT operations.
 
-Use ``aerospike_py.list_operations`` or ``aerospike_py.map_operations``
-helper modules to build CDT operation dicts.
+Use ``aerospike_py.list_operations``, ``aerospike_py.map_operations``,
+or ``aerospike_py.hll_operations`` helper modules to build CDT operation dicts.
 """
 
 
