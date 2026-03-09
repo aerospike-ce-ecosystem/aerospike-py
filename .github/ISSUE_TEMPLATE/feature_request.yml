@@ -1,0 +1,48 @@
+name: Feature Request
+description: Suggest a new feature for aerospike-py
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please describe what you'd like.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve?
+      placeholder: "I'm always frustrated when ..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this to work?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions you've considered
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      options:
+        - "New API method"
+        - "Performance improvement"
+        - "Developer experience"
+        - "Documentation"
+        - "Observability (metrics/tracing)"
+        - "NumPy integration"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, code examples, or screenshots
