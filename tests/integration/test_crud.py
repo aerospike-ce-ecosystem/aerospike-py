@@ -13,7 +13,7 @@ class TestPutGet:
 
         assert bins["name"] == "John"
         assert bins["age"] == 30
-        assert meta.gen >= 1
+        assert meta.gen == 1
 
     def test_put_with_policy_key_send(self, client, cleanup):
         key = ("test", "demo", "test_key_send")
@@ -23,7 +23,7 @@ class TestPutGet:
         key_tuple, meta, bins = client.get(key)
 
         assert bins["val"] == 1
-        assert meta.gen >= 1
+        assert meta.gen == 1
 
     def test_put_with_meta_ttl(self, client, cleanup):
         key = ("test", "demo", "test_ttl")
@@ -84,7 +84,7 @@ class TestExists:
         key_tuple, meta = client.exists(key)
 
         assert meta is not None
-        assert meta.gen >= 1
+        assert meta.gen == 1
 
     def test_exists_not_found(self, client, cleanup):
         key = ("test", "demo", "test_exists_notfound")
@@ -187,7 +187,7 @@ class TestOperate:
         ]
         _, meta, ordered = client.operate_ordered(key, ops)
         assert isinstance(ordered, list)
-        assert meta.gen >= 1
+        assert meta.gen == 1
 
 
 class TestConnection:

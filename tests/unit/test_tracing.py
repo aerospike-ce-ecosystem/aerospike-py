@@ -5,6 +5,7 @@ import threading
 import pytest
 
 import aerospike_py
+from tests import DUMMY_CONFIG
 
 # ---------------------------------------------------------------------------
 # Export & API surface tests
@@ -141,7 +142,7 @@ class TestTracingDoesNotAffectClient:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.client(DUMMY_CONFIG)
             try:
                 c.put(("test", "demo", "key1"), {"a": 1})
                 assert False, "Should have raised ClientError"
@@ -154,7 +155,7 @@ class TestTracingDoesNotAffectClient:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.client(DUMMY_CONFIG)
             try:
                 c.get(("test", "demo", "key1"))
                 assert False, "Should have raised ClientError"
@@ -167,7 +168,7 @@ class TestTracingDoesNotAffectClient:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.client(DUMMY_CONFIG)
             try:
                 c.exists(("test", "demo", "key1"))
                 assert False, "Should have raised ClientError"
@@ -180,7 +181,7 @@ class TestTracingDoesNotAffectClient:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.client(DUMMY_CONFIG)
             try:
                 c.remove(("test", "demo", "key1"))
                 assert False, "Should have raised ClientError"
@@ -193,7 +194,7 @@ class TestTracingDoesNotAffectClient:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.client(DUMMY_CONFIG)
             try:
                 c.batch_read([("test", "demo", "k1"), ("test", "demo", "k2")])
                 assert False, "Should have raised ClientError"
@@ -267,7 +268,7 @@ class TestAsyncClientTracing:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.AsyncClient(DUMMY_CONFIG)
             try:
                 await c.put(("test", "demo", "key1"), {"a": 1})
                 assert False, "Should have raised ClientError"
@@ -280,7 +281,7 @@ class TestAsyncClientTracing:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.AsyncClient(DUMMY_CONFIG)
             try:
                 await c.get(("test", "demo", "key1"))
                 assert False, "Should have raised ClientError"
@@ -293,7 +294,7 @@ class TestAsyncClientTracing:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.AsyncClient(DUMMY_CONFIG)
             try:
                 await c.exists(("test", "demo", "key1"))
                 assert False, "Should have raised ClientError"
@@ -383,7 +384,7 @@ class TestConnectionInfoHostFormats:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.client(DUMMY_CONFIG)
             try:
                 c.exists(("test", "demo", "k"))
             except aerospike_py.ClientError:
@@ -426,7 +427,7 @@ class TestConnectionInfoClusterName:
         monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
         aerospike_py.init_tracing()
         try:
-            c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+            c = aerospike_py.client(DUMMY_CONFIG)
             try:
                 c.remove(("test", "demo", "k"))
             except aerospike_py.ClientError:

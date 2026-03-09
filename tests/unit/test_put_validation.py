@@ -8,10 +8,11 @@ Covers:
 import pytest
 
 import aerospike_py
+from tests import DUMMY_CONFIG
 
 
 def _make_client():
-    return aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+    return aerospike_py.client(DUMMY_CONFIG)
 
 
 @pytest.mark.parametrize(
