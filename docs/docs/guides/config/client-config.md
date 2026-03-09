@@ -32,8 +32,9 @@ client = aerospike.client(config).connect()
 | `user` / `password` | `str` | `""` | Credentials |
 | `timeout` | `int` | `1000` | Connection timeout (ms) |
 | `idle_timeout` | `int` | `55` | Idle connection timeout (s) |
-| `max_conns_per_node` | `int` | `100` | Max connections per node |
+| `max_conns_per_node` | `int` | `256` | Max connections per node |
 | `min_conns_per_node` | `int` | `0` | Pre-warm connections |
+| `conn_pools_per_node` | `int` | `1` | Connection pools per node (increase on 8+ CPU cores) |
 | `tend_interval` | `int` | `1000` | Cluster tend interval (ms) |
 | `use_services_alternate` | `bool` | `false` | Use alternate addresses |
 
@@ -58,12 +59,14 @@ config: ClientConfig = {
     "hosts": [("127.0.0.1", 3000)],
     "max_conns_per_node": 300,
     "min_conns_per_node": 10,
+    "conn_pools_per_node": 1,
     "idle_timeout": 55,
 }
 ```
 
 - `max_conns_per_node`: Match to expected concurrent requests per node
 - `min_conns_per_node`: Avoid cold-start latency
+- `conn_pools_per_node`: Number of connection pools per node. Machines with 8 or fewer CPU cores typically need only 1. On machines with more cores, increasing this value reduces lock contention on pooled connections
 - `idle_timeout`: Keep below server `proto-fd-idle-ms` (default 60s)
 
 ## Per-Operation Timeouts

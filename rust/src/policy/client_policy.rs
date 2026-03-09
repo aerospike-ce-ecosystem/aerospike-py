@@ -17,6 +17,7 @@ pub fn parse_client_policy(config: &Bound<'_, PyDict>) -> PyResult<ClientPolicy>
         "idle_timeout" => policy.idle_timeout;
         "max_conns_per_node" => policy.max_conns_per_node;
         "min_conns_per_node" => policy.min_conns_per_node;
+        "conn_pools_per_node" => policy.conn_pools_per_node;
         "tend_interval" => policy.tend_interval;
         "use_services_alternate" => policy.use_services_alternate
     });

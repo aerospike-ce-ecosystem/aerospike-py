@@ -130,6 +130,7 @@ class ClientConfig(TypedDict, total=False):
     idle_timeout: int
     max_conns_per_node: int
     min_conns_per_node: int
+    conn_pools_per_node: int
     tend_interval: int
     use_services_alternate: bool
 
