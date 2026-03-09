@@ -32,73 +32,73 @@ class TestBitOperations:
             (
                 bit_resize,
                 ("mybin", 4),
-                3001,
+                4001,
                 {"byte_size": 4},
             ),
             (
                 bit_insert,
                 ("mybin", 1, b"\xff\xc7"),
-                3002,
+                4002,
                 {"byte_offset": 1, "val": b"\xff\xc7"},
             ),
             (
                 bit_remove,
                 ("mybin", 2, 3),
-                3003,
+                4003,
                 {"byte_offset": 2, "byte_size": 3},
             ),
             (
                 bit_set,
                 ("mybin", 13, 3, b"\xe0"),
-                3004,
+                4004,
                 {"bit_offset": 13, "bit_size": 3, "val": b"\xe0"},
             ),
             (
                 bit_or,
                 ("mybin", 17, 6, b"\xa8"),
-                3005,
+                4005,
                 {"bit_offset": 17, "bit_size": 6, "val": b"\xa8"},
             ),
             (
                 bit_xor,
                 ("mybin", 17, 6, b"\xac"),
-                3006,
+                4006,
                 {"bit_offset": 17, "bit_size": 6, "val": b"\xac"},
             ),
             (
                 bit_and,
                 ("mybin", 23, 9, b"\x3c\x80"),
-                3007,
+                4007,
                 {"bit_offset": 23, "bit_size": 9, "val": b"\x3c\x80"},
             ),
             (
                 bit_not,
                 ("mybin", 25, 6),
-                3008,
+                4008,
                 {"bit_offset": 25, "bit_size": 6},
             ),
             (
                 bit_lshift,
                 ("mybin", 32, 8, 3),
-                3009,
+                4009,
                 {"bit_offset": 32, "bit_size": 8, "shift": 3},
             ),
             (
                 bit_rshift,
                 ("mybin", 0, 9, 1),
-                3010,
+                4010,
                 {"bit_offset": 0, "bit_size": 9, "shift": 1},
             ),
             (
                 bit_get,
                 ("mybin", 9, 5),
-                3050,
+                4050,
                 {"bit_offset": 9, "bit_size": 5},
             ),
             (
                 bit_count,
                 ("mybin", 20, 4),
-                3051,
+                4051,
                 {"bit_offset": 20, "bit_size": 4},
             ),
         ],
@@ -126,7 +126,7 @@ class TestBitOperations:
 
     def test_bit_resize_with_flags(self):
         op = bit_resize("mybin", 8, resize_flags=1)
-        assert op["op"] == 3001
+        assert op["op"] == 4001
         assert op["byte_size"] == 8
         assert op["resize_flags"] == 1
 
@@ -148,7 +148,7 @@ class TestBitOperations:
 
     def test_bit_add_structure(self):
         op = bit_add("mybin", 24, 16, 128, signed=True, action=2)
-        assert op["op"] == 3011
+        assert op["op"] == 4011
         assert op["bit_offset"] == 24
         assert op["bit_size"] == 16
         assert op["val"] == 128
@@ -157,33 +157,33 @@ class TestBitOperations:
 
     def test_bit_subtract_structure(self):
         op = bit_subtract("mybin", 24, 16, 64, signed=False, action=4)
-        assert op["op"] == 3012
+        assert op["op"] == 4012
         assert op["val"] == 64
         assert op["signed"] is False
         assert op["action"] == 4
 
     def test_bit_set_int_structure(self):
         op = bit_set_int("mybin", 1, 8, 127)
-        assert op["op"] == 3013
+        assert op["op"] == 4013
         assert op["bit_offset"] == 1
         assert op["bit_size"] == 8
         assert op["val"] == 127
 
     def test_bit_lscan_structure(self):
         op = bit_lscan("mybin", 24, 8, True)
-        assert op["op"] == 3052
+        assert op["op"] == 4052
         assert op["bit_offset"] == 24
         assert op["bit_size"] == 8
         assert op["val"] is True
 
     def test_bit_rscan_structure(self):
         op = bit_rscan("mybin", 32, 8, False)
-        assert op["op"] == 3053
+        assert op["op"] == 4053
         assert op["val"] is False
 
     def test_bit_get_int_unsigned(self):
         op = bit_get_int("mybin", 8, 16)
-        assert op["op"] == 3054
+        assert op["op"] == 4054
         assert op["bit_offset"] == 8
         assert op["bit_size"] == 16
         assert op["signed"] is False

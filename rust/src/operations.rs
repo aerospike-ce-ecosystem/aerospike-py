@@ -285,7 +285,6 @@ fn get_scan_value(dict: &Bound<'_, PyDict>) -> PyResult<bool> {
         })
 }
 
-
 /// Unwrap a `Value::List` into its inner `Vec`, or wrap a single value in a `Vec`.
 fn values_from_list(val: &Value) -> Vec<Value> {
     match val {
