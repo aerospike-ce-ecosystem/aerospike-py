@@ -9,3 +9,6 @@ AEROSPIKE_CONFIG = {
     ],
     "cluster_name": "docker",
 }
+
+# Lightweight config for unit tests that never connect to a real server.
+DUMMY_CONFIG = {"hosts": [("127.0.0.1", 3000)]}

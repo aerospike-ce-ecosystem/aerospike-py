@@ -695,7 +695,7 @@ class TestOperateOrdered:
         ]
         _, meta, ordered = await invoke(any_client, "operate_ordered", key, ops)
         assert isinstance(ordered, list)
-        assert meta.gen >= 1
+        assert meta.gen == 1
         for item in ordered:
             assert isinstance(item, tuple)
             assert len(item) == 2

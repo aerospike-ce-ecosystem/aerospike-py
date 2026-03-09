@@ -22,6 +22,7 @@ from aerospike_py.types import (
     Record,
     RecordMetadata,
 )
+from tests import DUMMY_CONFIG
 
 # ═══════════════════════════════════════════════════════════════════
 # Import smoke tests
@@ -449,15 +450,15 @@ class TestClientFactoryEdgeCases:
 
     def test_client_is_instance_of_native(self):
         """Client should be a subclass of the native client."""
-        c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+        c = aerospike_py.client(DUMMY_CONFIG)
         assert isinstance(c, aerospike_py.Client)
 
     def test_async_client_creation(self):
-        c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+        c = aerospike_py.AsyncClient(DUMMY_CONFIG)
         assert not c.is_connected()
 
     def test_async_client_is_correct_type(self):
-        c = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+        c = aerospike_py.AsyncClient(DUMMY_CONFIG)
         assert isinstance(c, aerospike_py.AsyncClient)
 
 

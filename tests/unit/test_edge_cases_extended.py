@@ -12,6 +12,7 @@ import pytest
 
 import aerospike_py
 from aerospike_py import AsyncClient, Client
+from tests import DUMMY_CONFIG
 from tests.helpers import invoke
 
 # ═══════════════════════════════════════════════════════════════════
@@ -20,13 +21,13 @@ from tests.helpers import invoke
 
 
 def _make_client() -> Client:
-    """Create an unconnected sync client with a deliberately unreachable host."""
-    return aerospike_py.client({"hosts": [("127.0.0.1", 99999)]})
+    """Create an unconnected client for unit testing (connect() is not called)."""
+    return aerospike_py.client(DUMMY_CONFIG)
 
 
 def _make_async_client() -> AsyncClient:
-    """Create an unconnected async client with a deliberately unreachable host."""
-    return AsyncClient({"hosts": [("127.0.0.1", 99999)]})
+    """Create an unconnected async client for unit testing (connect() is not called)."""
+    return AsyncClient(DUMMY_CONFIG)
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -4,6 +4,7 @@ import pytest
 
 import aerospike_py
 from aerospike_py import exception
+from tests import DUMMY_CONFIG
 
 
 def test_import():
@@ -16,21 +17,21 @@ def test_import():
 
 def test_client_factory():
     """Test that aerospike_py.client() creates a Client."""
-    c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+    c = aerospike_py.client(DUMMY_CONFIG)
     assert isinstance(c, aerospike_py.Client)
     assert not c.is_connected()
 
 
 def test_async_client_factory():
     """Test that aerospike_py.async_client() creates an AsyncClient."""
-    c = aerospike_py.async_client({"hosts": [("127.0.0.1", 3000)]})
+    c = aerospike_py.async_client(DUMMY_CONFIG)
     assert isinstance(c, aerospike_py.AsyncClient)
     assert not c.is_connected()
 
 
 def test_client_not_connected_raises():
     """Test that calling methods on unconnected client raises ClientError."""
-    c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+    c = aerospike_py.client(DUMMY_CONFIG)
     with pytest.raises(aerospike_py.ClientError):
         c.get(("test", "demo", "key1"))
 
@@ -153,7 +154,7 @@ def test_exception_aliases():
 )
 def test_client_not_connected_operations(method, args):
     """Various methods on unconnected client raise ClientError."""
-    c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+    c = aerospike_py.client(DUMMY_CONFIG)
     with pytest.raises(aerospike_py.ClientError):
         getattr(c, method)(*args)
 
@@ -211,6 +212,6 @@ def test_list_map_op_codes_contiguous():
 
 def test_connect_username_without_password():
     """Test that connect() with username but no password raises ClientError."""
-    c = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]})
+    c = aerospike_py.client(DUMMY_CONFIG)
     with pytest.raises(aerospike_py.ClientError):
         c.connect(username="admin")
