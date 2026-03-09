@@ -7,6 +7,7 @@ import numpy as np
 from aerospike_py import exception as exception
 from aerospike_py import list_operations as list_operations
 from aerospike_py import map_operations as map_operations
+from aerospike_py import hll_operations as hll_operations
 from aerospike_py import predicates as predicates
 from aerospike_py.numpy_batch import NumpyBatchRecords as NumpyBatchRecords
 from aerospike_py.types import (
@@ -30,6 +31,7 @@ from aerospike_py.types import (
     WritePolicy as WritePolicy,
 )
 from aerospike_py._types import (
+    HLLPolicy as HLLPolicy,
     ListPolicy as ListPolicy,
     MapPolicy as MapPolicy,
     Operation as Operation,
@@ -2353,6 +2355,17 @@ BIT_WRITE_CREATE_ONLY: int
 BIT_WRITE_UPDATE_ONLY: int
 BIT_WRITE_NO_FAIL: int
 BIT_WRITE_PARTIAL: int
+
+# Bit Resize Flags
+BIT_RESIZE_DEFAULT: int
+BIT_RESIZE_FROM_FRONT: int
+BIT_RESIZE_GROW_ONLY: int
+BIT_RESIZE_SHRINK_ONLY: int
+
+# Bit Overflow Action
+BIT_OVERFLOW_FAIL: int
+BIT_OVERFLOW_SATURATE: int
+BIT_OVERFLOW_WRAP: int
 
 # HLL Write Flags
 HLL_WRITE_DEFAULT: int

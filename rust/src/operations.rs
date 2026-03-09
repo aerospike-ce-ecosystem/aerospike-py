@@ -6,6 +6,8 @@
 
 use aerospike_core::{
     operations,
+    operations::bitwise::{self as bit_ops, BitPolicy, BitwiseOverflowActions, BitwiseResizeFlags},
+    operations::hll::{self as hll_ops, HLLPolicy},
     operations::lists::{
         self as list_ops, ListOrderType, ListPolicy, ListReturnType, ListSortFlags,
     },
@@ -169,6 +171,120 @@ fn parse_map_policy(dict: &Bound<'_, PyDict>) -> PyResult<MapPolicy> {
         Ok(MapPolicy::default())
     }
 }
+
+/// Parse an optional `hll_policy` sub-dict from an operation dict.
+fn parse_hll_policy(dict: &Bound<'_, PyDict>) -> PyResult<HLLPolicy> {
+    if let Some(policy_obj) = dict.get_item("hll_policy")? {
+        if policy_obj.is_none() {
+            return Ok(HLLPolicy::default());
+        }
+        let policy_dict = policy_obj.cast::<PyDict>()?;
+        let flags: i64 = policy_dict
+            .get_item("flags")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or(0);
+        Ok(HLLPolicy { flags })
+    } else {
+        Ok(HLLPolicy::default())
+    }
+}
+
+/// Parse a `BitPolicy` from an operation dict's `"bit_policy"` key.
+fn parse_bit_policy(dict: &Bound<'_, PyDict>) -> PyResult<BitPolicy> {
+    if let Some(flags_obj) = dict.get_item("bit_policy")? {
+        if flags_obj.is_none() {
+            return Ok(BitPolicy::default());
+        }
+        let flags: u8 = flags_obj.extract()?;
+        Ok(BitPolicy::new(flags))
+    } else {
+        Ok(BitPolicy::default())
+    }
+}
+
+fn get_bit_offset(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
+    dict.get_item("bit_offset")?
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("Bit operation requires 'bit_offset'")
+        })?
+        .extract()
+}
+
+fn get_bit_size(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
+    dict.get_item("bit_size")?
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("Bit operation requires 'bit_size'")
+        })?
+        .extract()
+}
+
+fn get_byte_size(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
+    dict.get_item("byte_size")?
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("Bit operation requires 'byte_size'")
+        })?
+        .extract()
+}
+
+fn get_byte_offset(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
+    dict.get_item("byte_offset")?
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("Bit operation requires 'byte_offset'")
+        })?
+        .extract()
+}
+
+fn get_shift(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
+    dict.get_item("shift")?
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("Bit shift operation requires 'shift'")
+        })?
+        .extract()
+}
+
+fn get_signed(dict: &Bound<'_, PyDict>) -> PyResult<bool> {
+    match dict.get_item("signed")? {
+        Some(v) => v.extract(),
+        None => Ok(false),
+    }
+}
+
+fn get_overflow_action(dict: &Bound<'_, PyDict>) -> PyResult<BitwiseOverflowActions> {
+    let action: i32 = dict
+        .get_item("action")?
+        .map(|v| v.extract())
+        .transpose()?
+        .unwrap_or(0);
+    Ok(match action {
+        2 => BitwiseOverflowActions::Saturate,
+        4 => BitwiseOverflowActions::Wrap,
+        _ => BitwiseOverflowActions::Fail,
+    })
+}
+
+fn get_resize_flags(dict: &Bound<'_, PyDict>) -> PyResult<Option<BitwiseResizeFlags>> {
+    let flags: Option<i32> = dict
+        .get_item("resize_flags")?
+        .map(|v| v.extract())
+        .transpose()?;
+    Ok(flags.map(|f| match f {
+        1 => BitwiseResizeFlags::FromFront,
+        2 => BitwiseResizeFlags::GrowOnly,
+        4 => BitwiseResizeFlags::ShrinkOnly,
+        _ => BitwiseResizeFlags::Default,
+    }))
+}
+
+fn get_scan_value(dict: &Bound<'_, PyDict>) -> PyResult<bool> {
+    dict.get_item("val")?
+        .map(|v| v.extract())
+        .transpose()?
+        .ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err("Bit scan operation requires 'val' (bool)")
+        })
+}
+
 
 /// Unwrap a `Value::List` into its inner `Vec`, or wrap a single value in a `Vec`.
 fn values_from_list(val: &Value) -> Vec<Value> {
@@ -649,12 +765,283 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 map_ops::get_by_value_list(&name, values_from_list(&v), rt)
             }
 
+            // ── HLL CDT operations ───────────────────────────
+            OP_HLL_INIT => {
+                let name = require_bin(&bin_name, "hll_init")?;
+                let policy = parse_hll_policy(dict)?;
+                let index_bit_count: i64 = dict
+                    .get_item("index_bit_count")?
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err(
+                            "hll_init requires 'index_bit_count'",
+                        )
+                    })?
+                    .extract()?;
+                let minhash_bit_count: i64 = dict
+                    .get_item("minhash_bit_count")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(-1);
+                hll_ops::init_with_min_hash(&policy, &name, index_bit_count, minhash_bit_count)
+            }
+            OP_HLL_ADD => {
+                let name = require_bin(&bin_name, "hll_add")?;
+                let policy = parse_hll_policy(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                let list = values_from_list(&v);
+                let index_bit_count: i64 = dict
+                    .get_item("index_bit_count")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(-1);
+                let minhash_bit_count: i64 = dict
+                    .get_item("minhash_bit_count")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(-1);
+                hll_ops::add_with_index_and_min_hash(
+                    &policy,
+                    &name,
+                    list,
+                    index_bit_count,
+                    minhash_bit_count,
+                )
+            }
+            OP_HLL_GET_COUNT => {
+                let name = require_bin(&bin_name, "hll_get_count")?;
+                hll_ops::get_count(&name)
+            }
+            OP_HLL_GET_UNION => {
+                let name = require_bin(&bin_name, "hll_get_union")?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::get_union(&name, values_from_list(&v))
+            }
+            OP_HLL_GET_UNION_COUNT => {
+                let name = require_bin(&bin_name, "hll_get_union_count")?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::get_union_count(&name, values_from_list(&v))
+            }
+            OP_HLL_GET_INTERSECT_COUNT => {
+                let name = require_bin(&bin_name, "hll_get_intersect_count")?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::get_intersect_count(&name, values_from_list(&v))
+            }
+            OP_HLL_GET_SIMILARITY => {
+                let name = require_bin(&bin_name, "hll_get_similarity")?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::get_similarity(&name, values_from_list(&v))
+            }
+            OP_HLL_DESCRIBE => {
+                let name = require_bin(&bin_name, "hll_describe")?;
+                hll_ops::describe(&name)
+            }
+            OP_HLL_FOLD => {
+                let name = require_bin(&bin_name, "hll_fold")?;
+                let index_bit_count: i64 = dict
+                    .get_item("index_bit_count")?
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err(
+                            "hll_fold requires 'index_bit_count'",
+                        )
+                    })?
+                    .extract()?;
+                hll_ops::fold(&name, index_bit_count)
+            }
+            OP_HLL_SET_UNION => {
+                let name = require_bin(&bin_name, "hll_set_union")?;
+                let policy = parse_hll_policy(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::set_union(&policy, &name, values_from_list(&v))
+            }
+
+            // ── Bitwise CDT operations ─────────────────────────
+            OP_BIT_RESIZE => {
+                let name = require_bin(&bin_name, "bit_resize")?;
+                let byte_size = get_byte_size(dict)?;
+                let resize_flags = get_resize_flags(dict)?;
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::resize(&name, byte_size, resize_flags, &policy)
+            }
+            OP_BIT_INSERT => {
+                let name = require_bin(&bin_name, "bit_insert")?;
+                let byte_offset = get_byte_offset(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::insert(&name, byte_offset, v, &policy)
+            }
+            OP_BIT_REMOVE => {
+                let name = require_bin(&bin_name, "bit_remove")?;
+                let byte_offset = get_byte_offset(dict)?;
+                let byte_size = get_byte_size(dict)?;
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::remove(&name, byte_offset, byte_size, &policy)
+            }
+            OP_BIT_SET => {
+                let name = require_bin(&bin_name, "bit_set")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::set(&name, bit_offset, bit_size, v, &policy)
+            }
+            OP_BIT_OR => {
+                let name = require_bin(&bin_name, "bit_or")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::or(&name, bit_offset, bit_size, v, &policy)
+            }
+            OP_BIT_XOR => {
+                let name = require_bin(&bin_name, "bit_xor")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::xor(&name, bit_offset, bit_size, v, &policy)
+            }
+            OP_BIT_AND => {
+                let name = require_bin(&bin_name, "bit_and")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::and(&name, bit_offset, bit_size, v, &policy)
+            }
+            OP_BIT_NOT => {
+                let name = require_bin(&bin_name, "bit_not")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::not(&name, bit_offset, bit_size, &policy)
+            }
+            OP_BIT_LSHIFT => {
+                let name = require_bin(&bin_name, "bit_lshift")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let shift = get_shift(dict)?;
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::lshift(&name, bit_offset, bit_size, shift, &policy)
+            }
+            OP_BIT_RSHIFT => {
+                let name = require_bin(&bin_name, "bit_rshift")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let shift = get_shift(dict)?;
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::rshift(&name, bit_offset, bit_size, shift, &policy)
+            }
+            OP_BIT_ADD => {
+                let name = require_bin(&bin_name, "bit_add")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let value_int: i64 = match &val {
+                    Some(Value::Int(i)) => *i,
+                    Some(other) => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "bit operation requires an integer value, got {:?}",
+                            other
+                        )))
+                    }
+                    None => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "bit operation requires a 'val' parameter",
+                        ))
+                    }
+                };
+                let signed = get_signed(dict)?;
+                let action = get_overflow_action(dict)?;
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::add(
+                    &name, bit_offset, bit_size, value_int, signed, action, &policy,
+                )
+            }
+            OP_BIT_SUBTRACT => {
+                let name = require_bin(&bin_name, "bit_subtract")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let value_int: i64 = match &val {
+                    Some(Value::Int(i)) => *i,
+                    Some(other) => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "bit operation requires an integer value, got {:?}",
+                            other
+                        )))
+                    }
+                    None => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "bit operation requires a 'val' parameter",
+                        ))
+                    }
+                };
+                let signed = get_signed(dict)?;
+                let action = get_overflow_action(dict)?;
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::subtract(
+                    &name, bit_offset, bit_size, value_int, signed, action, &policy,
+                )
+            }
+            OP_BIT_SET_INT => {
+                let name = require_bin(&bin_name, "bit_set_int")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let value_int: i64 = match &val {
+                    Some(Value::Int(i)) => *i,
+                    Some(other) => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "bit operation requires an integer value, got {:?}",
+                            other
+                        )))
+                    }
+                    None => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "bit operation requires a 'val' parameter",
+                        ))
+                    }
+                };
+                let policy = parse_bit_policy(dict)?;
+                bit_ops::set_int(&name, bit_offset, bit_size, value_int, &policy)
+            }
+            OP_BIT_GET => {
+                let name = require_bin(&bin_name, "bit_get")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                bit_ops::get(&name, bit_offset, bit_size)
+            }
+            OP_BIT_COUNT => {
+                let name = require_bin(&bin_name, "bit_count")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                bit_ops::count(&name, bit_offset, bit_size)
+            }
+            OP_BIT_LSCAN => {
+                let name = require_bin(&bin_name, "bit_lscan")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let scan_val = get_scan_value(dict)?;
+                bit_ops::lscan(&name, bit_offset, bit_size, scan_val)
+            }
+            OP_BIT_RSCAN => {
+                let name = require_bin(&bin_name, "bit_rscan")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let scan_val = get_scan_value(dict)?;
+                bit_ops::rscan(&name, bit_offset, bit_size, scan_val)
+            }
+            OP_BIT_GET_INT => {
+                let name = require_bin(&bin_name, "bit_get_int")?;
+                let bit_offset = get_bit_offset(dict)?;
+                let bit_size = get_bit_size(dict)?;
+                let signed = get_signed(dict)?;
+                bit_ops::get_int(&name, bit_offset, bit_size, signed)
+            }
+
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "Unsupported operation code: {op_code}. Supported codes: \
                      READ={OP_READ}, WRITE={OP_WRITE}, INCR={OP_INCR}, \
                      APPEND={OP_APPEND}, PREPEND={OP_PREPEND}, TOUCH={OP_TOUCH}, DELETE={OP_DELETE}, \
-                     List CDT=1001-1031, Map CDT=2001-2027"
+                     List CDT=1001-1031, Map CDT=2001-2027, HLL CDT=3001-3010, Bit CDT=4001-4054"
                 )));
             }
         };

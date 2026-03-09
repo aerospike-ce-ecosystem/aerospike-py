@@ -34,8 +34,9 @@ client = aerospike.client(config).connect()
 | `password` | `str` | `""` | 인증 비밀번호 |
 | `timeout` | `int` | `1000` | 연결 타임아웃 (ms) |
 | `idle_timeout` | `int` | `55` | 풀링된 연결의 최대 유휴 시간 (초) |
-| `max_conns_per_node` | `int` | `100` | 노드당 최대 연결 수 |
+| `max_conns_per_node` | `int` | `256` | 노드당 최대 연결 수 |
 | `min_conns_per_node` | `int` | `0` | 노드당 사전 워밍 연결 수 |
+| `conn_pools_per_node` | `int` | `1` | 노드당 커넥션 풀 수 (8+ CPU 코어 시 증가) |
 | `tend_interval` | `int` | `1000` | 클러스터 tend 간격 (ms) |
 | `use_services_alternate` | `bool` | `false` | 서비스 응답의 대체 주소 사용 |
 
@@ -77,7 +78,7 @@ config = {
 ```python
 config = {
     "hosts": [("127.0.0.1", 3000)],
-    "max_conns_per_node": 300,   # 기본값: 100
+    "max_conns_per_node": 300,   # 기본값: 256
     "min_conns_per_node": 10,    # 사전 워밍 연결
     "idle_timeout": 55,          # 초 단위
 }
@@ -132,6 +133,10 @@ await client.put(key, bins, policy=policy)
 
   </TabItem>
 </Tabs>
+
+:::warning[기본 타임아웃 상호작용]
+기본값에서 `total_timeout`(1000ms)이 `socket_timeout`(30000ms)보다 **짧습니다**. 이는 개별 소켓 타임아웃이 발생하기 전에 전체 데드라인에 도달한다는 의미입니다. 실제로 클라이언트는 30초 소켓 타임아웃과 관계없이 1초 후에 전체 작업(진행 중인 소켓 읽기/쓰기 포함)을 중단합니다. `socket_timeout`을 늘리는 경우, `total_timeout`이 예상 지연 시간과 재시도 횟수를 수용하는지 확인하세요.
+:::
 
 **가이드라인:**
 - `socket_timeout`으로 응답 없는 연결 감지; 1-5초로 설정
