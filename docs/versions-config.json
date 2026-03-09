@@ -2,7 +2,7 @@
   "lastVersion": "0.0.3",
   "versions": {
     "current": {
-      "label": "Next",
+      "label": "main",
       "path": "next",
       "banner": "unreleased"
     },
