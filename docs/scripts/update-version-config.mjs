@@ -21,9 +21,9 @@ const configPath = join(__dirname, '..', 'versions-config.json');
 
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 
-// current (개발 중) → Next로 변경
+// current (개발 중) → main으로 변경
 config.versions.current = {
-  label: 'Next',
+  label: 'main',
   path: 'next',
   banner: 'unreleased',
 };
