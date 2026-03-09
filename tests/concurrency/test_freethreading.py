@@ -6,6 +6,7 @@ import threading
 
 import pytest
 
+import aerospike_py
 from tests.concurrency.utils import _drain
 
 NS = "test"
@@ -108,3 +109,88 @@ class TestFreeThreading:
         if sys._is_gil_enabled():
             pytest.skip("GIL is enabled — not a free-threaded build")
         assert sys._is_gil_enabled() is False
+
+    def test_ft_concurrent_batch_operate(self, client):
+        """Free-threaded batch_operate with barrier-synchronised threads."""
+        keys = [(NS, SET_NAME, f"ft_bo_{i}") for i in range(20)]
+        for k in keys:
+            client.put(k, {"counter": 0})
+
+        num_threads = 8
+        barrier = threading.Barrier(num_threads)
+        errors = queue.SimpleQueue()
+        ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 1}]
+
+        def batch_inc():
+            try:
+                barrier.wait()
+                client.batch_operate(keys, ops)
+            except Exception as e:
+                errors.put(e)
+
+        threads = [threading.Thread(target=batch_inc) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors.empty(), f"Errors during ft batch_operate: {list(_drain(errors))}"
+        for k in keys:
+            _, _, bins = client.get(k)
+            assert bins["counter"] == num_threads
+            client.remove(k)
+
+    def test_ft_explicit_thread_shared_client(self, client):
+        """Explicit threading.Thread instances sharing one client for put/get/remove."""
+        num_threads = 10
+        ops_per_thread = 30
+        errors = queue.SimpleQueue()
+
+        def worker(tid):
+            try:
+                for i in range(ops_per_thread):
+                    key = (NS, SET_NAME, f"ft_shared_{tid}_{i}")
+                    client.put(key, {"tid": tid, "idx": i})
+                    _, _, bins = client.get(key)
+                    assert bins["tid"] == tid
+                    assert bins["idx"] == i
+                    client.remove(key)
+            except Exception as e:
+                errors.put(e)
+
+        threads = [threading.Thread(target=worker, args=(t,)) for t in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors.empty(), f"Errors during ft shared client: {list(_drain(errors))}"
+
+    def test_ft_concurrent_query(self, client):
+        """Free-threaded concurrent query execution with barrier synchronisation."""
+        keys = [(NS, SET_NAME, f"ft_q_{i}") for i in range(20)]
+        for k in keys:
+            client.put(k, {"val": int(k[2].split("_")[2])})
+
+        num_threads = 6
+        barrier = threading.Barrier(num_threads)
+        errors = queue.SimpleQueue()
+
+        def query_worker():
+            try:
+                barrier.wait()
+                q = client.query(NS, SET_NAME)
+                q.select("val")
+                q.results()
+            except Exception as e:
+                errors.put(e)
+
+        threads = [threading.Thread(target=query_worker) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors.empty(), f"Errors during ft concurrent query: {list(_drain(errors))}"
+        for k in keys:
+            client.remove(k)
