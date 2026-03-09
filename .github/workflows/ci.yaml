@@ -340,6 +340,18 @@ jobs:
       - name: Run feasibility test
         run: uvx --with tox-uv tox -e ${{ matrix.test }}
 
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run cargo audit
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   compatibility:
     name: Compatibility Tests
     runs-on: ubuntu-latest

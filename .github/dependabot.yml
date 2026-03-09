@@ -1,24 +1,29 @@
 version: 2
 updates:
-  - package-ecosystem: cargo
+  - package-ecosystem: "cargo"
     directory: "/rust"
     schedule:
-      interval: weekly
+      interval: "weekly"
+    open-pull-requests-limit: 5
     groups:
       rust-deps:
-        patterns: ["*"]
+        patterns:
+          - "*"
 
-  - package-ecosystem: pip
+  - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+    open-pull-requests-limit: 5
 
-  - package-ecosystem: npm
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "npm"
     directory: "/docs"
     schedule:
-      interval: weekly
-
-  - package-ecosystem: github-actions
-    directory: "/"
-    schedule:
-      interval: weekly
+      interval: "weekly"
+    open-pull-requests-limit: 5
