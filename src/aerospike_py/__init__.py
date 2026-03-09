@@ -151,6 +151,15 @@ from aerospike_py._aerospike import (  # noqa: F401
     BIT_WRITE_UPDATE_ONLY,
     BIT_WRITE_NO_FAIL,
     BIT_WRITE_PARTIAL,
+    # Bit Resize Flags
+    BIT_RESIZE_DEFAULT,
+    BIT_RESIZE_FROM_FRONT,
+    BIT_RESIZE_GROW_ONLY,
+    BIT_RESIZE_SHRINK_ONLY,
+    # Bit Overflow Action
+    BIT_OVERFLOW_FAIL,
+    BIT_OVERFLOW_SATURATE,
+    BIT_OVERFLOW_WRAP,
     # HLL Write Flags
     HLL_WRITE_DEFAULT,
     HLL_WRITE_CREATE_ONLY,
@@ -222,6 +231,8 @@ from aerospike_py import predicates  # noqa: F401
 from aerospike_py.numpy_batch import NumpyBatchRecords  # noqa: F401
 from aerospike_py import list_operations  # noqa: F401
 from aerospike_py import map_operations  # noqa: F401
+from aerospike_py import hll_operations  # noqa: F401
+from aerospike_py import bit_operations  # noqa: F401
 from aerospike_py import exp  # noqa: F401
 from aerospike_py.types import (  # noqa: F401
     AerospikeKey,
@@ -243,7 +254,7 @@ from aerospike_py.types import (  # noqa: F401
     UserInfo,
     RoleInfo,
 )
-from aerospike_py._types import ListPolicy, MapPolicy, Operation  # noqa: F401
+from aerospike_py._types import HLLPolicy, ListPolicy, MapPolicy, Operation  # noqa: F401
 
 # Client and query classes (re-exported from internal modules)
 from aerospike_py._client import Client, Query  # noqa: F401
@@ -359,12 +370,15 @@ __all__ = [
     "RoleInfo",
     "ListPolicy",
     "MapPolicy",
+    "HLLPolicy",
     "Operation",
     # Submodules
     "exception",
     "predicates",
     "list_operations",
     "map_operations",
+    "hll_operations",
+    "bit_operations",
     "exp",
     # Exception classes
     "AerospikeError",
@@ -505,6 +519,15 @@ __all__ = [
     "BIT_WRITE_UPDATE_ONLY",
     "BIT_WRITE_NO_FAIL",
     "BIT_WRITE_PARTIAL",
+    # Bit Resize Flags
+    "BIT_RESIZE_DEFAULT",
+    "BIT_RESIZE_FROM_FRONT",
+    "BIT_RESIZE_GROW_ONLY",
+    "BIT_RESIZE_SHRINK_ONLY",
+    # Bit Overflow Action
+    "BIT_OVERFLOW_FAIL",
+    "BIT_OVERFLOW_SATURATE",
+    "BIT_OVERFLOW_WRAP",
     # HLL Write Flags
     "HLL_WRITE_DEFAULT",
     "HLL_WRITE_CREATE_ONLY",

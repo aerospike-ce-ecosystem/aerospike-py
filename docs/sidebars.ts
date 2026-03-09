@@ -46,6 +46,7 @@ const sidebars: SidebarsConfig = {
             'guides/admin/error-handling',
           ],
         },
+        'guides/api-comparison',
         'guides/troubleshooting',
       ],
     },
@@ -85,6 +86,7 @@ const sidebars: SidebarsConfig = {
       ],
     },
     'contributing',
+    'faq',
   ],
 };
 

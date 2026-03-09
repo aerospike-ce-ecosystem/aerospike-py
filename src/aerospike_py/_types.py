@@ -2,7 +2,7 @@
 
 from typing import Any, TypedDict
 
-__all__ = ["Operation", "ListPolicy", "MapPolicy"]
+__all__ = ["Operation", "ListPolicy", "MapPolicy", "HLLPolicy"]
 
 Operation = dict[str, Any]
 """Operation dict for use with ``client.operate()`` and ``client.operate_ordered()``.
@@ -18,9 +18,14 @@ Optional keys (CDT operations):
     ``return_type`` (int): ``LIST_RETURN_*`` or ``MAP_RETURN_*`` constant.
     ``list_policy`` (ListPolicy): Policy for list CDT operations.
     ``map_policy`` (MapPolicy): Policy for map CDT operations.
+    ``hll_policy`` (HLLPolicy): Policy for HyperLogLog CDT operations.
+    ``bit_policy`` (int): Bit write flags for bitwise CDT operations (``BIT_WRITE_*``).
+    ``bit_offset`` (int): Starting bit position for bitwise CDT operations.
+    ``bit_size`` (int): Number of bits for bitwise CDT operations.
 
-Use ``aerospike_py.list_operations`` or ``aerospike_py.map_operations``
-helper modules to build CDT operation dicts.
+Use ``aerospike_py.list_operations``, ``aerospike_py.map_operations``,
+``aerospike_py.hll_operations``, or ``aerospike_py.bit_operations`` helper modules
+to build CDT operation dicts.
 """
 
 
@@ -46,6 +51,16 @@ class MapPolicy(TypedDict, total=False):
 
     order: int
     write_mode: int
+
+
+class HLLPolicy(TypedDict, total=False):
+    """Policy for HyperLogLog CDT operations.
+
+    Keys:
+        flags: HLL write flags (HLL_WRITE_DEFAULT, HLL_WRITE_CREATE_ONLY, etc.).
+    """
+
+    flags: int
 
 
 _UNSET: Any = object()

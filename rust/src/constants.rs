@@ -77,6 +77,38 @@ pub const OP_MAP_GET_BY_RANK_RANGE: i32 = 2025;
 pub const OP_MAP_GET_BY_KEY_LIST: i32 = 2026;
 pub const OP_MAP_GET_BY_VALUE_LIST: i32 = 2027;
 
+// ── HLL CDT operation codes ──────────────────────────────────────
+pub const OP_HLL_INIT: i32 = 3001;
+pub const OP_HLL_ADD: i32 = 3002;
+pub const OP_HLL_GET_COUNT: i32 = 3003;
+pub const OP_HLL_GET_UNION: i32 = 3004;
+pub const OP_HLL_GET_UNION_COUNT: i32 = 3005;
+pub const OP_HLL_GET_INTERSECT_COUNT: i32 = 3006;
+pub const OP_HLL_GET_SIMILARITY: i32 = 3007;
+pub const OP_HLL_DESCRIBE: i32 = 3008;
+pub const OP_HLL_FOLD: i32 = 3009;
+pub const OP_HLL_SET_UNION: i32 = 3010;
+
+// ── Bitwise CDT operation codes ──────────────────────────────────
+pub const OP_BIT_RESIZE: i32 = 4001;
+pub const OP_BIT_INSERT: i32 = 4002;
+pub const OP_BIT_REMOVE: i32 = 4003;
+pub const OP_BIT_SET: i32 = 4004;
+pub const OP_BIT_OR: i32 = 4005;
+pub const OP_BIT_XOR: i32 = 4006;
+pub const OP_BIT_AND: i32 = 4007;
+pub const OP_BIT_NOT: i32 = 4008;
+pub const OP_BIT_LSHIFT: i32 = 4009;
+pub const OP_BIT_RSHIFT: i32 = 4010;
+pub const OP_BIT_ADD: i32 = 4011;
+pub const OP_BIT_SUBTRACT: i32 = 4012;
+pub const OP_BIT_SET_INT: i32 = 4013;
+pub const OP_BIT_GET: i32 = 4050;
+pub const OP_BIT_COUNT: i32 = 4051;
+pub const OP_BIT_LSCAN: i32 = 4052;
+pub const OP_BIT_RSCAN: i32 = 4053;
+pub const OP_BIT_GET_INT: i32 = 4054;
+
 /// Register all Aerospike constants onto the native Python module.
 ///
 /// Groups: policy keys/exists/gen/replica/commit, TTL, auth mode, operators,
@@ -218,6 +250,17 @@ pub fn register_constants(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("BIT_WRITE_UPDATE_ONLY", 2)?;
     m.add("BIT_WRITE_NO_FAIL", 4)?;
     m.add("BIT_WRITE_PARTIAL", 8)?;
+
+    // --- Bit Resize Flags ---
+    m.add("BIT_RESIZE_DEFAULT", 0)?;
+    m.add("BIT_RESIZE_FROM_FRONT", 1)?;
+    m.add("BIT_RESIZE_GROW_ONLY", 2)?;
+    m.add("BIT_RESIZE_SHRINK_ONLY", 4)?;
+
+    // --- Bit Overflow Action ---
+    m.add("BIT_OVERFLOW_FAIL", 0)?;
+    m.add("BIT_OVERFLOW_SATURATE", 2)?;
+    m.add("BIT_OVERFLOW_WRAP", 4)?;
 
     // --- HLL Write Flags ---
     m.add("HLL_WRITE_DEFAULT", 0)?;
