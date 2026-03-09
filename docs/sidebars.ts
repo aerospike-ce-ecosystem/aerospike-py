@@ -8,6 +8,7 @@ const sidebars: SidebarsConfig = {
       label: 'Guides',
       collapsed: false,
       items: [
+        'guides/architecture',
         {
           type: 'category',
           label: 'Client Config',
@@ -45,6 +46,7 @@ const sidebars: SidebarsConfig = {
             'guides/admin/error-handling',
           ],
         },
+        'guides/troubleshooting',
       ],
     },
     {
