@@ -11,7 +11,7 @@ name = "_aerospike"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.28" }
+pyo3 = { version = "0.28.2" }
 pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
 aerospike = { version = "2.0.0-alpha.9", features = ["async", "rt-tokio"], default-features = false }
 aerospike-core = { version = "2.0.0-alpha.9" }
