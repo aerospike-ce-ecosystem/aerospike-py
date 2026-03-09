@@ -40,6 +40,23 @@ pub fn extract_parent_context(py: Python<'_>) -> ParentContext {
 #[cfg(not(feature = "otel"))]
 pub fn extract_parent_context(_py: Python<'_>) -> ParentContext {}
 
+/// Bundles OpenTelemetry parent context and connection metadata.
+///
+/// Replaces the repeated `parent_ctx` + `conn_info` fields across all Args structs.
+pub struct OtelContext {
+    pub parent_ctx: ParentContext,
+    pub conn_info: Arc<ConnectionInfo>,
+}
+
+impl OtelContext {
+    pub fn new(py: Python<'_>, conn_info: &Arc<ConnectionInfo>) -> Self {
+        Self {
+            parent_ctx: extract_parent_context(py),
+            conn_info: Arc::clone(conn_info),
+        }
+    }
+}
+
 /// Extract optional `cluster_name` used only for tracing connection metadata.
 ///
 /// Accepts:
@@ -74,8 +91,7 @@ pub struct PutArgs {
     pub key: Key,
     pub bins: Vec<Bin>,
     pub policy: PutPolicy,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub enum PutPolicy {
@@ -114,8 +130,7 @@ pub fn prepare_put_args(
         key: rust_key,
         bins: rust_bins,
         policy: put_policy,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -124,8 +139,7 @@ pub fn prepare_put_args(
 pub struct GetArgs {
     pub key: Key,
     pub policy: ReadPolicyChoice,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub enum ReadPolicyChoice {
@@ -149,8 +163,7 @@ pub fn prepare_get_args(
     Ok(GetArgs {
         key: rust_key,
         policy: read_policy,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -169,8 +182,7 @@ pub struct SelectArgs {
     pub key: Key,
     pub bin_names: Vec<String>,
     pub policy: ReadPolicyChoice,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_select_args(
@@ -192,8 +204,7 @@ pub fn prepare_select_args(
         key: rust_key,
         bin_names,
         policy: read_policy,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -216,8 +227,7 @@ impl SelectArgs {
 pub struct ExistsArgs {
     pub key: Key,
     pub read_policy: ReadPolicy,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_exists_args(
@@ -236,8 +246,7 @@ pub fn prepare_exists_args(
     Ok(ExistsArgs {
         key: rust_key,
         read_policy,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -297,8 +306,7 @@ mod tests {
 pub struct RemoveArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_remove_args(
@@ -314,8 +322,7 @@ pub fn prepare_remove_args(
     Ok(RemoveArgs {
         key: rust_key,
         write_policy,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -324,8 +331,7 @@ pub fn prepare_remove_args(
 pub struct TouchArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_touch_args(
@@ -345,8 +351,7 @@ pub fn prepare_touch_args(
     Ok(TouchArgs {
         key: rust_key,
         write_policy,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -356,8 +361,7 @@ pub struct SingleBinWriteArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
     pub bins: Vec<Bin>,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_single_bin_write_args(
@@ -378,8 +382,7 @@ pub fn prepare_single_bin_write_args(
         key: rust_key,
         write_policy,
         bins,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -403,8 +406,7 @@ pub fn prepare_increment_args(
         key: rust_key,
         write_policy,
         bins,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -414,8 +416,7 @@ pub struct RemoveBinArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
     pub bins: Vec<Bin>,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_remove_bin_args(
@@ -435,8 +436,7 @@ pub fn prepare_remove_bin_args(
         key: rust_key,
         write_policy,
         bins,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -446,8 +446,7 @@ pub struct OperateArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
     pub ops: Vec<Operation>,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_operate_args(
@@ -466,8 +465,7 @@ pub fn prepare_operate_args(
         key: rust_key,
         write_policy,
         ops: rust_ops,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -479,8 +477,7 @@ pub struct BatchReadArgs {
     pub bins_selector: Bins,
     pub batch_ns: String,
     pub batch_set: String,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_batch_read_args(
@@ -513,8 +510,7 @@ pub fn prepare_batch_read_args(
         bins_selector,
         batch_ns,
         batch_set,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -536,8 +532,7 @@ pub struct BatchOperateArgs {
     pub ops: Vec<Operation>,
     pub batch_ns: String,
     pub batch_set: String,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_batch_operate_args(
@@ -562,8 +557,7 @@ pub fn prepare_batch_operate_args(
         ops: rust_ops,
         batch_ns,
         batch_set,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 
@@ -584,8 +578,7 @@ pub struct BatchRemoveArgs {
     pub batch_policy: aerospike_core::BatchPolicy,
     pub batch_ns: String,
     pub batch_set: String,
-    pub parent_ctx: ParentContext,
-    pub conn_info: Arc<ConnectionInfo>,
+    pub otel: OtelContext,
 }
 
 pub fn prepare_batch_remove_args(
@@ -607,8 +600,7 @@ pub fn prepare_batch_remove_args(
         batch_policy,
         batch_ns,
         batch_set,
-        parent_ctx: extract_parent_context(py),
-        conn_info: Arc::clone(conn_info),
+        otel: OtelContext::new(py, conn_info),
     })
 }
 

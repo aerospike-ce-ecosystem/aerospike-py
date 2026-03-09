@@ -162,7 +162,8 @@ unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> 
             "null buffer pointer in write_int_to_buffer",
         ));
     }
-    let dst = row_ptr.add(field.offset);
+    // SAFETY: caller guarantees row_ptr + field.offset is valid and within bounds
+    let dst = unsafe { row_ptr.add(field.offset) };
     match field.base_itemsize {
         1 => {
             if val < i8::MIN as i64 || val > i8::MAX as i64 {
@@ -171,7 +172,8 @@ unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> 
                     val, field.name
                 );
             }
-            ptr::write_unaligned(dst as *mut i8, val as i8)
+            // SAFETY: dst points to at least 1 byte of writable memory
+            unsafe { ptr::write_unaligned(dst as *mut i8, val as i8) }
         }
         2 => {
             if val < i16::MIN as i64 || val > i16::MAX as i64 {
@@ -180,7 +182,8 @@ unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> 
                     val, field.name
                 );
             }
-            ptr::write_unaligned(dst as *mut i16, val as i16)
+            // SAFETY: dst points to at least 2 bytes of writable memory
+            unsafe { ptr::write_unaligned(dst as *mut i16, val as i16) }
         }
         4 => {
             if val < i32::MIN as i64 || val > i32::MAX as i64 {
@@ -189,9 +192,11 @@ unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> 
                     val, field.name
                 );
             }
-            ptr::write_unaligned(dst as *mut i32, val as i32)
+            // SAFETY: dst points to at least 4 bytes of writable memory
+            unsafe { ptr::write_unaligned(dst as *mut i32, val as i32) }
         }
-        8 => ptr::write_unaligned(dst as *mut i64, val),
+        // SAFETY: dst points to at least 8 bytes of writable memory
+        8 => unsafe { ptr::write_unaligned(dst as *mut i64, val) },
         s => {
             return Err(PyTypeError::new_err(format!(
                 "unsupported int size: {} bytes",
@@ -219,7 +224,8 @@ unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) ->
             "null buffer pointer in write_uint_to_buffer",
         ));
     }
-    let dst = row_ptr.add(field.offset);
+    // SAFETY: caller guarantees row_ptr + field.offset is valid and within bounds
+    let dst = unsafe { row_ptr.add(field.offset) };
     match field.base_itemsize {
         1 => {
             if val > u8::MAX as u64 {
@@ -228,7 +234,8 @@ unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) ->
                     val, field.name
                 );
             }
-            ptr::write_unaligned(dst, val as u8)
+            // SAFETY: dst points to at least 1 byte of writable memory
+            unsafe { ptr::write_unaligned(dst, val as u8) }
         }
         2 => {
             if val > u16::MAX as u64 {
@@ -237,7 +244,8 @@ unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) ->
                     val, field.name
                 );
             }
-            ptr::write_unaligned(dst as *mut u16, val as u16)
+            // SAFETY: dst points to at least 2 bytes of writable memory
+            unsafe { ptr::write_unaligned(dst as *mut u16, val as u16) }
         }
         4 => {
             if val > u32::MAX as u64 {
@@ -246,9 +254,11 @@ unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) ->
                     val, field.name
                 );
             }
-            ptr::write_unaligned(dst as *mut u32, val as u32)
+            // SAFETY: dst points to at least 4 bytes of writable memory
+            unsafe { ptr::write_unaligned(dst as *mut u32, val as u32) }
         }
-        8 => ptr::write_unaligned(dst as *mut u64, val),
+        // SAFETY: dst points to at least 8 bytes of writable memory
+        8 => unsafe { ptr::write_unaligned(dst as *mut u64, val) },
         s => {
             return Err(PyTypeError::new_err(format!(
                 "unsupported uint size: {} bytes",
@@ -278,7 +288,8 @@ unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -
             "null buffer pointer in write_float_to_buffer",
         ));
     }
-    let dst = row_ptr.add(field.offset);
+    // SAFETY: caller guarantees row_ptr + field.offset is valid and within bounds
+    let dst = unsafe { row_ptr.add(field.offset) };
     match field.base_itemsize {
         4 => {
             if val.is_finite() && (val > f32::MAX as f64 || val < f32::MIN as f64) {
@@ -287,14 +298,17 @@ unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -
                     val, field.name
                 );
             }
-            ptr::write_unaligned(dst as *mut f32, val as f32)
+            // SAFETY: dst points to at least 4 bytes of writable memory
+            unsafe { ptr::write_unaligned(dst as *mut f32, val as f32) }
         }
-        8 => ptr::write_unaligned(dst as *mut f64, val),
+        // SAFETY: dst points to at least 8 bytes of writable memory
+        8 => unsafe { ptr::write_unaligned(dst as *mut f64, val) },
         2 => {
             // float16: use `half` crate for IEEE 754 compliant conversion
             // Handles denormals, rounding, and special values correctly
             let h = f16::from_f64(val);
-            ptr::write_unaligned(dst as *mut u16, h.to_bits());
+            // SAFETY: dst points to at least 2 bytes of writable memory
+            unsafe { ptr::write_unaligned(dst as *mut u16, h.to_bits()) };
         }
         s => {
             return Err(PyTypeError::new_err(format!(
@@ -326,12 +340,13 @@ unsafe fn write_bytes_to_buffer(row_ptr: *mut u8, field: &FieldInfo, data: &[u8]
             "null buffer pointer in write_bytes_to_buffer",
         ));
     }
-    let dst = row_ptr.add(field.offset);
+    // SAFETY: caller guarantees row_ptr + field.offset is valid and within bounds
+    let dst = unsafe { row_ptr.add(field.offset) };
     // Clamp copy length to field size to prevent buffer overrun
     let copy_len = data.len().min(field.itemsize);
     if copy_len > 0 {
-        // Use bounded slice for safer copy
-        let dst_slice = std::slice::from_raw_parts_mut(dst, field.itemsize);
+        // SAFETY: dst points to at least field.itemsize bytes of writable memory
+        let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst, field.itemsize) };
         dst_slice[..copy_len].copy_from_slice(&data[..copy_len]);
     }
     // np.zeros already zero-initialized, no need to zero-pad
@@ -400,9 +415,12 @@ unsafe fn write_value_to_buffer(
 
     match value {
         Value::Int(v) => match field.kind {
-            DtypeKind::Int => write_int_to_buffer(row_ptr, field, *v),
-            DtypeKind::Uint => write_uint_to_buffer(row_ptr, field, non_negative_u64(*v, field)?),
-            DtypeKind::Float => write_float_to_buffer(row_ptr, field, *v as f64),
+            // SAFETY: forwarding caller's safety guarantees to write_*_to_buffer
+            DtypeKind::Int => unsafe { write_int_to_buffer(row_ptr, field, *v) },
+            DtypeKind::Uint => unsafe {
+                write_uint_to_buffer(row_ptr, field, non_negative_u64(*v, field)?)
+            },
+            DtypeKind::Float => unsafe { write_float_to_buffer(row_ptr, field, *v as f64) },
             _ => Err(PyTypeError::new_err(format!(
                 "cannot write integer to bytes field '{}'",
                 field.name
@@ -411,11 +429,14 @@ unsafe fn write_value_to_buffer(
         Value::Float(fv) => {
             let v = float_value_to_f64(fv);
             match field.kind {
-                DtypeKind::Float => write_float_to_buffer(row_ptr, field, v),
-                DtypeKind::Int => write_int_to_buffer(row_ptr, field, finite_f64_to_i64(v, field)?),
-                DtypeKind::Uint => {
+                // SAFETY: forwarding caller's safety guarantees to write_*_to_buffer
+                DtypeKind::Float => unsafe { write_float_to_buffer(row_ptr, field, v) },
+                DtypeKind::Int => unsafe {
+                    write_int_to_buffer(row_ptr, field, finite_f64_to_i64(v, field)?)
+                },
+                DtypeKind::Uint => unsafe {
                     write_uint_to_buffer(row_ptr, field, non_negative_f64_to_u64(v, field)?)
-                }
+                },
                 _ => Err(PyTypeError::new_err(format!(
                     "cannot write float to bytes field '{}'",
                     field.name
@@ -425,9 +446,10 @@ unsafe fn write_value_to_buffer(
         Value::Bool(b) => {
             let iv = if *b { 1i64 } else { 0i64 };
             match field.kind {
-                DtypeKind::Int => write_int_to_buffer(row_ptr, field, iv),
-                DtypeKind::Uint => write_uint_to_buffer(row_ptr, field, iv as u64),
-                DtypeKind::Float => write_float_to_buffer(row_ptr, field, iv as f64),
+                // SAFETY: forwarding caller's safety guarantees to write_*_to_buffer
+                DtypeKind::Int => unsafe { write_int_to_buffer(row_ptr, field, iv) },
+                DtypeKind::Uint => unsafe { write_uint_to_buffer(row_ptr, field, iv as u64) },
+                DtypeKind::Float => unsafe { write_float_to_buffer(row_ptr, field, iv as f64) },
                 _ => Err(PyTypeError::new_err(format!(
                     "cannot write bool to bytes field '{}'",
                     field.name
@@ -436,13 +458,15 @@ unsafe fn write_value_to_buffer(
         }
         Value::Blob(bytes) => match field.kind {
             DtypeKind::FixedBytes | DtypeKind::VoidBytes => {
-                write_bytes_to_buffer(row_ptr, field, bytes)
+                // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
+                unsafe { write_bytes_to_buffer(row_ptr, field, bytes) }
             }
             // sub-array: bytes blob written directly to buffer
             DtypeKind::Float | DtypeKind::Int | DtypeKind::Uint
                 if field.itemsize > field.base_itemsize =>
             {
-                write_bytes_to_buffer(row_ptr, field, bytes)
+                // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
+                unsafe { write_bytes_to_buffer(row_ptr, field, bytes) }
             }
             _ => Err(PyTypeError::new_err(format!(
                 "cannot write bytes to numeric field '{}'",
@@ -451,7 +475,8 @@ unsafe fn write_value_to_buffer(
         },
         Value::String(s) => match field.kind {
             DtypeKind::FixedBytes | DtypeKind::VoidBytes => {
-                write_bytes_to_buffer(row_ptr, field, s.as_bytes())
+                // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
+                unsafe { write_bytes_to_buffer(row_ptr, field, s.as_bytes()) }
             }
             _ => Err(PyTypeError::new_err(format!(
                 "cannot write string to numeric field '{}'",
@@ -620,14 +645,16 @@ unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyRes
             "null buffer pointer in read_value_from_buffer",
         ));
     }
-    let src = row_ptr.add(field.offset);
+    // SAFETY: caller guarantees row_ptr + field.offset is valid and within bounds
+    let src = unsafe { row_ptr.add(field.offset) };
     match field.kind {
         DtypeKind::Int => {
             let v = match field.base_itemsize {
-                1 => ptr::read_unaligned(src as *const i8) as i64,
-                2 => ptr::read_unaligned(src as *const i16) as i64,
-                4 => ptr::read_unaligned(src as *const i32) as i64,
-                8 => ptr::read_unaligned(src as *const i64),
+                // SAFETY: src points to at least N bytes of readable memory
+                1 => (unsafe { ptr::read_unaligned(src as *const i8) }) as i64,
+                2 => (unsafe { ptr::read_unaligned(src as *const i16) }) as i64,
+                4 => (unsafe { ptr::read_unaligned(src as *const i32) }) as i64,
+                8 => unsafe { ptr::read_unaligned(src as *const i64) },
                 s => {
                     return Err(PyTypeError::new_err(format!(
                         "unsupported int size: {} bytes",
@@ -639,10 +666,11 @@ unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyRes
         }
         DtypeKind::Uint => {
             let v = match field.base_itemsize {
-                1 => ptr::read_unaligned(src) as i64,
-                2 => ptr::read_unaligned(src as *const u16) as i64,
-                4 => ptr::read_unaligned(src as *const u32) as i64,
-                8 => uint_to_i64(ptr::read_unaligned(src as *const u64), field)?,
+                // SAFETY: src points to at least N bytes of readable memory
+                1 => (unsafe { ptr::read_unaligned(src) }) as i64,
+                2 => (unsafe { ptr::read_unaligned(src as *const u16) }) as i64,
+                4 => (unsafe { ptr::read_unaligned(src as *const u32) }) as i64,
+                8 => uint_to_i64(unsafe { ptr::read_unaligned(src as *const u64) }, field)?,
                 s => {
                     return Err(PyTypeError::new_err(format!(
                         "unsupported uint size: {} bytes",
@@ -655,11 +683,13 @@ unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyRes
         DtypeKind::Float => {
             let v = match field.base_itemsize {
                 2 => {
-                    let bits = ptr::read_unaligned(src as *const u16);
+                    // SAFETY: src points to at least 2 bytes of readable memory
+                    let bits = unsafe { ptr::read_unaligned(src as *const u16) };
                     f16::from_bits(bits).to_f64()
                 }
-                4 => ptr::read_unaligned(src as *const f32) as f64,
-                8 => ptr::read_unaligned(src as *const f64),
+                // SAFETY: src points to at least N bytes of readable memory
+                4 => (unsafe { ptr::read_unaligned(src as *const f32) }) as f64,
+                8 => unsafe { ptr::read_unaligned(src as *const f64) },
                 s => {
                     return Err(PyTypeError::new_err(format!(
                         "unsupported float size: {} bytes",
@@ -671,7 +701,8 @@ unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyRes
         }
         DtypeKind::FixedBytes | DtypeKind::VoidBytes => {
             let mut buf = vec![0u8; field.itemsize];
-            ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), field.itemsize);
+            // SAFETY: src points to at least field.itemsize bytes of readable memory
+            unsafe { ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), field.itemsize) };
             Ok(Value::Blob(buf))
         }
     }

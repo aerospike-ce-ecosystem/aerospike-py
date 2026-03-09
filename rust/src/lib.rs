@@ -12,11 +12,13 @@ mod batch_types;
 mod bug_report;
 mod client;
 mod client_common;
+mod client_ops;
 mod constants;
 mod errors;
 pub mod expressions;
 mod logging;
 pub mod metrics;
+#[deny(unsafe_op_in_unsafe_fn)]
 mod numpy_support;
 mod operations;
 mod policy;
