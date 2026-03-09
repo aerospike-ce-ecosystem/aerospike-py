@@ -22,6 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
+          ref: main
           # GITHUB_TOKEN으로 main에 직접 push.
           # main 브랜치 보호(branch protection)가 활성화된 경우,
           # PAT 또는 GitHub App 토큰을 별도 Secret으로 등록하고 아래 token을 교체해야 한다.
