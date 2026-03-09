@@ -1,8 +1,13 @@
 {
-  "lastVersion": "current",
+  "lastVersion": "0.0.3",
   "versions": {
     "current": {
-      "label": "latest",
+      "label": "Next",
+      "path": "next",
+      "banner": "unreleased"
+    },
+    "0.0.3": {
+      "label": "0.0.3",
       "path": "",
       "banner": "none"
     }
