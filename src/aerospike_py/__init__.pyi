@@ -7,6 +7,7 @@ import numpy as np
 from aerospike_py import exception as exception
 from aerospike_py import list_operations as list_operations
 from aerospike_py import map_operations as map_operations
+from aerospike_py import hll_operations as hll_operations
 from aerospike_py import predicates as predicates
 from aerospike_py.numpy_batch import NumpyBatchRecords as NumpyBatchRecords
 from aerospike_py.types import (
@@ -30,6 +31,7 @@ from aerospike_py.types import (
     WritePolicy as WritePolicy,
 )
 from aerospike_py._types import (
+    HLLPolicy as HLLPolicy,
     ListPolicy as ListPolicy,
     MapPolicy as MapPolicy,
     Operation as Operation,

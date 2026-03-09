@@ -77,6 +77,18 @@ pub const OP_MAP_GET_BY_RANK_RANGE: i32 = 2025;
 pub const OP_MAP_GET_BY_KEY_LIST: i32 = 2026;
 pub const OP_MAP_GET_BY_VALUE_LIST: i32 = 2027;
 
+// ── HLL CDT operation codes ──────────────────────────────────────
+pub const OP_HLL_INIT: i32 = 3001;
+pub const OP_HLL_ADD: i32 = 3002;
+pub const OP_HLL_GET_COUNT: i32 = 3003;
+pub const OP_HLL_GET_UNION: i32 = 3004;
+pub const OP_HLL_GET_UNION_COUNT: i32 = 3005;
+pub const OP_HLL_GET_INTERSECT_COUNT: i32 = 3006;
+pub const OP_HLL_GET_SIMILARITY: i32 = 3007;
+pub const OP_HLL_DESCRIBE: i32 = 3008;
+pub const OP_HLL_FOLD: i32 = 3009;
+pub const OP_HLL_SET_UNION: i32 = 3010;
+
 /// Register all Aerospike constants onto the native Python module.
 ///
 /// Groups: policy keys/exists/gen/replica/commit, TTL, auth mode, operators,

@@ -6,6 +6,7 @@
 
 use aerospike_core::{
     operations,
+    operations::hll::{self as hll_ops, HLLPolicy},
     operations::lists::{
         self as list_ops, ListOrderType, ListPolicy, ListReturnType, ListSortFlags,
     },
@@ -167,6 +168,24 @@ fn parse_map_policy(dict: &Bound<'_, PyDict>) -> PyResult<MapPolicy> {
         Ok(MapPolicy::new(map_order, mode))
     } else {
         Ok(MapPolicy::default())
+    }
+}
+
+/// Parse an optional `hll_policy` sub-dict from an operation dict.
+fn parse_hll_policy(dict: &Bound<'_, PyDict>) -> PyResult<HLLPolicy> {
+    if let Some(policy_obj) = dict.get_item("hll_policy")? {
+        if policy_obj.is_none() {
+            return Ok(HLLPolicy::default());
+        }
+        let policy_dict = policy_obj.cast::<PyDict>()?;
+        let flags: i64 = policy_dict
+            .get_item("flags")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or(0);
+        Ok(HLLPolicy { flags })
+    } else {
+        Ok(HLLPolicy::default())
     }
 }
 
@@ -649,12 +668,101 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 map_ops::get_by_value_list(&name, values_from_list(&v), rt)
             }
 
+            // ── HLL CDT operations ───────────────────────────
+            OP_HLL_INIT => {
+                let name = require_bin(&bin_name, "hll_init")?;
+                let policy = parse_hll_policy(dict)?;
+                let index_bit_count: i64 = dict
+                    .get_item("index_bit_count")?
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err(
+                            "hll_init requires 'index_bit_count'",
+                        )
+                    })?
+                    .extract()?;
+                let minhash_bit_count: i64 = dict
+                    .get_item("minhash_bit_count")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(-1);
+                hll_ops::init_with_min_hash(&policy, &name, index_bit_count, minhash_bit_count)
+            }
+            OP_HLL_ADD => {
+                let name = require_bin(&bin_name, "hll_add")?;
+                let policy = parse_hll_policy(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                let list = values_from_list(&v);
+                let index_bit_count: i64 = dict
+                    .get_item("index_bit_count")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(-1);
+                let minhash_bit_count: i64 = dict
+                    .get_item("minhash_bit_count")?
+                    .map(|v| v.extract())
+                    .transpose()?
+                    .unwrap_or(-1);
+                hll_ops::add_with_index_and_min_hash(
+                    &policy,
+                    &name,
+                    list,
+                    index_bit_count,
+                    minhash_bit_count,
+                )
+            }
+            OP_HLL_GET_COUNT => {
+                let name = require_bin(&bin_name, "hll_get_count")?;
+                hll_ops::get_count(&name)
+            }
+            OP_HLL_GET_UNION => {
+                let name = require_bin(&bin_name, "hll_get_union")?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::get_union(&name, values_from_list(&v))
+            }
+            OP_HLL_GET_UNION_COUNT => {
+                let name = require_bin(&bin_name, "hll_get_union_count")?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::get_union_count(&name, values_from_list(&v))
+            }
+            OP_HLL_GET_INTERSECT_COUNT => {
+                let name = require_bin(&bin_name, "hll_get_intersect_count")?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::get_intersect_count(&name, values_from_list(&v))
+            }
+            OP_HLL_GET_SIMILARITY => {
+                let name = require_bin(&bin_name, "hll_get_similarity")?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::get_similarity(&name, values_from_list(&v))
+            }
+            OP_HLL_DESCRIBE => {
+                let name = require_bin(&bin_name, "hll_describe")?;
+                hll_ops::describe(&name)
+            }
+            OP_HLL_FOLD => {
+                let name = require_bin(&bin_name, "hll_fold")?;
+                let index_bit_count: i64 = dict
+                    .get_item("index_bit_count")?
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err(
+                            "hll_fold requires 'index_bit_count'",
+                        )
+                    })?
+                    .extract()?;
+                hll_ops::fold(&name, index_bit_count)
+            }
+            OP_HLL_SET_UNION => {
+                let name = require_bin(&bin_name, "hll_set_union")?;
+                let policy = parse_hll_policy(dict)?;
+                let v = val.unwrap_or(Value::Nil);
+                hll_ops::set_union(&policy, &name, values_from_list(&v))
+            }
+
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "Unsupported operation code: {op_code}. Supported codes: \
                      READ={OP_READ}, WRITE={OP_WRITE}, INCR={OP_INCR}, \
                      APPEND={OP_APPEND}, PREPEND={OP_PREPEND}, TOUCH={OP_TOUCH}, DELETE={OP_DELETE}, \
-                     List CDT=1001-1031, Map CDT=2001-2027"
+                     List CDT=1001-1031, Map CDT=2001-2027, HLL CDT=3001-3010"
                 )));
             }
         };

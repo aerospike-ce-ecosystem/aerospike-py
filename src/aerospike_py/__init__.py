@@ -222,6 +222,7 @@ from aerospike_py import predicates  # noqa: F401
 from aerospike_py.numpy_batch import NumpyBatchRecords  # noqa: F401
 from aerospike_py import list_operations  # noqa: F401
 from aerospike_py import map_operations  # noqa: F401
+from aerospike_py import hll_operations  # noqa: F401
 from aerospike_py import exp  # noqa: F401
 from aerospike_py.types import (  # noqa: F401
     AerospikeKey,
@@ -243,7 +244,7 @@ from aerospike_py.types import (  # noqa: F401
     UserInfo,
     RoleInfo,
 )
-from aerospike_py._types import ListPolicy, MapPolicy, Operation  # noqa: F401
+from aerospike_py._types import HLLPolicy, ListPolicy, MapPolicy, Operation  # noqa: F401
 
 # Client and query classes (re-exported from internal modules)
 from aerospike_py._client import Client, Query  # noqa: F401
@@ -359,12 +360,14 @@ __all__ = [
     "RoleInfo",
     "ListPolicy",
     "MapPolicy",
+    "HLLPolicy",
     "Operation",
     # Submodules
     "exception",
     "predicates",
     "list_operations",
     "map_operations",
+    "hll_operations",
     "exp",
     # Exception classes
     "AerospikeError",
