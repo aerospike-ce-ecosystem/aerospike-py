@@ -59,10 +59,15 @@ bench = [
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 dev = [
+    { name = "aerospike" },
+    { name = "fastapi" },
+    { name = "gunicorn" },
+    { name = "httpx" },
     { name = "hypothesis" },
     { name = "maturin" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "prometheus-client" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -70,42 +75,9 @@ dev = [
     { name = "ruff" },
 ]
 test = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-]
-test-all = [
-    { name = "fastapi" },
-    { name = "gunicorn" },
-    { name = "httpx" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "prometheus-client" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-]
-test-compat = [
     { name = "aerospike" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-test-fastapi = [
     { name = "fastapi" },
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-test-gunicorn = [
     { name = "gunicorn" },
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-test-integration = [
-    { name = "fastapi" },
     { name = "httpx" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -128,9 +100,14 @@ bench = [
     { name = "numpy", specifier = ">=2.0" },
 ]
 dev = [
+    { name = "aerospike" },
+    { name = "fastapi" },
+    { name = "gunicorn" },
+    { name = "httpx" },
     { name = "hypothesis", specifier = ">=6.0" },
     { name = "maturin", specifier = ">=1.9,<2" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "prometheus-client" },
     { name = "pyright", specifier = ">=1.1" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -138,40 +115,9 @@ dev = [
     { name = "ruff" },
 ]
 test = [
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov", specifier = ">=5.0" },
-]
-test-all = [
-    { name = "fastapi" },
-    { name = "gunicorn" },
-    { name = "httpx" },
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "prometheus-client" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov", specifier = ">=5.0" },
-]
-test-compat = [
     { name = "aerospike" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-test-fastapi = [
     { name = "fastapi" },
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-test-gunicorn = [
     { name = "gunicorn" },
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-test-integration = [
-    { name = "fastapi" },
     { name = "httpx" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "prometheus-client" },
