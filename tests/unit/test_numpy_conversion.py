@@ -1,7 +1,8 @@
 """NumpyBatchRecords 변환 로직 단위 테스트 (서버 불필요)."""
 
 import warnings
-from types import SimpleNamespace
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pytest
@@ -9,14 +10,26 @@ import pytest
 from aerospike_py.numpy_batch import NumpyBatchRecords, _batch_records_to_numpy
 
 
+@dataclass
+class FakeBatchRecord:
+    key: Any
+    result: int
+    record: Any  # tuple or None
+
+
+@dataclass
+class FakeBatchRecords:
+    batch_records: list[FakeBatchRecord]
+
+
 def _make_batch_record(key, result, record=None):
-    """Mock BatchRecord를 SimpleNamespace로 생성."""
-    return SimpleNamespace(key=key, result=result, record=record)
+    """Mock BatchRecord를 FakeBatchRecord로 생성."""
+    return FakeBatchRecord(key=key, result=result, record=record)
 
 
 def _make_batch_records(records):
-    """Mock BatchRecords를 SimpleNamespace로 생성."""
-    return SimpleNamespace(batch_records=records)
+    """Mock BatchRecords를 FakeBatchRecords로 생성."""
+    return FakeBatchRecords(batch_records=records)
 
 
 # ── 정상 변환 테스트 ────────────────────────────────────────────

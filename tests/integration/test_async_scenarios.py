@@ -26,7 +26,7 @@ class TestAsyncConcurrentOps:
 
         result = await async_client.batch_read(keys)
         assert len(result.batch_records) == 10
-        idxs = sorted([br.record[2]["idx"] for br in result.batch_records if br.record is not None])
+        idxs = sorted([br.record.bins["idx"] for br in result.batch_records if br.record is not None])
         assert idxs == list(range(10))
 
     async def test_concurrent_reads_writes(self, async_client, async_cleanup):

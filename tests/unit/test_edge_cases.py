@@ -528,3 +528,35 @@ class TestHostParsing:
         """String host with valid port should succeed at creation."""
         c = aerospike_py.client({"hosts": ["192.168.1.1:3000"]})
         assert c is not None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# BatchRecord / BatchRecords NamedTuple tests
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestBatchRecordNamedTuple:
+    """Verify BatchRecord and BatchRecords expose the expected public API."""
+
+    def test_batch_record_has_expected_attributes(self):
+        from aerospike_py import BatchRecord
+
+        # BatchRecord class exposes key, result, record attributes
+        assert hasattr(BatchRecord, "key") or "key" in dir(BatchRecord)
+        assert hasattr(BatchRecord, "result") or "result" in dir(BatchRecord)
+        assert hasattr(BatchRecord, "record") or "record" in dir(BatchRecord)
+
+    def test_batch_records_has_expected_attributes(self):
+        from aerospike_py import BatchRecords
+
+        # BatchRecords class exposes batch_records attribute
+        assert hasattr(BatchRecords, "batch_records") or "batch_records" in dir(BatchRecords)
+
+    def test_batch_record_importable_from_aerospike_py(self):
+        """BatchRecord and BatchRecords are importable from the top-level package."""
+        import aerospike_py
+
+        assert hasattr(aerospike_py, "BatchRecord")
+        assert hasattr(aerospike_py, "BatchRecords")
+        assert "BatchRecord" in aerospike_py.__all__
+        assert "BatchRecords" in aerospike_py.__all__

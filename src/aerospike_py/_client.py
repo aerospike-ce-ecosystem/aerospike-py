@@ -9,6 +9,8 @@ from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
 from aerospike_py.types import (
     AerospikeKey,
+    BatchRecord as BatchRecordTuple,
+    BatchRecords as BatchRecordsTuple,
     BinTuple,
     ExistsResult,
     InfoNodeResult,
@@ -51,6 +53,12 @@ def _wrap_operate_ordered(raw: tuple) -> OperateOrderedResult:
         meta=_wrap_meta(raw[1]),
         ordered_bins=[BinTuple(n, v) for n, v in raw[2]],
     )
+
+
+def _wrap_batch_record(br) -> BatchRecordTuple:
+    key = _wrap_key(br.key)
+    record = _wrap_record(br.record) if br.record is not None else None
+    return BatchRecordTuple(key=key, result=br.result, record=record)
 
 
 # ---------------------------------------------------------------------------
@@ -166,16 +174,13 @@ class Client(_NativeClient):
             batch = client.batch_read(keys, bins=["name", "age"])
             for br in batch.batch_records:
                 if br.record:
-                    key, meta, bins = br.record  # raw tuples (not wrapped)
-                    print(bins)
+                    print(br.record.bins)
             ```
-
-        Note:
-            ``batch_read`` returns raw ``BatchRecords`` from the native layer.
-            Individual ``br.record`` tuples are **not** wrapped as ``Record``
-            NamedTuples. Use dict-style access for metadata: ``meta["gen"]``.
         """
-        return super().batch_read(keys, bins, policy, _dtype)
+        raw = super().batch_read(keys, bins, policy, _dtype)
+        if _dtype is not None:
+            return raw  # NumpyBatchRecords path unchanged
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_write_numpy")
     def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None):

@@ -70,7 +70,7 @@ keys = [("test", "demo", f"user_{i}") for i in range(10)]
 # All bins
 batch = client.batch_read(keys)
 for br in batch.batch_records:
-    if br.record:
+    if br.result == 0 and br.record is not None:
         print(br.record.bins)
 
 # Specific bins

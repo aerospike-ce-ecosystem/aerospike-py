@@ -108,7 +108,7 @@ client.put(key, bins)  # RecordExistsError가 발생하지 않음
 ```python
 batch = client.batch_read(keys)
 for br in batch.batch_records:
-    if br.result == aerospike.AEROSPIKE_OK and br.record:
+    if br.result == aerospike.AEROSPIKE_OK and br.record is not None:
         process(br.record.bins)
     elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
         handle_missing(br.key)
