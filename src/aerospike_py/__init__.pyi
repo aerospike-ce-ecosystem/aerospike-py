@@ -1,6 +1,6 @@
 """Type stubs for the aerospike_py package."""
 
-from typing import Any, Callable, Optional, Union, overload
+from typing import Any, Callable, NamedTuple, Optional, Union, overload
 
 import numpy as np
 
@@ -44,14 +44,14 @@ __version__: str
 Key = tuple[str, str, Union[str, int, bytes]]
 """Aerospike key: (namespace, set, primary_key). Input type for all key parameters."""
 
-class BatchRecord:
+class BatchRecord(NamedTuple):
     """Single record result from a batch read operation."""
 
-    key: Key
+    key: AerospikeKey | None
     result: int
-    record: Optional[tuple[Any, ...]]
+    record: Record | None
 
-class BatchRecords:
+class BatchRecords(NamedTuple):
     """Container for batch read results."""
 
     batch_records: list[BatchRecord]
