@@ -604,7 +604,7 @@ results = client.batch_write_numpy(data, "test", "demo", dtype)
 # Check results
 for record in results:
     key, meta, bins = record
-    print(f"Key: {key}, Gen: {meta['gen']}")
+    print(f"Key: {key}, Gen: {meta.gen}")
 
 # Async
 results = await async_client.batch_write_numpy(data, "test", "demo", dtype)

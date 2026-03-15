@@ -9,8 +9,9 @@ from typing import Any
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
-from aerospike_py._client import _wrap_exists, _wrap_operate_ordered, _wrap_record
+from aerospike_py._client import _wrap_batch_record, _wrap_exists, _wrap_operate_ordered, _wrap_record
 from aerospike_py.types import (
+    BatchRecords as BatchRecordsTuple,
     ExistsResult,
     InfoNodeResult,
     OperateOrderedResult,
@@ -165,16 +166,13 @@ class AsyncClient:
             batch = await client.batch_read(keys, bins=["name", "age"])
             for br in batch.batch_records:
                 if br.record:
-                    key, meta, bins = br.record  # raw tuples (not wrapped)
-                    print(bins)
+                    print(br.record.bins)
             ```
-
-        Note:
-            ``batch_read`` returns raw ``BatchRecords`` from the native layer.
-            Individual ``br.record`` tuples are **not** wrapped as ``Record``
-            NamedTuples. Use dict-style access for metadata: ``meta["gen"]``.
         """
-        return await self._inner.batch_read(keys, bins, policy, _dtype)
+        raw = await self._inner.batch_read(keys, bins, policy, _dtype)
+        if _dtype is not None:
+            return raw  # NumpyBatchRecords path unchanged
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(

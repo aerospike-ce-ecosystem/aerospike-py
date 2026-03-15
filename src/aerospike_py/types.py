@@ -64,6 +64,20 @@ class OperateOrderedResult(NamedTuple):
     ordered_bins: list[BinTuple]
 
 
+class BatchRecord(NamedTuple):
+    """Single record result from a batch read operation."""
+
+    key: AerospikeKey | None
+    result: int
+    record: Record | None
+
+
+class BatchRecords(NamedTuple):
+    """Container for batch read results."""
+
+    batch_records: list[BatchRecord]
+
+
 # ---------------------------------------------------------------------------
 # TypedDict types (input parameters - annotation only)
 # ---------------------------------------------------------------------------

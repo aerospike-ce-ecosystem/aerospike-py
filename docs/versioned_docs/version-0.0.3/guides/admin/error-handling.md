@@ -98,7 +98,7 @@ missing = []
 errors = []
 
 for br in batch.batch_records:
-    if br.result == aerospike.AEROSPIKE_OK and br.record:
+    if br.result == aerospike.AEROSPIKE_OK and br.record is not None:
         succeeded.append(br.record.bins)
     elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
         missing.append(br.key)
@@ -120,9 +120,10 @@ except AerospikeError:
     # Entire batch failed (e.g., cluster unavailable)
     raise
 
-for br in results.batch_records:
-    if br.result != aerospike.AEROSPIKE_OK:
-        logger.warning("Key %s failed: code=%d", br.key, br.result)
+for record in results:
+    key, meta, bins = record  # Record NamedTuple unpacking
+    if meta is None:
+        logger.warning("Key %s failed (no metadata)", key)
 ```
 
 ## Async Error Handling
@@ -331,7 +332,7 @@ Set `total_timeout` higher than `socket_timeout * (max_retries + 1)` to allow al
 | 5 | `AEROSPIKE_ERR_RECORD_EXISTS` | `RecordExistsError` |
 | 6 | `AEROSPIKE_ERR_BIN_EXISTS` | `BinExistsError` |
 | 9 | `AEROSPIKE_ERR_TIMEOUT` | `AerospikeTimeoutError` |
-| 12 | `AEROSPIKE_ERR_BIN_INCOMPATIBLE_TYPE` | `BinTypeError` |
+| 12 | `AEROSPIKE_ERR_BIN_TYPE` | `BinTypeError` |
 | 13 | `AEROSPIKE_ERR_RECORD_TOO_BIG` | `RecordTooBig` |
 | 17 | `AEROSPIKE_ERR_BIN_NOT_FOUND` | `BinNotFound` |
 | 21 | `AEROSPIKE_ERR_BIN_NAME` | `BinNameError` |
