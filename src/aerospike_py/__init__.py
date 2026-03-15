@@ -5,7 +5,7 @@ Drop-in compatible replacement for the aerospike-client-python package.
 
 import logging
 
-from aerospike_py._aerospike import BatchRecord, BatchRecords  # noqa: F401
+from aerospike_py.types import BatchRecord, BatchRecords  # noqa: F401
 
 # Import all exceptions from native module
 from aerospike_py._aerospike import (  # noqa: F401
