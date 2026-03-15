@@ -165,7 +165,7 @@ class AsyncClient:
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
             batch = await client.batch_read(keys, bins=["name", "age"])
             for br in batch.batch_records:
-                if br.record:
+                if br.result == 0 and br.record is not None:
                     print(br.record.bins)
             ```
         """
