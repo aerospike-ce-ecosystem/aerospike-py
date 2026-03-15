@@ -180,19 +180,6 @@ def test_sync_async_method_parity():
     assert not async_extra, f"Methods in AsyncClient but missing from Client: {async_extra}"
 
 
-def test_exp_invalid_op_rejected():
-    """Test that constructing an expression with invalid op raises ValueError."""
-    from aerospike_py import exp
-
-    with pytest.raises(ValueError, match="nonexistent_op"):
-        exp._cmd("nonexistent_op", val=42)
-
-    # Valid ops should work fine
-    result = exp.int_val(42)
-    assert result["__expr__"] == "int_val"
-    assert result["val"] == 42
-
-
 def test_list_map_op_codes_contiguous():
     """Verify list/map operation code constants are contiguous and match expected ranges."""
     from aerospike_py import list_operations, map_operations

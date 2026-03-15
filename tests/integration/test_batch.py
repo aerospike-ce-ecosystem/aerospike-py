@@ -24,7 +24,7 @@ class TestBatchRead:
             assert br.record is not None
             _, meta, bins = br.record
             assert meta is not None
-            assert meta["gen"] >= 1
+            assert meta.gen >= 1
             assert "a" in bins
 
     def test_batch_read_specific_bins(self, client, cleanup):
