@@ -291,13 +291,9 @@ jobs:
           UV_PYTHON: 3.14t
 
   feasibility:
-    name: Feasibility (${{ matrix.test }})
+    name: Feasibility
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        test: [fastapi, gunicorn]
     services:
       aerospike:
         image: aerospike/aerospike-server:latest
@@ -338,7 +334,7 @@ jobs:
         uses: ./.github/actions/wait-for-aerospike
 
       - name: Run feasibility test
-        run: uvx --with tox-uv tox -e ${{ matrix.test }}
+        run: uvx --with tox-uv tox -e feasibility
 
   security:
     name: Security Audit

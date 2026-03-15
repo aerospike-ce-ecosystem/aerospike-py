@@ -1,6 +1,6 @@
 """Type stubs for the aerospike_py package."""
 
-from typing import Any, Callable, NamedTuple, Optional, Union, overload
+from typing import Any, Callable, Optional, Union, overload
 
 import numpy as np
 
@@ -14,6 +14,8 @@ from aerospike_py.types import (
     AdminPolicy as AdminPolicy,
     AerospikeKey as AerospikeKey,
     BatchPolicy as BatchPolicy,
+    BatchRecord as BatchRecord,
+    BatchRecords as BatchRecords,
     Bins as Bins,
     BinTuple as BinTuple,
     ClientConfig as ClientConfig,
@@ -43,18 +45,6 @@ __version__: str
 
 Key = tuple[str, str, Union[str, int, bytes]]
 """Aerospike key: (namespace, set, primary_key). Input type for all key parameters."""
-
-class BatchRecord(NamedTuple):
-    """Single record result from a batch read operation."""
-
-    key: AerospikeKey | None
-    result: int
-    record: Record | None
-
-class BatchRecords(NamedTuple):
-    """Container for batch read results."""
-
-    batch_records: list[BatchRecord]
 
 # -- Client --------------------------------------------------------------
 
@@ -583,7 +573,7 @@ class Client:
 
             batch = client.batch_read(keys)
             for br in batch.batch_records:
-                if br.record:
+                if br.result == 0 and br.record is not None:
                     print(br.record.bins)
 
             # Read specific bins
@@ -1483,7 +1473,7 @@ class AsyncClient:
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
             batch = await client.batch_read(keys, bins=["name", "age"])
             for br in batch.batch_records:
-                if br.record:
+                if br.result == 0 and br.record is not None:
                     print(br.record.bins)
             ```
         """
