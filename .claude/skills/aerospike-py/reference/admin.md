@@ -259,7 +259,7 @@ keys = [("test", "demo", f"id-{i}") for i in range(100)]
 batch = client.batch_read(keys)
 
 for br in batch.batch_records:
-    if br.result == aerospike.AEROSPIKE_OK and br.record:
+    if br.result == aerospike.AEROSPIKE_OK and br.record is not None:
         print(br.record.bins)
     elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
         print("missing:", br.key)
@@ -324,7 +324,7 @@ def resilient_get(client, key, max_retries: int = 3):
 | 5 | AEROSPIKE_ERR_RECORD_EXISTS | RecordExistsError |
 | 6 | AEROSPIKE_ERR_BIN_EXISTS | BinExistsError |
 | 9 | AEROSPIKE_ERR_TIMEOUT | AerospikeTimeoutError |
-| 12 | AEROSPIKE_ERR_BIN_INCOMPATIBLE_TYPE | BinTypeError |
+| 12 | AEROSPIKE_ERR_BIN_TYPE | BinTypeError |
 | 13 | AEROSPIKE_ERR_RECORD_TOO_BIG | RecordTooBig |
 | 17 | AEROSPIKE_ERR_BIN_NOT_FOUND | BinNotFound |
 | 21 | AEROSPIKE_ERR_BIN_NAME | BinNameError |

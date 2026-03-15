@@ -63,7 +63,7 @@ results = client.batch_write_numpy(data, "test", "demo", dtype)
 # 4. 결과 확인
 for record in results:
     key, meta, bins = record
-    print(f"Key: {key}, Gen: {meta['gen']}")
+    print(f"Key: {key}, Gen: {meta.gen}")
 ```
 
   </TabItem>
@@ -101,7 +101,7 @@ async def main():
     # 4. 결과 확인
     for record in results:
         key, meta, bins = record
-        print(f"Key: {key}, Gen: {meta['gen']}")
+        print(f"Key: {key}, Gen: {meta.gen}")
 
     await client.close()
 
