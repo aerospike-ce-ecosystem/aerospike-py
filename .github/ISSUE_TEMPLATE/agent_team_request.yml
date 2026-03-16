@@ -1,0 +1,34 @@
+name: Agent Team Request
+description: Request AI agent team to analyze, plan, and implement changes
+title: "[Agent Team]: "
+labels: ["agent-team"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template triggers an AI agent team (Claude Opus) to analyze the codebase,
+        create an implementation plan, and generate a pull request.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe what you want the agent team to implement or investigate.
+      placeholder: "Implement a new API method for ..."
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any additional context, references, or constraints.
+  - type: dropdown
+    id: expected-scope
+    attributes:
+      label: Expected Scope
+      description: How large is this change expected to be?
+      options:
+        - "Small (single file, minor change)"
+        - "Medium (a few files, new feature)"
+        - "Large (cross-cutting, multiple modules)"
+    validations:
+      required: true
