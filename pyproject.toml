@@ -46,29 +46,20 @@ otel = ["opentelemetry-api>=1.20"]
 dev = [
     "pytest",
     "pytest-asyncio",
-    "pytest-cov>=5.0",
-    "hypothesis>=6.0",
     "ruff",
     "maturin>=1.9,<2",
     "numpy>=2.0",
     "pyright>=1.1",
-    "fastapi",
-    "httpx",
-    "prometheus-client",
-    "gunicorn",
-    {include-group = "compat"},
-]
-test = [
-    "pytest",
-    "pytest-asyncio",
     "pytest-cov>=5.0",
-    "numpy>=2.0",
-    "fastapi",
-    "httpx",
-    "prometheus-client",
-    "gunicorn",
+    "hypothesis>=6.0",
+    "pre-commit>=4.5.1",
 ]
-compat = ["aerospike"]
+test = ["pytest", "pytest-asyncio", "numpy>=2.0", "pytest-cov>=5.0"]
+test-integration = [{include-group = "test"}, "fastapi", "httpx", "prometheus-client"]
+test-fastapi = ["pytest", "pytest-asyncio", "fastapi", "httpx"]
+test-gunicorn = ["pytest", "pytest-asyncio", "gunicorn", "httpx"]
+test-compat = ["pytest", "pytest-asyncio", "aerospike"]
+test-all = [{include-group = "test-integration"}, "gunicorn"]
 bench = ["aerospike>=17.0.0", "numpy>=2.0"]
 
 [tool.pytest.ini_options]
@@ -151,7 +142,7 @@ commands = [["pytest", "tests/unit/", "-v"]]
 base_python = ["python3.14t"]
 
 [tool.tox.env.integration]
-dependency_groups = ["test"]
+dependency_groups = ["test-integration"]
 commands = [["pytest", "tests/integration/", "-v"]]
 
 [tool.tox.env.concurrency]
@@ -161,16 +152,20 @@ commands = [["pytest", "tests/concurrency/", "-v", "--ignore=tests/concurrency/t
 base_python = ["python3.14t"]
 commands = [["pytest", "tests/concurrency/", "-v"]]
 
-[tool.tox.env.feasibility]
-dependency_groups = ["test"]
-commands = [["pytest", "tests/feasibility/", "-v"]]
+[tool.tox.env.fastapi]
+dependency_groups = ["test-fastapi"]
+commands = [["pytest", "tests/feasibility/test_fastapi.py", "-v"]]
+
+[tool.tox.env.gunicorn]
+dependency_groups = ["test-gunicorn"]
+commands = [["pytest", "tests/feasibility/test_gunicorn.py", "-v"]]
 
 [tool.tox.env.compat]
-dependency_groups = ["test", "compat"]
+dependency_groups = ["test-compat"]
 commands = [["pytest", "tests/compatibility/", "-v"]]
 
 [tool.tox.env.all]
-dependency_groups = ["test", "compat"]
+dependency_groups = ["test-all"]
 commands = [["pytest", "tests/", "-v"]]
 
 # ── maturin ──────────────────────────────────────────────
@@ -181,3 +176,9 @@ module-name = "aerospike_py._aerospike"
 manifest-path = "rust/Cargo.toml"
 features = ["extension-module", "otel"]
 include = ["LICENSE"]
+
+[tool.uv.workspace]
+members = [
+    "aaaa",
+    "bbbb",
+]

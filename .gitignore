@@ -1,56 +1,45 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-
-# Rust build artifacts
-target/
-rust/target/
-
-# Compiled extensions
+*.py[cod]
+*$py.class
 *.so
-*.pyd
-*.dylib
+*.egg
+*.egg-info/
+dist/
+build/
+sdist/
+wheels/
 
-# Tox
+# uv
+.venv/
+uv.lock
+
+# 테스트 & 커버리지
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
 .tox/
+.nox/
+
+# 타입 체커
+.mypy_cache/
+.pytype/
+.pyre/
+.pyright/
+
+# Ruff
+.ruff_cache/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+.DS_Store
 
-# Claude Code
-.claude/settings.local.json
-.claude/skills/playwright-cli/
-
-# Sisyphus
-.sisyphus/
-
-# Playwright
-.playwright-cli/
-
-# Security-sensitive files
-*.pem
-*.key
-*.crt
-*.pfx
-*.p12
+# 환경변수
 .env
-.env.*
-!.env.example
-credentials.json
-secrets/
-
-# Docusaurus
-docs/node_modules/
-docs/build/
-docs/.docusaurus/
-docs/src/pages/releases.mdx
+.env.local
+.env.*.local

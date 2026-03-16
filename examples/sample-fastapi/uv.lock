@@ -23,17 +23,20 @@ bench = [
     { name = "numpy", specifier = ">=2.0" },
 ]
 dev = [
+    { name = "hypothesis", specifier = ">=6.0" },
     { name = "maturin", specifier = ">=1.9,<2" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pyright", specifier = ">=1.1" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-cov", specifier = ">=5.0" },
     { name = "ruff" },
 ]
 test = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-cov", specifier = ">=5.0" },
 ]
 test-all = [
     { name = "fastapi" },
@@ -43,6 +46,7 @@ test-all = [
     { name = "prometheus-client" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-cov", specifier = ">=5.0" },
 ]
 test-compat = [
     { name = "aerospike" },
@@ -68,6 +72,7 @@ test-integration = [
     { name = "prometheus-client" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-cov", specifier = ">=5.0" },
 ]
 
 [[package]]

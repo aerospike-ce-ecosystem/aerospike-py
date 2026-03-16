@@ -5,7 +5,7 @@ on:
 roles: [admin, maintainer, write]
 engine:
   id: claude
-  model: claude-opus-4
+  model: claude-opus-4-6
 permissions:
   contents: read
   issues: read
