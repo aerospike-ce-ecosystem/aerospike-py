@@ -41,6 +41,9 @@ config: dict = {
     "max_conns_per_node": 300, "min_conns_per_node": 0,
     "tend_interval": 1000,         # cluster health check interval (ms)
     "use_services_alternate": False,
+    # Backpressure (operation concurrency limiter)
+    "max_concurrent_operations": 0,      # 0=disabled(default), >0=limit in-flight ops
+    "operation_queue_timeout_ms": 0,     # 0=wait forever, >0=BackpressureError after N ms
 }
 ```
 
@@ -130,6 +133,8 @@ try:
     record = client.get(key)
 except aerospike_py.RecordNotFound:
     print("Not found")
+except aerospike_py.BackpressureError:
+    print("Too many concurrent operations, retry later")
 except aerospike_py.AerospikeTimeoutError:
     print("Timeout")
 except aerospike_py.AerospikeError as e:
@@ -142,7 +147,9 @@ Exception hierarchy:
 
 ```
 AerospikeError
-+-- ClientError, ClusterError, InvalidArgError, AerospikeTimeoutError
++-- ClientError
+|   +-- BackpressureError   # max_concurrent_operations exceeded (timeout)
++-- ClusterError, InvalidArgError, AerospikeTimeoutError
 +-- RecordError
 |   +-- RecordNotFound, RecordExistsError, RecordGenerationError, RecordTooBig
 |   +-- BinNameError, BinExistsError, BinNotFound, BinTypeError, FilteredOut
@@ -428,6 +435,7 @@ async def lifespan(app: FastAPI):
     aerospike_py.init_tracing()
     client = AsyncClient({
         "hosts": [(os.getenv("AEROSPIKE_HOST", "127.0.0.1"), 18710)],
+        "max_concurrent_operations": 64,  # backpressure for high concurrency
     })
     await client.connect()
     app.state.aerospike = client

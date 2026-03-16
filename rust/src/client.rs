@@ -7,10 +7,11 @@ use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
+use crate::backpressure::OperationLimiter;
 use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
-use crate::policy::client_policy::parse_client_policy;
+use crate::policy::client_policy::{parse_backpressure_config, parse_client_policy};
 use crate::record_helpers::{batch_records_to_py, record_to_meta};
 use crate::runtime::RUNTIME;
 use crate::types::host::parse_hosts_from_config;
@@ -32,6 +33,8 @@ pub struct PyClient {
     config: Py<PyAny>,
     /// Connection metadata used for OTel span attributes (Arc for cheap cloning).
     connection_info: Arc<crate::tracing::ConnectionInfo>,
+    /// Operation concurrency limiter (disabled by default).
+    limiter: Arc<OperationLimiter>,
 }
 
 #[pymethods]
@@ -42,6 +45,7 @@ impl PyClient {
             inner: None,
             config,
             connection_info: Arc::new(crate::tracing::ConnectionInfo::default()),
+            limiter: Arc::new(OperationLimiter::new(0, 0)),
         })
     }
 
@@ -69,6 +73,7 @@ impl PyClient {
 
         let parsed = parse_hosts_from_config(&effective_config)?;
         let client_policy = parse_client_policy(&effective_config)?;
+        let (max_ops, timeout_ms) = parse_backpressure_config(&effective_config)?;
 
         let cluster_name = client_common::extract_cluster_name(&effective_config)?;
 
@@ -92,6 +97,7 @@ impl PyClient {
         })?;
 
         self.inner = Some(Arc::new(client));
+        self.limiter = Arc::new(OperationLimiter::new(max_ops, timeout_ms));
         info!("Connected to Aerospike cluster");
         Ok(())
     }
@@ -166,8 +172,14 @@ impl PyClient {
         let args =
             client_common::prepare_put_args(py, key, bins, meta, policy, &self.connection_info)?;
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         debug!("put: ns={} set={}", args.key.namespace, args.key.set_name);
-        py.detach(|| RUNTIME.block_on(client_ops::do_put(client, args)))
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_put(client, args).await
+            })
+        })
     }
 
     /// Read a record
@@ -179,10 +191,16 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
         debug!("get: ns={} set={}", args.key.namespace, args.key.set_name);
         let key_py = key_to_py(py, &args.key)?;
-        let record = py.detach(|| RUNTIME.block_on(client_ops::do_get(client, &args)))?;
+        let record = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_get(client, &args).await
+            })
+        })?;
         record_to_py_with_key(py, &record, key_py)
     }
 
@@ -203,7 +221,13 @@ impl PyClient {
             args.key.namespace, args.key.set_name
         );
         let key_py = key_to_py(py, &args.key)?;
-        let record = py.detach(|| RUNTIME.block_on(client_ops::do_select(client, &args)))?;
+        let limiter = self.limiter.clone();
+        let record = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_select(client, &args).await
+            })
+        })?;
         record_to_py_with_key(py, &record, key_py)
     }
 
@@ -222,7 +246,13 @@ impl PyClient {
             args.key.namespace, args.key.set_name
         );
         let key_py = key_to_py(py, &args.key)?;
-        let result = py.detach(|| RUNTIME.block_on(client_ops::do_exists(&client, &args)));
+        let limiter = self.limiter.clone();
+        let result = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                Ok::<_, pyo3::PyErr>(client_ops::do_exists(&client, &args).await)
+            })
+        })?;
 
         match result {
             Ok(record) => {
@@ -254,7 +284,13 @@ impl PyClient {
             "remove: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-        py.detach(|| RUNTIME.block_on(client_ops::do_remove(client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_remove(client, args).await
+            })
+        })
     }
 
     /// Reset record's TTL
@@ -271,7 +307,13 @@ impl PyClient {
         let args =
             client_common::prepare_touch_args(py, key, val, meta, policy, &self.connection_info)?;
         debug!("touch: ns={} set={}", args.key.namespace, args.key.set_name);
-        py.detach(|| RUNTIME.block_on(client_ops::do_touch(client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_touch(client, args).await
+            })
+        })
     }
 
     /// Append a string to a bin
@@ -299,7 +341,13 @@ impl PyClient {
             "append: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        py.detach(|| RUNTIME.block_on(client_ops::do_append(client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_append(client, args).await
+            })
+        })
     }
 
     /// Prepend a string to a bin
@@ -327,7 +375,13 @@ impl PyClient {
             "prepend: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        py.detach(|| RUNTIME.block_on(client_ops::do_prepend(client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_prepend(client, args).await
+            })
+        })
     }
 
     /// Increment an integer bin
@@ -355,7 +409,13 @@ impl PyClient {
             "increment: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        py.detach(|| RUNTIME.block_on(client_ops::do_increment(client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_increment(client, args).await
+            })
+        })
     }
 
     /// Remove bins from a record by setting them to nil
@@ -377,7 +437,13 @@ impl PyClient {
             policy,
             &self.connection_info,
         )?;
-        py.detach(|| RUNTIME.block_on(client_ops::do_remove_bin(client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_remove_bin(client, args).await
+            })
+        })
     }
 
     /// Perform multiple operations on a single record
@@ -400,7 +466,13 @@ impl PyClient {
             args.ops.len()
         );
         let key_py = key_to_py(py, &args.key)?;
-        let record = py.detach(|| RUNTIME.block_on(client_ops::do_operate(client, &args)))?;
+        let limiter = self.limiter.clone();
+        let record = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_operate(client, &args).await
+            })
+        })?;
         record_to_py_with_key(py, &record, key_py)
     }
 
@@ -424,8 +496,13 @@ impl PyClient {
             args.ops.len()
         );
         let pre_key_py = key_to_py(py, &args.key)?;
-        let record =
-            py.detach(|| RUNTIME.block_on(client_ops::do_operate_ordered(client, &args)))?;
+        let limiter = self.limiter.clone();
+        let record = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_operate_ordered(client, &args).await
+            })
+        })?;
 
         let key_py = match &record.key {
             Some(k) => key_to_py(py, k)?,
@@ -987,7 +1064,13 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let args =
             client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?;
-        let results = py.detach(|| RUNTIME.block_on(client_ops::do_batch_read(&client, &args)))?;
+        let limiter = self.limiter.clone();
+        let results = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_batch_read(&client, &args).await
+            })
+        })?;
 
         match _dtype {
             Some(d) => crate::numpy_support::batch_to_numpy_py(py, &results, d),
@@ -1016,8 +1099,13 @@ impl PyClient {
             policy,
             &self.connection_info,
         )?;
-        let results =
-            py.detach(|| RUNTIME.block_on(client_ops::do_batch_operate(&client, &args)))?;
+        let limiter = self.limiter.clone();
+        let results = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_batch_operate(&client, &args).await
+            })
+        })?;
         batch_records_to_py(py, &results)
     }
 
@@ -1055,16 +1143,21 @@ impl PyClient {
         let ns = namespace.to_string();
         let set = set_name.to_string();
 
+        let limiter = self.limiter.clone();
         let results = py.detach(|| {
-            RUNTIME.block_on(client_ops::do_batch_write(
-                &client,
-                &batch_policy,
-                &records,
-                &ns,
-                &set,
-                parent_ctx,
-                conn_info,
-            ))
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_batch_write(
+                    &client,
+                    &batch_policy,
+                    &records,
+                    &ns,
+                    &set,
+                    parent_ctx,
+                    conn_info,
+                )
+                .await
+            })
         })?;
 
         batch_records_to_py(py, &results)
@@ -1082,8 +1175,13 @@ impl PyClient {
         let client = self.get_client()?.clone();
         let args =
             client_common::prepare_batch_remove_args(py, keys, policy, &self.connection_info)?;
-        let results =
-            py.detach(|| RUNTIME.block_on(client_ops::do_batch_remove(&client, &args)))?;
+        let limiter = self.limiter.clone();
+        let results = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_batch_remove(&client, &args).await
+            })
+        })?;
         batch_records_to_py(py, &results)
     }
 }

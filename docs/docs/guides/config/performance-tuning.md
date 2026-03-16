@@ -11,7 +11,7 @@ description: Tips for optimizing aerospike-py throughput and latency.
 ```python
 config = {
     "hosts": [("node1", 3000), ("node2", 3000)],
-    "max_conns_per_node": 300,   # default: 100
+    "max_conns_per_node": 300,   # default: 256
     "min_conns_per_node": 10,    # pre-warm
     "idle_timeout": 55,          # below server proto-fd-idle-ms (60s)
 }
@@ -78,6 +78,25 @@ client.put(key, bins, meta={"ttl": aerospike.TTL_DONT_UPDATE})      # keep exist
 client.put(key, bins, meta={"ttl": aerospike.TTL_NAMESPACE_DEFAULT}) # use namespace default
 ```
 
+## Backpressure (High Concurrency)
+
+When firing many concurrent operations (e.g., `asyncio.gather` with 100+ tasks), the upstream connection pool can run out of connections. Enable backpressure to queue excess operations instead of failing:
+
+```python
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+    "max_concurrent_operations": 64,       # at most 64 in-flight ops
+    "operation_queue_timeout_ms": 5000,    # wait up to 5s for a slot
+}
+```
+
+**Disabled by default** (zero overhead). When enabled:
+- Operations beyond the limit **wait** for a free slot instead of getting errors
+- Waiting operations resume as soon as a previous operation completes
+- `BackpressureError` is raised only if the timeout expires
+
+**Choosing `max_concurrent_operations`:** Set this close to `max_conns_per_node` (default 256). For a 3-node cluster, `64` is a conservative starting point that prevents pool exhaustion while maintaining high throughput.
+
 ## Async Client
 
 For high-concurrency workloads (web servers, fan-out reads):
@@ -86,7 +105,10 @@ For high-concurrency workloads (web servers, fan-out reads):
 import asyncio
 
 async def main() -> None:
-    client = aerospike.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+    client = aerospike.AsyncClient({
+        "hosts": [("127.0.0.1", 3000)],
+        "max_concurrent_operations": 64,  # prevent pool exhaustion
+    })
     await client.connect()
 
     keys = [("test", "demo", f"key{i}") for i in range(1000)]

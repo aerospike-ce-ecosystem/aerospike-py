@@ -8,6 +8,7 @@ use log::info;
 use pyo3::prelude::*;
 
 mod async_client;
+mod backpressure;
 mod batch_types;
 mod bug_report;
 mod client;

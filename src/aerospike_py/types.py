@@ -147,6 +147,8 @@ class ClientConfig(TypedDict, total=False):
     conn_pools_per_node: int
     tend_interval: int
     use_services_alternate: bool
+    max_concurrent_operations: int
+    operation_queue_timeout_ms: int
 
 
 class Privilege(TypedDict, total=False):

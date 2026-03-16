@@ -54,3 +54,19 @@ pub fn parse_client_policy(config: &Bound<'_, PyDict>) -> PyResult<ClientPolicy>
 
     Ok(policy)
 }
+
+/// Parse backpressure configuration from a Python config dict.
+///
+/// Returns `(max_concurrent_operations, operation_queue_timeout_ms)`.
+/// Both default to 0 (disabled / no timeout).
+pub fn parse_backpressure_config(config: &Bound<'_, PyDict>) -> PyResult<(usize, u64)> {
+    let max_ops: usize = config
+        .get_item("max_concurrent_operations")?
+        .map(|v| v.extract())
+        .unwrap_or(Ok(0))?;
+    let timeout_ms: u64 = config
+        .get_item("operation_queue_timeout_ms")?
+        .map(|v| v.extract())
+        .unwrap_or(Ok(0))?;
+    Ok((max_ops, timeout_ms))
+}
