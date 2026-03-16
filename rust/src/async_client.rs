@@ -537,12 +537,11 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         warn!("Async truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?;
-        let limiter = self.limiter.clone();
         let args = client_common::prepare_truncate_args(namespace, set_name, nanos, policy)?;
-        future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
-            client_ops::do_truncate(&client, args).await
-        })
+        future_into_py(
+            py,
+            async move { client_ops::do_truncate(&client, args).await },
+        )
     }
 
     // ── UDF ──────────────────────────────────────────────────

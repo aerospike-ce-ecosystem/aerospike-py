@@ -437,7 +437,13 @@ impl PyClient {
             policy,
             &self.connection_info,
         )?;
-        py.detach(|| RUNTIME.block_on(client_ops::do_remove_bin(client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire().await?;
+                client_ops::do_remove_bin(client, args).await
+            })
+        })
     }
 
     /// Perform multiple operations on a single record
