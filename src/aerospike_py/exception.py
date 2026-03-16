@@ -16,6 +16,7 @@ from aerospike_py._aerospike import (
     RecordError,
     ServerError,
     AerospikeTimeoutError,
+    BackpressureError,
     # Record-level exceptions
     RecordNotFound,
     RecordExistsError,
@@ -68,6 +69,7 @@ __all__ = [
     "RecordError",
     "ClusterError",
     "AerospikeTimeoutError",
+    "BackpressureError",
     "InvalidArgError",
     "RecordNotFound",
     "RecordExistsError",

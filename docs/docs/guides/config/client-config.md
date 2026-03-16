@@ -37,6 +37,8 @@ client = aerospike.client(config).connect()
 | `conn_pools_per_node` | `int` | `1` | Connection pools per node (increase on 8+ CPU cores) |
 | `tend_interval` | `int` | `1000` | Cluster tend interval (ms) |
 | `use_services_alternate` | `bool` | `false` | Use alternate addresses |
+| `max_concurrent_operations` | `int` | `0` (disabled) | Max in-flight operations per client. `0` = unlimited. |
+| `operation_queue_timeout_ms` | `int` | `0` (infinite) | Max wait time for a backpressure slot (ms). `0` = wait forever. |
 
 ## Multi-Node Cluster
 
@@ -68,6 +70,22 @@ config: ClientConfig = {
 - `min_conns_per_node`: Avoid cold-start latency
 - `conn_pools_per_node`: Number of connection pools per node. Machines with 8 or fewer CPU cores typically need only 1. On machines with more cores, increasing this value reduces lock contention on pooled connections
 - `idle_timeout`: Keep below server `proto-fd-idle-ms` (default 60s)
+
+## Backpressure
+
+When running many concurrent operations (e.g., `asyncio.gather` with hundreds of tasks), the upstream connection pool can be exhausted, causing `NoMoreConnections` errors. Backpressure limits how many operations are in-flight simultaneously:
+
+```python
+config: ClientConfig = {
+    "hosts": [("127.0.0.1", 3000)],
+    "max_concurrent_operations": 64,       # at most 64 in-flight ops
+    "operation_queue_timeout_ms": 5000,    # wait up to 5s for a slot
+}
+```
+
+- **Disabled by default** (`max_concurrent_operations=0`): zero overhead.
+- When enabled, excess operations wait for a free slot instead of failing.
+- If `operation_queue_timeout_ms` expires while waiting, raises `BackpressureError`.
 
 ## Per-Operation Timeouts
 

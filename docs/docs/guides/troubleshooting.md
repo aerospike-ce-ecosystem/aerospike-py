@@ -81,6 +81,47 @@ aerospike_py.AerospikeTimeoutError: Operation timed out
    print(info)  # returns list of (node_name, error_code, response) tuples
    ```
 
+### BackpressureError
+
+**Symptoms:**
+
+```python
+aerospike_py.BackpressureError: Operation queue timeout after 5000ms: max_concurrent_operations=64 exceeded
+```
+
+**Causes:**
+- `max_concurrent_operations` is set too low for the workload
+- `operation_queue_timeout_ms` is too short
+- Server is slow, causing operations to hold slots longer
+
+**Solutions:**
+
+1. Increase the concurrency limit:
+   ```python
+   config = {
+       "hosts": [("127.0.0.1", 3000)],
+       "max_concurrent_operations": 128,  # increase from 64
+   }
+   ```
+
+2. Increase the timeout:
+   ```python
+   config = {
+       "hosts": [("127.0.0.1", 3000)],
+       "max_concurrent_operations": 64,
+       "operation_queue_timeout_ms": 10000,  # 10 seconds
+   }
+   ```
+
+3. Set `operation_queue_timeout_ms` to `0` to wait indefinitely (no timeout errors, but operations may block):
+   ```python
+   config = {
+       "hosts": [("127.0.0.1", 3000)],
+       "max_concurrent_operations": 64,
+       "operation_queue_timeout_ms": 0,  # wait forever
+   }
+   ```
+
 ### "Client not connected" Error
 
 **Symptoms:**

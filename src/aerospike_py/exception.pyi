@@ -4,6 +4,7 @@ Exception hierarchy::
 
     AerospikeError (base)
       +-- ClientError              (connection, configuration, internal)
+      |     +-- BackpressureError  (concurrent operations limit exceeded)
       +-- ServerError              (server-side errors)
       |     +-- AerospikeIndexError
       |     |     +-- IndexNotFound
@@ -53,6 +54,14 @@ class TimeoutError(AerospikeError):
     """Deprecated: use ``AerospikeTimeoutError`` instead.
 
     Accessing this name emits a ``DeprecationWarning``.
+    """
+
+class BackpressureError(ClientError):
+    """Raised when the maximum number of concurrent operations is exceeded.
+
+    Only raised when ``max_concurrent_operations`` is configured in the client
+    config and the ``operation_queue_timeout_ms`` deadline expires while waiting
+    for a free slot.
     """
 
 class InvalidArgError(AerospikeError):

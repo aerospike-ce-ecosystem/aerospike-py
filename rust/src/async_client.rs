@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::backpressure::OperationLimiter;
 use crate::client_common;
 use crate::client_ops;
 use aerospike_core::Client as AsClient;
@@ -12,7 +13,7 @@ use pyo3_async_runtimes::tokio::future_into_py;
 use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
-use crate::policy::client_policy::parse_client_policy;
+use crate::policy::client_policy::{parse_backpressure_config, parse_client_policy};
 use crate::record_helpers::{
     batch_records_to_py, PendingExists, PendingOrderedRecord, PendingRecord,
 };
@@ -40,6 +41,8 @@ pub struct PyAsyncClient {
     config: Py<PyAny>,
     /// Connection metadata used for OTel span attributes (Arc for cheap cloning).
     connection_info: Arc<crate::tracing::ConnectionInfo>,
+    /// Operation concurrency limiter (disabled by default).
+    limiter: Arc<OperationLimiter>,
 }
 
 #[pymethods]
@@ -50,6 +53,7 @@ impl PyAsyncClient {
             inner: Arc::new(ArcSwapOption::empty()),
             config,
             connection_info: Arc::new(crate::tracing::ConnectionInfo::default()),
+            limiter: Arc::new(OperationLimiter::new(0, 0)),
         })
     }
 
@@ -77,6 +81,7 @@ impl PyAsyncClient {
 
         let parsed = parse_hosts_from_config(&effective_config)?;
         let client_policy = parse_client_policy(&effective_config)?;
+        let (max_ops, timeout_ms) = parse_backpressure_config(&effective_config)?;
         let inner = self.inner.clone();
 
         let cluster_name = client_common::extract_cluster_name(&effective_config)?;
@@ -86,6 +91,8 @@ impl PyAsyncClient {
             server_port: parsed.first_port as i64,
             cluster_name: Arc::from(cluster_name.as_str()),
         });
+
+        self.limiter = Arc::new(OperationLimiter::new(max_ops, timeout_ms));
 
         let hosts_str = parsed.connection_string;
         info!("Async connecting to Aerospike cluster: {}", hosts_str);
@@ -197,11 +204,15 @@ impl PyAsyncClient {
         let args =
             client_common::prepare_put_args(py, key, bins, meta, policy, &self.connection_info)?;
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         debug!(
             "async put: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-        future_into_py(py, async move { client_ops::do_put(&client, args).await })
+        future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
+            client_ops::do_put(&client, args).await
+        })
     }
 
     /// Read a record (async).
@@ -213,6 +224,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
         debug!(
             "async get: ns={} set={}",
@@ -221,6 +233,7 @@ impl PyAsyncClient {
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let record = client_ops::do_get(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
@@ -236,6 +249,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args =
             client_common::prepare_select_args(py, key, bins, policy, &self.connection_info)?;
         debug!(
@@ -245,6 +259,7 @@ impl PyAsyncClient {
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let record = client_ops::do_select(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
@@ -259,6 +274,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args = client_common::prepare_exists_args(py, key, policy, &self.connection_info)?;
         debug!(
             "async exists: ns={} set={}",
@@ -267,6 +283,7 @@ impl PyAsyncClient {
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let result = client_ops::do_exists(&client, &args).await;
             Ok(PendingExists { result, key_py })
         })
@@ -282,16 +299,17 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args =
             client_common::prepare_remove_args(py, key, meta, policy, &self.connection_info)?;
         debug!(
             "async remove: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-        future_into_py(
-            py,
-            async move { client_ops::do_remove(&client, args).await },
-        )
+        future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
+            client_ops::do_remove(&client, args).await
+        })
     }
 
     /// Touch a record (async).
@@ -305,13 +323,17 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args =
             client_common::prepare_touch_args(py, key, val, meta, policy, &self.connection_info)?;
         debug!(
             "async touch: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-        future_into_py(py, async move { client_ops::do_touch(&client, args).await })
+        future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
+            client_ops::do_touch(&client, args).await
+        })
     }
 
     /// Increment a bin (async).
@@ -326,6 +348,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args = client_common::prepare_increment_args(
             py,
             key,
@@ -339,10 +362,10 @@ impl PyAsyncClient {
             "async increment: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        future_into_py(
-            py,
-            async move { client_ops::do_increment(&client, args).await },
-        )
+        future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
+            client_ops::do_increment(&client, args).await
+        })
     }
 
     /// Operate on a record (async).
@@ -356,6 +379,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args =
             client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
@@ -367,6 +391,7 @@ impl PyAsyncClient {
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let record = client_ops::do_operate(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
@@ -386,6 +411,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args = client_common::prepare_single_bin_write_args(
             py,
             key,
@@ -399,10 +425,10 @@ impl PyAsyncClient {
             "async append: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        future_into_py(
-            py,
-            async move { client_ops::do_append(&client, args).await },
-        )
+        future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
+            client_ops::do_append(&client, args).await
+        })
     }
 
     /// Prepend a string to a bin (async).
@@ -417,6 +443,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args = client_common::prepare_single_bin_write_args(
             py,
             key,
@@ -430,10 +457,10 @@ impl PyAsyncClient {
             "async prepend: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        future_into_py(
-            py,
-            async move { client_ops::do_prepend(&client, args).await },
-        )
+        future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
+            client_ops::do_prepend(&client, args).await
+        })
     }
 
     /// Remove bins from a record by setting them to nil (async).
@@ -447,6 +474,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args = client_common::prepare_remove_bin_args(
             py,
             key,
@@ -455,10 +483,10 @@ impl PyAsyncClient {
             policy,
             &self.connection_info,
         )?;
-        future_into_py(
-            py,
-            async move { client_ops::do_remove_bin(&client, args).await },
-        )
+        future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
+            client_ops::do_remove_bin(&client, args).await
+        })
     }
 
     // ── Multi-operation (ordered) ────────────────────────────────
@@ -474,6 +502,7 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args =
             client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
@@ -485,6 +514,7 @@ impl PyAsyncClient {
         let pre_key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let record = client_ops::do_operate_ordered(&client, &args).await?;
             Ok(PendingOrderedRecord {
                 record,
@@ -592,6 +622,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_read: keys_count={}", keys.len());
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args =
             client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?;
 
@@ -599,6 +630,7 @@ impl PyAsyncClient {
         let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let results = client_ops::do_batch_read(&client, &args).await?;
             Python::attach(|py| {
                 if use_numpy {
@@ -627,6 +659,7 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_operate: keys_count={}", keys.len());
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args = client_common::prepare_batch_operate_args(
             py,
             keys,
@@ -636,6 +669,7 @@ impl PyAsyncClient {
         )?;
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let results = client_ops::do_batch_operate(&client, &args).await?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
@@ -659,6 +693,7 @@ impl PyAsyncClient {
             namespace, set_name
         );
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let batch_policy = crate::policy::batch_policy::parse_batch_policy(policy)?;
         #[allow(clippy::let_unit_value)]
         let parent_ctx = client_common::extract_parent_context(py);
@@ -672,6 +707,7 @@ impl PyAsyncClient {
         let set = set_name.to_string();
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let results = client_ops::do_batch_write(
                 &client,
                 &batch_policy,
@@ -696,10 +732,12 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_remove: keys_count={}", keys.len());
         let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         let args =
             client_common::prepare_batch_remove_args(py, keys, policy, &self.connection_info)?;
 
         future_into_py(py, async move {
+            let _permit = limiter.acquire().await?;
             let results = client_ops::do_batch_remove(&client, &args).await?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })

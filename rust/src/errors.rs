@@ -65,6 +65,12 @@ pyo3::create_exception!(
     AerospikeError,
     "Invalid argument passed to an operation."
 );
+pyo3::create_exception!(
+    aerospike,
+    BackpressureError,
+    ClientError,
+    "Maximum concurrent operations exceeded; retry after backoff."
+);
 
 // Record-level exceptions
 pyo3::create_exception!(
@@ -344,6 +350,7 @@ pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("TimeoutError", py.get_type::<AerospikeTimeoutError>())?; // backward compat
     m.add("InvalidArgError", py.get_type::<InvalidArgError>())?;
+    m.add("BackpressureError", py.get_type::<BackpressureError>())?;
     // Record-level exceptions
     m.add("RecordNotFound", py.get_type::<RecordNotFound>())?;
     m.add("RecordExistsError", py.get_type::<RecordExistsError>())?;

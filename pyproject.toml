@@ -152,6 +152,10 @@ commands = [["pytest", "tests/concurrency/", "-v", "--ignore=tests/concurrency/t
 base_python = ["python3.14t"]
 commands = [["pytest", "tests/concurrency/", "-v"]]
 
+[tool.tox.env.feasibility]
+dependency_groups = ["test-fastapi", "test-gunicorn"]
+commands = [["pytest", "tests/feasibility/", "-v"]]
+
 [tool.tox.env.fastapi]
 dependency_groups = ["test-fastapi"]
 commands = [["pytest", "tests/feasibility/test_fastapi.py", "-v"]]
