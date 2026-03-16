@@ -28,6 +28,7 @@ pub type OperationPermit = Option<OwnedSemaphorePermit>;
 #[derive(Clone)]
 pub struct OperationLimiter {
     semaphore: Option<Arc<Semaphore>>,
+    max_concurrent: usize,
     timeout_ms: u64,
 }
 
@@ -46,6 +47,7 @@ impl OperationLimiter {
         };
         Self {
             semaphore,
+            max_concurrent,
             timeout_ms,
         }
     }
@@ -62,14 +64,12 @@ impl OperationLimiter {
         };
 
         if self.timeout_ms > 0 {
-            let max_permits = sem.available_permits();
             tokio::time::timeout(Duration::from_millis(self.timeout_ms), sem.acquire_owned())
                 .await
                 .map_err(|_| {
                     BackpressureError::new_err(format!(
-                        "Operation queue timeout after {}ms: all {} slots are in use",
-                        self.timeout_ms,
-                        max_permits
+                        "Operation queue timeout after {}ms: max_concurrent_operations={} exceeded",
+                        self.timeout_ms, self.max_concurrent
                     ))
                 })?
                 .map(Some)
