@@ -1049,7 +1049,7 @@ class AsyncClient:
         """
         ...
 
-    async def get_node_names(self) -> list[str]:
+    def get_node_names(self) -> list[str]:
         """Return the names of all nodes in the cluster.
 
         Returns:
@@ -1057,7 +1057,7 @@ class AsyncClient:
 
         Example:
             ```python
-            nodes = await client.get_node_names()
+            nodes = client.get_node_names()
             ```
         """
         ...
