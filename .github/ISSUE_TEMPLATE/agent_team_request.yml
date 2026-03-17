@@ -1,18 +1,19 @@
-name: Agent Team Request
-description: Request AI agent team to analyze, plan, and implement changes
-title: "[Agent Team]: "
+name: Agent Request
+description: Request AI agent to analyze, plan, and implement changes
+title: "[Agent]: "
 labels: ["agent-team"]
 body:
   - type: markdown
     attributes:
       value: |
-        This template triggers an AI agent team (Claude Opus) to analyze the codebase,
-        create an implementation plan, and generate a pull request.
+        This template triggers an AI agent (Claude Opus) to analyze the codebase
+        and create an implementation plan as a comment.
+        After reviewing the plan, use `/agent implement` to proceed with implementation.
   - type: textarea
     id: description
     attributes:
       label: Description
-      description: Describe what you want the agent team to implement or investigate.
+      description: Describe what you want the agent to implement or investigate.
       placeholder: "Implement a new API method for ..."
     validations:
       required: true
@@ -30,5 +31,17 @@ body:
         - "Small (single file, minor change)"
         - "Medium (a few files, new feature)"
         - "Large (cross-cutting, multiple modules)"
+    validations:
+      required: true
+  - type: dropdown
+    id: agent-mode
+    attributes:
+      label: Agent Mode
+      description: >
+        Single agent is faster for focused tasks. Agent team uses 4 specialized
+        roles (planner/architect/implementer/reviewer) for complex features.
+      options:
+        - "Single agent (faster, for small/focused tasks)"
+        - "Agent team (4-role coordination for complex features)"
     validations:
       required: true

@@ -19,11 +19,11 @@
 #   gh aw compile
 # For more information: https://github.com/github/gh-aw/blob/main/.github/aw/github-agentic-workflows.md
 #
-# Slash command for interactive agent team follow-up
+# Slash command agent: plan, implement, test, refactor, review
 #
-# frontmatter-hash: 5904de0abe43853347a263288f1c6eff01303db880a0899ee3bc42c2d64f49a6
+# frontmatter-hash: 0939457d26abc1068b45a5b75c04408a4c8c431557d1eae6bd61e831819c5379
 
-name: "Agent Team"
+name: "Agent"
 "on":
   discussion:
     types:
@@ -57,25 +57,21 @@ permissions: {}
 concurrency:
   group: "gh-aw-${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}"
 
-run-name: "Agent Team"
-
-env:
-  AGENT_TEAM: planner,architect,implementer,reviewer
+run-name: "Agent"
 
 jobs:
   activation:
     needs: pre_activation
     if: >
-      (needs.pre_activation.outputs.activated == 'true') && ((github.event_name == 'issues') && ((startsWith(github.event.issue.body, '/agent-team ')) ||
-      (github.event.issue.body == '/agent-team')) || (github.event_name == 'issue_comment') && (((startsWith(github.event.comment.body, '/agent-team ')) ||
-      (github.event.comment.body == '/agent-team')) && (github.event.issue.pull_request == null)) || (github.event_name == 'issue_comment') &&
-      (((startsWith(github.event.comment.body, '/agent-team ')) || (github.event.comment.body == '/agent-team')) &&
-      (github.event.issue.pull_request != null)) || (github.event_name == 'pull_request_review_comment') &&
-      ((startsWith(github.event.comment.body, '/agent-team ')) || (github.event.comment.body == '/agent-team')) ||
-      (github.event_name == 'pull_request') && ((startsWith(github.event.pull_request.body, '/agent-team ')) ||
-      (github.event.pull_request.body == '/agent-team')) || (github.event_name == 'discussion') && ((startsWith(github.event.discussion.body, '/agent-team ')) ||
-      (github.event.discussion.body == '/agent-team')) || (github.event_name == 'discussion_comment') && ((startsWith(github.event.comment.body, '/agent-team ')) ||
-      (github.event.comment.body == '/agent-team')))
+      (needs.pre_activation.outputs.activated == 'true') && ((github.event_name == 'issues') && ((startsWith(github.event.issue.body, '/agent ')) ||
+      (github.event.issue.body == '/agent')) || (github.event_name == 'issue_comment') && (((startsWith(github.event.comment.body, '/agent ')) ||
+      (github.event.comment.body == '/agent')) && (github.event.issue.pull_request == null)) || (github.event_name == 'issue_comment') &&
+      (((startsWith(github.event.comment.body, '/agent ')) || (github.event.comment.body == '/agent')) && (github.event.issue.pull_request != null)) ||
+      (github.event_name == 'pull_request_review_comment') && ((startsWith(github.event.comment.body, '/agent ')) ||
+      (github.event.comment.body == '/agent')) || (github.event_name == 'pull_request') && ((startsWith(github.event.pull_request.body, '/agent ')) ||
+      (github.event.pull_request.body == '/agent')) || (github.event_name == 'discussion') && ((startsWith(github.event.discussion.body, '/agent ')) ||
+      (github.event.discussion.body == '/agent')) || (github.event_name == 'discussion_comment') && ((startsWith(github.event.comment.body, '/agent ')) ||
+      (github.event.comment.body == '/agent')))
     runs-on: ubuntu-slim
     permissions:
       contents: read
@@ -95,7 +91,7 @@ jobs:
       - name: Check workflow file timestamps
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_WORKFLOW_FILE: "agent-team.lock.yml"
+          GH_AW_WORKFLOW_FILE: "agent.lock.yml"
         with:
           script: |
             const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
@@ -107,7 +103,7 @@ jobs:
         if: github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment' || github.event_name == 'discussion' || github.event_name == 'discussion_comment' || (github.event_name == 'pull_request') && (github.event.pull_request.head.repo.id == github.repository_id)
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_WORKFLOW_NAME: "Agent Team"
+          GH_AW_WORKFLOW_NAME: "Agent"
         with:
           script: |
             const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
@@ -188,11 +184,11 @@ jobs:
             const awInfo = {
               engine_id: "claude",
               engine_name: "Claude Code",
-              model: "claude-opus-4-6",
+              model: "claude-opus-4",
               version: "",
               agent_version: "2.1.39",
               cli_version: "v0.43.4",
-              workflow_name: "Agent Team",
+              workflow_name: "Agent",
               experimental: false,
               supports_tools_allowlist: true,
               supports_http_transport: true,
@@ -256,7 +252,7 @@ jobs:
           mkdir -p /tmp/gh-aw/safeoutputs
           mkdir -p /tmp/gh-aw/mcp-logs/safeoutputs
           cat > /opt/gh-aw/safeoutputs/config.json << 'EOF'
-          {"add_comment":{"max":5},"add_labels":{"allowed":["plan-ready","in-progress","agent-team","needs-review"],"max":3},"create_pull_request":{},"missing_data":{},"missing_tool":{},"noop":{"max":1}}
+          {"add_comment":{"max":5},"add_labels":{"allowed":["plan-ready","in-progress","needs-review","needs-clarification"],"max":3},"create_pull_request":{},"missing_data":{},"missing_tool":{},"noop":{"max":1}}
           EOF
           cat > /opt/gh-aw/safeoutputs/tools.json << 'EOF'
           [
@@ -315,7 +311,7 @@ jobs:
               "name": "create_pull_request"
             },
             {
-              "description": "Add labels to an existing GitHub issue or pull request for categorization and filtering. Labels must already exist in the repository. For creating new issues with labels, use create_issue with the labels property instead. CONSTRAINTS: Maximum 3 label(s) can be added. Only these labels are allowed: [plan-ready in-progress agent-team needs-review].",
+              "description": "Add labels to an existing GitHub issue or pull request for categorization and filtering. Labels must already exist in the repository. For creating new issues with labels, use create_issue with the labels property instead. CONSTRAINTS: Maximum 3 label(s) can be added. Only these labels are allowed: [plan-ready in-progress needs-review needs-clarification].",
               "inputSchema": {
                 "additionalProperties": false,
                 "properties": {
@@ -665,7 +661,7 @@ jobs:
           </system>
           PROMPT_EOF
           cat << 'PROMPT_EOF' >> "$GH_AW_PROMPT"
-          {{#runtime-import .github/workflows/agent-team.md}}
+          {{#runtime-import .github/workflows/agent.md}}
           PROMPT_EOF
       - name: Substitute placeholders
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
@@ -792,7 +788,7 @@ jobs:
         run: |
           set -o pipefail
           sudo -E awf --enable-chroot --tty --env-all --container-workdir "${GITHUB_WORKSPACE}" --allow-domains '*.githubusercontent.com,*.pythonhosted.org,anaconda.org,anthropic.com,api.anthropic.com,api.github.com,api.snapcraft.io,archive.ubuntu.com,azure.archive.ubuntu.com,binstar.org,bootstrap.pypa.io,cdn.playwright.dev,codeload.github.com,conda.anaconda.org,conda.binstar.org,crates.io,crl.geotrust.com,crl.globalsign.com,crl.identrust.com,crl.sectigo.com,crl.thawte.com,crl.usertrust.com,crl.verisign.com,crl3.digicert.com,crl4.digicert.com,crls.ssl.com,files.pythonhosted.org,ghcr.io,github-cloud.githubusercontent.com,github-cloud.s3.amazonaws.com,github.com,github.githubassets.com,host.docker.internal,index.crates.io,json-schema.org,json.schemastore.org,keyserver.ubuntu.com,lfs.github.com,objects.githubusercontent.com,ocsp.digicert.com,ocsp.geotrust.com,ocsp.globalsign.com,ocsp.identrust.com,ocsp.sectigo.com,ocsp.ssl.com,ocsp.thawte.com,ocsp.usertrust.com,ocsp.verisign.com,packagecloud.io,packages.cloud.google.com,packages.microsoft.com,pip.pypa.io,playwright.download.prss.microsoft.com,ppa.launchpad.net,pypi.org,pypi.python.org,raw.githubusercontent.com,registry.npmjs.org,repo.anaconda.com,repo.continuum.io,s.symcb.com,s.symcd.com,security.ubuntu.com,sentry.io,sh.rustup.rs,static.crates.io,static.rust-lang.org,statsig.anthropic.com,ts-crl.ws.symantec.com,ts-ocsp.ws.symantec.com' --log-level info --proxy-logs-dir /tmp/gh-aw/sandbox/firewall/logs --enable-host-access --image-tag 0.13.14 --skip-pull \
-            -- /bin/bash -c 'export PATH="$(find /opt/hostedtoolcache -maxdepth 4 -type d -name bin 2>/dev/null | tr '\''\n'\'' '\'':'\'')$PATH"; [ -n "$GOROOT" ] && export PATH="$GOROOT/bin:$PATH" || true && claude --print --disable-slash-commands --no-chrome --model claude-opus-4-6 --mcp-config /tmp/gh-aw/mcp-config/mcp-servers.json --allowed-tools Bash,BashOutput,Edit,ExitPlanMode,Glob,Grep,KillBash,LS,MultiEdit,NotebookEdit,NotebookRead,Read,Task,TodoWrite,WebFetch,Write,mcp__github__download_workflow_run_artifact,mcp__github__get_code_scanning_alert,mcp__github__get_commit,mcp__github__get_dependabot_alert,mcp__github__get_discussion,mcp__github__get_discussion_comments,mcp__github__get_file_contents,mcp__github__get_job_logs,mcp__github__get_label,mcp__github__get_latest_release,mcp__github__get_me,mcp__github__get_notification_details,mcp__github__get_pull_request,mcp__github__get_pull_request_comments,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request_review_comments,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,mcp__github__get_release_by_tag,mcp__github__get_secret_scanning_alert,mcp__github__get_tag,mcp__github__get_workflow_run,mcp__github__get_workflow_run_logs,mcp__github__get_workflow_run_usage,mcp__github__issue_read,mcp__github__list_branches,mcp__github__list_code_scanning_alerts,mcp__github__list_commits,mcp__github__list_dependabot_alerts,mcp__github__list_discussion_categories,mcp__github__list_discussions,mcp__github__list_issue_types,mcp__github__list_issues,mcp__github__list_label,mcp__github__list_notifications,mcp__github__list_pull_requests,mcp__github__list_releases,mcp__github__list_secret_scanning_alerts,mcp__github__list_starred_repositories,mcp__github__list_tags,mcp__github__list_workflow_jobs,mcp__github__list_workflow_run_artifacts,mcp__github__list_workflow_runs,mcp__github__list_workflows,mcp__github__pull_request_read,mcp__github__search_code,mcp__github__search_issues,mcp__github__search_orgs,mcp__github__search_pull_requests,mcp__github__search_repositories,mcp__github__search_users --debug-file /tmp/gh-aw/agent-stdio.log --verbose --permission-mode bypassPermissions --output-format stream-json "$(cat /tmp/gh-aw/aw-prompts/prompt.txt)"' 2>&1 | tee -a /tmp/gh-aw/agent-stdio.log
+            -- /bin/bash -c 'export PATH="$(find /opt/hostedtoolcache -maxdepth 4 -type d -name bin 2>/dev/null | tr '\''\n'\'' '\'':'\'')$PATH"; [ -n "$GOROOT" ] && export PATH="$GOROOT/bin:$PATH" || true && claude --print --disable-slash-commands --no-chrome --model claude-opus-4 --mcp-config /tmp/gh-aw/mcp-config/mcp-servers.json --allowed-tools Bash,BashOutput,Edit,ExitPlanMode,Glob,Grep,KillBash,LS,MultiEdit,NotebookEdit,NotebookRead,Read,Task,TodoWrite,WebFetch,Write,mcp__github__download_workflow_run_artifact,mcp__github__get_code_scanning_alert,mcp__github__get_commit,mcp__github__get_dependabot_alert,mcp__github__get_discussion,mcp__github__get_discussion_comments,mcp__github__get_file_contents,mcp__github__get_job_logs,mcp__github__get_label,mcp__github__get_latest_release,mcp__github__get_me,mcp__github__get_notification_details,mcp__github__get_pull_request,mcp__github__get_pull_request_comments,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request_review_comments,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,mcp__github__get_release_by_tag,mcp__github__get_secret_scanning_alert,mcp__github__get_tag,mcp__github__get_workflow_run,mcp__github__get_workflow_run_logs,mcp__github__get_workflow_run_usage,mcp__github__issue_read,mcp__github__list_branches,mcp__github__list_code_scanning_alerts,mcp__github__list_commits,mcp__github__list_dependabot_alerts,mcp__github__list_discussion_categories,mcp__github__list_discussions,mcp__github__list_issue_types,mcp__github__list_issues,mcp__github__list_label,mcp__github__list_notifications,mcp__github__list_pull_requests,mcp__github__list_releases,mcp__github__list_secret_scanning_alerts,mcp__github__list_starred_repositories,mcp__github__list_tags,mcp__github__list_workflow_jobs,mcp__github__list_workflow_run_artifacts,mcp__github__list_workflow_runs,mcp__github__list_workflows,mcp__github__pull_request_read,mcp__github__search_code,mcp__github__search_issues,mcp__github__search_orgs,mcp__github__search_pull_requests,mcp__github__search_repositories,mcp__github__search_users --debug-file /tmp/gh-aw/agent-stdio.log --verbose --permission-mode bypassPermissions --output-format stream-json "$(cat /tmp/gh-aw/aw-prompts/prompt.txt)"' 2>&1 | tee -a /tmp/gh-aw/agent-stdio.log
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BASH_DEFAULT_TIMEOUT_MS: 60000
@@ -858,7 +854,7 @@ jobs:
           GH_AW_ALLOWED_DOMAINS: "*.githubusercontent.com,*.pythonhosted.org,anaconda.org,anthropic.com,api.anthropic.com,api.github.com,api.snapcraft.io,archive.ubuntu.com,azure.archive.ubuntu.com,binstar.org,bootstrap.pypa.io,cdn.playwright.dev,codeload.github.com,conda.anaconda.org,conda.binstar.org,crates.io,crl.geotrust.com,crl.globalsign.com,crl.identrust.com,crl.sectigo.com,crl.thawte.com,crl.usertrust.com,crl.verisign.com,crl3.digicert.com,crl4.digicert.com,crls.ssl.com,files.pythonhosted.org,ghcr.io,github-cloud.githubusercontent.com,github-cloud.s3.amazonaws.com,github.com,github.githubassets.com,host.docker.internal,index.crates.io,json-schema.org,json.schemastore.org,keyserver.ubuntu.com,lfs.github.com,objects.githubusercontent.com,ocsp.digicert.com,ocsp.geotrust.com,ocsp.globalsign.com,ocsp.identrust.com,ocsp.sectigo.com,ocsp.ssl.com,ocsp.thawte.com,ocsp.usertrust.com,ocsp.verisign.com,packagecloud.io,packages.cloud.google.com,packages.microsoft.com,pip.pypa.io,playwright.download.prss.microsoft.com,ppa.launchpad.net,pypi.org,pypi.python.org,raw.githubusercontent.com,registry.npmjs.org,repo.anaconda.com,repo.continuum.io,s.symcb.com,s.symcd.com,security.ubuntu.com,sentry.io,sh.rustup.rs,static.crates.io,static.rust-lang.org,statsig.anthropic.com,ts-crl.ws.symantec.com,ts-ocsp.ws.symantec.com"
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_API_URL: ${{ github.api_url }}
-          GH_AW_COMMAND: agent-team
+          GH_AW_COMMAND: agent
         with:
           script: |
             const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
@@ -968,7 +964,7 @@ jobs:
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
           GH_AW_NOOP_MAX: 1
-          GH_AW_WORKFLOW_NAME: "Agent Team"
+          GH_AW_WORKFLOW_NAME: "Agent"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -981,7 +977,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Agent Team"
+          GH_AW_WORKFLOW_NAME: "Agent"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -994,10 +990,10 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Agent Team"
+          GH_AW_WORKFLOW_NAME: "Agent"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
-          GH_AW_WORKFLOW_ID: "agent-team"
+          GH_AW_WORKFLOW_ID: "agent"
           GH_AW_SECRET_VERIFICATION_RESULT: ${{ needs.agent.outputs.secret_verification_result }}
           GH_AW_CHECKOUT_PR_SUCCESS: ${{ needs.agent.outputs.checkout_pr_success }}
         with:
@@ -1012,7 +1008,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Agent Team"
+          GH_AW_WORKFLOW_NAME: "Agent"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
           GH_AW_NOOP_MESSAGE: ${{ steps.noop.outputs.noop_message }}
@@ -1029,7 +1025,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_WORKFLOW_NAME: "Agent Team"
+          GH_AW_WORKFLOW_NAME: "Agent"
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
@@ -1046,7 +1042,7 @@ jobs:
           GH_AW_COMMENT_ID: ${{ needs.activation.outputs.comment_id }}
           GH_AW_COMMENT_REPO: ${{ needs.activation.outputs.comment_repo }}
           GH_AW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          GH_AW_WORKFLOW_NAME: "Agent Team"
+          GH_AW_WORKFLOW_NAME: "Agent"
           GH_AW_AGENT_CONCLUSION: ${{ needs.agent.result }}
           GH_AW_DETECTION_CONCLUSION: ${{ needs.detection.result }}
         with:
@@ -1090,8 +1086,8 @@ jobs:
       - name: Setup threat detection
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          WORKFLOW_NAME: "Agent Team"
-          WORKFLOW_DESCRIPTION: "Slash command for interactive agent team follow-up"
+          WORKFLOW_NAME: "Agent"
+          WORKFLOW_DESCRIPTION: "Slash command agent: plan, implement, test, refactor, review"
           HAS_PATCH: ${{ needs.agent.outputs.has_patch }}
         with:
           script: |
@@ -1140,7 +1136,7 @@ jobs:
         run: |
           set -o pipefail
                     # Execute Claude Code CLI with prompt from file
-                    claude --print --disable-slash-commands --no-chrome --model claude-opus-4-6 --allowed-tools 'Bash(cat),Bash(grep),Bash(head),Bash(jq),Bash(ls),Bash(tail),Bash(wc),BashOutput,ExitPlanMode,Glob,Grep,KillBash,LS,NotebookRead,Read,Task,TodoWrite' --debug-file /tmp/gh-aw/threat-detection/detection.log --verbose --permission-mode bypassPermissions --output-format stream-json "$(cat /tmp/gh-aw/aw-prompts/prompt.txt)" 2>&1 | tee -a /tmp/gh-aw/threat-detection/detection.log
+                    claude --print --disable-slash-commands --no-chrome --model claude-opus-4 --allowed-tools 'Bash(cat),Bash(grep),Bash(head),Bash(jq),Bash(ls),Bash(tail),Bash(wc),BashOutput,ExitPlanMode,Glob,Grep,KillBash,LS,NotebookRead,Read,Task,TodoWrite' --debug-file /tmp/gh-aw/threat-detection/detection.log --verbose --permission-mode bypassPermissions --output-format stream-json "$(cat /tmp/gh-aw/aw-prompts/prompt.txt)" 2>&1 | tee -a /tmp/gh-aw/threat-detection/detection.log
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BASH_DEFAULT_TIMEOUT_MS: 60000
@@ -1172,16 +1168,16 @@ jobs:
 
   pre_activation:
     if: >
-      (github.event_name == 'issues') && ((startsWith(github.event.issue.body, '/agent-team ')) || (github.event.issue.body == '/agent-team')) ||
-      (github.event_name == 'issue_comment') && (((startsWith(github.event.comment.body, '/agent-team ')) ||
-      (github.event.comment.body == '/agent-team')) && (github.event.issue.pull_request == null)) || (github.event_name == 'issue_comment') &&
-      (((startsWith(github.event.comment.body, '/agent-team ')) || (github.event.comment.body == '/agent-team')) &&
-      (github.event.issue.pull_request != null)) || (github.event_name == 'pull_request_review_comment') &&
-      ((startsWith(github.event.comment.body, '/agent-team ')) || (github.event.comment.body == '/agent-team')) ||
-      (github.event_name == 'pull_request') && ((startsWith(github.event.pull_request.body, '/agent-team ')) ||
-      (github.event.pull_request.body == '/agent-team')) || (github.event_name == 'discussion') && ((startsWith(github.event.discussion.body, '/agent-team ')) ||
-      (github.event.discussion.body == '/agent-team')) || (github.event_name == 'discussion_comment') && ((startsWith(github.event.comment.body, '/agent-team ')) ||
-      (github.event.comment.body == '/agent-team'))
+      (github.event_name == 'issues') && ((startsWith(github.event.issue.body, '/agent ')) || (github.event.issue.body == '/agent')) ||
+      (github.event_name == 'issue_comment') && (((startsWith(github.event.comment.body, '/agent ')) || (github.event.comment.body == '/agent')) &&
+      (github.event.issue.pull_request == null)) || (github.event_name == 'issue_comment') && (((startsWith(github.event.comment.body, '/agent ')) ||
+      (github.event.comment.body == '/agent')) && (github.event.issue.pull_request != null)) || (github.event_name == 'pull_request_review_comment') &&
+      ((startsWith(github.event.comment.body, '/agent ')) || (github.event.comment.body == '/agent')) ||
+      (github.event_name == 'pull_request') &&
+      ((startsWith(github.event.pull_request.body, '/agent ')) || (github.event.pull_request.body == '/agent')) ||
+      (github.event_name == 'discussion') && ((startsWith(github.event.discussion.body, '/agent ')) || (github.event.discussion.body == '/agent')) ||
+      (github.event_name == 'discussion_comment') && ((startsWith(github.event.comment.body, '/agent ')) ||
+      (github.event.comment.body == '/agent'))
     runs-on: ubuntu-slim
     permissions:
       discussions: write
@@ -1224,7 +1220,7 @@ jobs:
         id: check_command_position
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          GH_AW_COMMANDS: "[\"agent-team\"]"
+          GH_AW_COMMANDS: "[\"agent\"]"
         with:
           script: |
             const { setupGlobals } = require('/opt/gh-aw/actions/setup_globals.cjs');
@@ -1247,9 +1243,9 @@ jobs:
     timeout-minutes: 15
     env:
       GH_AW_ENGINE_ID: "claude"
-      GH_AW_ENGINE_MODEL: "claude-opus-4-6"
-      GH_AW_WORKFLOW_ID: "agent-team"
-      GH_AW_WORKFLOW_NAME: "Agent Team"
+      GH_AW_ENGINE_MODEL: "claude-opus-4"
+      GH_AW_WORKFLOW_ID: "agent"
+      GH_AW_WORKFLOW_NAME: "Agent"
     outputs:
       create_discussion_error_count: ${{ steps.process_safe_outputs.outputs.create_discussion_error_count }}
       create_discussion_errors: ${{ steps.process_safe_outputs.outputs.create_discussion_errors }}
@@ -1302,7 +1298,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           GH_AW_AGENT_OUTPUT: ${{ env.GH_AW_AGENT_OUTPUT }}
-          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"max\":5},\"add_labels\":{\"allowed\":[\"plan-ready\",\"in-progress\",\"agent-team\",\"needs-review\"],\"max\":3},\"create_pull_request\":{\"base_branch\":\"${{ github.ref_name }}\",\"max\":1,\"max_patch_size\":1024},\"missing_data\":{},\"missing_tool\":{}}"
+          GH_AW_SAFE_OUTPUTS_HANDLER_CONFIG: "{\"add_comment\":{\"max\":5},\"add_labels\":{\"allowed\":[\"plan-ready\",\"in-progress\",\"needs-review\",\"needs-clarification\"],\"max\":3},\"create_pull_request\":{\"base_branch\":\"${{ github.ref_name }}\",\"max\":1,\"max_patch_size\":1024},\"missing_data\":{},\"missing_tool\":{}}"
         with:
           github-token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
