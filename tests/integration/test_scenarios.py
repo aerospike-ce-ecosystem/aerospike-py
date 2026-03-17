@@ -16,6 +16,17 @@ from tests.helpers import invoke
 # ═══════════════════════════════════════════════════════════════════
 
 
+class TestConnectionWorkflow:
+    """Connection-related scenario tests (sync + async)."""
+
+    async def test_get_node_names(self, any_client):
+        """get_node_names() works on both sync and async clients (no await for async)."""
+        names = await invoke(any_client, "get_node_names")
+        assert isinstance(names, list)
+        assert len(names) > 0
+        assert all(isinstance(n, str) for n in names)
+
+
 class TestCRUDWorkflow:
     """Multi-step CRUD workflow scenarios."""
 

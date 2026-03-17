@@ -151,7 +151,7 @@ nodes = client.get_node_names()
   <TabItem value="async" label="Async Client">
 
 ```python
-nodes = await client.get_node_names()
+nodes = client.get_node_names()  # sync since alpha.10 — no await needed
 ```
 
   </TabItem>
