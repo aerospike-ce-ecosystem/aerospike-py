@@ -294,7 +294,7 @@ pub async fn do_info_all(
     client: &AsClient,
     args: &InfoArgs,
 ) -> PyResult<Vec<(String, i32, String)>> {
-    let nodes = client.nodes().await;
+    let nodes = client.nodes();
     let mut results = Vec::new();
     for node in &nodes {
         let r = node.info(&args.admin_policy, &[&args.command]).await;
@@ -308,7 +308,6 @@ pub async fn do_info_random_node(client: &AsClient, args: &InfoArgs) -> PyResult
     let node = client
         .cluster
         .get_random_node()
-        .await
         .map_err(as_to_pyerr)?;
     let map = node
         .info(&args.admin_policy, &[&args.command])

@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "aerospike"
-version = "2.0.0-alpha.9"
+version = "2.0.0-alpha.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca597b50c87a9c2267f38bcf9797fbf7ec759ca1cdf12edf2e36f7c3a452c9dd"
+checksum = "9262641046aa6b2071e9c9f3aee86d943d24dafae5287e36c09d3ba6bf72e3cc"
 dependencies = [
  "aerospike-core",
  "aerospike-macro",
@@ -14,18 +14,17 @@ dependencies = [
 
 [[package]]
 name = "aerospike-core"
-version = "2.0.0-alpha.9"
+version = "2.0.0-alpha.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0537167eb44188b6b8db40ab4114d5ef51649cacf9c0c8e3b1f4637db46ecb0"
+checksum = "0b58c52f5a73bb54d51db315422beca3e555130cadc28962f81368def9ccda29"
 dependencies = [
  "aerospike-rt",
  "async-channel",
- "async-lock",
  "async-trait",
  "base64 0.13.1",
  "byteorder",
- "crossbeam-queue",
  "futures",
+ "hazarc",
  "lazy_static",
  "log",
  "pwhash",
@@ -38,9 +37,9 @@ dependencies = [
 
 [[package]]
 name = "aerospike-macro"
-version = "2.0.0-alpha.9"
+version = "2.0.0-alpha.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f4c430c3dd4739974218013872ea215b858a361e65f7208662369382073b759"
+checksum = "b92cee2ec92acc24d7bf4cc3d60c9c4ba8d069ac09755614b2a04db99c3b5a6b"
 dependencies = [
  "aerospike-rt",
  "proc-macro2",
@@ -70,9 +69,9 @@ dependencies = [
 
 [[package]]
 name = "aerospike-rt"
-version = "2.0.0-alpha.9"
+version = "2.0.0-alpha.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7435dd4f3cc15ce2cc9aa723a2d835968c042913ebcaf20acac01e8c5dbe082"
+checksum = "36cbe306a1fa1555e5312b22e8a607501108fb57365bc8cde6a16a8364b417a3"
 dependencies = [
  "tokio",
 ]
@@ -110,17 +109,6 @@ dependencies = [
  "concurrent-queue",
  "event-listener-strategy",
  "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
-name = "async-lock"
-version = "3.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "290f7f2596bd5b78a9fec8088ccd89180d7f9f55b94b0576823bbbdc72ee8311"
-dependencies = [
- "event-listener",
- "event-listener-strategy",
  "pin-project-lite",
 ]
 
@@ -237,15 +225,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "crossbeam-queue"
-version = "0.3.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
-dependencies = [
- "crossbeam-utils",
 ]
 
 [[package]]
@@ -521,6 +500,15 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+
+[[package]]
+name = "hazarc"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7ba4340463c67ba476bb834950decb0bc3615ef5b0f30ef96d0a4b21c6bdb9a"
+dependencies = [
+ "crossbeam-utils",
+]
 
 [[package]]
 name = "heck"
