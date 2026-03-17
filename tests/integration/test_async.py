@@ -18,6 +18,13 @@ class TestAsyncConnection:
         await async_client.close()
         assert not async_client.is_connected()
 
+    async def test_get_node_names(self, async_client):
+        """get_node_names() is sync on AsyncClient since alpha.10 — no await."""
+        names = async_client.get_node_names()  # direct call, no await
+        assert isinstance(names, list)
+        assert len(names) > 0
+        assert all(isinstance(n, str) for n in names)
+
 
 class TestAsyncBatchWrite:
     """Test async batch_operate used as batch write (OPERATOR_WRITE)."""
