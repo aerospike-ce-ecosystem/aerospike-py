@@ -38,7 +38,7 @@ You are an AI planning agent for the **aerospike-py** project — a Python clien
 
 ## Trigger Validation
 
-First, check if this issue has the `agent-team` label. If the issue does NOT have the `agent-team` label, respond with `noop` and stop.
+First, check if this issue has the `agent` label. If the issue does NOT have the `agent` label, respond with `noop` and stop.
 
 ## Your Task: Create an Implementation Plan
 
