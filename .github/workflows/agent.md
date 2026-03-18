@@ -135,19 +135,26 @@ Implement changes based on the existing plan and create a PR.
 
 ### Step 2: Implement
 - Add `in-progress` label
-- Create branch: `agent/issue-{number}-{short-kebab-description}`
 - Follow the plan's Proposed Changes table and Implementation Strategy
 - For each file change:
   - Read the existing file first
   - Apply changes matching existing code style
   - Update `.pyi` type stubs if public API changes
   - Ensure sync/async API pairs remain consistent
-- Commit with Conventional Commits format (e.g., `feat(client): add batch_exists method`)
+- After all changes are made, commit locally with Conventional Commits format
 
-### Step 3: Create PR
-- Title: Conventional Commits format
-- Body: Reference the issue (`Closes #{number}`), summarize changes, include test plan
-- Add `needs-review` label to the issue
+### Step 3: Create PR via safe-output
+
+**IMPORTANT**: Do NOT use `git push` or `gh pr create`. You do not have push access.
+Instead, use the `create_pull_request` safe-output tool. The framework will automatically
+generate a git patch from your local commits and create the PR for you.
+
+Call the `create_pull_request` tool with:
+- `title`: Conventional Commits format (e.g., `feat(client): add batch_exists method`)
+- `body`: Reference the issue (`Closes #{number}`), summarize changes, include test plan
+- `branch`: `agent/issue-{number}-{short-kebab-description}`
+
+Then add the `needs-review` label to the issue using the `add_labels` tool.
 
 ---
 
@@ -161,16 +168,18 @@ Generate tests for the feature described in the issue or PR.
 - Check `tests/conftest.py` for available fixtures (`client`, `async_client`, `cleanup`)
 
 ### Step 2: Generate Tests
-- Create branch: `agent/issue-{number}-tests`
 - Add tests following project conventions:
   - Unit tests in `tests/unit/` (no server required, test logic and types)
   - Integration tests in `tests/integration/` (requires Aerospike server)
 - Use `asyncio_mode = "auto"` for async tests
 - Use existing fixtures from `tests/conftest.py`
+- Commit locally after all changes
 
-### Step 3: Create PR
-- Title: `test(scope): add tests for [feature]`
-- Reference the issue in the body
+### Step 3: Create PR via safe-output
+Use the `create_pull_request` tool (NOT `git push` or `gh pr create`):
+- `title`: `test(scope): add tests for [feature]`
+- `body`: Reference the issue
+- `branch`: `agent/issue-{number}-tests`
 
 ---
 
@@ -183,15 +192,16 @@ Propose and implement refactoring changes.
 - Identify refactoring opportunities (deduplication, clarity, performance)
 
 ### Step 2: Implement
-- Create branch: `agent/issue-{number}-refactor`
 - Apply refactoring while maintaining backward compatibility
 - Ensure no public API changes unless explicitly requested (update `.pyi` if so)
 - Run through existing patterns to ensure consistency
+- Commit locally after all changes
 
-### Step 3: Create PR
-- Title: `refactor(scope): description`
-- Include before/after comparison in PR body
-- Reference the issue
+### Step 3: Create PR via safe-output
+Use the `create_pull_request` tool (NOT `git push` or `gh pr create`):
+- `title`: `refactor(scope): description`
+- `body`: Include before/after comparison, reference the issue
+- `branch`: `agent/issue-{number}-refactor`
 
 ---
 
@@ -211,6 +221,7 @@ Review code on the current PR. This subcommand DOES NOT create PRs.
 
 ## General Guidelines
 
+- **NEVER use `git push`, `gh pr create`, or GitHub API writes directly** — you run in a read-only sandbox. Use the safe-output tools (`create_pull_request`, `add_comment`, `add_labels`) instead. The framework handles all write operations.
 - Always read the full issue/PR context before acting
 - Read existing code before modifying — understand before changing
 - Match existing code style exactly
@@ -219,4 +230,3 @@ Review code on the current PR. This subcommand DOES NOT create PRs.
 - Prefer minimal, focused changes over sweeping refactors
 - If the request is unclear, post a clarifying question instead of guessing
 - Reference the issue number in all PRs: `Closes #N` or `Related to #N`
-- Branch naming: `agent/issue-{number}-{short-kebab-description}`
