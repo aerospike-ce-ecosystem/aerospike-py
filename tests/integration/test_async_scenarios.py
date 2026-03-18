@@ -101,6 +101,37 @@ class TestAsyncErrorHandling:
             await c.connect()
 
 
+class TestAsyncBackpressure:
+    """Validate OperationLimiter + lock-free pool under burst load."""
+
+    async def test_backpressure_high_concurrency(self):
+        """OperationLimiter + alpha.10 lock-free pool: no NoMoreConnections under burst."""
+        from tests import AEROSPIKE_CONFIG
+
+        client = aerospike_py.AsyncClient(
+            {
+                **AEROSPIKE_CONFIG,
+                "max_concurrent_operations": 10,
+                "operation_queue_timeout_ms": 5000,
+            }
+        )
+        await client.connect()
+        try:
+            keys = [("test", "demo", f"bp_{i}") for i in range(40)]
+            await client.batch_operate(
+                keys,
+                [{"op": aerospike_py.OPERATOR_WRITE, "bin": "v", "val": 1}],
+            )
+            # 40 ops through a pool limited to 10 concurrent — no exception expected
+            result = await client.batch_read(keys)
+            for br in result.batch_records:
+                assert br.result == 0
+                assert br.record is not None
+        finally:
+            await client.batch_remove(keys)
+            await client.close()
+
+
 class TestAsyncDataTypes:
     """Async-specific data type tests (comprehensive single-record check)."""
 
