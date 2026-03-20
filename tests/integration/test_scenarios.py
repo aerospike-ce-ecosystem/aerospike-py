@@ -12,6 +12,22 @@ from tests import AEROSPIKE_CONFIG
 from tests.helpers import invoke
 
 # ═══════════════════════════════════════════════════════════════════
+# Connection Workflow  (sync + async)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestConnectionWorkflow:
+    """Connection-related scenarios."""
+
+    async def test_get_node_names(self, any_client):
+        """get_node_names() works on both sync and async clients (no await for async)."""
+        names = await invoke(any_client, "get_node_names")
+        assert isinstance(names, list)
+        assert len(names) > 0
+        assert all(isinstance(n, str) for n in names)
+
+
+# ═══════════════════════════════════════════════════════════════════
 # CRUD Workflow  (sync + async)
 # ═══════════════════════════════════════════════════════════════════
 

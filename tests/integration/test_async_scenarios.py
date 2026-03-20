@@ -101,6 +101,41 @@ class TestAsyncErrorHandling:
             await c.connect()
 
 
+class TestAsyncBackpressure:
+    """Validate OperationLimiter + lock-free pool under burst load."""
+
+    async def test_backpressure_high_concurrency(self):
+        """40 concurrent put() calls through limiter capped at 10 — no errors expected."""
+        import asyncio
+
+        from tests import AEROSPIKE_CONFIG
+
+        client = aerospike_py.AsyncClient(
+            {
+                **AEROSPIKE_CONFIG,
+                "max_concurrent_operations": 10,
+                "operation_queue_timeout_ms": 5000,
+            }
+        )
+        await client.connect()
+        keys = [("test", "demo", f"bp_{i}") for i in range(40)]
+        try:
+            # 40 individual concurrent puts — limiter queues excess beyond 10
+            await asyncio.gather(*[client.put(k, {"v": i}) for i, k in enumerate(keys)])
+            # verify all 40 records written
+            for i, k in enumerate(keys):
+                _, _, bins = await client.get(k)
+                assert bins is not None
+                assert bins["v"] == i
+        finally:
+            for k in keys:
+                try:
+                    await client.remove(k)
+                except Exception:
+                    pass
+            await client.close()
+
+
 class TestAsyncDataTypes:
     """Async-specific data type tests (comprehensive single-record check)."""
 

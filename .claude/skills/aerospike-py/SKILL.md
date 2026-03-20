@@ -54,7 +54,8 @@ client.connect(username=None, password=None) -> Client  # returns self for chain
 client.is_connected() -> bool
 client.close() -> None
 client.get_node_names() -> list[str]
-# Async: await connect(), await close(), await get_node_names()
+# Async: await connect(), await close()
+# Note: get_node_names() is sync on both Client and AsyncClient (lock-free since alpha.10)
 ```
 
 Detail: `reference/client-config.md`
