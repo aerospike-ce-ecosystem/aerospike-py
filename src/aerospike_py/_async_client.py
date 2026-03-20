@@ -219,8 +219,8 @@ class AsyncClient:
     def is_connected(self) -> bool:
         return self._inner.is_connected()
 
-    async def get_node_names(self) -> list[str]:
-        return await self._inner.get_node_names()
+    def get_node_names(self) -> list[str]:
+        return self._inner.get_node_names()
 
     async def info_random_node(self, command, policy=None) -> str:
         return await self._inner.info_random_node(command, policy)

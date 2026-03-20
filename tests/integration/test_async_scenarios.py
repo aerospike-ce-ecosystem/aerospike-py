@@ -105,7 +105,9 @@ class TestAsyncBackpressure:
     """Validate OperationLimiter + lock-free pool under burst load."""
 
     async def test_backpressure_high_concurrency(self):
-        """OperationLimiter + alpha.10 lock-free pool: no NoMoreConnections under burst."""
+        """40 concurrent put() calls through limiter capped at 10 — no errors expected."""
+        import asyncio
+
         from tests import AEROSPIKE_CONFIG
 
         client = aerospike_py.AsyncClient(
@@ -116,19 +118,21 @@ class TestAsyncBackpressure:
             }
         )
         await client.connect()
+        keys = [("test", "demo", f"bp_{i}") for i in range(40)]
         try:
-            keys = [("test", "demo", f"bp_{i}") for i in range(40)]
-            await client.batch_operate(
-                keys,
-                [{"op": aerospike_py.OPERATOR_WRITE, "bin": "v", "val": 1}],
-            )
-            # 40 ops through a pool limited to 10 concurrent — no exception expected
-            result = await client.batch_read(keys)
-            for br in result.batch_records:
-                assert br.result == 0
-                assert br.record is not None
+            # 40 individual concurrent puts — limiter queues excess beyond 10
+            await asyncio.gather(*[client.put(k, {"v": i}) for i, k in enumerate(keys)])
+            # verify all 40 records written
+            for i, k in enumerate(keys):
+                _, _, bins = await client.get(k)
+                assert bins is not None
+                assert bins["v"] == i
         finally:
-            await client.batch_remove(keys)
+            for k in keys:
+                try:
+                    await client.remove(k)
+                except Exception:
+                    pass
             await client.close()
 
 
