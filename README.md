@@ -123,6 +123,15 @@ Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to und
 
 이 프로젝트는 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 자동화가 설정되어 있습니다.
 
+### Ecosystem Plugin 설치
+
+[aerospike-ce-ecosystem-plugins](https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins)를 설치하면 aerospike-py API 레퍼런스, 배포 가이드 등 ecosystem 전체 스킬을 사용할 수 있습니다.
+
+```bash
+claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+claude plugin install aerospike-ce-ecosystem
+```
+
 ### Skills
 
 `/skill-name`으로 호출합니다.

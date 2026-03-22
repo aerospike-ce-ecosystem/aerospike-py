@@ -123,7 +123,7 @@ make pre-commit-install             # pre-commit 훅 설치
 
 ## API 레퍼런스
 
-API 사용법은 `.claude/skills/aerospike-py/SKILL.md` 스킬에서 자동 로드됨. 상세 레퍼런스는 `reference/` 참조.
+API 사용법은 ecosystem plugin의 `aerospike-py-api` 스킬에서 자동 로드됨.
 전체 타입/상수 정의는 `src/aerospike_py/__init__.pyi` 참조.
 
 ---
