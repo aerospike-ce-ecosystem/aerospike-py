@@ -154,7 +154,7 @@ jobs:
       attestations: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.1
         with:
           path: dist
           merge-multiple: true
@@ -181,7 +181,7 @@ jobs:
       attestations: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.1
         with:
           path: dist
           merge-multiple: true
