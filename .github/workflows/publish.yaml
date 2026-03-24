@@ -93,7 +93,7 @@ jobs:
           args: --release --out dist
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.target }}
           path: dist/*.whl
@@ -135,7 +135,7 @@ jobs:
           args: --out dist
 
       - name: Upload sdist
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: sdist
           path: dist/*.tar.gz
