@@ -154,6 +154,7 @@ class Client(_NativeClient):
     def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
+    @catch_unexpected("Client.batch_read")
     def batch_read(self, keys, bins=None, policy=None, _dtype=None):
         """Read multiple records in a single batch call.
 
@@ -223,6 +224,27 @@ class Client(_NativeClient):
 
     def query(self, namespace, set_name) -> Query:
         return Query(super().query(namespace, set_name))
+
+    def is_connected(self) -> bool:
+        """Check whether the client has an active cluster connection."""
+        return super().is_connected()
+
+    def get_node_names(self) -> list[str]:
+        """Return the list of cluster node names."""
+        return super().get_node_names()
+
+    @catch_unexpected("Client.info_random_node")
+    def info_random_node(self, command, policy=None) -> str:
+        """Send an info command to a random cluster node.
+
+        Args:
+            command: The info command string.
+            policy: Optional admin policy dict.
+
+        Returns:
+            The info command response string.
+        """
+        return super().info_random_node(command, policy)
 
     def __enter__(self) -> "Client":
         return self

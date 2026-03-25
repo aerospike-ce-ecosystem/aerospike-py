@@ -26,6 +26,19 @@ async def set_log_level(body: LogLevelRequest):
     return {"message": f"Log level set to {level_names.get(body.level, str(body.level))}"}
 
 
+@router.post("/metrics/toggle")
+async def toggle_metrics(enabled: bool = True):
+    """Enable or disable Prometheus metrics collection at runtime."""
+    aerospike_py.set_metrics_enabled(enabled)
+    return {"metrics_enabled": aerospike_py.is_metrics_enabled()}
+
+
+@router.get("/metrics/status")
+async def metrics_status():
+    """Return whether Prometheus metrics collection is currently enabled."""
+    return {"metrics_enabled": aerospike_py.is_metrics_enabled()}
+
+
 @router.get("/tracing-status")
 async def tracing_status(request: Request):
     """Return the current tracing initialization status."""
