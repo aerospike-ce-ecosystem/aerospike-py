@@ -107,7 +107,8 @@ async def numpy_batch_write(
         raise HTTPException(status_code=400, detail=f"Row data does not match dtype: {e}") from e
 
     results = await client.batch_write_numpy(data, body.namespace, body.set_name, dtype, key_field=body.key_field)
-    return NumpyBatchWriteResponse(written=len(results))
+    ok = sum(1 for r in results if r.meta is not None)
+    return NumpyBatchWriteResponse(written=ok, failed=len(results) - ok)
 
 
 @router.post("/vector-search", response_model=VectorSearchResponse)
@@ -151,6 +152,8 @@ async def vector_search(
 
     # cosine similarity (vectorized)
     query_norm = np.linalg.norm(query)
+    if query_norm == 0.0:
+        raise HTTPException(status_code=422, detail="query_vector must be non-zero")
     vec_norms = np.linalg.norm(all_vectors, axis=1)
     # 0-norm 방지
     safe_norms = np.where(vec_norms > 0, vec_norms, 1.0)

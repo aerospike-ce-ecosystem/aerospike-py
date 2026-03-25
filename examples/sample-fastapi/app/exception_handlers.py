@@ -36,7 +36,7 @@ _STATUS_MAP: dict[type, int] = {
     InvalidArgError: 400,
     BinNameError: 400,
     RecordTooBig: 413,
-    FilteredOut: 404,
+    FilteredOut: 412,
     BackpressureError: 503,
     AerospikeTimeoutError: 504,
     ClusterError: 503,

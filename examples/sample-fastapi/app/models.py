@@ -358,7 +358,8 @@ class NumpyBatchWriteRequest(BaseModel):
 
 
 class NumpyBatchWriteResponse(BaseModel):
-    written: int = Field(description="Number of records written")
+    written: int = Field(description="Number of records successfully written")
+    failed: int = Field(0, description="Number of records that failed to write")
 
 
 # ── Observability models ──────────────────────────────────────

@@ -232,8 +232,8 @@ def test_batch_write_and_read_back(client, aerospike_client, cleanup):
     )
 
     assert resp2.status_code == 200
-    # 일부 key는 bytes vs string 차이로 not found 될 수 있으므로 write 성공만 검증
     assert data["written"] == 10
+    assert data["failed"] == 0
 
 
 def test_batch_write_invalid_rows_rejected(client):
