@@ -9,7 +9,13 @@ from typing import Any
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
-from aerospike_py._client import _wrap_batch_record, _wrap_exists, _wrap_operate_ordered, _wrap_record
+from aerospike_py._client import (
+    _RETRIABLE_ERRORS,
+    _wrap_batch_record,
+    _wrap_exists,
+    _wrap_operate_ordered,
+    _wrap_record,
+)
 from aerospike_py.types import (
     BatchRecords as BatchRecordsTuple,
     ExistsResult,
@@ -144,6 +150,7 @@ class AsyncClient:
     async def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in await self._inner.info_all(command, policy)]
 
+    @catch_unexpected("AsyncClient.batch_read")
     async def batch_read(
         self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None, _dtype: Any = None
     ) -> Any:
@@ -176,7 +183,7 @@ class AsyncClient:
 
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
-        self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None
+        self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None, retry: int = 0
     ) -> list[Record]:
         """Write multiple records from a numpy structured array (async).
 
@@ -191,6 +198,9 @@ class AsyncClient:
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional batch policy dict.
+            retry: Number of retry attempts for transient errors (default ``0``).
+                Uses exponential backoff (base 100ms, max 5s) between attempts.
+                Retries on BackpressureError, AerospikeTimeoutError, and ClusterError.
 
         Returns:
             A list of ``Record`` NamedTuples with write results.
@@ -200,13 +210,31 @@ class AsyncClient:
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = await client.batch_write_numpy(data, "test", "demo", dtype)
+            results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
             ```
         """
-        return [
-            _wrap_record(r)
-            for r in await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy)
-        ]
+        last_err = None
+        for attempt in range(1 + retry):
+            try:
+                return [
+                    _wrap_record(r)
+                    for r in await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy)
+                ]
+            except Exception as e:
+                if attempt < retry and type(e).__name__ in _RETRIABLE_ERRORS:
+                    last_err = e
+                    delay = min(0.1 * (2**attempt), 5.0)
+                    logger.warning(
+                        "batch_write_numpy attempt %d/%d failed (%s), retrying in %.1fs",
+                        attempt + 1,
+                        1 + retry,
+                        e,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+        raise last_err  # pragma: no cover
 
     @catch_unexpected("AsyncClient.batch_operate")
     async def batch_operate(self, keys, ops, policy=None) -> list[Record]:
@@ -222,6 +250,7 @@ class AsyncClient:
     def get_node_names(self) -> list[str]:
         return self._inner.get_node_names()
 
+    @catch_unexpected("AsyncClient.info_random_node")
     async def info_random_node(self, command, policy=None) -> str:
         return await self._inner.info_random_node(command, policy)
 

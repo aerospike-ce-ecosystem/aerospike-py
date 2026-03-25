@@ -342,3 +342,7 @@ class LogLevelRequest(BaseModel):
         le=4,
         description="Log level: -1=OFF, 0=ERROR, 1=WARN, 2=INFO, 3=DEBUG, 4=TRACE",
     )
+
+
+class MetricsToggleRequest(BaseModel):
+    enabled: bool = Field(..., description="Enable or disable Prometheus metrics collection")

@@ -4,4 +4,6 @@ from __future__ import annotations
 def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["aerospike_connected"] is True

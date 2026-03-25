@@ -70,6 +70,32 @@ def test_log_level_invalid(client):
     assert resp.status_code == 422
 
 
+# ── Metrics toggle tests ─────────────────────────────────────
+
+
+def test_metrics_toggle(client):
+    """POST /observability/metrics/toggle enables/disables metrics."""
+    resp = client.post("/observability/metrics/toggle", json={"enabled": False})
+    assert resp.status_code == 200
+    assert resp.json()["metrics_enabled"] is False
+
+    resp = client.get("/observability/metrics/status")
+    assert resp.status_code == 200
+    assert resp.json()["metrics_enabled"] is False
+
+    # Re-enable for other tests
+    resp = client.post("/observability/metrics/toggle", json={"enabled": True})
+    assert resp.status_code == 200
+    assert resp.json()["metrics_enabled"] is True
+
+
+def test_metrics_status(client):
+    """GET /observability/metrics/status returns current state."""
+    resp = client.get("/observability/metrics/status")
+    assert resp.status_code == 200
+    assert "metrics_enabled" in resp.json()
+
+
 # ── Tracing status tests ─────────────────────────────────────
 
 

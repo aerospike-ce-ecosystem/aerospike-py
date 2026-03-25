@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import Query as _NativeQuery
@@ -18,6 +19,9 @@ from aerospike_py.types import (
     Record,
     RecordMetadata,
 )
+
+# Transient error types eligible for batch_write retry.
+_RETRIABLE_ERRORS: tuple[str, ...] = ("BackpressureError", "AerospikeTimeoutError", "ClusterError")
 
 logger = logging.getLogger("aerospike_py")
 
@@ -154,6 +158,7 @@ class Client(_NativeClient):
     def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
+    @catch_unexpected("Client.batch_read")
     def batch_read(self, keys, bins=None, policy=None, _dtype=None):
         """Read multiple records in a single batch call.
 
@@ -183,7 +188,7 @@ class Client(_NativeClient):
         return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_write_numpy")
-    def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None):
+    def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0):
         """Write multiple records from a numpy structured array.
 
         Each row of the structured array becomes a separate write operation.
@@ -197,6 +202,9 @@ class Client(_NativeClient):
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional batch policy dict.
+            retry: Number of retry attempts for transient errors (default ``0``).
+                Uses exponential backoff (base 100ms, max 5s) between attempts.
+                Retries on BackpressureError, AerospikeTimeoutError, and ClusterError.
 
         Returns:
             A list of ``Record`` NamedTuples with write results.
@@ -206,12 +214,31 @@ class Client(_NativeClient):
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = client.batch_write_numpy(data, "test", "demo", dtype)
+            results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
             ```
         """
-        return [
-            _wrap_record(r) for r in super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy)
-        ]
+        last_err = None
+        for attempt in range(1 + retry):
+            try:
+                return [
+                    _wrap_record(r)
+                    for r in super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy)
+                ]
+            except Exception as e:
+                if attempt < retry and type(e).__name__ in _RETRIABLE_ERRORS:
+                    last_err = e
+                    delay = min(0.1 * (2**attempt), 5.0)
+                    logger.warning(
+                        "batch_write_numpy attempt %d/%d failed (%s), retrying in %.1fs",
+                        attempt + 1,
+                        1 + retry,
+                        e,
+                        delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    raise
+        raise last_err  # pragma: no cover
 
     @catch_unexpected("Client.batch_operate")
     def batch_operate(self, keys, ops, policy=None) -> list[Record]:

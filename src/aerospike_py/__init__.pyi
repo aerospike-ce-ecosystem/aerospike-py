@@ -590,6 +590,7 @@ class Client:
         _dtype: np.dtype,
         key_field: str = "_key",
         policy: Optional[dict[str, Any]] = None,
+        retry: int = 0,
     ) -> list[Record]:
         """Write multiple records from a numpy structured array.
 
@@ -604,6 +605,8 @@ class Client:
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+            retry: Number of retry attempts for transient errors (default ``0``).
+                Uses exponential backoff between attempts.
 
         Returns:
             A list of ``Record`` NamedTuples with write results.
@@ -614,7 +617,7 @@ class Client:
 
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = client.batch_write_numpy(data, "test", "demo", dtype)
+            results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
             ```
         """
         ...
@@ -1487,6 +1490,7 @@ class AsyncClient:
         _dtype: np.dtype,
         key_field: str = "_key",
         policy: Optional[dict[str, Any]] = None,
+        retry: int = 0,
     ) -> list[Record]:
         """Write multiple records from a numpy structured array (async).
 
@@ -1501,6 +1505,8 @@ class AsyncClient:
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+            retry: Number of retry attempts for transient errors (default ``0``).
+                Uses exponential backoff between attempts.
 
         Returns:
             A list of ``Record`` NamedTuples with write results.
@@ -1511,7 +1517,7 @@ class AsyncClient:
 
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = await client.batch_write_numpy(data, "test", "demo", dtype)
+            results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
             ```
         """
         ...
