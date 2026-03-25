@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 
+import aerospike_py
 from aerospike_py import AsyncClient
 from aerospike_py.exception import RecordNotFound
 from app.config import settings
@@ -66,17 +67,16 @@ async def update_user(user_id: str, body: UserUpdate, request: Request):
     client = _get_client(request)
     key = _key(user_id)
 
-    # Verify the record exists first
-    try:
-        await client.get(key)
-    except RecordNotFound:
-        raise HTTPException(status_code=404, detail="User not found") from None
-
     update_bins = body.model_dump(exclude_none=True)
     if not update_bins:
         raise HTTPException(status_code=422, detail="No fields to update")
 
-    await client.put(key, update_bins)
+    # Use UPDATE_ONLY policy to atomically fail if the record was deleted
+    # between our check and write (prevents TOCTOU race).
+    try:
+        await client.put(key, update_bins, policy={"exists": aerospike_py.POLICY_EXISTS_UPDATE_ONLY})
+    except RecordNotFound:
+        raise HTTPException(status_code=404, detail="User not found") from None
 
     _, meta, bins = await client.get(key)
     return _to_response(user_id, meta, bins)
