@@ -74,7 +74,7 @@ app.include_router(observability.router)
 
 @app.get("/health")
 async def health():
-    client = app.state.aerospike
+    client = getattr(app.state, "aerospike", None)
     connected = client.is_connected() if client else False
     status = "ok" if connected else "degraded"
     return {"status": status, "aerospike_connected": connected}

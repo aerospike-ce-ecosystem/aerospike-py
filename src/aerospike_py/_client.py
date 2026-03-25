@@ -158,6 +158,10 @@ class Client(_NativeClient):
     def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
+    @catch_unexpected("Client.info_random_node")
+    def info_random_node(self, command, policy=None) -> str:
+        return super().info_random_node(command, policy)
+
     @catch_unexpected("Client.batch_read")
     def batch_read(self, keys, bins=None, policy=None, _dtype=None):
         """Read multiple records in a single batch call.
@@ -217,7 +221,8 @@ class Client(_NativeClient):
             results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
             ```
         """
-        last_err = None
+        retry = max(retry, 0)
+        last_err: Exception | None = None
         for attempt in range(1 + retry):
             try:
                 return [

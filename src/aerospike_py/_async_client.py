@@ -213,7 +213,8 @@ class AsyncClient:
             results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
             ```
         """
-        last_err = None
+        retry = max(retry, 0)
+        last_err: Exception | None = None
         for attempt in range(1 + retry):
             try:
                 return [
