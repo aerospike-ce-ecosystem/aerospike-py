@@ -105,5 +105,5 @@ async def readiness():
         logging.getLogger("aerospike_py.fastapi").warning("Readiness probe failed: %s", e)
         return JSONResponse(
             status_code=503,
-            content={"status": "not_ready", "reason": str(e)},
+            content={"status": "not_ready", "reason": "cluster connectivity check failed"},
         )

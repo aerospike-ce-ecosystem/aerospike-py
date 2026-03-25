@@ -49,7 +49,12 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(AerospikeError)
     async def _handle_aerospike_error(request: Request, exc: AerospikeError) -> JSONResponse:
-        status = _STATUS_MAP.get(type(exc), 500)
+        # Use MRO to find the closest mapped exception class
+        status = 500
+        for cls in type(exc).__mro__:
+            if cls in _STATUS_MAP:
+                status = _STATUS_MAP[cls]
+                break
         detail = str(exc)
 
         if status >= 500:
@@ -60,6 +65,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 request.url.path,
                 detail,
             )
+            detail = "Internal server error"
         else:
             logger.debug(
                 "Aerospike error (HTTP %d) %s %s: %s",
