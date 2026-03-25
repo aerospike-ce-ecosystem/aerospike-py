@@ -7,6 +7,7 @@ AEROSPIKE_CONFIG = {
             int(_os.environ.get("AEROSPIKE_PORT", "18710")),
         )
     ],
+    # Must match cluster-name in scripts/aerospike.template.conf
     "cluster_name": _os.environ.get("AEROSPIKE_CLUSTER_NAME", "docker"),
 }
 
