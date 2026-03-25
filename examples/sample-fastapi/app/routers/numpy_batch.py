@@ -125,6 +125,8 @@ async def vector_search(
 
     # cosine similarity (vectorized)
     query_norm = np.linalg.norm(query)
+    if query_norm == 0.0:
+        raise HTTPException(status_code=400, detail="query_vector must not be a zero vector")
     vec_norms = np.linalg.norm(all_vectors, axis=1)
     # 0-norm 방지
     safe_norms = np.where(vec_norms > 0, vec_norms, 1.0)
