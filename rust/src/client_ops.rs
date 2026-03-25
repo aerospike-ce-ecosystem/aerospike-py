@@ -347,7 +347,9 @@ pub async fn do_batch_write(
         }
 
         // Exponential backoff: 10ms, 20ms, 40ms, ..., capped at 500ms
-        let backoff_ms = std::cmp::min(10u64 * (1u64 << attempt), 500);
+        // Cap the shift exponent to avoid overflow panic when attempt >= 64
+        let capped_attempt = std::cmp::min(attempt, 6); // 10 * 2^6 = 640 > 500
+        let backoff_ms = std::cmp::min(10u64 * (1u64 << capped_attempt), 500);
         log::info!(
             "batch_write retry: {} failed records, attempt {}/{}, backoff {}ms",
             retry_indices.len(),
@@ -368,14 +370,25 @@ pub async fn do_batch_write(
             })
             .collect();
 
-        let retry_results: Vec<BatchRecord> = traced_op!(
+        let retry_results: Vec<BatchRecord> = match traced_op!(
             "batch_write_numpy_retry",
             ns,
             set,
             parent_ctx,
             conn_info,
             { client.batch(batch_policy, &retry_ops).await }
-        )?;
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!(
+                    "batch_write retry transport error on attempt {}/{}: {}",
+                    attempt + 1,
+                    max_retries,
+                    e
+                );
+                break; // Return partial results instead of propagating error
+            }
+        };
 
         // Merge retry results back into the main results vector
         for (retry_pos, &original_idx) in retry_indices.iter().enumerate() {

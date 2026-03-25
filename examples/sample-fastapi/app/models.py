@@ -333,7 +333,7 @@ class VectorSearchResponse(BaseModel):
 
 
 class NumpyBatchWriteRequest(BaseModel):
-    keys: list[AerospikeKey]
+    keys: list[AerospikeKey] = Field(..., min_length=1)
     dtype: list[DtypeField] = Field(
         ...,
         description="Structured array dtype specification (must include _key field)",
