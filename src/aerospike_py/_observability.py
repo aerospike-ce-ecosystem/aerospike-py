@@ -125,6 +125,11 @@ def start_metrics_server(port: int = 9464) -> None:
             _metrics_server.shutdown()
             if _metrics_server_thread is not None:
                 _metrics_server_thread.join(timeout=5)
+                if _metrics_server_thread.is_alive():
+                    logger.warning(
+                        "Old metrics server thread did not stop within 5 seconds; "
+                        "replacing reference — thread is daemonic"
+                    )
 
         _metrics_server = new_server
         _metrics_server_thread = threading.Thread(target=_metrics_server.serve_forever, daemon=True)

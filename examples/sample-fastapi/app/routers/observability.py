@@ -28,7 +28,10 @@ async def set_log_level(body: LogLevelRequest):
 
 @router.post("/metrics/toggle")
 async def toggle_metrics(enabled: bool = True):
-    """Enable or disable Prometheus metrics collection at runtime."""
+    """Enable or disable Prometheus metrics collection at runtime.
+
+    Pass ``?enabled=true`` (default) or ``?enabled=false`` as a query parameter.
+    """
     aerospike_py.set_metrics_enabled(enabled)
     return {"metrics_enabled": aerospike_py.is_metrics_enabled()}
 
