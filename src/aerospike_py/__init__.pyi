@@ -590,6 +590,7 @@ class Client:
         _dtype: np.dtype,
         key_field: str = "_key",
         policy: Optional[dict[str, Any]] = None,
+        retry: int = 0,
     ) -> list[Record]:
         """Write multiple records from a numpy structured array.
 
@@ -604,6 +605,10 @@ class Client:
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+            retry: Maximum number of retries for failed records (default ``0``).
+                When > 0, records that fail with transient errors (timeout,
+                device overload, key busy) are automatically retried with
+                exponential backoff.
 
         Returns:
             A list of ``Record`` NamedTuples with write results.
@@ -615,6 +620,8 @@ class Client:
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
             results = client.batch_write_numpy(data, "test", "demo", dtype)
+            # With retry for transient failures
+            results = client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
             ```
         """
         ...
@@ -1487,6 +1494,7 @@ class AsyncClient:
         _dtype: np.dtype,
         key_field: str = "_key",
         policy: Optional[dict[str, Any]] = None,
+        retry: int = 0,
     ) -> list[Record]:
         """Write multiple records from a numpy structured array (async).
 
@@ -1501,6 +1509,10 @@ class AsyncClient:
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+            retry: Maximum number of retries for failed records (default ``0``).
+                When > 0, records that fail with transient errors (timeout,
+                device overload, key busy) are automatically retried with
+                exponential backoff.
 
         Returns:
             A list of ``Record`` NamedTuples with write results.
@@ -1512,6 +1524,8 @@ class AsyncClient:
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
             results = await client.batch_write_numpy(data, "test", "demo", dtype)
+            # With retry for transient failures
+            results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
             ```
         """
         ...
@@ -2128,6 +2142,18 @@ def is_metrics_enabled() -> bool:
         if aerospike_py.is_metrics_enabled():
             print(aerospike_py.get_metrics())
         ```
+    """
+    ...
+
+def dropped_log_count() -> int:
+    """Return the number of log messages dropped because the GIL was unavailable.
+
+    When the Rust logging bridge cannot acquire the Python GIL (e.g. during
+    interpreter shutdown), log messages are counted as dropped. WARN and ERROR
+    level messages are still emitted to stderr as a fallback.
+
+    Returns:
+        Count of dropped messages since process start.
     """
     ...
 

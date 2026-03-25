@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
 import aerospike_py
-from app.models import LogLevelRequest
+from app.models import LogLevelRequest, MetricsToggleRequest
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 
@@ -16,6 +16,19 @@ async def get_metrics():
         content=aerospike_py.get_metrics(),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
+
+
+@router.get("/metrics/status")
+async def metrics_status():
+    """Return whether metrics collection is currently enabled."""
+    return {"metrics_enabled": aerospike_py.is_metrics_enabled()}
+
+
+@router.post("/metrics/toggle")
+async def toggle_metrics(body: MetricsToggleRequest):
+    """Enable or disable metrics collection at runtime."""
+    aerospike_py.set_metrics_enabled(body.enabled)
+    return {"metrics_enabled": aerospike_py.is_metrics_enabled()}
 
 
 @router.post("/log-level")

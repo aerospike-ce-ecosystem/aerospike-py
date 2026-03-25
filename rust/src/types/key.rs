@@ -13,7 +13,7 @@ use super::value::{py_to_value, value_to_py};
 /// The official Python C client uses STRING particle type for bytes keys,
 /// while the Rust client uses BLOB particle type (4). To ensure cross-client
 /// compatibility, we compute the digest with STRING particle type.
-fn compute_bytes_key_digest(set_name: &str, bytes_data: &[u8]) -> [u8; 20] {
+pub(crate) fn compute_bytes_key_digest(set_name: &str, bytes_data: &[u8]) -> [u8; 20] {
     let mut hash = Ripemd160::new();
     hash.update(set_name.as_bytes());
     hash.update([3u8]); // ParticleType::STRING = 3

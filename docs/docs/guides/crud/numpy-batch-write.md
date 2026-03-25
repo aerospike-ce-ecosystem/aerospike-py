@@ -412,6 +412,27 @@ data["level"] = df["level"].values
 results = client.batch_write_numpy(data, "test", "users", dtype)
 ```
 
+## Retry for Transient Failures
+
+When `retry > 0`, records that fail with transient errors (timeout, device overload, key busy, server memory, partition unavailable) are automatically retried with exponential backoff. Permanent errors (key exists, record too big) are never retried.
+
+```python
+# Retry up to 3 times for transient failures
+results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
+
+# Check which records still failed after retries
+for record in results:
+    key, meta, bins = record
+    if meta is None:
+        print(f"Write failed for key {key} after retries")
+```
+
+The backoff schedule is 10ms, 20ms, 40ms, ... capped at 500ms between attempts. Only the failed records are re-submitted on each retry, not the entire batch.
+
+:::tip
+For large bulk ingestion where occasional transient failures are expected, `retry=3` is a good starting point. Set `retry=0` (default) when you want full control over retry logic in your application.
+:::
+
 ## Error Handling
 
 ```python
@@ -454,6 +475,7 @@ results: list[Record] = client.batch_write_numpy(
     _dtype: np.dtype,
     key_field: str = "_key",
     policy: dict | None = None,
+    retry: int = 0,
 )
 
 # Async
@@ -464,6 +486,7 @@ results: list[Record] = await client.batch_write_numpy(
     _dtype: np.dtype,
     key_field: str = "_key",
     policy: dict | None = None,
+    retry: int = 0,
 )
 ```
 
@@ -475,6 +498,7 @@ results: list[Record] = await client.batch_write_numpy(
 | `_dtype` | `np.dtype` | required | Structured dtype describing the array layout |
 | `key_field` | `str` | `"_key"` | Name of the dtype field to use as the record user key |
 | `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides |
+| `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). `0` = no retry. |
 
 **Returns:** `list[Record]` — a list of `Record` NamedTuples `(key, meta, bins)` with write results.
 

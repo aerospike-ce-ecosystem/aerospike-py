@@ -265,6 +265,7 @@ from aerospike_py._async_client import AsyncClient, AsyncQuery  # noqa: F401
 from aerospike_py._observability import (  # noqa: F401
     set_log_level,
     get_metrics,
+    dropped_log_count,
     set_metrics_enabled,
     is_metrics_enabled,
     start_metrics_server,
@@ -343,6 +344,7 @@ __all__ = [
     "async_client",
     "set_log_level",
     "get_metrics",
+    "dropped_log_count",
     "set_metrics_enabled",
     "is_metrics_enabled",
     "start_metrics_server",

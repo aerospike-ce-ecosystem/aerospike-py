@@ -122,6 +122,24 @@ for name in ["aerospike_core", "aerospike_py"]:
     logger.setLevel(logging.DEBUG)
 ```
 
+## Shutdown Fallback
+
+When the Python GIL is unavailable (e.g., during interpreter shutdown), the logging bridge cannot forward messages to Python. In this case:
+
+- **WARN and ERROR** messages are emitted to **stderr** so critical diagnostics are not lost
+- **INFO, DEBUG, TRACE** messages are silently dropped
+
+Use `dropped_log_count()` to check how many messages were dropped:
+
+```python
+import aerospike_py
+
+# After client shutdown
+count = aerospike_py.dropped_log_count()
+if count > 0:
+    print(f"{count} log messages were dropped (GIL unavailable)")
+```
+
 ## Disabling
 
 ```python

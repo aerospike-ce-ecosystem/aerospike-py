@@ -15,7 +15,7 @@ def test_index_integer_create(client):
         },
     )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     assert idx_name in resp.json()["message"]
     # Cleanup
     time.sleep(0.5)
@@ -34,7 +34,7 @@ def test_index_string_create(client):
         },
     )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     assert idx_name in resp.json()["message"]
     # Cleanup
     time.sleep(0.5)
@@ -53,7 +53,7 @@ def test_index_geo2dsphere_create(client):
         },
     )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     assert idx_name in resp.json()["message"]
     # Cleanup
     time.sleep(0.5)

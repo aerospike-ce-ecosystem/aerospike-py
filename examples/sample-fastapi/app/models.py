@@ -313,7 +313,7 @@ class VectorSearchRequest(BaseModel):
     keys: list[AerospikeKey]
     query_vector: list[float] = Field(..., description="Query vector for similarity search")
     embedding_bin: str = Field("embedding", description="Bin name storing the vector blob")
-    embedding_dim: int = Field(..., description="Vector dimensionality", examples=[768])
+    embedding_dim: int = Field(..., ge=1, description="Vector dimensionality", examples=[768])
     extra_bins: list[str] | None = Field(
         None,
         description="Additional bins to return alongside similarity scores",
@@ -332,6 +332,35 @@ class VectorSearchResponse(BaseModel):
     total_found: int = Field(description="Total records successfully read")
 
 
+class NumpyBatchWriteRequest(BaseModel):
+    namespace: str = Field("test", description="Aerospike namespace")
+    set_name: str = Field("demo", description="Aerospike set name")
+    dtype: list[DtypeField] = Field(
+        ...,
+        description="Structured array dtype specification (must include _key field)",
+        examples=[
+            [
+                {"name": "_key", "dtype": "i4"},
+                {"name": "score", "dtype": "f8"},
+                {"name": "count", "dtype": "i4"},
+            ]
+        ],
+    )
+    data: list[list[Any]] = Field(
+        ...,
+        min_length=1,
+        description="Row-oriented data: each inner list is one record matching the dtype order",
+        examples=[[[1, 0.95, 10], [2, 0.87, 20]]],
+    )
+    retry: int = Field(0, ge=0, le=100, description="Max retries for transient failures (0 = no retry)")
+
+
+class NumpyBatchWriteResponse(BaseModel):
+    count: int
+    failed_count: int = Field(0, description="Number of records that still failed after retries")
+    result_codes: list[int] = Field(description="Per-record result codes (0 = success)")
+
+
 # ── Observability models ──────────────────────────────────────
 
 
@@ -342,3 +371,7 @@ class LogLevelRequest(BaseModel):
         le=4,
         description="Log level: -1=OFF, 0=ERROR, 1=WARN, 2=INFO, 3=DEBUG, 4=TRACE",
     )
+
+
+class MetricsToggleRequest(BaseModel):
+    enabled: bool = Field(..., description="Enable or disable metrics collection")

@@ -25,14 +25,14 @@ def test_metrics_endpoint(client):
 
 def test_metrics_after_operations(client, aerospike_client, cleanup):
     """Metrics reflect actual Aerospike operations."""
-    key = ("test", "users", "metrics_test_key")
-    cleanup.append(key)
-
-    # Perform a put via the API
-    client.post(
+    # Perform a put via the API and clean up using the returned user_id
+    resp = client.post(
         "/users",
         json={"name": "MetricsUser", "email": "m@test.com", "age": 25},
     )
+    if resp.status_code == 201:
+        user_id = resp.json()["user_id"]
+        cleanup.append(("test", "users", user_id))
 
     resp = client.get("/observability/metrics")
     assert resp.status_code == 200
@@ -68,6 +68,32 @@ def test_log_level_invalid(client):
 
     resp = client.post("/observability/log-level", json={"level": -2})
     assert resp.status_code == 422
+
+
+# ── Metrics toggle tests ─────────────────────────────────────
+
+
+def test_metrics_toggle(client):
+    """POST /observability/metrics/toggle enables/disables metrics."""
+    try:
+        resp = client.post("/observability/metrics/toggle", json={"enabled": False})
+        assert resp.status_code == 200
+        assert resp.json()["metrics_enabled"] is False
+
+        resp = client.get("/observability/metrics/status")
+        assert resp.status_code == 200
+        assert resp.json()["metrics_enabled"] is False
+    finally:
+        # Always re-enable metrics so subsequent tests are not affected
+        restore = client.post("/observability/metrics/toggle", json={"enabled": True})
+        assert restore.status_code == 200
+
+
+def test_metrics_status(client):
+    """GET /observability/metrics/status returns current state."""
+    resp = client.get("/observability/metrics/status")
+    assert resp.status_code == 200
+    assert "metrics_enabled" in resp.json()
 
 
 # ── Tracing status tests ─────────────────────────────────────

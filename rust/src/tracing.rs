@@ -59,6 +59,7 @@ pub fn op_to_upper(op: &str) -> Cow<'static, str> {
         "batch_operate" => Cow::Borrowed("BATCH_OPERATE"),
         "batch_remove" => Cow::Borrowed("BATCH_REMOVE"),
         "batch_write_numpy" => Cow::Borrowed("BATCH_WRITE_NUMPY"),
+        "batch_write_numpy_retry" => Cow::Borrowed("BATCH_WRITE_NUMPY_RETRY"),
         "query" => Cow::Borrowed("QUERY"),
         other => {
             log::warn!("Unknown operation name for uppercase mapping: {other}");

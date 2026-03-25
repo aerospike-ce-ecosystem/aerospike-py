@@ -20,7 +20,7 @@ from tests.helpers import invoke
 
 
 class TestKeyTupleReturned:
-    """CRUD 결과에서 key tuple이 None이 아닌 (ns, set, pk, digest)로 반환되어야 한다."""
+    """CRUD results should return a key tuple as (ns, set, pk, digest), not None."""
 
     async def test_get_returns_key_tuple(self, any_client, any_cleanup):
         key = ("test", "demo", "bugfix_get_key")
@@ -86,7 +86,7 @@ class TestKeyTupleReturned:
         assert set_name == "demo"
 
     def test_get_with_policy_key_send(self, client, cleanup):
-        """POLICY_KEY_SEND로 put한 레코드의 get 결과에 pk가 포함되어야 한다."""
+        """get result should include pk for a record put with POLICY_KEY_SEND."""
         key = ("test", "demo", "bugfix_key_send")
         cleanup.append(key)
         client.put(key, {"val": 1}, policy={"key": aerospike_py.POLICY_KEY_SEND})
@@ -106,7 +106,7 @@ class TestKeyTupleReturned:
 
 
 class TestRemoveRecordNotFound:
-    """remove()로 존재하지 않는 레코드를 삭제하면 RecordNotFound가 발생해야 한다."""
+    """remove() on a non-existent record should raise RecordNotFound."""
 
     async def test_remove_nonexistent_raises_record_not_found(self, any_client):
         key = ("test", "demo", "bugfix_remove_nonexistent")
@@ -114,7 +114,7 @@ class TestRemoveRecordNotFound:
             await invoke(any_client, "remove", key)
 
     async def test_remove_twice_raises_record_not_found(self, any_client, any_cleanup):
-        """put → remove → remove 시 두 번째 remove에서 RecordNotFound."""
+        """put -> remove -> remove: the second remove should raise RecordNotFound."""
         key = ("test", "demo", "bugfix_remove_twice")
         await invoke(any_client, "put", key, {"val": 1})
         await invoke(any_client, "remove", key)
@@ -125,7 +125,7 @@ class TestRemoveRecordNotFound:
     # ── sync-only ──
 
     def test_remove_not_found_is_record_error(self, client):
-        """RecordNotFound는 RecordError의 서브클래스여야 한다."""
+        """RecordNotFound should be a subclass of RecordError."""
         key = ("test", "demo", "bugfix_remove_hierarchy")
         with pytest.raises(aerospike_py.RecordError):
             client.remove(key)
@@ -137,10 +137,10 @@ class TestRemoveRecordNotFound:
 
 
 class TestPutNoneBinDeletion:
-    """put(key, {"bin": None})으로 특정 bin을 삭제할 수 있어야 한다."""
+    """put(key, {"bin": None}) should be able to delete a specific bin."""
 
     async def test_put_none_deletes_bin(self, any_client, any_cleanup):
-        """bin 값을 None으로 put하면 해당 bin이 삭제된다."""
+        """Putting a bin value of None deletes that bin."""
         key = ("test", "demo", "bugfix_none_bin")
         any_cleanup.append(key)
 
@@ -155,7 +155,7 @@ class TestPutNoneBinDeletion:
         assert bins["c"] == 3
 
     async def test_put_none_bins_raises_type_error(self, any_client):
-        """put(key, None) — dict가 아닌 None을 전달하면 TypeError."""
+        """put(key, None) -- passing None instead of a dict raises TypeError."""
         key = ("test", "demo", "bugfix_put_none")
         with pytest.raises(TypeError):
             await invoke(any_client, "put", key, None)
@@ -163,7 +163,7 @@ class TestPutNoneBinDeletion:
     # ── sync-only ──
 
     def test_put_none_all_bins_removes_record(self, client):
-        """모든 bin을 None으로 설정하면 레코드 자체가 삭제된다."""
+        """Setting all bins to None deletes the record itself."""
         key = ("test", "demo", "bugfix_none_all_bins")
 
         client.put(key, {"only": 1})

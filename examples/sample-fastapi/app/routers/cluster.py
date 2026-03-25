@@ -17,5 +17,5 @@ async def is_connected(client: AsyncClient = Depends(get_client)):
 @router.get("/nodes")
 async def get_node_names(client: AsyncClient = Depends(get_client)):
     """Get the list of cluster node names."""
-    nodes = await client.get_node_names()
+    nodes = client.get_node_names()
     return {"nodes": nodes}

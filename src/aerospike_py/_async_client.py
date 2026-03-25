@@ -144,6 +144,7 @@ class AsyncClient:
     async def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in await self._inner.info_all(command, policy)]
 
+    @catch_unexpected("AsyncClient.batch_read")
     async def batch_read(
         self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None, _dtype: Any = None
     ) -> Any:
@@ -176,7 +177,7 @@ class AsyncClient:
 
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
-        self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None
+        self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None, retry: int = 0
     ) -> list[Record]:
         """Write multiple records from a numpy structured array (async).
 
@@ -191,6 +192,10 @@ class AsyncClient:
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional batch policy dict.
+            retry: Maximum number of retries for failed records (default ``0``).
+                When > 0, records that fail with transient errors (timeout,
+                device overload, key busy) are automatically retried with
+                exponential backoff.
 
         Returns:
             A list of ``Record`` NamedTuples with write results.
@@ -200,12 +205,15 @@ class AsyncClient:
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
+            # Without retry
             results = await client.batch_write_numpy(data, "test", "demo", dtype)
+            # With retry (up to 10 attempts for transient failures)
+            results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
             ```
         """
         return [
             _wrap_record(r)
-            for r in await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy)
+            for r in await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
         ]
 
     @catch_unexpected("AsyncClient.batch_operate")
@@ -216,114 +224,147 @@ class AsyncClient:
     async def batch_remove(self, keys, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in await self._inner.batch_remove(keys, policy)]
 
+    @catch_unexpected("AsyncClient.is_connected")
     def is_connected(self) -> bool:
         return self._inner.is_connected()
 
+    @catch_unexpected("AsyncClient.get_node_names")
     def get_node_names(self) -> list[str]:
         return self._inner.get_node_names()
 
+    @catch_unexpected("AsyncClient.info_random_node")
     async def info_random_node(self, command, policy=None) -> str:
         return await self._inner.info_random_node(command, policy)
 
+    @catch_unexpected("AsyncClient.put")
     async def put(self, key, bins, meta=None, policy=None) -> None:
         return await self._inner.put(key, bins, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.remove")
     async def remove(self, key, meta=None, policy=None) -> None:
         return await self._inner.remove(key, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.touch")
     async def touch(self, key, val=0, meta=None, policy=None) -> None:
         return await self._inner.touch(key, val=val, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.append")
     async def append(self, key, bin, val, meta=None, policy=None) -> None:
         return await self._inner.append(key, bin, val, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.prepend")
     async def prepend(self, key, bin, val, meta=None, policy=None) -> None:
         return await self._inner.prepend(key, bin, val, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.increment")
     async def increment(self, key, bin, offset, meta=None, policy=None) -> None:
         return await self._inner.increment(key, bin, offset, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.remove_bin")
     async def remove_bin(self, key, bin_names, meta=None, policy=None) -> None:
         return await self._inner.remove_bin(key, bin_names, meta=meta, policy=policy)
 
     # -- Index --
 
+    @catch_unexpected("AsyncClient.index_integer_create")
     async def index_integer_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
         return await self._inner.index_integer_create(namespace, set_name, bin_name, index_name, policy)
 
+    @catch_unexpected("AsyncClient.index_string_create")
     async def index_string_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
         return await self._inner.index_string_create(namespace, set_name, bin_name, index_name, policy)
 
+    @catch_unexpected("AsyncClient.index_geo2dsphere_create")
     async def index_geo2dsphere_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
         return await self._inner.index_geo2dsphere_create(namespace, set_name, bin_name, index_name, policy)
 
+    @catch_unexpected("AsyncClient.index_remove")
     async def index_remove(self, namespace, index_name, policy=None) -> None:
         return await self._inner.index_remove(namespace, index_name, policy)
 
     # -- Truncate --
 
+    @catch_unexpected("AsyncClient.truncate")
     async def truncate(self, namespace, set_name, nanos=0, policy=None) -> None:
         return await self._inner.truncate(namespace, set_name, nanos, policy)
 
     # -- UDF --
 
+    @catch_unexpected("AsyncClient.udf_put")
     async def udf_put(self, filename, udf_type=0, policy=None) -> None:
         return await self._inner.udf_put(filename, udf_type, policy)
 
+    @catch_unexpected("AsyncClient.udf_remove")
     async def udf_remove(self, module, policy=None) -> None:
         return await self._inner.udf_remove(module, policy)
 
+    @catch_unexpected("AsyncClient.apply")
     async def apply(self, key, module, function, args=None, policy=None):
         return await self._inner.apply(key, module, function, args, policy)
 
     # -- Admin: User --
 
+    @catch_unexpected("AsyncClient.admin_create_user")
     async def admin_create_user(self, username, password, roles, policy=None) -> None:
         return await self._inner.admin_create_user(username, password, roles, policy)
 
+    @catch_unexpected("AsyncClient.admin_drop_user")
     async def admin_drop_user(self, username, policy=None) -> None:
         return await self._inner.admin_drop_user(username, policy)
 
+    @catch_unexpected("AsyncClient.admin_change_password")
     async def admin_change_password(self, username, password, policy=None) -> None:
         return await self._inner.admin_change_password(username, password, policy)
 
+    @catch_unexpected("AsyncClient.admin_grant_roles")
     async def admin_grant_roles(self, username, roles, policy=None) -> None:
         return await self._inner.admin_grant_roles(username, roles, policy)
 
+    @catch_unexpected("AsyncClient.admin_revoke_roles")
     async def admin_revoke_roles(self, username, roles, policy=None) -> None:
         return await self._inner.admin_revoke_roles(username, roles, policy)
 
+    @catch_unexpected("AsyncClient.admin_query_user_info")
     async def admin_query_user_info(self, username, policy=None):
         return await self._inner.admin_query_user_info(username, policy)
 
+    @catch_unexpected("AsyncClient.admin_query_users_info")
     async def admin_query_users_info(self, policy=None):
         return await self._inner.admin_query_users_info(policy)
 
     # -- Admin: Role --
 
+    @catch_unexpected("AsyncClient.admin_create_role")
     async def admin_create_role(
         self, role, privileges, policy=None, whitelist=None, read_quota=0, write_quota=0
     ) -> None:
         return await self._inner.admin_create_role(role, privileges, policy, whitelist, read_quota, write_quota)
 
+    @catch_unexpected("AsyncClient.admin_drop_role")
     async def admin_drop_role(self, role, policy=None) -> None:
         return await self._inner.admin_drop_role(role, policy)
 
+    @catch_unexpected("AsyncClient.admin_grant_privileges")
     async def admin_grant_privileges(self, role, privileges, policy=None) -> None:
         return await self._inner.admin_grant_privileges(role, privileges, policy)
 
+    @catch_unexpected("AsyncClient.admin_revoke_privileges")
     async def admin_revoke_privileges(self, role, privileges, policy=None) -> None:
         return await self._inner.admin_revoke_privileges(role, privileges, policy)
 
+    @catch_unexpected("AsyncClient.admin_query_role")
     async def admin_query_role(self, role, policy=None):
         return await self._inner.admin_query_role(role, policy)
 
+    @catch_unexpected("AsyncClient.admin_query_roles")
     async def admin_query_roles(self, policy=None):
         return await self._inner.admin_query_roles(policy)
 
+    @catch_unexpected("AsyncClient.admin_set_whitelist")
     async def admin_set_whitelist(self, role, whitelist, policy=None) -> None:
         return await self._inner.admin_set_whitelist(role, whitelist, policy)
 
+    @catch_unexpected("AsyncClient.admin_set_quotas")
     async def admin_set_quotas(self, role, read_quota=0, write_quota=0, policy=None) -> None:
         return await self._inner.admin_set_quotas(role, read_quota, write_quota, policy)
 
