@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", settings.otel_endpoint)
     os.environ.setdefault("OTEL_SERVICE_NAME", settings.otel_service_name)
     aerospike_py.init_tracing()
-    app.state.tracing_enabled = True
+    app.state.tracing_enabled = os.environ.get("OTEL_SDK_DISABLED", "").lower() not in ("true", "1")
 
     # Aerospike client with backpressure config
     config: dict = {

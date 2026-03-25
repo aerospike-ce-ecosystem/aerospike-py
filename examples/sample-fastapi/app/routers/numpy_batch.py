@@ -102,6 +102,13 @@ async def numpy_batch_write(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid dtype: {e}") from e
 
+    dtype_names = {f.name for f in body.dtype}
+    if body.key_field not in dtype_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"key_field '{body.key_field}' not found in dtype fields: {sorted(dtype_names)}",
+        )
+
     try:
         data = np.array([tuple(row) for row in body.data], dtype=dtype)
     except (ValueError, TypeError) as e:
