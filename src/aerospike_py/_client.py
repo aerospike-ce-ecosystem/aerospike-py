@@ -154,6 +154,7 @@ class Client(_NativeClient):
     def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
+    @catch_unexpected("Client.batch_read")
     def batch_read(self, keys, bins=None, policy=None, _dtype=None):
         """Read multiple records in a single batch call.
 
