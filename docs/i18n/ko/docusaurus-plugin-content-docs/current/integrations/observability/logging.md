@@ -204,6 +204,24 @@ for name in ["aerospike_core", "aerospike_py"]:
     logger.setLevel(logging.DEBUG)
 ```
 
+## 종료 시 폴백
+
+Python GIL을 획득할 수 없는 상황(예: 인터프리터 종료 중)에서는 로깅 브리지가 Python으로 메시지를 전달할 수 없습니다. 이 경우:
+
+- **WARN, ERROR** 메시지는 **stderr**로 출력되어 중요한 진단 정보가 유실되지 않습니다
+- **INFO, DEBUG, TRACE** 메시지는 조용히 버려집니다
+
+`dropped_log_count()`로 버려진 메시지 수를 확인할 수 있습니다:
+
+```python
+import aerospike_py
+
+# 클라이언트 종료 후
+count = aerospike_py.dropped_log_count()
+if count > 0:
+    print(f"{count}개의 로그 메시지가 버려졌습니다 (GIL 사용 불가)")
+```
+
 ## 로그 비활성화
 
 모든 Aerospike 로깅을 억제하려면:
