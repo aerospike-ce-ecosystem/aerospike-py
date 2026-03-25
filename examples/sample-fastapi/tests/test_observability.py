@@ -85,7 +85,8 @@ def test_metrics_toggle(client):
         assert resp.json()["metrics_enabled"] is False
     finally:
         # Always re-enable metrics so subsequent tests are not affected
-        client.post("/observability/metrics/toggle", json={"enabled": True})
+        restore = client.post("/observability/metrics/toggle", json={"enabled": True})
+        assert restore.status_code == 200
 
 
 def test_metrics_status(client):

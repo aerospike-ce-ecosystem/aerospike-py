@@ -255,24 +255,31 @@ class AsyncClient:
     async def info_random_node(self, command, policy=None) -> str:
         return await self._inner.info_random_node(command, policy)
 
+    @catch_unexpected("AsyncClient.put")
     async def put(self, key, bins, meta=None, policy=None) -> None:
         return await self._inner.put(key, bins, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.remove")
     async def remove(self, key, meta=None, policy=None) -> None:
         return await self._inner.remove(key, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.touch")
     async def touch(self, key, val=0, meta=None, policy=None) -> None:
         return await self._inner.touch(key, val=val, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.append")
     async def append(self, key, bin, val, meta=None, policy=None) -> None:
         return await self._inner.append(key, bin, val, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.prepend")
     async def prepend(self, key, bin, val, meta=None, policy=None) -> None:
         return await self._inner.prepend(key, bin, val, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.increment")
     async def increment(self, key, bin, offset, meta=None, policy=None) -> None:
         return await self._inner.increment(key, bin, offset, meta=meta, policy=policy)
 
+    @catch_unexpected("AsyncClient.remove_bin")
     async def remove_bin(self, key, bin_names, meta=None, policy=None) -> None:
         return await self._inner.remove_bin(key, bin_names, meta=meta, policy=policy)
 
