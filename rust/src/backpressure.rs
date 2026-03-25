@@ -151,11 +151,16 @@ mod tests {
 
         let result = limiter.acquire_named("batch_read").await;
         assert!(result.is_err());
-        let err_msg = format!("{}", result.unwrap_err());
-        assert!(
-            err_msg.contains("batch_read"),
-            "Error message should contain the operation name, got: {}",
-            err_msg
-        );
+        // Verify the error message contains the operation name by
+        // inspecting the PyErr via Python's GIL.
+        Python::with_gil(|py| {
+            let err = result.unwrap_err();
+            let msg = err.value(py).to_string();
+            assert!(
+                msg.contains("batch_read"),
+                "Error message should contain the operation name, got: {}",
+                msg
+            );
+        });
     }
 }
