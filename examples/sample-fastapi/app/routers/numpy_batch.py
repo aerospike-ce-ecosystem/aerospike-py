@@ -24,7 +24,7 @@ router = APIRouter(prefix="/numpy-batch", tags=["numpy-batch"])
 
 
 def _build_dtype(fields) -> np.dtype:
-    """DtypeField 리스트 → np.dtype 변환."""
+    """Convert DtypeField list to np.dtype."""
     spec = []
     for f in fields:
         if f.shape:
@@ -35,7 +35,7 @@ def _build_dtype(fields) -> np.dtype:
 
 
 def _field_to_json(arr: np.ndarray) -> list[Any]:
-    """numpy 필드 배열을 JSON-serializable 리스트로 변환."""
+    """Convert numpy field array to JSON-serializable list."""
     if arr.dtype.kind == "S":  # bytes → base64
         return [base64.b64encode(v).decode() for v in arr]
     if arr.dtype.kind == "V":  # void → base64
@@ -145,7 +145,7 @@ async def vector_search(
     dim = body.embedding_dim
     blob_size = dim * 4  # float32
 
-    # dtype 구성: embedding (bytes) + extra bins (float64)
+    # Build dtype: embedding (bytes) + extra bins (float64)
     dtype_spec: list[tuple] = [(body.embedding_bin, f"S{blob_size}")]
     if body.extra_bins:
         for b in body.extra_bins:
@@ -171,13 +171,16 @@ async def vector_search(
 
     query = np.array(body.query_vector, dtype=np.float32)
 
-    # cosine similarity (vectorized)
+    # Cosine similarity (vectorized)
     query_norm = np.linalg.norm(query)
+    if query_norm == 0.0:
+        raise HTTPException(status_code=400, detail="Query vector must be non-zero")
     vec_norms = np.linalg.norm(all_vectors, axis=1)
-    # 0-norm 방지
+    # Guard against zero-norm stored vectors
     safe_norms = np.where(vec_norms > 0, vec_norms, 1.0)
     similarities = (all_vectors @ query) / (safe_norms * query_norm)
-    similarities = np.where(ok_mask, similarities, -2.0)  # 실패 레코드 제외
+    # Exclude failed records from ranking
+    similarities = np.where(ok_mask, similarities, -2.0)
 
     # top-k
     top_k = min(body.top_k, total_found)
