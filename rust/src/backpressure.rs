@@ -57,7 +57,18 @@ impl OperationLimiter {
     /// Returns `None` when the limiter is disabled (zero overhead path).
     /// Returns `Some(permit)` when a slot is available.
     /// Raises `BackpressureError` if the timeout expires while waiting.
+    ///
+    /// Prefer [`acquire_named`] for better error diagnostics.
+    #[allow(dead_code)]
     pub async fn acquire(&self) -> PyResult<OperationPermit> {
+        self.acquire_named("unknown").await
+    }
+
+    /// Acquire a permit with an operation name for better error diagnostics.
+    ///
+    /// Same as [`acquire`] but includes the operation name in error messages,
+    /// making it easier to diagnose which operation hit the backpressure limit.
+    pub async fn acquire_named(&self, operation: &str) -> PyResult<OperationPermit> {
         let sem = match &self.semaphore {
             None => return Ok(None),
             Some(s) => s.clone(),
@@ -68,20 +79,26 @@ impl OperationLimiter {
                 .await
                 .map_err(|_| {
                     BackpressureError::new_err(format!(
-                        "Operation queue timeout after {}ms: max_concurrent_operations={} exceeded",
-                        self.timeout_ms, self.max_concurrent
+                        "Backpressure timeout on '{}' after {}ms: max_concurrent_operations={} exceeded",
+                        operation, self.timeout_ms, self.max_concurrent
                     ))
                 })?
                 .map(Some)
                 .map_err(|_| {
-                    BackpressureError::new_err("Semaphore closed unexpectedly".to_string())
+                    BackpressureError::new_err(format!(
+                        "Semaphore closed unexpectedly during '{}' (max_concurrent={}, timeout={}ms)",
+                        operation, self.max_concurrent, self.timeout_ms
+                    ))
                 })
         } else {
             sem.acquire_owned()
                 .await
                 .map(Some)
                 .map_err(|_| {
-                    BackpressureError::new_err("Semaphore closed unexpectedly".to_string())
+                    BackpressureError::new_err(format!(
+                        "Semaphore closed unexpectedly during '{}' (max_concurrent={})",
+                        operation, self.max_concurrent
+                    ))
                 })
         }
     }
