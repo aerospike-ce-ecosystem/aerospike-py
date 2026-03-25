@@ -362,7 +362,8 @@ class NumpyBatchWriteResponse(BaseModel):
     failed: int = Field(0, description="Number of records that failed to write")
     result_codes: list[int] = Field(
         default_factory=list,
-        description="Per-record result codes (0 = success, non-zero = error)",
+        description="Per-record result codes (0 = success, -1 = write failed; "
+        "batch_write_numpy returns Record types without granular error codes)",
     )
 
 

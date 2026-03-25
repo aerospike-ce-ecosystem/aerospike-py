@@ -134,6 +134,17 @@ async def vector_search(
     dim = body.embedding_dim
     blob_size = dim * 4  # float32
 
+    # Validate query_vector before I/O to avoid wasted batch reads
+    query = np.array(body.query_vector, dtype=np.float32)
+    if len(query) != dim:
+        raise HTTPException(
+            status_code=422,
+            detail=f"query_vector length {len(query)} does not match embedding_dim {dim}",
+        )
+    query_norm = np.linalg.norm(query)
+    if query_norm == 0.0:
+        raise HTTPException(status_code=422, detail="query_vector must be non-zero")
+
     # dtype 구성: embedding (bytes) + extra bins (float64)
     dtype_spec: list[tuple] = [(body.embedding_bin, f"S{blob_size}")]
     if body.extra_bins:
@@ -162,17 +173,7 @@ async def vector_search(
             else:
                 valid_mask[i] = False
 
-    query = np.array(body.query_vector, dtype=np.float32)
-    if len(query) != dim:
-        raise HTTPException(
-            status_code=422,
-            detail=f"query_vector length {len(query)} does not match embedding_dim {dim}",
-        )
-
     # cosine similarity (vectorized)
-    query_norm = np.linalg.norm(query)
-    if query_norm == 0.0:
-        raise HTTPException(status_code=422, detail="query_vector must be non-zero")
     vec_norms = np.linalg.norm(all_vectors, axis=1)
     # 0-norm 방지
     safe_norms = np.where(vec_norms > 0, vec_norms, 1.0)
