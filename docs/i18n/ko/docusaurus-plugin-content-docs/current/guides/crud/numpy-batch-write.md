@@ -412,6 +412,27 @@ data["level"] = df["level"].values
 results = client.batch_write_numpy(data, "test", "users", dtype)
 ```
 
+## 일시적 실패 자동 재시도
+
+`retry > 0`이면 일시적 오류(timeout, device overload, key busy, server memory, partition unavailable)로 실패한 레코드를 지수 백오프로 자동 재시도합니다. 영구 오류(key exists, record too big)는 재시도하지 않습니다.
+
+```python
+# 일시적 실패 시 최대 3회 재시도
+results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
+
+# 재시도 후에도 실패한 레코드 확인
+for record in results:
+    key, meta, bins = record
+    if meta is None:
+        print(f"Write failed for key {key} after retries")
+```
+
+백오프 간격은 10ms, 20ms, 40ms, ... 최대 500ms입니다. 재시도 시에는 실패한 레코드만 다시 전송하며 전체 배치를 재전송하지 않습니다.
+
+:::tip
+대량 벌크 적재 시 간헐적 일시 오류가 예상되면 `retry=3`이 적당합니다. 애플리케이션에서 재시도 로직을 직접 제어하려면 `retry=0`(기본값)을 사용하세요.
+:::
+
 ## 오류 처리
 
 ```python
@@ -454,6 +475,7 @@ results: list[Record] = client.batch_write_numpy(
     _dtype: np.dtype,
     key_field: str = "_key",
     policy: dict | None = None,
+    retry: int = 0,
 )
 
 # Async
@@ -464,6 +486,7 @@ results: list[Record] = await client.batch_write_numpy(
     _dtype: np.dtype,
     key_field: str = "_key",
     policy: dict | None = None,
+    retry: int = 0,
 )
 ```
 
@@ -475,6 +498,7 @@ results: list[Record] = await client.batch_write_numpy(
 | `_dtype` | `np.dtype` | 필수 | 배열 레이아웃을 설명하는 구조화 dtype |
 | `key_field` | `str` | `"_key"` | 레코드 사용자 키로 사용할 dtype 필드 이름 |
 | `policy` | `dict \| None` | `None` | 선택적 [`BatchPolicy`](/docs/api/types#batchpolicy) 오버라이드 |
+| `retry` | `int` | `0` | 일시적 실패(timeout, device overload, key busy) 최대 재시도 횟수. `0` = 재시도 안 함. |
 
 **반환값:** `list[Record]` -- 쓰기 결과가 담긴 `Record` NamedTuple `(key, meta, bins)` 리스트.
 

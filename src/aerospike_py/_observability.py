@@ -6,6 +6,7 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from aerospike_py._aerospike import dropped_log_count as _dropped_log_count
 from aerospike_py._aerospike import get_metrics_text as _get_metrics_text
 from aerospike_py._aerospike import init_tracing as _init_tracing
 from aerospike_py._aerospike import is_metrics_enabled as _is_metrics_enabled
@@ -56,6 +57,19 @@ def get_metrics() -> str:
     return _get_metrics_text()
 
 
+def dropped_log_count() -> int:
+    """Return the number of log messages dropped because the GIL was unavailable.
+
+    When the Rust logging bridge cannot acquire the Python GIL (e.g. during
+    interpreter shutdown), log messages are counted as dropped. WARN and ERROR
+    level messages are still emitted to stderr as a fallback.
+
+    Returns:
+        Count of dropped messages since process start.
+    """
+    return _dropped_log_count()
+
+
 def set_metrics_enabled(enabled: bool) -> None:
     """Enable or disable Prometheus metrics collection.
 
@@ -90,6 +104,8 @@ _metrics_lock = threading.Lock()
 
 
 class _MetricsHandler(BaseHTTPRequestHandler):
+    """HTTP handler for Prometheus /metrics endpoint."""
+
     def do_GET(self):
         if self.path == "/metrics":
             body = _get_metrics_text().encode("utf-8")
@@ -103,7 +119,8 @@ class _MetricsHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def log_message(self, format, *args):
-        pass
+        # Forward HTTP request logs at DEBUG level instead of silently dropping them.
+        logger.debug(format, *args)
 
 
 def start_metrics_server(port: int = 9464) -> None:
@@ -111,14 +128,41 @@ def start_metrics_server(port: int = 9464) -> None:
     global _metrics_server, _metrics_server_thread
 
     with _metrics_lock:
-        new_server = HTTPServer(("", port), _MetricsHandler)
+        old_server = _metrics_server
+        old_thread = _metrics_server_thread
 
-        if _metrics_server is not None:
-            _metrics_server.shutdown()
+        # Same-port restart: shut down and close old server to release the socket.
+        if old_server is not None and old_server.server_address[1] == port:
+            try:
+                old_server.shutdown()
+                old_server.server_close()
+            except Exception:
+                logger.exception("Error shutting down old metrics server during same-port restart")
+            if old_thread is not None:
+                old_thread.join(timeout=5)
+                if old_thread.is_alive():
+                    logger.warning(
+                        "Old metrics server thread did not stop within 5 seconds "
+                        "during same-port restart; proceeding anyway"
+                    )
+            old_server = None
+            old_thread = None
+
+        # Bind the new port — if this raises OSError (port in use by another
+        # process), the existing server on a different port remains untouched.
+        new_server = HTTPServer(("", port), _MetricsHandler)
+        new_thread = threading.Thread(target=new_server.serve_forever, daemon=True)
+        new_thread.start()
+
+        # New server is running; tear down the old one if not already done.
+        if old_server is not None:
+            old_server.shutdown()
+            old_server.server_close()
+            if old_thread is not None:
+                old_thread.join(timeout=5)
 
         _metrics_server = new_server
-        _metrics_server_thread = threading.Thread(target=_metrics_server.serve_forever, daemon=True)
-        _metrics_server_thread.start()
+        _metrics_server_thread = new_thread
 
 
 def stop_metrics_server() -> None:
@@ -128,7 +172,14 @@ def stop_metrics_server() -> None:
     with _metrics_lock:
         if _metrics_server is not None:
             try:
-                _metrics_server.shutdown()
+                try:
+                    _metrics_server.shutdown()
+                except Exception:
+                    logger.exception("Error shutting down metrics server")
+                try:
+                    _metrics_server.server_close()
+                except Exception:
+                    logger.exception("Error closing metrics server socket")
                 if _metrics_server_thread is not None:
                     _metrics_server_thread.join(timeout=5)
                     if _metrics_server_thread.is_alive():

@@ -1,10 +1,12 @@
 //! Minimal Rust `log` → Python `logging` bridge.
 //!
 //! Implements the `log::Log` trait to forward Rust log messages
-//! to Python's `logging` module via PyO3.
+//! to Python's `logging` module via PyO3. Falls back to stderr
+//! when the Python GIL is unavailable (e.g. during shutdown).
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use pyo3::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// Maps Rust log levels to Python logging levels.
@@ -23,6 +25,14 @@ struct PyLogger;
 
 static LOGGER: OnceLock<PyLogger> = OnceLock::new();
 
+/// Counter tracking how many log messages were dropped (GIL unavailable).
+static DROPPED_LOG_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Return the number of log messages dropped since process start.
+pub fn dropped_log_count() -> u64 {
+    DROPPED_LOG_COUNT.load(Ordering::Relaxed)
+}
+
 impl Log for PyLogger {
     fn enabled(&self, _metadata: &Metadata) -> bool {
         true
@@ -38,13 +48,36 @@ impl Log for PyLogger {
         let message = format!("{}", record.args());
 
         // Try to acquire the GIL and forward to Python.
-        // If we can't (e.g., during shutdown), silently drop the message.
-        let _ = Python::try_attach(|py| -> PyResult<()> {
+        // If we can't (e.g., during shutdown), fall back to stderr for
+        // WARN/ERROR messages so critical diagnostics are not lost.
+        match Python::try_attach(|py| -> PyResult<()> {
             let logging = py.import("logging")?;
             let logger = logging.call_method1("getLogger", (target,))?;
             logger.call_method1("log", (level, &message))?;
             Ok(())
-        });
+        }) {
+            Some(Ok(())) => {} // Successfully forwarded to Python
+            None => {
+                // GIL genuinely unavailable (interpreter shutdown)
+                DROPPED_LOG_COUNT.fetch_add(1, Ordering::Relaxed);
+                if record.level() <= Level::Warn {
+                    eprintln!(
+                        "[aerospike-py/{}] {}: {}",
+                        record.level(),
+                        target,
+                        message
+                    );
+                }
+            }
+            Some(Err(_)) => {
+                // GIL acquired but Python logging call failed
+                // (e.g. misconfigured handler). Always emit to stderr.
+                eprintln!(
+                    "[aerospike-py/LOGGING-ERROR] {}: {}",
+                    target, message
+                );
+            }
+        }
     }
 
     fn flush(&self) {}

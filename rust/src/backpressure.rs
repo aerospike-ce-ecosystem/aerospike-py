@@ -57,7 +57,9 @@ impl OperationLimiter {
     /// Returns `None` when the limiter is disabled (zero overhead path).
     /// Returns `Some(permit)` when a slot is available.
     /// Raises `BackpressureError` if the timeout expires while waiting.
-    pub async fn acquire(&self) -> PyResult<OperationPermit> {
+    ///
+    /// The `operation` name is included in error messages for diagnostics.
+    pub async fn acquire_named(&self, operation: &str) -> PyResult<OperationPermit> {
         let sem = match &self.semaphore {
             None => return Ok(None),
             Some(s) => s.clone(),
@@ -68,20 +70,26 @@ impl OperationLimiter {
                 .await
                 .map_err(|_| {
                     BackpressureError::new_err(format!(
-                        "Operation queue timeout after {}ms: max_concurrent_operations={} exceeded",
-                        self.timeout_ms, self.max_concurrent
+                        "Backpressure timeout on '{}' after {}ms: max_concurrent_operations={} exceeded",
+                        operation, self.timeout_ms, self.max_concurrent
                     ))
                 })?
                 .map(Some)
                 .map_err(|_| {
-                    BackpressureError::new_err("Semaphore closed unexpectedly".to_string())
+                    BackpressureError::new_err(format!(
+                        "Semaphore closed unexpectedly during '{}' (max_concurrent={}, timeout={}ms)",
+                        operation, self.max_concurrent, self.timeout_ms
+                    ))
                 })
         } else {
             sem.acquire_owned()
                 .await
                 .map(Some)
                 .map_err(|_| {
-                    BackpressureError::new_err("Semaphore closed unexpectedly".to_string())
+                    BackpressureError::new_err(format!(
+                        "Semaphore closed unexpectedly during '{}' (max_concurrent={})",
+                        operation, self.max_concurrent
+                    ))
                 })
         }
     }
@@ -94,16 +102,16 @@ mod tests {
     #[tokio::test]
     async fn test_disabled_limiter_returns_none() {
         let limiter = OperationLimiter::new(0, 0);
-        let permit = limiter.acquire().await.unwrap();
+        let permit = limiter.acquire_named("test").await.unwrap();
         assert!(permit.is_none());
     }
 
     #[tokio::test]
     async fn test_enabled_limiter_returns_permit() {
         let limiter = OperationLimiter::new(2, 0);
-        let p1 = limiter.acquire().await.unwrap();
+        let p1 = limiter.acquire_named("test").await.unwrap();
         assert!(p1.is_some());
-        let p2 = limiter.acquire().await.unwrap();
+        let p2 = limiter.acquire_named("test").await.unwrap();
         assert!(p2.is_some());
     }
 
@@ -111,21 +119,35 @@ mod tests {
     async fn test_permit_released_on_drop() {
         let limiter = OperationLimiter::new(1, 1000);
         {
-            let _p = limiter.acquire().await.unwrap();
+            let _p = limiter.acquire_named("test").await.unwrap();
             // permit held
         }
         // permit dropped — should be able to acquire again
-        let p2 = limiter.acquire().await.unwrap();
+        let p2 = limiter.acquire_named("test").await.unwrap();
         assert!(p2.is_some());
     }
 
     #[tokio::test]
     async fn test_timeout_when_exhausted() {
         let limiter = OperationLimiter::new(1, 50); // 50ms timeout
-        let _p = limiter.acquire().await.unwrap(); // hold the only permit
+        let _p = limiter.acquire_named("test").await.unwrap(); // hold the only permit
 
         // Second acquire should timeout
-        let result = limiter.acquire().await;
+        let result = limiter.acquire_named("test").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_acquire_named_includes_op_in_error() {
+        let limiter = OperationLimiter::new(1, 50);
+        let _p = limiter.acquire_named("batch_read").await.unwrap();
+
+        let result = limiter.acquire_named("batch_read").await;
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("batch_read"),
+            "Error message should include the operation name, got: {err_msg}"
+        );
     }
 }

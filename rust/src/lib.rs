@@ -50,6 +50,13 @@ fn is_metrics_enabled() -> bool {
     metrics::is_metrics_enabled()
 }
 
+/// Return the number of log messages dropped because the Python GIL
+/// was unavailable (e.g. during interpreter shutdown).
+#[pyfunction]
+fn dropped_log_count() -> u64 {
+    logging::dropped_log_count()
+}
+
 /// Native Aerospike Python client module
 #[pymodule(gil_used = true)]
 fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -70,6 +77,7 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_metrics_text, m)?)?;
     m.add_function(wrap_pyfunction!(set_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(is_metrics_enabled, m)?)?;
+    m.add_function(wrap_pyfunction!(dropped_log_count, m)?)?;
     m.add_function(wrap_pyfunction!(tracing::init_tracing, m)?)?;
     m.add_function(wrap_pyfunction!(tracing::shutdown_tracing, m)?)?;
 

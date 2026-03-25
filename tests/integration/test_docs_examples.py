@@ -19,11 +19,11 @@ class TestBatchReadDocExamples:
             cleanup.append(k)
             client.put(k, {"name": f"user_{i}", "age": 20 + i})
 
-        # docs 예제와 동일한 패턴
+        # Same pattern as the docs example
         batch = client.batch_read(keys)
         for br in batch.batch_records:
             if br.record:
-                assert br.record.bins is not None  # dot 접근 가능
+                assert br.record.bins is not None  # dot access works
                 assert br.record.meta is not None
 
     def test_batch_read_specific_bins_sync(self, client, cleanup):
@@ -33,7 +33,7 @@ class TestBatchReadDocExamples:
             cleanup.append(k)
             client.put(k, {"name": f"user_{i}", "age": 20 + i, "extra": "drop"})
 
-        # docs 예제: bins=["name", "age"]
+        # docs example: bins=["name", "age"]
         batch = client.batch_read(keys, bins=["name", "age"])
         assert len(batch.batch_records) == 2
         for br in batch.batch_records:
@@ -61,7 +61,7 @@ class TestBatchReadDocExamples:
             async_cleanup.append(k)
             await async_client.put(k, {"name": f"user_{i}", "age": 20 + i})
 
-        # docs 예제: await client.batch_read(keys, bins=["name", "age"])
+        # docs example: await client.batch_read(keys, bins=["name", "age"])
         batch = await async_client.batch_read(keys, bins=["name"])
         assert len(batch.batch_records) == 3
         for br in batch.batch_records:
@@ -109,7 +109,7 @@ class TestBatchOperateDocExamples:
         ops = [list_operations.list_append("items", 4)]
         results = client.batch_operate(keys, ops)
 
-        # docs 예제: for record in results (list[Record])
+        # docs example: for record in results (list[Record])
         assert isinstance(results, list)
         for record in results:
             # Record NamedTuple unpacking
@@ -151,12 +151,12 @@ class TestNumpyBatchWriteDocExamples:
 
         results = client.batch_write_numpy(data, "test", "demo", dtype)
 
-        # docs 예제: meta.gen (not meta['gen'])
+        # docs example: meta.gen (not meta['gen'])
         assert isinstance(results, list)
         for record in results:
             key, meta, bins = record
             if meta is not None:
-                assert isinstance(meta.gen, int)  # dot 접근 확인
+                assert isinstance(meta.gen, int)  # verify dot access
                 assert isinstance(meta.ttl, int)
 
     def test_batch_write_numpy_basic(self, client, cleanup):
@@ -182,7 +182,7 @@ class TestNumpyBatchWriteDocExamples:
         for k in [("test", "demo", 2001), ("test", "demo", 2002), ("test", "demo", 2003)]:
             cleanup.append(k)
 
-        # docs 예제와 동일
+        # Same as the docs example
         results = client.batch_write_numpy(data, "test", "demo", dtype)
 
         assert len(results) == 3
@@ -207,6 +207,6 @@ class TestNumpyBatchWriteDocExamples:
         for k in [("test", "demo", 3001), ("test", "demo", 3002)]:
             cleanup.append(k)
 
-        # docs 예제: key_field="user_id"
+        # docs example: key_field="user_id"
         results = client.batch_write_numpy(data, "test", "demo", dtype, key_field="user_id")
         assert len(results) == 2

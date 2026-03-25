@@ -45,9 +45,9 @@ class TestContextManager:
 
 class TestAsyncClientInitFailure:
     def test_getattr_after_bad_init_no_recursion(self):
-        """_inner 미설정 시 RecursionError 대신 AttributeError 발생 확인."""
+        """Verify AttributeError is raised instead of RecursionError when _inner is not set."""
         client = object.__new__(aerospike_py.AsyncClient)
-        # _inner가 설정되지 않은 상태에서 속성 접근 — __getattr__ 제거 후 일반 AttributeError 발생
+        # Accessing an attribute when _inner is not set — raises normal AttributeError after __getattr__ removal
         with pytest.raises(AttributeError):
             _ = client.some_attribute
 

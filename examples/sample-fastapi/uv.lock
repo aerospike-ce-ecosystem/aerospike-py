@@ -26,6 +26,7 @@ dev = [
     { name = "hypothesis", specifier = ">=6.0" },
     { name = "maturin", specifier = ">=1.9,<2" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pyright", specifier = ">=1.1" },
     { name = "pytest" },
     { name = "pytest-asyncio" },

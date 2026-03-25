@@ -209,7 +209,7 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name
         );
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("put").await?;
             client_ops::do_put(&client, args).await
         })
     }
@@ -232,7 +232,7 @@ impl PyAsyncClient {
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("get").await?;
             let record = client_ops::do_get(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
@@ -258,7 +258,7 @@ impl PyAsyncClient {
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("select").await?;
             let record = client_ops::do_select(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
@@ -282,7 +282,7 @@ impl PyAsyncClient {
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("exists").await?;
             let result = client_ops::do_exists(&client, &args).await;
             Ok(PendingExists { result, key_py })
         })
@@ -306,7 +306,7 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name
         );
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("remove").await?;
             client_ops::do_remove(&client, args).await
         })
     }
@@ -330,7 +330,7 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name
         );
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("touch").await?;
             client_ops::do_touch(&client, args).await
         })
     }
@@ -362,7 +362,7 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name, bin
         );
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("increment").await?;
             client_ops::do_increment(&client, args).await
         })
     }
@@ -390,7 +390,7 @@ impl PyAsyncClient {
         let key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("operate").await?;
             let record = client_ops::do_operate(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
         })
@@ -425,7 +425,7 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name, bin
         );
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("append").await?;
             client_ops::do_append(&client, args).await
         })
     }
@@ -457,7 +457,7 @@ impl PyAsyncClient {
             args.key.namespace, args.key.set_name, bin
         );
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("prepend").await?;
             client_ops::do_prepend(&client, args).await
         })
     }
@@ -483,7 +483,7 @@ impl PyAsyncClient {
             &self.connection_info,
         )?;
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("remove_bin").await?;
             client_ops::do_remove_bin(&client, args).await
         })
     }
@@ -513,7 +513,7 @@ impl PyAsyncClient {
         let pre_key_py = key_to_py(py, &args.key)?;
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("operate_ordered").await?;
             let record = client_ops::do_operate_ordered(&client, &args).await?;
             Ok(PendingOrderedRecord {
                 record,
@@ -629,7 +629,7 @@ impl PyAsyncClient {
         let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("batch_read").await?;
             let results = client_ops::do_batch_read(&client, &args).await?;
             Python::attach(|py| {
                 if use_numpy {
@@ -668,7 +668,7 @@ impl PyAsyncClient {
         )?;
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("batch_operate").await?;
             let results = client_ops::do_batch_operate(&client, &args).await?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })
@@ -676,7 +676,7 @@ impl PyAsyncClient {
 
     /// Write multiple records from a numpy structured array (async).
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (data, namespace, set_name, _dtype, key_field="_key", policy=None))]
+    #[pyo3(signature = (data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0))]
     fn batch_write_numpy<'py>(
         &self,
         py: Python<'py>,
@@ -686,10 +686,11 @@ impl PyAsyncClient {
         _dtype: &Bound<'_, PyAny>,
         key_field: &str,
         policy: Option<&Bound<'_, PyDict>>,
+        retry: u32,
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!(
-            "async batch_write_numpy: namespace={}, set={}",
-            namespace, set_name
+            "async batch_write_numpy: namespace={}, set={}, retry={}",
+            namespace, set_name, retry
         );
         let client = self.get_client()?;
         let limiter = self.limiter.clone();
@@ -706,7 +707,7 @@ impl PyAsyncClient {
         let set = set_name.to_string();
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("batch_write_numpy").await?;
             let results = client_ops::do_batch_write(
                 &client,
                 &batch_policy,
@@ -715,6 +716,7 @@ impl PyAsyncClient {
                 &set,
                 parent_ctx,
                 conn_info,
+                retry,
             )
             .await?;
             Python::attach(|py| batch_records_to_py(py, &results))
@@ -736,7 +738,7 @@ impl PyAsyncClient {
             client_common::prepare_batch_remove_args(py, keys, policy, &self.connection_info)?;
 
         future_into_py(py, async move {
-            let _permit = limiter.acquire().await?;
+            let _permit = limiter.acquire_named("batch_remove").await?;
             let results = client_ops::do_batch_remove(&client, &args).await?;
             Python::attach(|py| batch_records_to_py(py, &results))
         })

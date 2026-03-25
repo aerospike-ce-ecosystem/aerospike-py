@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     aerospike_namespace: str = "test"
     aerospike_set: str = "users"
 
+    # Backpressure — 0 disables the limiter (default)
+    max_concurrent_ops: int = 0
+    backpressure_timeout_ms: int = 5000
+
     # Observability
+    metrics_enabled: bool = True
     otel_endpoint: str = "http://localhost:4317"
     otel_service_name: str = "sample-fastapi"
     log_level: int = 2  # LOG_LEVEL_INFO

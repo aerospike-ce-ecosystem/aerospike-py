@@ -154,6 +154,7 @@ class Client(_NativeClient):
     def info_all(self, command, policy=None) -> list[InfoNodeResult]:
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
+    @catch_unexpected("Client.batch_read")
     def batch_read(self, keys, bins=None, policy=None, _dtype=None):
         """Read multiple records in a single batch call.
 
@@ -183,7 +184,7 @@ class Client(_NativeClient):
         return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_write_numpy")
-    def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None):
+    def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0):
         """Write multiple records from a numpy structured array.
 
         Each row of the structured array becomes a separate write operation.
@@ -197,6 +198,10 @@ class Client(_NativeClient):
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional batch policy dict.
+            retry: Maximum number of retries for failed records (default ``0``).
+                When > 0, records that fail with transient errors (timeout,
+                device overload, key busy) are automatically retried with
+                exponential backoff.
 
         Returns:
             A list of ``Record`` NamedTuples with write results.
@@ -206,11 +211,15 @@ class Client(_NativeClient):
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
+            # Without retry
             results = client.batch_write_numpy(data, "test", "demo", dtype)
+            # With retry (up to 10 attempts for transient failures)
+            results = client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
             ```
         """
         return [
-            _wrap_record(r) for r in super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy)
+            _wrap_record(r)
+            for r in super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
         ]
 
     @catch_unexpected("Client.batch_operate")
@@ -220,6 +229,148 @@ class Client(_NativeClient):
     @catch_unexpected("Client.batch_remove")
     def batch_remove(self, keys, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in super().batch_remove(keys, policy)]
+
+    @catch_unexpected("Client.put")
+    def put(self, key, bins, meta=None, policy=None) -> None:
+        return super().put(key, bins, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.remove")
+    def remove(self, key, meta=None, policy=None) -> None:
+        return super().remove(key, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.touch")
+    def touch(self, key, val=0, meta=None, policy=None) -> None:
+        return super().touch(key, val=val, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.append")
+    def append(self, key, bin, val, meta=None, policy=None) -> None:
+        return super().append(key, bin, val, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.prepend")
+    def prepend(self, key, bin, val, meta=None, policy=None) -> None:
+        return super().prepend(key, bin, val, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.increment")
+    def increment(self, key, bin, offset, meta=None, policy=None) -> None:
+        return super().increment(key, bin, offset, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.remove_bin")
+    def remove_bin(self, key, bin_names, meta=None, policy=None) -> None:
+        return super().remove_bin(key, bin_names, meta=meta, policy=policy)
+
+    # -- Index --
+
+    @catch_unexpected("Client.index_integer_create")
+    def index_integer_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return super().index_integer_create(namespace, set_name, bin_name, index_name, policy)
+
+    @catch_unexpected("Client.index_string_create")
+    def index_string_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return super().index_string_create(namespace, set_name, bin_name, index_name, policy)
+
+    @catch_unexpected("Client.index_geo2dsphere_create")
+    def index_geo2dsphere_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return super().index_geo2dsphere_create(namespace, set_name, bin_name, index_name, policy)
+
+    @catch_unexpected("Client.index_remove")
+    def index_remove(self, namespace, index_name, policy=None) -> None:
+        return super().index_remove(namespace, index_name, policy)
+
+    # -- Truncate --
+
+    @catch_unexpected("Client.truncate")
+    def truncate(self, namespace, set_name, nanos=0, policy=None) -> None:
+        return super().truncate(namespace, set_name, nanos, policy)
+
+    # -- UDF --
+
+    @catch_unexpected("Client.udf_put")
+    def udf_put(self, filename, udf_type=0, policy=None) -> None:
+        return super().udf_put(filename, udf_type, policy)
+
+    @catch_unexpected("Client.udf_remove")
+    def udf_remove(self, module, policy=None) -> None:
+        return super().udf_remove(module, policy)
+
+    @catch_unexpected("Client.apply")
+    def apply(self, key, module, function, args=None, policy=None):
+        return super().apply(key, module, function, args, policy)
+
+    # -- Admin: User --
+
+    @catch_unexpected("Client.admin_create_user")
+    def admin_create_user(self, username, password, roles, policy=None) -> None:
+        return super().admin_create_user(username, password, roles, policy)
+
+    @catch_unexpected("Client.admin_drop_user")
+    def admin_drop_user(self, username, policy=None) -> None:
+        return super().admin_drop_user(username, policy)
+
+    @catch_unexpected("Client.admin_change_password")
+    def admin_change_password(self, username, password, policy=None) -> None:
+        return super().admin_change_password(username, password, policy)
+
+    @catch_unexpected("Client.admin_grant_roles")
+    def admin_grant_roles(self, username, roles, policy=None) -> None:
+        return super().admin_grant_roles(username, roles, policy)
+
+    @catch_unexpected("Client.admin_revoke_roles")
+    def admin_revoke_roles(self, username, roles, policy=None) -> None:
+        return super().admin_revoke_roles(username, roles, policy)
+
+    @catch_unexpected("Client.admin_query_user_info")
+    def admin_query_user_info(self, username, policy=None):
+        return super().admin_query_user_info(username, policy)
+
+    @catch_unexpected("Client.admin_query_users_info")
+    def admin_query_users_info(self, policy=None):
+        return super().admin_query_users_info(policy)
+
+    # -- Admin: Role --
+
+    @catch_unexpected("Client.admin_create_role")
+    def admin_create_role(self, role, privileges, policy=None, whitelist=None, read_quota=0, write_quota=0) -> None:
+        return super().admin_create_role(role, privileges, policy, whitelist, read_quota, write_quota)
+
+    @catch_unexpected("Client.admin_drop_role")
+    def admin_drop_role(self, role, policy=None) -> None:
+        return super().admin_drop_role(role, policy)
+
+    @catch_unexpected("Client.admin_grant_privileges")
+    def admin_grant_privileges(self, role, privileges, policy=None) -> None:
+        return super().admin_grant_privileges(role, privileges, policy)
+
+    @catch_unexpected("Client.admin_revoke_privileges")
+    def admin_revoke_privileges(self, role, privileges, policy=None) -> None:
+        return super().admin_revoke_privileges(role, privileges, policy)
+
+    @catch_unexpected("Client.admin_query_role")
+    def admin_query_role(self, role, policy=None):
+        return super().admin_query_role(role, policy)
+
+    @catch_unexpected("Client.admin_query_roles")
+    def admin_query_roles(self, policy=None):
+        return super().admin_query_roles(policy)
+
+    @catch_unexpected("Client.admin_set_whitelist")
+    def admin_set_whitelist(self, role, whitelist, policy=None) -> None:
+        return super().admin_set_whitelist(role, whitelist, policy)
+
+    @catch_unexpected("Client.admin_set_quotas")
+    def admin_set_quotas(self, role, read_quota=0, write_quota=0, policy=None) -> None:
+        return super().admin_set_quotas(role, read_quota, write_quota, policy)
+
+    # -- Utility --
+
+    @catch_unexpected("Client.is_connected")
+    def is_connected(self) -> bool:
+        return super().is_connected()
+
+    @catch_unexpected("Client.get_node_names")
+    def get_node_names(self) -> list[str]:
+        return super().get_node_names()
+
+    # -- Query --
 
     def query(self, namespace, set_name) -> Query:
         return Query(super().query(namespace, set_name))

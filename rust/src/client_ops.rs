@@ -262,7 +262,30 @@ pub async fn do_batch_remove(
     )
 }
 
-/// Write multiple records from pre-parsed (key, bins) pairs.
+/// Check if a batch record result code is retryable.
+///
+/// Retries on transient errors: timeout, device overload, key busy,
+/// server overloaded, or partition unavailable. Permanent errors
+/// (key exists, record too big, etc.) are not retried.
+fn is_retryable_result_code(rc: &aerospike_core::ResultCode) -> bool {
+    use aerospike_core::ResultCode;
+    matches!(
+        rc,
+        ResultCode::Timeout
+            | ResultCode::DeviceOverload
+            | ResultCode::KeyBusy
+            | ResultCode::ServerMemError
+            | ResultCode::PartitionUnavailable
+    )
+}
+
+/// Write multiple records from pre-parsed (key, bins) pairs with optional retry.
+///
+/// When `max_retries > 0`, failed records with retryable error codes are
+/// re-submitted in subsequent batch calls, up to `max_retries` attempts.
+/// A short exponential backoff (10ms * 2^attempt, capped at 500ms) is applied
+/// between retries to avoid thundering-herd effects.
+#[allow(clippy::too_many_arguments)]
 pub async fn do_batch_write(
     client: &AsClient,
     batch_policy: &aerospike_core::BatchPolicy,
@@ -271,8 +294,11 @@ pub async fn do_batch_write(
     set: &str,
     parent_ctx: client_common::ParentContext,
     conn_info: Arc<crate::tracing::ConnectionInfo>,
+    max_retries: u32,
 ) -> PyResult<Vec<BatchRecord>> {
     let write_policy = BatchWritePolicy::default();
+
+    // Build initial batch operations
     let batch_ops: Vec<BatchOperation> = records
         .iter()
         .map(|(key, bins)| {
@@ -282,9 +308,97 @@ pub async fn do_batch_write(
         })
         .collect();
 
-    traced_op!("batch_write_numpy", ns, set, parent_ctx, conn_info, {
-        client.batch(batch_policy, &batch_ops).await
-    })
+    // First attempt
+    let mut results: Vec<BatchRecord> = traced_op!(
+        "batch_write_numpy",
+        ns,
+        set,
+        parent_ctx,
+        conn_info,
+        { client.batch(batch_policy, &batch_ops).await }
+    )?;
+
+    if max_retries == 0 {
+        return Ok(results);
+    }
+
+    // Retry loop: only retry records with retryable error codes
+    for attempt in 0..max_retries {
+        // Find indices of failed records that are retryable
+        let retry_indices: Vec<usize> = results
+            .iter()
+            .enumerate()
+            .filter_map(|(i, br)| {
+                if let Some(rc) = &br.result_code {
+                    if *rc != aerospike_core::ResultCode::Ok && is_retryable_result_code(rc) {
+                        return Some(i);
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if retry_indices.is_empty() {
+            log::debug!(
+                "batch_write retry: all records succeeded after {} attempt(s)",
+                attempt + 1
+            );
+            break;
+        }
+
+        // Exponential backoff: 10ms, 20ms, 40ms, ..., capped at 500ms
+        // Cap the shift exponent to avoid overflow panic when attempt >= 64
+        let capped_attempt = std::cmp::min(attempt, 6); // 10 * 2^6 = 640 > 500
+        let backoff_ms = std::cmp::min(10u64 * (1u64 << capped_attempt), 500);
+        log::info!(
+            "batch_write retry: {} failed records, attempt {}/{}, backoff {}ms",
+            retry_indices.len(),
+            attempt + 1,
+            max_retries,
+            backoff_ms
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+
+        // Build retry batch from failed records only
+        let retry_ops: Vec<BatchOperation> = retry_indices
+            .iter()
+            .map(|&i| {
+                let (key, bins) = &records[i];
+                let ops: Vec<aerospike_core::operations::Operation> =
+                    bins.iter().map(aerospike_core::operations::put).collect();
+                BatchOperation::write(&write_policy, key.clone(), ops)
+            })
+            .collect();
+
+        let retry_results: Vec<BatchRecord> = match traced_op!(
+            "batch_write_numpy_retry",
+            ns,
+            set,
+            parent_ctx,
+            conn_info,
+            { client.batch(batch_policy, &retry_ops).await }
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!(
+                    "batch_write retry transport error on attempt {}/{}: {}",
+                    attempt + 1,
+                    max_retries,
+                    e
+                );
+                break; // Return partial results instead of propagating error
+            }
+        };
+
+        // Merge retry results back into the main results vector
+        for (retry_pos, &original_idx) in retry_indices.iter().enumerate() {
+            if retry_pos < retry_results.len() {
+                results[original_idx] = retry_results[retry_pos].clone();
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 // ── Info ────────────────────────────────────────────────────────────────────
@@ -590,4 +704,60 @@ pub async fn do_admin_set_quotas(
         .set_quotas(admin_policy, role, read_quota, write_quota)
         .await
         .map_err(as_to_pyerr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aerospike_core::ResultCode;
+
+    #[test]
+    fn test_retryable_timeout() {
+        assert!(is_retryable_result_code(&ResultCode::Timeout));
+    }
+
+    #[test]
+    fn test_retryable_device_overload() {
+        assert!(is_retryable_result_code(&ResultCode::DeviceOverload));
+    }
+
+    #[test]
+    fn test_retryable_key_busy() {
+        assert!(is_retryable_result_code(&ResultCode::KeyBusy));
+    }
+
+    #[test]
+    fn test_retryable_server_mem_error() {
+        assert!(is_retryable_result_code(&ResultCode::ServerMemError));
+    }
+
+    #[test]
+    fn test_retryable_partition_unavailable() {
+        assert!(is_retryable_result_code(&ResultCode::PartitionUnavailable));
+    }
+
+    #[test]
+    fn test_not_retryable_ok() {
+        assert!(!is_retryable_result_code(&ResultCode::Ok));
+    }
+
+    #[test]
+    fn test_not_retryable_key_exists() {
+        assert!(!is_retryable_result_code(&ResultCode::KeyExistsError));
+    }
+
+    #[test]
+    fn test_not_retryable_record_too_big() {
+        assert!(!is_retryable_result_code(&ResultCode::RecordTooBig));
+    }
+
+    #[test]
+    fn test_not_retryable_key_not_found() {
+        assert!(!is_retryable_result_code(&ResultCode::KeyNotFoundError));
+    }
+
+    #[test]
+    fn test_not_retryable_bin_type_error() {
+        assert!(!is_retryable_result_code(&ResultCode::BinTypeError));
+    }
 }

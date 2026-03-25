@@ -1,4 +1,4 @@
-"""NumpyBatchRecords 변환 로직 단위 테스트 (서버 불필요)."""
+"""Unit tests for NumpyBatchRecords conversion logic (no server required)."""
 
 import warnings
 from dataclasses import dataclass
@@ -23,16 +23,16 @@ class FakeBatchRecords:
 
 
 def _make_batch_record(key, result, record=None):
-    """Mock BatchRecord를 FakeBatchRecord로 생성."""
+    """Create a mock BatchRecord as a FakeBatchRecord."""
     return FakeBatchRecord(key=key, result=result, record=record)
 
 
 def _make_batch_records(records):
-    """Mock BatchRecords를 FakeBatchRecords로 생성."""
+    """Create a mock BatchRecords as a FakeBatchRecords."""
     return FakeBatchRecords(batch_records=records)
 
 
-# ── 정상 변환 테스트 ────────────────────────────────────────────
+# ── Basic conversion tests ─────────────────────────────────────
 
 
 class TestBasicConversion:
@@ -87,7 +87,7 @@ class TestBasicConversion:
         assert result.batch_records[0]["count"] == 42
 
 
-# ── bytes dtype 테스트 ──────────────────────────────────────────
+# ── bytes dtype tests ──────────────────────────────────────────
 
 
 class TestBytesDtype:
@@ -120,7 +120,7 @@ class TestBytesDtype:
         assert bytes(result.batch_records[0]["raw"]) == b"\x01\x02\x03\x04"
 
 
-# ── sub-array dtype 테스트 ──────────────────────────────────────
+# ── sub-array dtype tests ──────────────────────────────────────
 
 
 class TestSubArrayDtype:
@@ -146,7 +146,7 @@ class TestSubArrayDtype:
         np.testing.assert_almost_equal(result.batch_records[0]["score"], 0.95)
 
 
-# ── 비허용 dtype 거부 ──────────────────────────────────────────
+# ── Unsupported dtype rejection ─────────────────────────────────
 
 
 class TestDtypeValidation:
@@ -163,7 +163,7 @@ class TestDtypeValidation:
             _batch_records_to_numpy(batch, dtype, [])
 
 
-# ── result_code != 0 처리 ──────────────────────────────────────
+# ── result_code != 0 handling ──────────────────────────────────
 
 
 class TestErrorRecords:
@@ -182,14 +182,14 @@ class TestErrorRecords:
         assert result.result_codes[0] == 0
         assert result.result_codes[1] == 2
         assert result.result_codes[2] == 0
-        # 실패 레코드는 0으로 채워짐
+        # Failed records are zero-filled
         assert result.batch_records[1]["val"] == 0
-        # 성공 레코드는 정상 값
+        # Successful records have correct values
         assert result.batch_records[0]["val"] == 10
         assert result.batch_records[2]["val"] == 30
 
 
-# ── missing bin 처리 ────────────────────────────────────────────
+# ── missing bin handling ────────────────────────────────────────
 
 
 class TestMissingBins:
@@ -200,7 +200,7 @@ class TestMissingBins:
                 _make_batch_record(
                     ("test", "demo", "k1"),
                     0,
-                    (None, {"gen": 1, "ttl": 0}, {"a": 5}),  # b 누락
+                    (None, {"gen": 1, "ttl": 0}, {"a": 5}),  # b missing
                 ),
             ]
         )
@@ -215,7 +215,7 @@ class TestMissingBins:
                 _make_batch_record(
                     ("test", "demo", "k1"),
                     0,
-                    (None, None, None),  # meta와 bins 모두 None
+                    (None, None, None),  # both meta and bins are None
                 ),
             ]
         )
@@ -223,7 +223,7 @@ class TestMissingBins:
         assert result.batch_records[0]["a"] == 0
 
 
-# ── get() 메서드 ────────────────────────────────────────────────
+# ── get() method ───────────────────────────────────────────────
 
 
 class TestGetMethod:
@@ -263,7 +263,7 @@ class TestGetMethod:
             result.get("nonexistent")
 
 
-# ── meta (gen, ttl) 매핑 ───────────────────────────────────────
+# ── meta (gen, ttl) mapping ─────────────────────────────────────
 
 
 class TestMeta:
@@ -313,7 +313,7 @@ class TestMeta:
         assert result.meta.dtype == np.dtype([("gen", "u4"), ("ttl", "u4")])
 
 
-# ── empty batch 테스트 ──────────────────────────────────────────
+# ── empty batch tests ──────────────────────────────────────────
 
 
 class TestEmptyBatch:
@@ -328,7 +328,7 @@ class TestEmptyBatch:
         assert result._map == {}
 
 
-# ── key fallback 경고 테스트 ────────────────────────────────────
+# ── key fallback warning tests ──────────────────────────────────
 
 
 class TestKeyFallbackWarning:
@@ -376,7 +376,7 @@ class TestKeyFallbackWarning:
         assert result._map[0] == 0
 
 
-# ── 대규모 배치 테스트 ────────────────────────────────────────────
+# ── Large batch tests ──────────────────────────────────────────
 
 
 class TestLargeBatch:
@@ -436,7 +436,7 @@ class TestLargeBatch:
                 assert result.batch_records[i]["val"] == i
 
 
-# ── 컬럼 접근 (vectorized) 테스트 ──────────────────────────────
+# ── Column access (vectorized) tests ───────────────────────────
 
 
 class TestVectorizedAccess:
@@ -481,7 +481,7 @@ class TestVectorizedAccess:
         assert ok_records[1]["val"] == 30
 
 
-# ── strict mode 테스트 ──────────────────────────────────────────
+# ── strict mode tests ──────────────────────────────────────────
 
 
 class TestStrictMode:
@@ -492,7 +492,7 @@ class TestStrictMode:
                 _make_batch_record(
                     ("test", "demo", "k1"),
                     0,
-                    (None, {"gen": 1, "ttl": 0}, {"a": 5}),  # b 누락
+                    (None, {"gen": 1, "ttl": 0}, {"a": 5}),  # b missing
                 ),
             ]
         )
@@ -538,7 +538,7 @@ class TestStrictMode:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")], strict=True)
-            # key 관련 warning 외에는 없어야 함
+            # No warnings should appear other than key-related ones
             schema_warns = [x for x in w if "not found in bins" in str(x.message) or "not in dtype" in str(x.message)]
             assert len(schema_warns) == 0
         assert result.batch_records[0]["a"] == 10
@@ -561,7 +561,7 @@ class TestStrictMode:
             assert len(schema_warns) == 0
 
 
-# ── 대규모 배치 테스트 (10K+) ──────────────────────────────────
+# ── Very large batch tests (10K+) ──────────────────────────────
 
 
 class TestVeryLargeBatch:
@@ -669,12 +669,12 @@ class TestVeryLargeBatch:
         assert np.all(error_vals == 0.0)
 
 
-# ── key 충돌 경고 테스트 ──────────────────────────────────────
+# ── key collision warning tests ─────────────────────────────────
 
 
 class TestKeyCollision:
     def test_integer_key_collides_with_fallback_index(self):
-        """fallback index와 실제 integer PK 충돌 시 경고 발생 확인."""
+        """Verify warning when fallback index collides with an actual integer PK."""
         dtype = np.dtype([("val", "i4")])
         # Record 0: key=None → fallback to index 0
         # Record 1: key=(test, demo, 0) → pk=0, collides with record 0
@@ -694,7 +694,7 @@ class TestKeyCollision:
         assert result._map[0] == 1
 
     def test_no_collision_with_distinct_keys(self):
-        """모든 키가 고유할 때 경고 없음 확인."""
+        """Verify no warnings when all keys are unique."""
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
@@ -710,12 +710,12 @@ class TestKeyCollision:
             assert len(collision_warns) == 0
 
 
-# ── 타입 변환 에러 컨텍스트 테스트 ────────────────────────────
+# ── Type conversion error context tests ─────────────────────────
 
 
 class TestTypeConversionErrors:
     def test_string_to_int_field_raises_with_context(self):
-        """문자열을 정수 필드에 할당 시 에러 메시지에 필드명/인덱스 포함 확인."""
+        """Verify error message includes field name and index when assigning a string to an integer field."""
         dtype = np.dtype([("count", "i4")])
         batch = _make_batch_records(
             [
@@ -734,7 +734,7 @@ class TestTypeConversionErrors:
         assert "index 0" in msg
 
 
-# ── NumpyBatchRecords protocol 메서드 테스트 ──────────────────
+# ── NumpyBatchRecords protocol method tests ────────────────────
 
 
 class TestNumpyBatchRecordsProtocol:

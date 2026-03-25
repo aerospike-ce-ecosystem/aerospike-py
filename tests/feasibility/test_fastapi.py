@@ -60,7 +60,7 @@ def _create_app() -> FastAPI:
 
     @app.get("/cluster/nodes")
     async def cluster_nodes():
-        nodes = await app.state.client.get_node_names()
+        nodes = app.state.client.get_node_names()
         return {"nodes": nodes}
 
     # -- Basic CRUD ---------------------------------------------------------

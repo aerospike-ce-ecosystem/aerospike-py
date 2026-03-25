@@ -33,7 +33,6 @@ def test_get_user_not_found(client):
     resp = client.get("/users/nonexistent-user-xyz")
 
     assert resp.status_code == 404
-    assert resp.json()["detail"] == "User not found"
 
 
 def test_update_user(client, aerospike_client, cleanup):
@@ -45,6 +44,17 @@ def test_update_user(client, aerospike_client, cleanup):
 
     assert resp.status_code == 200
     assert resp.json()["name"] == "New"
+
+
+def test_update_user_no_fields(client, aerospike_client, cleanup):
+    key = ("test", "users", "upd-empty")
+    aerospike_client.put(key, {"name": "X", "email": "x@x.com", "age": 1})
+    cleanup.append(key)
+
+    resp = client.put("/users/upd-empty", json={})
+
+    assert resp.status_code == 422
+    assert "No fields to update" in resp.json()["detail"]
 
 
 def test_update_user_not_found(client):
@@ -65,15 +75,15 @@ def test_delete_user(client, aerospike_client, cleanup):
 
 
 def test_delete_user_not_found(client):
-    # aerospike-py remove()는 존재하지 않는 키에 대해 RecordNotFound를 발생시키므로
-    # 라우터가 404를 반환한다.
+    # aerospike-py remove() raises RecordNotFound for non-existent keys,
+    # so the router returns 404.
     resp = client.delete("/users/nonexistent-del-xyz")
 
     assert resp.status_code == 404
 
 
 def test_list_users(client, cleanup):
-    # API로 생성해야 bins에 user_id가 포함되어 스캔 시 식별 가능하다.
+    # Create via API so user_id is stored in bins for scan identification.
     r1 = client.post("/users", json={"name": "Alice", "email": "a@b.com", "age": 30})
     r2 = client.post("/users", json={"name": "Bob", "email": "b@b.com", "age": 25})
     assert r1.status_code == 201

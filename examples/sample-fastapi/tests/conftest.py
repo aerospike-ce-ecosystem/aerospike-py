@@ -10,8 +10,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 
-# Podman 소켓을 우선 사용하고, 없으면 Docker 소켓으로 폴백.
-# testcontainers 임포트 전에 DOCKER_HOST를 설정해야 하므로 최상단에 위치한다.
+# Prefer Podman socket; fall back to Docker socket.
+# DOCKER_HOST must be set before importing testcontainers, hence top-level placement.
 def _is_real_socket(p: Path) -> bool:
     try:
         return stat.S_ISSOCK(p.stat().st_mode)
@@ -168,12 +168,14 @@ def jaeger_container():
 @pytest.fixture(scope="session")
 def aerospike_client(aerospike_container):
     """Provide a sync Aerospike client for test data setup/teardown."""
-    _, port = aerospike_container
+    container, port = aerospike_container
     config = {
         "hosts": [("127.0.0.1", port)],
-        "cluster_name": "docker",
         "policies": {"key": aerospike_py.POLICY_KEY_SEND},
     }
+    # Only set cluster_name when using the managed container (cluster-name "docker").
+    if container is not None:
+        config["cluster_name"] = "docker"
     c = aerospike_py.client(config).connect()
     yield c
     c.close()
@@ -184,7 +186,7 @@ def client(aerospike_container):
     """Provide a FastAPI TestClient with a real AsyncClient connected to the container."""
     from app.main import app
 
-    _, port = aerospike_container
+    container, port = aerospike_container
 
     @asynccontextmanager
     async def _test_lifespan(a):
@@ -194,13 +196,14 @@ def client(aerospike_container):
         aerospike_py.init_tracing()
         a.state.tracing_enabled = True
 
-        ac = aerospike_py.AsyncClient(
-            {
-                "hosts": [("127.0.0.1", port)],
-                "cluster_name": "docker",
-                "policies": {"key": aerospike_py.POLICY_KEY_SEND},
-            }
-        )
+        ac_config = {
+            "hosts": [("127.0.0.1", port)],
+            "policies": {"key": aerospike_py.POLICY_KEY_SEND},
+        }
+        # Only set cluster_name when using the managed container.
+        if container is not None:
+            ac_config["cluster_name"] = "docker"
+        ac = aerospike_py.AsyncClient(ac_config)
         await ac.connect()
         a.state.aerospike = ac
         yield
