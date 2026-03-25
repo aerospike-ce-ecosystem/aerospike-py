@@ -46,6 +46,17 @@ def test_update_user(client, aerospike_client, cleanup):
     assert resp.json()["name"] == "New"
 
 
+def test_update_user_no_fields(client, aerospike_client, cleanup):
+    key = ("test", "users", "upd-empty")
+    aerospike_client.put(key, {"name": "X", "email": "x@x.com", "age": 1})
+    cleanup.append(key)
+
+    resp = client.put("/users/upd-empty", json={})
+
+    assert resp.status_code == 422
+    assert "No fields to update" in resp.json()["detail"]
+
+
 def test_update_user_not_found(client):
     resp = client.put("/users/nonexistent-upd-xyz", json={"name": "New"})
 

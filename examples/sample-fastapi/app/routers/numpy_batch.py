@@ -162,14 +162,18 @@ async def vector_search(
     if total_found == 0:
         return VectorSearchResponse(results=[], total_found=0)
 
-    # bytes → float32 vectors (skip records with wrong blob size)
+    # bytes → float32 vectors (skip records with wrong blob size or non-finite values)
     raw_blobs = result.batch_records[body.embedding_bin]
     all_vectors = np.zeros((len(raw_blobs), dim), dtype=np.float32)
     valid_mask = ok_mask.copy()
     for i in range(len(raw_blobs)):
         if ok_mask[i]:
             if len(raw_blobs[i]) == blob_size:
-                all_vectors[i] = np.frombuffer(raw_blobs[i], dtype=np.float32)
+                vec = np.frombuffer(raw_blobs[i], dtype=np.float32)
+                if np.all(np.isfinite(vec)):
+                    all_vectors[i] = vec
+                else:
+                    valid_mask[i] = False
             else:
                 valid_mask[i] = False
 

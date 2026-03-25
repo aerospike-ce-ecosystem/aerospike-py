@@ -268,6 +268,41 @@ def test_batch_write_invalid_rows_rejected(client):
 # ── vector search validation ────────────────────────────────
 
 
+def test_vector_search_zero_embedding_dim_rejected(client):
+    """embedding_dim=0 은 Pydantic 검증에서 422 에러."""
+    resp = client.post(
+        "/numpy-batch/vector-search",
+        json={
+            "keys": [_key_body("v_0")],
+            "query_vector": [0.1],
+            "embedding_bin": "embedding",
+            "embedding_dim": 0,
+            "top_k": 1,
+        },
+    )
+
+    assert resp.status_code == 422
+
+
+def test_vector_search_nan_query_rejected(client, aerospike_client, cleanup):
+    """NaN이 포함된 query_vector는 422 에러."""
+    _seed_vectors(aerospike_client, cleanup)
+
+    resp = client.post(
+        "/numpy-batch/vector-search",
+        json={
+            "keys": [_key_body("v_0")],
+            "query_vector": [float("nan")] * DIM,
+            "embedding_bin": "embedding",
+            "embedding_dim": DIM,
+            "top_k": 1,
+        },
+    )
+
+    assert resp.status_code == 422
+    assert "finite" in resp.json()["detail"]
+
+
 def test_vector_search_dim_mismatch_rejected(client, aerospike_client, cleanup):
     """query_vector 길이와 embedding_dim 불일치 시 422 에러."""
     _seed_vectors(aerospike_client, cleanup)

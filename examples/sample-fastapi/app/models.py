@@ -313,7 +313,7 @@ class VectorSearchRequest(BaseModel):
     keys: list[AerospikeKey]
     query_vector: list[float] = Field(..., description="Query vector for similarity search")
     embedding_bin: str = Field("embedding", description="Bin name storing the vector blob")
-    embedding_dim: int = Field(..., description="Vector dimensionality", examples=[768])
+    embedding_dim: int = Field(..., ge=1, description="Vector dimensionality", examples=[768])
     extra_bins: list[str] | None = Field(
         None,
         description="Additional bins to return alongside similarity scores",
