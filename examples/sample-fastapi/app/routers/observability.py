@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 import aerospike_py
+from aerospike_py import AsyncClient
 from app.dependencies import get_client
 from app.models import LogLevelRequest
 
@@ -48,11 +49,9 @@ async def tracing_status(request: Request):
 
 
 @router.get("/ready")
-async def readiness(client=Depends(get_client)):
+async def readiness(client: AsyncClient = Depends(get_client)):
     """Readiness probe — checks if the Aerospike client is connected."""
     connected = client.is_connected()
     if not connected:
-        from fastapi.responses import JSONResponse
-
         return JSONResponse(status_code=503, content={"ready": False, "reason": "Aerospike client not connected"})
     return {"ready": True}

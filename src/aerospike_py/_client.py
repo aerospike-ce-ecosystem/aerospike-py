@@ -222,6 +222,146 @@ class Client(_NativeClient):
     def batch_remove(self, keys, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in super().batch_remove(keys, policy)]
 
+    @catch_unexpected("Client.put")
+    def put(self, key, bins, meta=None, policy=None) -> None:
+        return super().put(key, bins, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.remove")
+    def remove(self, key, meta=None, policy=None) -> None:
+        return super().remove(key, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.touch")
+    def touch(self, key, val=0, meta=None, policy=None) -> None:
+        return super().touch(key, val=val, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.append")
+    def append(self, key, bin, val, meta=None, policy=None) -> None:
+        return super().append(key, bin, val, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.prepend")
+    def prepend(self, key, bin, val, meta=None, policy=None) -> None:
+        return super().prepend(key, bin, val, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.increment")
+    def increment(self, key, bin, offset, meta=None, policy=None) -> None:
+        return super().increment(key, bin, offset, meta=meta, policy=policy)
+
+    @catch_unexpected("Client.remove_bin")
+    def remove_bin(self, key, bin_names, meta=None, policy=None) -> None:
+        return super().remove_bin(key, bin_names, meta=meta, policy=policy)
+
+    # -- Index --
+
+    @catch_unexpected("Client.index_integer_create")
+    def index_integer_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return super().index_integer_create(namespace, set_name, bin_name, index_name, policy)
+
+    @catch_unexpected("Client.index_string_create")
+    def index_string_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return super().index_string_create(namespace, set_name, bin_name, index_name, policy)
+
+    @catch_unexpected("Client.index_geo2dsphere_create")
+    def index_geo2dsphere_create(self, namespace, set_name, bin_name, index_name, policy=None) -> None:
+        return super().index_geo2dsphere_create(namespace, set_name, bin_name, index_name, policy)
+
+    @catch_unexpected("Client.index_remove")
+    def index_remove(self, namespace, index_name, policy=None) -> None:
+        return super().index_remove(namespace, index_name, policy)
+
+    # -- Truncate --
+
+    @catch_unexpected("Client.truncate")
+    def truncate(self, namespace, set_name, nanos=0, policy=None) -> None:
+        return super().truncate(namespace, set_name, nanos, policy)
+
+    # -- UDF --
+
+    @catch_unexpected("Client.udf_put")
+    def udf_put(self, filename, udf_type=0, policy=None) -> None:
+        return super().udf_put(filename, udf_type, policy)
+
+    @catch_unexpected("Client.udf_remove")
+    def udf_remove(self, module, policy=None) -> None:
+        return super().udf_remove(module, policy)
+
+    @catch_unexpected("Client.apply")
+    def apply(self, key, module, function, args=None, policy=None):
+        return super().apply(key, module, function, args, policy)
+
+    # -- Admin: User --
+
+    @catch_unexpected("Client.admin_create_user")
+    def admin_create_user(self, username, password, roles, policy=None) -> None:
+        return super().admin_create_user(username, password, roles, policy)
+
+    @catch_unexpected("Client.admin_drop_user")
+    def admin_drop_user(self, username, policy=None) -> None:
+        return super().admin_drop_user(username, policy)
+
+    @catch_unexpected("Client.admin_change_password")
+    def admin_change_password(self, username, password, policy=None) -> None:
+        return super().admin_change_password(username, password, policy)
+
+    @catch_unexpected("Client.admin_grant_roles")
+    def admin_grant_roles(self, username, roles, policy=None) -> None:
+        return super().admin_grant_roles(username, roles, policy)
+
+    @catch_unexpected("Client.admin_revoke_roles")
+    def admin_revoke_roles(self, username, roles, policy=None) -> None:
+        return super().admin_revoke_roles(username, roles, policy)
+
+    @catch_unexpected("Client.admin_query_user_info")
+    def admin_query_user_info(self, username, policy=None):
+        return super().admin_query_user_info(username, policy)
+
+    @catch_unexpected("Client.admin_query_users_info")
+    def admin_query_users_info(self, policy=None):
+        return super().admin_query_users_info(policy)
+
+    # -- Admin: Role --
+
+    @catch_unexpected("Client.admin_create_role")
+    def admin_create_role(self, role, privileges, policy=None, whitelist=None, read_quota=0, write_quota=0) -> None:
+        return super().admin_create_role(role, privileges, policy, whitelist, read_quota, write_quota)
+
+    @catch_unexpected("Client.admin_drop_role")
+    def admin_drop_role(self, role, policy=None) -> None:
+        return super().admin_drop_role(role, policy)
+
+    @catch_unexpected("Client.admin_grant_privileges")
+    def admin_grant_privileges(self, role, privileges, policy=None) -> None:
+        return super().admin_grant_privileges(role, privileges, policy)
+
+    @catch_unexpected("Client.admin_revoke_privileges")
+    def admin_revoke_privileges(self, role, privileges, policy=None) -> None:
+        return super().admin_revoke_privileges(role, privileges, policy)
+
+    @catch_unexpected("Client.admin_query_role")
+    def admin_query_role(self, role, policy=None):
+        return super().admin_query_role(role, policy)
+
+    @catch_unexpected("Client.admin_query_roles")
+    def admin_query_roles(self, policy=None):
+        return super().admin_query_roles(policy)
+
+    @catch_unexpected("Client.admin_set_whitelist")
+    def admin_set_whitelist(self, role, whitelist, policy=None) -> None:
+        return super().admin_set_whitelist(role, whitelist, policy)
+
+    @catch_unexpected("Client.admin_set_quotas")
+    def admin_set_quotas(self, role, read_quota=0, write_quota=0, policy=None) -> None:
+        return super().admin_set_quotas(role, read_quota, write_quota, policy)
+
+    # -- Utility --
+
+    def is_connected(self) -> bool:
+        return super().is_connected()
+
+    def get_node_names(self) -> list[str]:
+        return super().get_node_names()
+
+    # -- Query --
+
     def query(self, namespace, set_name) -> Query:
         return Query(super().query(namespace, set_name))
 
