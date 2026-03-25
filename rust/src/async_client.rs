@@ -537,10 +537,11 @@ impl PyAsyncClient {
         warn!("Async truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?;
         let args = client_common::prepare_truncate_args(namespace, set_name, nanos, policy)?;
-        future_into_py(
-            py,
-            async move { client_ops::do_truncate(&client, args).await },
-        )
+        let limiter = self.limiter.clone();
+        future_into_py(py, async move {
+            let _permit = limiter.acquire_named("truncate").await?;
+            client_ops::do_truncate(&client, args).await
+        })
     }
 
     // ── UDF ──────────────────────────────────────────────────
@@ -557,10 +558,11 @@ impl PyAsyncClient {
         info!("Async registering UDF: filename={}", filename);
         let client = self.get_client()?;
         let args = client_common::prepare_udf_put_args(filename, udf_type, policy)?;
-        future_into_py(
-            py,
-            async move { client_ops::do_udf_put(&client, args).await },
-        )
+        let limiter = self.limiter.clone();
+        future_into_py(py, async move {
+            let _permit = limiter.acquire_named("udf_put").await?;
+            client_ops::do_udf_put(&client, args).await
+        })
     }
 
     /// Remove a UDF module (async).
@@ -574,10 +576,11 @@ impl PyAsyncClient {
         info!("Async removing UDF: module={}", module);
         let client = self.get_client()?;
         let args = client_common::prepare_udf_remove_args(module, policy)?;
-        future_into_py(
-            py,
-            async move { client_ops::do_udf_remove(&client, args).await },
-        )
+        let limiter = self.limiter.clone();
+        future_into_py(py, async move {
+            let _permit = limiter.acquire_named("udf_remove").await?;
+            client_ops::do_udf_remove(&client, args).await
+        })
     }
 
     /// Execute a UDF on a single record (async).
@@ -597,8 +600,9 @@ impl PyAsyncClient {
             "async apply UDF: ns={} set={} module={} function={}",
             a.key.namespace, a.key.set_name, a.module, a.function
         );
-
+        let limiter = self.limiter.clone();
         future_into_py(py, async move {
+            let _permit = limiter.acquire_named("apply").await?;
             let result = client_ops::do_apply(&client, &a).await?;
             Python::attach(|py| match result {
                 Some(val) => value_to_py(py, &val),

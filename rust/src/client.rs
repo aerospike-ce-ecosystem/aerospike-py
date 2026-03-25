@@ -640,7 +640,13 @@ impl PyClient {
         warn!("Truncating: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
         let args = client_common::prepare_truncate_args(namespace, set_name, nanos, policy)?;
-        py.detach(|| RUNTIME.block_on(client_ops::do_truncate(&client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire_named("truncate").await?;
+                client_ops::do_truncate(&client, args).await
+            })
+        })
     }
 
     // ── UDF ───────────────────────────────────────────────────────
@@ -657,7 +663,13 @@ impl PyClient {
         info!("Registering UDF: filename={}", filename);
         let client = self.get_client()?.clone();
         let args = client_common::prepare_udf_put_args(filename, udf_type, policy)?;
-        py.detach(|| RUNTIME.block_on(client_ops::do_udf_put(&client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire_named("udf_put").await?;
+                client_ops::do_udf_put(&client, args).await
+            })
+        })
     }
 
     /// Remove a UDF module.
@@ -671,7 +683,13 @@ impl PyClient {
         info!("Removing UDF: module={}", module);
         let client = self.get_client()?.clone();
         let args = client_common::prepare_udf_remove_args(module, policy)?;
-        py.detach(|| RUNTIME.block_on(client_ops::do_udf_remove(&client, args)))
+        let limiter = self.limiter.clone();
+        py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire_named("udf_remove").await?;
+                client_ops::do_udf_remove(&client, args).await
+            })
+        })
     }
 
     /// Execute a UDF on a single record.
@@ -691,7 +709,13 @@ impl PyClient {
             "apply UDF: ns={} set={} module={} function={}",
             a.key.namespace, a.key.set_name, a.module, a.function
         );
-        let result = py.detach(|| RUNTIME.block_on(client_ops::do_apply(&client, &a)))?;
+        let limiter = self.limiter.clone();
+        let result = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire_named("apply").await?;
+                client_ops::do_apply(&client, &a).await
+            })
+        })?;
         match result {
             Some(val) => value_to_py(py, &val),
             None => Ok(py.None()),
