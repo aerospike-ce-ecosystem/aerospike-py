@@ -40,9 +40,7 @@ def _field_to_json(arr: np.ndarray) -> list[Any]:
         return [base64.b64encode(v).decode() for v in arr]
     if arr.dtype.kind == "V":  # void → base64
         return [base64.b64encode(bytes(v)).decode() for v in arr]
-    if arr.ndim > 1:  # sub-array → nested list
-        return arr.tolist()
-    return arr.tolist()
+    return arr.tolist()  # numeric scalar or sub-array fields
 
 
 @router.post("/read", response_model=NumpyBatchReadResponse)
