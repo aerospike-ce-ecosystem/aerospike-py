@@ -24,6 +24,7 @@ use pyo3::types::PyDict;
 
 use crate::errors::result_code_to_int;
 use crate::record_helpers::record_ttl_seconds;
+use crate::types::key::compute_bytes_key_digest;
 use crate::types::value::value_to_py;
 
 // ── dtype field descriptor ──────────────────────────────────────
@@ -895,12 +896,23 @@ pub fn numpy_to_records(
             set_name.to_string()
         };
 
-        // Build the Key
-        let key = Key {
-            namespace: ns,
-            set_name: set,
-            user_key: Some(key_value),
-            digest: [0u8; 20],
+        // Build the Key with a properly computed digest.
+        // For Blob (bytes) keys, use STRING particle type (3) for cross-client
+        // compatibility with the official C Python client.
+        // For other key types, use Key::new() which computes the correct digest.
+        let key = match &key_value {
+            Value::Blob(bytes_data) => {
+                let digest = compute_bytes_key_digest(&set, bytes_data);
+                Key {
+                    namespace: ns,
+                    set_name: set,
+                    user_key: Some(key_value),
+                    digest,
+                }
+            }
+            _ => Key::new(ns, set, key_value).map_err(|e| {
+                PyValueError::new_err(format!("Invalid key at row {}: {}", i, e))
+            })?,
         };
 
         // Extract bin values

@@ -195,35 +195,35 @@ WRITE_SET = "np_write"
 
 
 def test_batch_write_and_read_back(client, aerospike_client, cleanup):
-    """batch_write_numpy로 쓴 레코드를 string key로 검증."""
+    """batch_write_numpy로 쓴 레코드를 integer key로 write/read 라운드트립 검증."""
     resp = client.post(
         "/numpy-batch/write",
         json={
             "namespace": NS,
             "set_name": WRITE_SET,
             "dtype": [
-                {"name": "_key", "dtype": "S10"},
+                {"name": "_key", "dtype": "i4"},
                 {"name": "temperature", "dtype": "f8"},
                 {"name": "humidity", "dtype": "i4"},
             ],
-            "rows": [[f"s_{i}", 20.0 + i * 0.5, 50 + i] for i in range(10)],
+            "rows": [[i, 20.0 + i * 0.5, 50 + i] for i in range(10)],
         },
     )
 
     assert resp.status_code == 200
     data = resp.json()
     assert data["written"] == 10
+    assert data["failed"] == 0
 
-    # cleanup 등록
+    # cleanup 등록 (integer key)
     for i in range(10):
-        cleanup.append((NS, WRITE_SET, f"s_{i}"))
+        cleanup.append((NS, WRITE_SET, i))
 
-    # sync client의 put/get은 string key 사용 — batch_write_numpy의 S10 key도 bytes→string 변환
     # batch_read API로 다시 읽어서 값 검증
     resp2 = client.post(
         "/numpy-batch/read",
         json={
-            "keys": [{"namespace": NS, "set_name": WRITE_SET, "key": f"s_{i}"} for i in range(10)],
+            "keys": [{"namespace": NS, "set_name": WRITE_SET, "key": i} for i in range(10)],
             "dtype": [
                 {"name": "temperature", "dtype": "f8"},
                 {"name": "humidity", "dtype": "i4"},
