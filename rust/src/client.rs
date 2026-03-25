@@ -172,7 +172,7 @@ impl PyClient {
         debug!("put: ns={} set={}", args.key.namespace, args.key.set_name);
         py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("put").await?;
                 client_ops::do_put(client, args).await
             })
         })
@@ -193,7 +193,7 @@ impl PyClient {
         let key_py = key_to_py(py, &args.key)?;
         let record = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("get").await?;
                 client_ops::do_get(client, &args).await
             })
         })?;
@@ -220,7 +220,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         let record = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("select").await?;
                 client_ops::do_select(client, &args).await
             })
         })?;
@@ -245,7 +245,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         let result = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("exists").await?;
                 Ok::<_, pyo3::PyErr>(client_ops::do_exists(&client, &args).await)
             })
         })?;
@@ -283,7 +283,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("remove").await?;
                 client_ops::do_remove(client, args).await
             })
         })
@@ -306,7 +306,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("touch").await?;
                 client_ops::do_touch(client, args).await
             })
         })
@@ -340,7 +340,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("append").await?;
                 client_ops::do_append(client, args).await
             })
         })
@@ -374,7 +374,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("prepend").await?;
                 client_ops::do_prepend(client, args).await
             })
         })
@@ -408,7 +408,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("increment").await?;
                 client_ops::do_increment(client, args).await
             })
         })
@@ -436,7 +436,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("remove_bin").await?;
                 client_ops::do_remove_bin(client, args).await
             })
         })
@@ -465,7 +465,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         let record = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("operate").await?;
                 client_ops::do_operate(client, &args).await
             })
         })?;
@@ -495,7 +495,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         let record = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("operate_ordered").await?;
                 client_ops::do_operate_ordered(client, &args).await
             })
         })?;
@@ -1063,7 +1063,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         let results = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("batch_read").await?;
                 client_ops::do_batch_read(&client, &args).await
             })
         })?;
@@ -1098,7 +1098,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         let results = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("batch_operate").await?;
                 client_ops::do_batch_operate(&client, &args).await
             })
         })?;
@@ -1142,7 +1142,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         let results = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("batch_write_numpy").await?;
                 client_ops::do_batch_write(
                     &client,
                     &batch_policy,
@@ -1174,7 +1174,7 @@ impl PyClient {
         let limiter = self.limiter.clone();
         let results = py.detach(|| {
             RUNTIME.block_on(async {
-                let _permit = limiter.acquire().await?;
+                let _permit = limiter.acquire_named("batch_remove").await?;
                 client_ops::do_batch_remove(&client, &args).await
             })
         })?;
