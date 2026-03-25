@@ -235,6 +235,10 @@ def test_batch_write_and_read_back(client, aerospike_client, cleanup):
     assert data["written"] == 10
     assert data["failed"] == 0
 
+    # 읽기 결과 검증
+    data2 = resp2.json()
+    assert data2["count"] == 10
+
 
 def test_batch_write_invalid_rows_rejected(client):
     """dtype과 맞지 않는 row 데이터는 400 에러."""

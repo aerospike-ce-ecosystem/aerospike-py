@@ -2,6 +2,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 import aerospike_py
 from aerospike_py import AsyncClient
@@ -92,9 +93,15 @@ async def readiness():
     """Readiness probe — verifies Aerospike cluster connectivity."""
     client: AsyncClient | None = getattr(app.state, "aerospike", None)
     if client is None or not client.is_connected():
-        return {"status": "not_ready", "reason": "aerospike client not connected"}
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "reason": "aerospike client not connected"},
+        )
     try:
         nodes = client.get_node_names()
         return {"status": "ready", "nodes": len(nodes)}
     except Exception as e:
-        return {"status": "not_ready", "reason": str(e)}
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "reason": str(e)},
+        )
