@@ -204,31 +204,31 @@ class Client(_NativeClient):
                 exponential backoff.
 
         Returns:
-            A list of ``Record`` NamedTuples with write results.
+            ``BatchRecords`` containing per-record result codes.
 
         Example:
             ```python
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            # Without retry
-            results = client.batch_write_numpy(data, "test", "demo", dtype)
-            # With retry (up to 10 attempts for transient failures)
             results = client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+            for br in results.batch_records:
+                if br.result != 0:
+                    print(f"Failed: {br.key}, code={br.result}")
             ```
         """
-        return [
-            _wrap_record(r)
-            for r in super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
-        ]
+        raw = super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_operate")
-    def batch_operate(self, keys, ops, policy=None) -> list[Record]:
-        return [_wrap_record(r) for r in super().batch_operate(keys, ops, policy)]
+    def batch_operate(self, keys, ops, policy=None) -> BatchRecordsTuple:
+        raw = super().batch_operate(keys, ops, policy)
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_remove")
-    def batch_remove(self, keys, policy=None) -> list[Record]:
-        return [_wrap_record(r) for r in super().batch_remove(keys, policy)]
+    def batch_remove(self, keys, policy=None) -> BatchRecordsTuple:
+        raw = super().batch_remove(keys, policy)
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.put")
     def put(self, key, bins, meta=None, policy=None) -> None:

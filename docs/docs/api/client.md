@@ -191,7 +191,7 @@ nodes = client.get_node_names()
   <TabItem value="async" label="Async Client">
 
 ```python
-nodes = client.get_node_names()  # sync since alpha.10 — no await needed
+nodes = client.get_node_names()
 ```
 
   </TabItem>
@@ -767,7 +767,7 @@ Execute operations on multiple records in a single batch call.
 | `ops` | List of operation dicts to apply to each record. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** A list of ``Record`` NamedTuples.
+**Returns:** ``BatchRecords`` containing per-record result codes.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -778,6 +778,9 @@ import aerospike_py
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}]
 results = client.batch_operate(keys, ops)
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins)
 ```
 
   </TabItem>
@@ -789,6 +792,9 @@ import aerospike_py
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 ops = [{"op": aerospike_py.OPERATOR_INCR, "bin": "views", "val": 1}]
 results = await client.batch_operate(keys, ops)
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins)
 ```
 
   </TabItem>
@@ -803,7 +809,7 @@ Delete multiple records in a single batch call.
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** A list of ``Record`` NamedTuples.
+**Returns:** ``BatchRecords`` containing per-record result codes.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -811,6 +817,7 @@ Delete multiple records in a single batch call.
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 results = client.batch_remove(keys)
+failed = [br for br in results.batch_records if br.result != 0]
 ```
 
   </TabItem>
@@ -819,6 +826,7 @@ results = client.batch_remove(keys)
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 results = await client.batch_remove(keys)
+failed = [br for br in results.batch_records if br.result != 0]
 ```
 
   </TabItem>

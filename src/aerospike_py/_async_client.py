@@ -102,7 +102,9 @@ class AsyncClient:
         Example:
             ```python
             client = await aerospike_py.AsyncClient(config).connect()
-            await client.connect("admin", "admin")
+
+            # With authentication
+            client = await aerospike_py.AsyncClient(config).connect("admin", "admin")
             ```
         """
         logger.info("Async client connecting")
@@ -178,7 +180,7 @@ class AsyncClient:
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
         self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None, retry: int = 0
-    ) -> list[Record]:
+    ) -> BatchRecordsTuple:
         """Write multiple records from a numpy structured array (async).
 
         Each row of the structured array becomes a separate write operation.
@@ -198,31 +200,31 @@ class AsyncClient:
                 exponential backoff.
 
         Returns:
-            A list of ``Record`` NamedTuples with write results.
+            ``BatchRecords`` containing per-record result codes.
 
         Example:
             ```python
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            # Without retry
-            results = await client.batch_write_numpy(data, "test", "demo", dtype)
-            # With retry (up to 10 attempts for transient failures)
             results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+            for br in results.batch_records:
+                if br.result != 0:
+                    print(f"Failed: {br.key}, code={br.result}")
             ```
         """
-        return [
-            _wrap_record(r)
-            for r in await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
-        ]
+        raw = await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("AsyncClient.batch_operate")
-    async def batch_operate(self, keys, ops, policy=None) -> list[Record]:
-        return [_wrap_record(r) for r in await self._inner.batch_operate(keys, ops, policy)]
+    async def batch_operate(self, keys, ops, policy=None) -> BatchRecordsTuple:
+        raw = await self._inner.batch_operate(keys, ops, policy)
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("AsyncClient.batch_remove")
-    async def batch_remove(self, keys, policy=None) -> list[Record]:
-        return [_wrap_record(r) for r in await self._inner.batch_remove(keys, policy)]
+    async def batch_remove(self, keys, policy=None) -> BatchRecordsTuple:
+        raw = await self._inner.batch_remove(keys, policy)
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("AsyncClient.is_connected")
     def is_connected(self) -> bool:

@@ -168,30 +168,30 @@ unsafe fn write_int_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: i64) -> 
     match field.base_itemsize {
         1 => {
             if val < i8::MIN as i64 || val > i8::MAX as i64 {
-                warn!(
-                    "integer overflow: value {} truncated to i8 for field '{}'",
+                return Err(PyOverflowError::new_err(format!(
+                    "integer overflow: value {} does not fit in i8 for field '{}'",
                     val, field.name
-                );
+                )));
             }
             // SAFETY: dst points to at least 1 byte of writable memory
             unsafe { ptr::write_unaligned(dst as *mut i8, val as i8) }
         }
         2 => {
             if val < i16::MIN as i64 || val > i16::MAX as i64 {
-                warn!(
-                    "integer overflow: value {} truncated to i16 for field '{}'",
+                return Err(PyOverflowError::new_err(format!(
+                    "integer overflow: value {} does not fit in i16 for field '{}'",
                     val, field.name
-                );
+                )));
             }
             // SAFETY: dst points to at least 2 bytes of writable memory
             unsafe { ptr::write_unaligned(dst as *mut i16, val as i16) }
         }
         4 => {
             if val < i32::MIN as i64 || val > i32::MAX as i64 {
-                warn!(
-                    "integer overflow: value {} truncated to i32 for field '{}'",
+                return Err(PyOverflowError::new_err(format!(
+                    "integer overflow: value {} does not fit in i32 for field '{}'",
                     val, field.name
-                );
+                )));
             }
             // SAFETY: dst points to at least 4 bytes of writable memory
             unsafe { ptr::write_unaligned(dst as *mut i32, val as i32) }
@@ -230,30 +230,30 @@ unsafe fn write_uint_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: u64) ->
     match field.base_itemsize {
         1 => {
             if val > u8::MAX as u64 {
-                warn!(
-                    "integer overflow: value {} truncated to u8 for field '{}'",
+                return Err(PyOverflowError::new_err(format!(
+                    "integer overflow: value {} does not fit in u8 for field '{}'",
                     val, field.name
-                );
+                )));
             }
             // SAFETY: dst points to at least 1 byte of writable memory
             unsafe { ptr::write_unaligned(dst, val as u8) }
         }
         2 => {
             if val > u16::MAX as u64 {
-                warn!(
-                    "integer overflow: value {} truncated to u16 for field '{}'",
+                return Err(PyOverflowError::new_err(format!(
+                    "integer overflow: value {} does not fit in u16 for field '{}'",
                     val, field.name
-                );
+                )));
             }
             // SAFETY: dst points to at least 2 bytes of writable memory
             unsafe { ptr::write_unaligned(dst as *mut u16, val as u16) }
         }
         4 => {
             if val > u32::MAX as u64 {
-                warn!(
-                    "integer overflow: value {} truncated to u32 for field '{}'",
+                return Err(PyOverflowError::new_err(format!(
+                    "integer overflow: value {} does not fit in u32 for field '{}'",
                     val, field.name
-                );
+                )));
             }
             // SAFETY: dst points to at least 4 bytes of writable memory
             unsafe { ptr::write_unaligned(dst as *mut u32, val as u32) }
@@ -294,10 +294,10 @@ unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -
     match field.base_itemsize {
         4 => {
             if val.is_finite() && (val > f32::MAX as f64 || val < f32::MIN as f64) {
-                warn!(
-                    "float overflow: value {} truncated to f32 for field '{}'",
+                return Err(PyOverflowError::new_err(format!(
+                    "float overflow: value {} does not fit in f32 for field '{}'",
                     val, field.name
-                );
+                )));
             }
             // SAFETY: dst points to at least 4 bytes of writable memory
             unsafe { ptr::write_unaligned(dst as *mut f32, val as f32) }
@@ -580,10 +580,14 @@ pub fn batch_to_numpy_py(
             ptr::write_unaligned(rc_ptr.add(i * 4) as *mut i32, result_code);
         }
 
-        // Extract user_key and map to index
+        // Extract user_key and map to index.
+        // Use a sentinel string for None keys to avoid collision with integer user_keys.
         let user_key = match &br.key.user_key {
             Some(v) => value_to_py(py, v)?,
-            None => i.into_pyobject(py)?.into_any().unbind(),
+            None => format!("__no_user_key_{i}__")
+                .into_pyobject(py)?
+                .into_any()
+                .unbind(),
         };
         key_map.set_item(user_key, i)?;
 
@@ -610,6 +614,11 @@ pub fn batch_to_numpy_py(
                     }
                     // bins not in dtype are silently ignored
                 }
+            } else {
+                log::warn!(
+                    "batch record at index {}: result_code is OK but record is None (data/meta will be zero-filled)",
+                    i
+                );
             }
         }
     }
@@ -864,8 +873,22 @@ pub fn numpy_to_records(
         let row_offset = checked_row_offset(i, row_stride)?;
         let row_ptr = unsafe { data_ptr.offset(row_offset) };
 
-        // Extract key value
+        // Extract key value.
+        // For bytes keys from fixed-length numpy fields (e.g. S10), trim
+        // trailing null bytes so the digest matches lookups with unpadded keys.
+        // This mirrors the trimming already applied to _namespace and _set fields.
         let key_value = unsafe { read_value_from_buffer(row_ptr, key_fi)? };
+        let key_value = match key_value {
+            Value::Blob(ref b) => {
+                let end = b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1);
+                if end < b.len() {
+                    Value::Blob(b[..end].to_vec())
+                } else {
+                    key_value
+                }
+            }
+            _ => key_value,
+        };
 
         // Extract namespace (from field or default)
         let ns = if let Some(ns_fi) = ns_field {
@@ -1013,7 +1036,7 @@ def make_reverse_slice():
     }
 
     #[test]
-    fn test_write_int_i8_truncation() {
+    fn test_write_int_i8_overflow_returns_error() {
         let mut buf = [0u8; 8];
         let field = FieldInfo {
             name: "x".to_string(),
@@ -1023,10 +1046,8 @@ def make_reverse_slice():
             kind: DtypeKind::Int,
         };
         unsafe {
-            write_int_to_buffer(buf.as_mut_ptr(), &field, 300)
-                .expect("write truncated i8 should succeed"); // truncates to 44
-            let val = ptr::read_unaligned(buf.as_ptr() as *const i8);
-            assert_eq!(val, 300i64 as i8);
+            let result = write_int_to_buffer(buf.as_mut_ptr(), &field, 300);
+            assert!(result.is_err(), "overflow should return error");
         }
     }
 
@@ -1578,5 +1599,48 @@ def make_reverse_slice():
                 vec![Bin::new("value".to_string(), Value::Int(10))]
             );
         });
+    }
+
+    #[test]
+    fn test_bytes_key_trailing_null_trim() {
+        let padded = Value::Blob(b"alice\x00\x00\x00\x00\x00".to_vec());
+        let trimmed = match padded {
+            Value::Blob(ref b) => {
+                let end = b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1);
+                Value::Blob(b[..end].to_vec())
+            }
+            other => other,
+        };
+        assert_eq!(trimmed, Value::Blob(b"alice".to_vec()));
+    }
+
+    #[test]
+    fn test_bytes_key_all_nulls_trim_to_empty() {
+        let padded = Value::Blob(b"\x00\x00\x00".to_vec());
+        let trimmed = match padded {
+            Value::Blob(ref b) => {
+                let end = b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1);
+                Value::Blob(b[..end].to_vec())
+            }
+            other => other,
+        };
+        assert_eq!(trimmed, Value::Blob(b"".to_vec()));
+    }
+
+    #[test]
+    fn test_bytes_key_no_trailing_nulls_unchanged() {
+        let original = Value::Blob(b"exact".to_vec());
+        let result = match &original {
+            Value::Blob(ref b) => {
+                let end = b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1);
+                if end < b.len() {
+                    Value::Blob(b[..end].to_vec())
+                } else {
+                    original.clone()
+                }
+            }
+            _ => original.clone(),
+        };
+        assert_eq!(result, Value::Blob(b"exact".to_vec()));
     }
 }

@@ -97,8 +97,8 @@ class TestBatchReadDocExamples:
 class TestBatchOperateDocExamples:
     """Tests for docs/docs/guides/admin/error-handling.md batch_operate examples."""
 
-    def test_batch_operate_returns_list_of_records(self, client, cleanup):
-        """error-handling.md: batch_operate returns list[Record]."""
+    def test_batch_operate_returns_list_of_batch_records(self, client, cleanup):
+        """error-handling.md: batch_operate returns list[BatchRecord]."""
         from aerospike_py import list_operations
 
         key = ("test", "demo", "doc_batch_op_1")
@@ -109,12 +109,11 @@ class TestBatchOperateDocExamples:
         ops = [list_operations.list_append("items", 4)]
         results = client.batch_operate(keys, ops)
 
-        # docs example: for record in results (list[Record])
-        assert isinstance(results, list)
-        for record in results:
-            # Record NamedTuple unpacking
-            rec_key, meta, bins = record
-            assert rec_key is not None
+        # docs example: for br in results.batch_records (BatchRecords container)
+        for br in results.batch_records:
+            assert br.result == 0
+            assert br.key is not None
+            assert br.record is not None
 
     def test_batch_operate_increment_and_read(self, client, cleanup):
         """error-handling.md: batch_operate with INCR + READ operations."""
@@ -128,10 +127,11 @@ class TestBatchOperateDocExamples:
             {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
         ]
         results = client.batch_operate(keys, ops)
-        assert len(results) == 2
-        for record in results:
-            _, meta, bins = record
-            assert meta is not None
+        assert len(results.batch_records) == 2
+        for br in results.batch_records:
+            assert br.result == 0
+            assert br.record is not None
+            assert br.record.meta is not None
 
 
 class TestNumpyBatchWriteDocExamples:
@@ -151,13 +151,12 @@ class TestNumpyBatchWriteDocExamples:
 
         results = client.batch_write_numpy(data, "test", "demo", dtype)
 
-        # docs example: meta.gen (not meta['gen'])
-        assert isinstance(results, list)
-        for record in results:
-            key, meta, bins = record
-            if meta is not None:
-                assert isinstance(meta.gen, int)  # verify dot access
-                assert isinstance(meta.ttl, int)
+        # docs example: br.record.meta.gen (not meta['gen'])
+        for br in results.batch_records:
+            assert br.result == 0
+            assert br.record is not None
+            assert isinstance(br.record.meta.gen, int)  # verify dot access
+            assert isinstance(br.record.meta.ttl, int)
 
     def test_batch_write_numpy_basic(self, client, cleanup):
         """numpy-batch-write.md: Quick Start example."""
@@ -185,12 +184,11 @@ class TestNumpyBatchWriteDocExamples:
         # Same as the docs example
         results = client.batch_write_numpy(data, "test", "demo", dtype)
 
-        assert len(results) == 3
-        for record in results:
-            key, meta, bins = record
-            # meta is not None for successful writes
-            assert meta is not None
-            assert meta.gen >= 1
+        assert len(results.batch_records) == 3
+        for br in results.batch_records:
+            assert br.result == 0
+            assert br.record is not None
+            assert br.record.meta.gen >= 1
 
     def test_batch_write_numpy_key_field_custom(self, client, cleanup):
         """numpy-batch-write.md: Custom key_field example."""
@@ -209,4 +207,4 @@ class TestNumpyBatchWriteDocExamples:
 
         # docs example: key_field="user_id"
         results = client.batch_write_numpy(data, "test", "demo", dtype, key_field="user_id")
-        assert len(results) == 2
+        assert len(results.batch_records) == 2

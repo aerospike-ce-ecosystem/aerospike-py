@@ -268,69 +268,22 @@ _, meta, results = await client.operate_ordered(key, ops)
   </TabItem>
 </Tabs>
 
-## Batch Operate
-
-여러 record에 대해 작업을 실행합니다:
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+## Batch Operate / Remove
 
 ```python
-from aerospike_py import Record
+# Batch operate — BatchRecords 반환 (batch_read와 동일)
+ops = [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}]
+results = client.batch_operate(keys, ops)
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins)
 
-keys = [("test", "demo", f"counter_{i}") for i in range(10)]
-ops = [
-    {"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1},
-    {"op": aerospike.OPERATOR_READ, "bin": "views", "val": None},
-]
-results: list[Record] = client.batch_operate(keys, ops)
-
-for record in results:
-    if record.bins:
-        print(f"views: {record.bins['views']}")
-```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-from aerospike_py import Record
-
-keys = [("test", "demo", f"counter_{i}") for i in range(10)]
-ops = [
-    {"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1},
-    {"op": aerospike.OPERATOR_READ, "bin": "views", "val": None},
-]
-results: list[Record] = await client.batch_operate(keys, ops)
-
-for record in results:
-    if record.bins:
-        print(f"views: {record.bins['views']}")
-```
-
-  </TabItem>
-</Tabs>
-
-## Batch Remove
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-```python
-keys = [("test", "demo", f"temp_{i}") for i in range(100)]
+# Batch remove
 results = client.batch_remove(keys)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed to remove: {br.key}")
 ```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-keys = [("test", "demo", f"temp_{i}") for i in range(100)]
-await client.batch_remove(keys)
-```
-
-  </TabItem>
-</Tabs>
 
 ## Optimistic Locking
 
@@ -398,6 +351,6 @@ except AerospikeError as e:
 
 ## Best Practices
 
-- **배치 크기**: 배치 크기를 적절하게 유지하세요 (100-5000 keys). 매우 큰 배치는 타임아웃이 발생할 수 있습니다.
-- **타임아웃**: 대규모 배치 작업에 대해 policy를 통해 적절한 타임아웃을 설정하세요.
-- **오류 처리**: 배치 내의 개별 record는 독립적으로 실패할 수 있습니다. 각 결과의 bin이 `None`인지 확인하세요.
+- **배치 크기**: 배치당 100-5,000 keys가 최적입니다. 매우 큰 배치는 타임아웃이 발생할 수 있습니다.
+- **타임아웃**: 대규모 배치 작업에는 `total_timeout`을 늘리세요.
+- **오류 처리**: 배치 내의 개별 record는 독립적으로 실패할 수 있습니다. `br.record`가 `None`인지 항상 확인하세요.

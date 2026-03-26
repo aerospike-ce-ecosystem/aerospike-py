@@ -12,7 +12,7 @@ use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::{parse_backpressure_config, parse_client_policy};
-use crate::record_helpers::{batch_records_to_py, record_to_meta};
+use crate::record_helpers::record_to_meta;
 use crate::runtime::RUNTIME;
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
@@ -1102,7 +1102,8 @@ impl PyClient {
                 client_ops::do_batch_operate(&client, &args).await
             })
         })?;
-        batch_records_to_py(py, &results)
+        let batch = batch_to_batch_records_py(py, &results)?;
+        Ok(Py::new(py, batch)?.into_any())
     }
 
     /// Write multiple records from a numpy structured array.
@@ -1158,7 +1159,8 @@ impl PyClient {
             })
         })?;
 
-        batch_records_to_py(py, &results)
+        let batch = batch_to_batch_records_py(py, &results)?;
+        Ok(Py::new(py, batch)?.into_any())
     }
 
     /// Remove multiple records.
@@ -1180,7 +1182,8 @@ impl PyClient {
                 client_ops::do_batch_remove(&client, &args).await
             })
         })?;
-        batch_records_to_py(py, &results)
+        let batch = batch_to_batch_records_py(py, &results)?;
+        Ok(Py::new(py, batch)?.into_any())
     }
 }
 

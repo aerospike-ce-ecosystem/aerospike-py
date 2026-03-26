@@ -17,7 +17,7 @@ All return types support both attribute access and tuple unpacking.
 
 ### `Record`
 
-Returned by: `get()`, `select()`, `operate()`, `batch_operate()`, `batch_remove()`, `Query.results()`
+Returned by: `get()`, `select()`, `operate()`, `Query.results()`
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -46,6 +46,31 @@ _, meta, bins = record     # tuple unpacking
 | `set_name` | `str` | Set name |
 | `user_key` | `str \| int \| bytes \| None` | Primary key (`None` if `POLICY_KEY_DIGEST`) |
 | `digest` | `bytes` | 20-byte RIPEMD-160 digest |
+
+### `BatchRecord`
+
+Returned by: batch operations (inside `BatchRecords.batch_records`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | `AerospikeKey \| None` | Record key |
+| `result` | `int` | Per-record result code (0 = success) |
+| `record` | `Record \| None` | Record data (`None` if operation failed) |
+
+```python
+results = client.batch_operate(keys, ops)
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins)
+```
+
+### `BatchRecords`
+
+Returned by: `batch_read()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `batch_records` | `list[BatchRecord]` | Per-record results |
 
 ### `ExistsResult`
 
@@ -99,7 +124,8 @@ Returned by: `operate_ordered()`
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
 | `batch_read()` | `BatchRecords` \| `NumpyBatchRecords` |
-| `batch_operate()`, `batch_remove()` | `list[Record]` |
+| `batch_operate()`, `batch_remove()` | `BatchRecords` |
+| `batch_write_numpy()` | `BatchRecords` |
 | `Query.results()` | `list[Record]` |
 
 ---
