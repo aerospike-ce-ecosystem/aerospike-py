@@ -61,9 +61,11 @@ data = np.array([
 results = client.batch_write_numpy(data, "test", "demo", dtype)
 
 # 4. 결과 확인
-for record in results:
-    key, meta, bins = record
-    print(f"Key: {key}, Gen: {meta.gen}")
+for br in results.batch_records:
+    if br.result == 0:
+        print(f"Key: {br.key}, Gen: {br.record.meta.gen}")
+    else:
+        print(f"Failed: {br.key}, code={br.result}")
 ```
 
   </TabItem>
@@ -99,9 +101,11 @@ async def main():
     results = await client.batch_write_numpy(data, "test", "demo", dtype)
 
     # 4. 결과 확인
-    for record in results:
-        key, meta, bins = record
-        print(f"Key: {key}, Gen: {meta.gen}")
+    for br in results.batch_records:
+        if br.result == 0:
+            print(f"Key: {br.key}, Gen: {br.record.meta.gen}")
+        else:
+            print(f"Failed: {br.key}, code={br.result}")
 
     await client.close()
 
@@ -226,7 +230,7 @@ data["pressure"] = np.random.normal(1013.25, 10.0, n).astype(np.float32)
 data["status"] = 1
 
 results = client.batch_write_numpy(data, "test", "sensors", dtype)
-print(f"Wrote {len(results)} records")
+print(f"Wrote {len(results.batch_records)} records")
 ```
 
   </TabItem>
@@ -259,7 +263,7 @@ async def main():
     data["status"] = 1
 
     results = await client.batch_write_numpy(data, "test", "sensors", dtype)
-    print(f"Wrote {len(results)} records")
+    print(f"Wrote {len(results.batch_records)} records")
 
     await client.close()
 
@@ -421,10 +425,9 @@ results = client.batch_write_numpy(data, "test", "users", dtype)
 results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
 
 # 재시도 후에도 실패한 레코드 확인
-for record in results:
-    key, meta, bins = record
-    if meta is None:
-        print(f"Write failed for key {key} after retries")
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Write failed for key {br.key} after retries (code={br.result})")
 ```
 
 백오프 간격은 10ms, 20ms, 40ms, ... 최대 500ms입니다. 재시도 시에는 실패한 레코드만 다시 전송하며 전체 배치를 재전송하지 않습니다.
@@ -440,10 +443,9 @@ from aerospike_py.exception import AerospikeError
 
 try:
     results = client.batch_write_numpy(data, "test", "demo", dtype)
-    for record in results:
-        key, meta, bins = record
-        if meta is None:
-            print(f"Write failed for key {key}")
+    for br in results.batch_records:
+        if br.result != 0:
+            print(f"Write failed for key {br.key} (code={br.result})")
 except AerospikeError as e:
     print(f"Batch write error: {e}")
 ```
@@ -468,7 +470,7 @@ for i in range(0, len(data), chunk_size):
 
 ```python
 # Sync
-results: list[Record] = client.batch_write_numpy(
+results: BatchRecords = client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -479,7 +481,7 @@ results: list[Record] = client.batch_write_numpy(
 )
 
 # Async
-results: list[Record] = await client.batch_write_numpy(
+results: BatchRecords = await client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -500,6 +502,6 @@ results: list[Record] = await client.batch_write_numpy(
 | `policy` | `dict \| None` | `None` | 선택적 [`BatchPolicy`](/docs/api/types#batchpolicy) 오버라이드 |
 | `retry` | `int` | `0` | 일시적 실패(timeout, device overload, key busy) 최대 재시도 횟수. `0` = 재시도 안 함. |
 
-**반환값:** `list[Record]` -- 쓰기 결과가 담긴 `Record` NamedTuple `(key, meta, bins)` 리스트.
+**반환값:** `BatchRecords` -- `batch_records: list[BatchRecord]`를 포함하며, 각 `BatchRecord`는 `key`, `result` (0=성공), `record` (`Record` 또는 `None`)를 가집니다.
 
 **참고:** numpy 배열로 레코드를 읽어오려면 [NumPy 배치 읽기 가이드](./numpy-batch.md)를 참조하세요.

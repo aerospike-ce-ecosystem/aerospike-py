@@ -26,19 +26,24 @@ async def batch_read(body: BatchReadRequest, client: AsyncClient = Depends(get_c
     for br in result.batch_records:
         rec = None
         if br.record is not None:
-            k, m, b = br.record
-            rec = RecordResponse(key=k, meta=m, bins=b)
+            rec = RecordResponse(key=br.record.key, meta=br.record.meta, bins=br.record.bins)
         records.append(BatchRecordResponse(key=br.key, result=br.result, record=rec))
     return BatchRecordsResponse(batch_records=records)
 
 
-@router.post("/operate", response_model=list[RecordResponse])
+@router.post("/operate", response_model=list[BatchRecordResponse])
 async def batch_operate(body: BatchOperateRequest, client: AsyncClient = Depends(get_client)):
     """Execute operations on multiple records in a single batch call."""
     keys = [k.to_tuple() for k in body.keys]
     ops = [{"op": op.op, "bin": op.bin, "val": op.val} for op in body.ops]
     results = await client.batch_operate(keys, ops)
-    return [RecordResponse(key=k, meta=m, bins=b) for k, m, b in results]
+    records = []
+    for br in results.batch_records:
+        rec = None
+        if br.record is not None:
+            rec = RecordResponse(key=br.record.key, meta=br.record.meta, bins=br.record.bins)
+        records.append(BatchRecordResponse(key=br.key, result=br.result, record=rec))
+    return records
 
 
 @router.post("/remove", response_model=MessageResponse)

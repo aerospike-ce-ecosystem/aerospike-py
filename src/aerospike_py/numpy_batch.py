@@ -115,14 +115,14 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
                 f"batch record at index {i} has missing or malformed key "
                 f"(key={br.key!r}); falling back to integer index as map key. "
                 f"NumpyBatchRecords.get() will not find this record by primary key.",
-                stacklevel=2,
+                stacklevel=4,
             )
             pk = i
         if pk in key_map:
             warnings.warn(
                 f"batch record at index {i}: primary key {pk!r} collides with "
                 f"record at index {key_map[pk]}; earlier mapping will be overwritten.",
-                stacklevel=2,
+                stacklevel=4,
             )
         key_map[pk] = i
 
@@ -141,12 +141,12 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
                     if missing:
                         warnings.warn(
                             f"record at index {i}: dtype fields {missing} not found in bins (zero-filled)",
-                            stacklevel=2,
+                            stacklevel=4,
                         )
                     if extra:
                         warnings.warn(
                             f"record at index {i}: bin fields {extra} not in dtype (ignored)",
-                            stacklevel=2,
+                            stacklevel=4,
                         )
                 for field in dtype.names:
                     val = bins.get(field)

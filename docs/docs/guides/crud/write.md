@@ -142,12 +142,18 @@ result = await client.operate_ordered(key, ops)
 ## Batch Operate / Remove
 
 ```python
-# Batch operate
+# Batch operate — returns BatchRecords (same as batch_read)
 ops = [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}]
-results: list[Record] = client.batch_operate(keys, ops)
+results = client.batch_operate(keys, ops)
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins)
 
 # Batch remove
 results = client.batch_remove(keys)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed to remove: {br.key}")
 ```
 
 ## Optimistic Locking

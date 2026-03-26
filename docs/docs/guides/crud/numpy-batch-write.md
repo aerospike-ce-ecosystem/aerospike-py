@@ -61,9 +61,11 @@ data = np.array([
 results = client.batch_write_numpy(data, "test", "demo", dtype)
 
 # 4. Check results
-for record in results:
-    key, meta, bins = record
-    print(f"Key: {key}, Gen: {meta.gen}")
+for br in results.batch_records:
+    if br.result == 0:
+        print(f"Key: {br.key}, Gen: {br.record.meta.gen}")
+    else:
+        print(f"Failed: {br.key}, code={br.result}")
 ```
 
   </TabItem>
@@ -99,9 +101,11 @@ async def main():
     results = await client.batch_write_numpy(data, "test", "demo", dtype)
 
     # 4. Check results
-    for record in results:
-        key, meta, bins = record
-        print(f"Key: {key}, Gen: {meta.gen}")
+    for br in results.batch_records:
+        if br.result == 0:
+            print(f"Key: {br.key}, Gen: {br.record.meta.gen}")
+        else:
+            print(f"Failed: {br.key}, code={br.result}")
 
     await client.close()
 
@@ -226,7 +230,7 @@ data["pressure"] = np.random.normal(1013.25, 10.0, n).astype(np.float32)
 data["status"] = 1
 
 results = client.batch_write_numpy(data, "test", "sensors", dtype)
-print(f"Wrote {len(results)} records")
+print(f"Wrote {len(results.batch_records)} records")
 ```
 
   </TabItem>
@@ -259,7 +263,7 @@ async def main():
     data["status"] = 1
 
     results = await client.batch_write_numpy(data, "test", "sensors", dtype)
-    print(f"Wrote {len(results)} records")
+    print(f"Wrote {len(results.batch_records)} records")
 
     await client.close()
 
@@ -421,10 +425,9 @@ When `retry > 0`, records that fail with transient errors (timeout, device overl
 results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
 
 # Check which records still failed after retries
-for record in results:
-    key, meta, bins = record
-    if meta is None:
-        print(f"Write failed for key {key} after retries")
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Write failed for key {br.key} after retries (code={br.result})")
 ```
 
 The backoff schedule is 10ms, 20ms, 40ms, ... capped at 500ms between attempts. Only the failed records are re-submitted on each retry, not the entire batch.
@@ -440,10 +443,9 @@ from aerospike_py.exception import AerospikeError
 
 try:
     results = client.batch_write_numpy(data, "test", "demo", dtype)
-    for record in results:
-        key, meta, bins = record
-        if meta is None:
-            print(f"Write failed for key {key}")
+    for br in results.batch_records:
+        if br.result != 0:
+            print(f"Write failed for key {br.key} (code={br.result})")
 except AerospikeError as e:
     print(f"Batch write error: {e}")
 ```
@@ -468,7 +470,7 @@ for i in range(0, len(data), chunk_size):
 
 ```python
 # Sync
-results: list[Record] = client.batch_write_numpy(
+results: BatchRecords = client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -479,7 +481,7 @@ results: list[Record] = client.batch_write_numpy(
 )
 
 # Async
-results: list[Record] = await client.batch_write_numpy(
+results: BatchRecords = await client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -500,6 +502,6 @@ results: list[Record] = await client.batch_write_numpy(
 | `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides |
 | `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). `0` = no retry. |
 
-**Returns:** `list[Record]` — a list of `Record` NamedTuples `(key, meta, bins)` with write results.
+**Returns:** `BatchRecords` — contains `batch_records: list[BatchRecord]` where each `BatchRecord` has `key`, `result` (0=success), and `record` (a `Record` or `None`).
 
 **See also:** [NumPy Batch Read Guide](./numpy-batch.md) for reading records back into numpy arrays.

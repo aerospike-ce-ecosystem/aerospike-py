@@ -14,9 +14,7 @@ use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::{parse_backpressure_config, parse_client_policy};
-use crate::record_helpers::{
-    batch_records_to_py, PendingExists, PendingOrderedRecord, PendingRecord,
-};
+use crate::record_helpers::{PendingExists, PendingOrderedRecord, PendingRecord};
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
 use crate::types::value::value_to_py;
@@ -670,7 +668,10 @@ impl PyAsyncClient {
         future_into_py(py, async move {
             let _permit = limiter.acquire_named("batch_operate").await?;
             let results = client_ops::do_batch_operate(&client, &args).await?;
-            Python::attach(|py| batch_records_to_py(py, &results))
+            Python::attach(|py| {
+                let batch = batch_to_batch_records_py(py, &results)?;
+                Ok(Py::new(py, batch)?.into_any())
+            })
         })
     }
 
@@ -719,7 +720,10 @@ impl PyAsyncClient {
                 retry,
             )
             .await?;
-            Python::attach(|py| batch_records_to_py(py, &results))
+            Python::attach(|py| {
+                let batch = batch_to_batch_records_py(py, &results)?;
+                Ok(Py::new(py, batch)?.into_any())
+            })
         })
     }
 
@@ -740,7 +744,10 @@ impl PyAsyncClient {
         future_into_py(py, async move {
             let _permit = limiter.acquire_named("batch_remove").await?;
             let results = client_ops::do_batch_remove(&client, &args).await?;
-            Python::attach(|py| batch_records_to_py(py, &results))
+            Python::attach(|py| {
+                let batch = batch_to_batch_records_py(py, &results)?;
+                Ok(Py::new(py, batch)?.into_any())
+            })
         })
     }
 

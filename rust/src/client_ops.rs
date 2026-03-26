@@ -265,7 +265,7 @@ pub async fn do_batch_remove(
 /// Check if a batch record result code is retryable.
 ///
 /// Retries on transient errors: timeout, device overload, key busy,
-/// server overloaded, or partition unavailable. Permanent errors
+/// server memory error, or partition unavailable. Permanent errors
 /// (key exists, record too big, etc.) are not retried.
 fn is_retryable_result_code(rc: &aerospike_core::ResultCode) -> bool {
     use aerospike_core::ResultCode;
@@ -391,6 +391,13 @@ pub async fn do_batch_write(
         };
 
         // Merge retry results back into the main results vector
+        if retry_results.len() != retry_indices.len() {
+            log::warn!(
+                "batch_write retry: expected {} results, got {} (partial batch response)",
+                retry_indices.len(),
+                retry_results.len()
+            );
+        }
         for (retry_pos, &original_idx) in retry_indices.iter().enumerate() {
             if retry_pos < retry_results.len() {
                 results[original_idx] = retry_results[retry_pos].clone();

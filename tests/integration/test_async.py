@@ -40,7 +40,9 @@ class TestAsyncBatchWrite:
             {"op": aerospike_py.OPERATOR_WRITE, "bin": "score", "val": 200},
         ]
         results = await async_client.batch_operate(keys, ops)
-        assert len(results) == 3
+        assert len(results.batch_records) == 3
+        for br in results.batch_records:
+            assert br.result == 0
 
         # Verify records were written
         for k in keys:
@@ -63,16 +65,18 @@ class TestAsyncBatchWrite:
             {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 5},
         ]
         results = await async_client.batch_operate(keys, ops)
-        assert len(results) == 2
+        assert len(results.batch_records) == 2
 
         # First record succeeds
-        _, meta0, bins0 = results[0]
-        assert meta0 is not None
+        br0 = results.batch_records[0]
+        assert br0.result == 0
+        assert br0.record is not None
+        assert br0.record.meta is not None
 
-        # Second record fails (type mismatch) -> None meta/bins
-        _, meta1, bins1 = results[1]
-        assert meta1 is None
-        assert bins1 is None
+        # Second record fails (type mismatch)
+        br1 = results.batch_records[1]
+        assert br1.result != 0
+        assert br1.record is None
 
         await async_client.batch_remove(keys)
 
@@ -86,11 +90,11 @@ class TestAsyncBatchWrite:
             {"op": aerospike_py.OPERATOR_READ, "bin": "val", "val": None},
         ]
         results = await async_client.batch_operate(keys, ops)
-        assert len(results) == 2
-        for rec in results:
-            _, meta, bins = rec
-            assert meta is not None
-            val = bins["val"]
+        assert len(results.batch_records) == 2
+        for br in results.batch_records:
+            assert br.result == 0
+            assert br.record is not None
+            val = br.record.bins["val"]
             if isinstance(val, list):
                 assert val[-1] == 77
             else:
