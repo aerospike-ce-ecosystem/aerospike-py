@@ -367,9 +367,7 @@ class TestAsyncWriteReadRoundtrip:
         read_dtype = np.dtype([("x", "f8")])
         read = await async_client.batch_read(keys, _dtype=read_dtype)
         assert (read.result_codes == 0).all()
-        np.testing.assert_array_almost_equal(
-            read.batch_records["x"], np.arange(n, dtype=np.float64)
-        )
+        np.testing.assert_array_almost_equal(read.batch_records["x"], np.arange(n, dtype=np.float64))
 
     async def test_async_write_result_codes(self, async_client, async_cleanup):
         """Verify async batch_write_numpy returns BatchRecord with result codes."""
