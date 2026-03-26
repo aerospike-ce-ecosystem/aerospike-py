@@ -502,6 +502,6 @@ results: BatchRecords = await client.batch_write_numpy(
 | `policy` | `dict \| None` | `None` | 선택적 [`BatchPolicy`](/docs/api/types#batchpolicy) 오버라이드 |
 | `retry` | `int` | `0` | 일시적 실패(timeout, device overload, key busy) 최대 재시도 횟수. `0` = 재시도 안 함. |
 
-**반환값:** `list[Record]` -- 쓰기 결과가 담긴 `Record` NamedTuple `(key, meta, bins)` 리스트.
+**반환값:** `BatchRecords` -- `batch_records: list[BatchRecord]`를 포함하며, 각 `BatchRecord`는 `key`, `result` (0=성공), `record` (`Record` 또는 `None`)를 가집니다.
 
 **참고:** numpy 배열로 레코드를 읽어오려면 [NumPy 배치 읽기 가이드](./numpy-batch.md)를 참조하세요.
