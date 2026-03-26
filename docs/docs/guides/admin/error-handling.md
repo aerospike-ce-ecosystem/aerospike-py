@@ -120,10 +120,9 @@ except AerospikeError:
     # Entire batch failed (e.g., cluster unavailable)
     raise
 
-for record in results:
-    key, meta, bins = record  # Record NamedTuple unpacking
-    if meta is None:
-        logger.warning("Key %s failed (no metadata)", key)
+for br in results.batch_records:
+    if br.result != 0:
+        logger.warning("Key %s failed (code=%d)", br.key, br.result)
 ```
 
 ## Async Error Handling
