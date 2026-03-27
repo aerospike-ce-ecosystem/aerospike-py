@@ -370,6 +370,25 @@ class Client(_NativeClient):
     def get_node_names(self) -> list[str]:
         return super().get_node_names()
 
+    @catch_unexpected("Client.get_cluster_name")
+    def get_cluster_name(self) -> str:
+        """Retrieve the cluster name from the Aerospike server.
+
+        Returns:
+            The cluster name string.
+
+        Raises:
+            ClientError: If not connected.
+
+        Example:
+            ```python
+            name = client.get_cluster_name()
+            print(name)  # e.g. "myCluster"
+            ```
+        """
+        response = self.info_random_node("cluster-name")
+        return response.split("\t", 1)[1].strip()
+
     # -- Query --
 
     def query(self, namespace, set_name) -> Query:

@@ -22,3 +22,21 @@ class TestInfoNotConnected:
             assert False, "Should have raised ClientError"
         except aerospike_py.ClientError:
             pass
+
+    def test_get_cluster_name_requires_connection(self):
+        """get_cluster_name() on unconnected client raises ClientError."""
+        c = aerospike_py.client(DUMMY_CONFIG)
+        try:
+            c.get_cluster_name()
+            assert False, "Should have raised ClientError"
+        except aerospike_py.ClientError:
+            pass
+
+    async def test_async_get_cluster_name_requires_connection(self):
+        """AsyncClient.get_cluster_name() on unconnected client raises ClientError."""
+        c = aerospike_py.AsyncClient(DUMMY_CONFIG)
+        try:
+            await c.get_cluster_name()
+            assert False, "Should have raised ClientError"
+        except aerospike_py.ClientError:
+            pass

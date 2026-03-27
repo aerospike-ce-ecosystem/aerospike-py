@@ -234,6 +234,25 @@ class AsyncClient:
     def get_node_names(self) -> list[str]:
         return self._inner.get_node_names()
 
+    @catch_unexpected("AsyncClient.get_cluster_name")
+    async def get_cluster_name(self) -> str:
+        """Retrieve the cluster name from the Aerospike server.
+
+        Returns:
+            The cluster name string.
+
+        Raises:
+            ClientError: If not connected.
+
+        Example:
+            ```python
+            name = await client.get_cluster_name()
+            print(name)  # e.g. "myCluster"
+            ```
+        """
+        response = await self._inner.info_random_node("cluster-name")
+        return response.split("\t", 1)[1].strip()
+
     @catch_unexpected("AsyncClient.info_random_node")
     async def info_random_node(self, command, policy=None) -> str:
         return await self._inner.info_random_node(command, policy)
