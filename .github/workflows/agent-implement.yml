@@ -81,4 +81,5 @@ jobs:
             - Always read existing code before modifying
           claude_args: |
             --max-turns 30
+            --dangerously-skip-permissions
           settings: '{"git":{"includeCoAuthor":false}}'
