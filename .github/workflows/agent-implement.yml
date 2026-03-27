@@ -70,9 +70,10 @@ jobs:
             gh pr create --title "feat(scope): description" --body "Closes #${{ github.event.issue.number }}" --head <branch-name>
             ```
 
-            ### Step 6: Add Label
+            ### Step 6: Add Label to PR
+            After creating the PR, add `needs-review` label to the **PR** (not the issue) to trigger the review workflow:
             ```
-            gh issue edit ${{ github.event.issue.number }} --add-label "needs-review"
+            gh pr edit <pr-number> --add-label "needs-review"
             ```
 
             ## Constraints
@@ -81,5 +82,6 @@ jobs:
             - Always read existing code before modifying
           claude_args: |
             --max-turns 300
+            --model claude-opus-4-6
             --dangerously-skip-permissions
-          settings: '{"git":{"includeCoAuthor":false}}'
+          settings: '{"git":{"includeCoAuthor":false},"env":{"CLAUDE_CODE_EFFORT":"high"}}'
