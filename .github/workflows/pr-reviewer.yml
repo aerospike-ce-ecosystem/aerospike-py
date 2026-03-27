@@ -1,0 +1,99 @@
+name: PR Reviewer
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  review:
+    if: github.event.label.name == 'needs-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Run Claude Code - PR Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          branch_prefix: ''
+          prompt: |
+            You are an AI code review agent for the **aerospike-py** project.
+
+            ## Project Context
+            - **Structure**: Rust native module (`rust/src/`) with PyO3 bindings, Python package (`src/aerospike_py/`) with type stubs (`.pyi`)
+            - **Build**: maturin + uv, Conventional Commits format
+            - **Key patterns**: Sync + Async API pairs, policy-based configuration, CDT operations, Expression filters
+
+            ## Task
+            Review PR #${{ github.event.pull_request.number }} and auto-fix HIGH severity issues.
+
+            ### Review Loop (max 3 iterations)
+
+            For each iteration (up to 3):
+
+            **1. Analyze Changes**
+            - Run `gh pr diff ${{ github.event.pull_request.number }}` to read the diff
+            - Categorize issues by severity:
+              - **HIGH**: Bugs, security vulnerabilities, data loss risks, breaking API changes, compilation errors, memory safety issues in Rust, incorrect PyO3 bindings
+              - **MEDIUM**: Missing error handling, incomplete tests, style inconsistencies, missing `.pyi` stub updates, sync/async mismatch
+              - **LOW**: Naming suggestions, documentation improvements
+              - **INFO**: Observations, positive feedback
+
+            **2. Decision**
+            - If HIGH issues exist and iteration < 3:
+              - Fix each HIGH issue by editing the affected files
+              - Commit: `git add -A && git commit -m "fix(review): <description>"`
+              - Push: `git push`
+              - Comment: `gh pr comment ${{ github.event.pull_request.number }} --body "🔄 Review iteration N/3: Fixed M HIGH severity issue(s). Re-reviewing..."`
+              - Re-read the diff and continue to next iteration
+            - If no HIGH issues OR iteration limit reached:
+              - Break the loop
+
+            **3. Post Final Review**
+            Post a summary comment:
+            ```
+            gh pr comment ${{ github.event.pull_request.number }} --body "$(cat <<'REVIEW'
+            ## 📋 PR Review Summary
+
+            **Status**: ✅ APPROVED / ⚠️ CHANGES_REQUESTED
+            **Review iterations**: N/3
+            **Issues found**: X HIGH, Y MEDIUM, Z LOW
+
+            ### HIGH Severity (auto-fixed)
+            - [x] Description of issue and fix
+
+            ### MEDIUM Severity (manual review recommended)
+            - Description and recommendation
+
+            ### LOW Severity
+            - Suggestions
+
+            ---
+            @kimsoungryoul — Review complete. Human review requested.
+            REVIEW
+            )"
+            ```
+
+            **4. Add Label**
+            ```
+            gh pr edit ${{ github.event.pull_request.number }} --add-label "review-complete"
+            ```
+
+            ## Constraints
+            - Maximum 3 review iterations
+            - Only auto-fix HIGH severity issues
+            - Leave MEDIUM and LOW as suggestions
+            - Always mention @kimsoungryoul in the final comment
+          claude_args: |
+            --max-turns 25
+          settings: '{"git":{"includeCoAuthor":false}}'

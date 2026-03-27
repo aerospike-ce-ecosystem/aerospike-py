@@ -1,0 +1,83 @@
+name: Agent Implement
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  implement:
+    if: github.event.label.name == 'plan-complete'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code - Implement
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          branch_prefix: 'agent/'
+          prompt: |
+            You are an AI implementation agent for the **aerospike-py** project.
+
+            ## Project Context
+            - **Structure**: Rust native module (`rust/src/`) with PyO3 bindings, Python package (`src/aerospike_py/`) with type stubs (`.pyi`)
+            - **Build**: maturin + uv, Conventional Commits format
+            - **Key patterns**: Sync + Async API pairs, policy-based configuration, CDT operations, Expression filters
+            - **Tests**: unit (`tests/unit/`, no server), integration (`tests/integration/`, Aerospike server required)
+
+            ## Task
+            Implement changes for issue #${{ github.event.issue.number }} based on the existing plan.
+
+            ### Step 1: Find the Plan
+            - Run `gh issue view ${{ github.event.issue.number }} --comments --json comments` to read all comments
+            - Find the comment containing `<!-- agent-plan-start -->`
+            - Extract and follow the plan
+            - If no plan found, comment "No plan found" and stop
+
+            ### Step 2: Implement
+            - Add `in-progress` label: `gh issue edit ${{ github.event.issue.number }} --add-label "in-progress"`
+            - Follow the plan's Proposed Changes and Implementation Strategy
+            - Read each file before modifying
+            - Match existing code style exactly
+            - Update `.pyi` type stubs if public API changes
+            - Ensure sync/async API pairs remain consistent
+
+            ### Step 3: Verify
+            Run verification (these may not all be available in CI, do your best):
+            - `make check` (Rust compile check)
+            - `make lint` (ruff + clippy)
+            - `make typecheck` (pyright)
+
+            If verification fails, comment the error on the issue and stop.
+
+            ### Step 4: Commit and Push
+            - Commit with Conventional Commits format
+            - The action will handle branch creation and pushing
+
+            ### Step 5: Create PR
+            After committing, create a PR:
+            ```
+            gh pr create --title "feat(scope): description" --body "Closes #${{ github.event.issue.number }}" --head <branch-name>
+            ```
+
+            ### Step 6: Add Label
+            ```
+            gh issue edit ${{ github.event.issue.number }} --add-label "needs-review"
+            ```
+
+            ## Constraints
+            - Follow Conventional Commits for all commit messages and PR title
+            - Reference the issue: `Closes #${{ github.event.issue.number }}`
+            - Always read existing code before modifying
+          claude_args: |
+            --max-turns 30
+          settings: '{"git":{"includeCoAuthor":false}}'

@@ -1,0 +1,89 @@
+name: Issue Planner
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  plan:
+    if: github.event.label.name == 'agent'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code - Issue Planner
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are an AI planning agent for the **aerospike-py** project.
+
+            ## Project Context
+            - **Structure**: Rust native module (`rust/src/`) with PyO3 bindings, Python package (`src/aerospike_py/`) with type stubs (`.pyi`)
+            - **Build**: maturin + uv, Conventional Commits format
+            - **Key patterns**: Sync + Async API pairs, policy-based configuration, CDT operations, Expression filters
+            - **Tests**: unit (`tests/unit/`, no server), integration (`tests/integration/`, Aerospike server required)
+
+            ## Task
+            Analyze issue #${{ github.event.issue.number }} and create an implementation plan.
+
+            **Issue Title**: ${{ github.event.issue.title }}
+
+            ### Instructions
+            1. Read the issue description carefully
+            2. Explore the codebase to understand relevant files and patterns
+            3. If the issue is too vague, run: `gh issue comment ${{ github.event.issue.number }} --body "The issue needs more details. Please clarify: [specific questions]"` then run `gh issue edit ${{ github.event.issue.number }} --add-label "needs-clarification"` and stop.
+            4. Create a structured plan and post it as a comment:
+
+            ```
+            gh issue comment ${{ github.event.issue.number }} --body "$(cat <<'PLAN'
+            <!-- agent-plan-start -->
+            ## 🤖 Agent Plan
+
+            ### Analysis
+            [Summary of what the issue requests. Reference specific files and line numbers.]
+
+            ### Proposed Changes
+            | File | Action | Description |
+            |------|--------|-------------|
+            | path/to/file | Create/Modify | Brief description |
+
+            ### Implementation Strategy
+            1. [Step with specific details]
+            2. [Next step...]
+
+            ### Risk Assessment
+            - **Breaking changes**: Yes/No
+            - **Test coverage**: [What tests to add]
+            - **Dependencies**: [Any new dependencies needed]
+
+            ### Verification
+            - [ ] `make check` succeeds
+            - [ ] `make test-unit` passes
+            - [ ] `make lint` passes
+            - [ ] `make typecheck` passes
+            <!-- agent-plan-end -->
+            PLAN
+            )"
+            ```
+
+            5. After posting the plan comment, add the `plan-complete` label:
+            ```
+            gh issue edit ${{ github.event.issue.number }} --add-label "plan-complete"
+            ```
+
+            ## Constraints
+            - Do NOT create branches or pull requests
+            - Do NOT modify any files in the repository
+            - Your ONLY outputs are: one plan comment + one label
+          claude_args: |
+            --max-turns 15
+            --allowedTools Bash(gh issue:*) Bash(gh api:*) Read Glob Grep
+          settings: '{"git":{"includeCoAuthor":false}}'
