@@ -54,13 +54,13 @@ jobs:
               - **INFO**: Observations, positive feedback
 
             **2. Decision**
-            - If HIGH issues exist and iteration < 3:
-              - Fix each HIGH issue by editing the affected files
+            - If HIGH or MEDIUM issues exist and iteration < 3:
+              - Fix all HIGH and MEDIUM issues by editing the affected files
               - Commit: `git add -A && git commit -m "fix(review): <description>"`
               - Push: `git push`
-              - Comment: `gh pr comment ${{ github.event.pull_request.number }} --body "🔄 Review iteration N/3: Fixed M HIGH severity issue(s). Re-reviewing..."`
+              - Comment: `gh pr comment ${{ github.event.pull_request.number }} --body "🔄 Review iteration N/3: Fixed M HIGH + MEDIUM severity issue(s). Re-reviewing..."`
               - Re-read the diff and continue to next iteration
-            - If no HIGH issues OR iteration limit reached:
+            - If no HIGH/MEDIUM issues OR iteration limit reached:
               - Break the loop
 
             **3. Post Final Review**
@@ -76,8 +76,8 @@ jobs:
             ### HIGH Severity (auto-fixed)
             - [x] Description of issue and fix
 
-            ### MEDIUM Severity (manual review recommended)
-            - Description and recommendation
+            ### MEDIUM Severity (auto-fixed)
+            - [x] Description of issue and fix
 
             ### LOW Severity
             - Suggestions
@@ -95,8 +95,8 @@ jobs:
 
             ## Constraints
             - Maximum 3 review iterations
-            - Only auto-fix HIGH severity issues
-            - Leave MEDIUM and LOW as suggestions
+            - Auto-fix HIGH and MEDIUM severity issues
+            - Leave LOW as suggestions only
             - Always mention @kimsoungryoul in the final comment
           claude_args: |
             --max-turns 300
