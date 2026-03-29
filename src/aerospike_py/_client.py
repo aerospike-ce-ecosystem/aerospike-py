@@ -362,6 +362,10 @@ class Client(_NativeClient):
 
     # -- Utility --
 
+    @catch_unexpected("Client.ping")
+    def ping(self) -> bool:
+        return super().ping()
+
     @catch_unexpected("Client.is_connected")
     def is_connected(self) -> bool:
         return super().is_connected()

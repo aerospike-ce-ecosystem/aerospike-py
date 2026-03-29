@@ -120,6 +120,29 @@ class Client:
         """
         ...
 
+    def ping(self) -> bool:
+        """Lightweight health check that verifies cluster liveness.
+
+        Sends an ``info("build")`` command to a random cluster node and
+        returns whether the node responded successfully. Unlike
+        ``is_connected()`` which only checks local state, this method
+        performs an actual network round-trip.
+
+        Useful for Kubernetes readiness probes, load-balancer health
+        checks, and connection-pool validation.
+
+        Returns:
+            ``True`` if a cluster node responded, ``False`` otherwise
+            (including when the client is not connected).
+
+        Example:
+            ```python
+            if client.ping():
+                print("Cluster is reachable")
+            ```
+        """
+        ...
+
     def close(self) -> None:
         """Close the connection to the cluster.
 
@@ -1047,6 +1070,29 @@ class AsyncClient:
             ```python
             if client.is_connected():
                 print("Connected")
+            ```
+        """
+        ...
+
+    async def ping(self) -> bool:
+        """Lightweight health check that verifies cluster liveness.
+
+        Sends an ``info("build")`` command to a random cluster node and
+        returns whether the node responded successfully. Unlike
+        ``is_connected()`` which only checks local state, this method
+        performs an actual network round-trip.
+
+        Useful for Kubernetes readiness probes, load-balancer health
+        checks, and connection-pool validation.
+
+        Returns:
+            ``True`` if a cluster node responded, ``False`` otherwise
+            (including when the client is not connected).
+
+        Example:
+            ```python
+            if await client.ping():
+                print("Cluster is reachable")
             ```
         """
         ...

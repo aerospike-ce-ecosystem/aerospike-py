@@ -128,6 +128,27 @@ for r in results:
 version: str = client.info_random_node("build")
 ```
 
+## Health Check
+
+The client provides two ways to check cluster health:
+
+- **`is_connected()`** — checks local state only (no I/O). Fast but may return `True` even if the cluster is temporarily unreachable.
+- **`ping()`** — sends a lightweight `info("build")` command to a random node. Performs an actual network round-trip to verify liveness. Returns `True` if the node responds, `False` otherwise (never raises).
+
+```python
+# Kubernetes readiness probe / load-balancer health check
+if client.ping():
+    return {"status": "healthy"}
+
+# Async health endpoint (e.g., FastAPI)
+@app.get("/health")
+async def health():
+    ok = await async_client.ping()
+    return {"status": "ok" if ok else "degraded"}
+```
+
+The background **tend** process (configured via `tend_interval`, default 1000 ms) automatically monitors cluster membership and connection health. `ping()` complements this by providing on-demand verification.
+
 ## Sync vs Async
 
 <Tabs>

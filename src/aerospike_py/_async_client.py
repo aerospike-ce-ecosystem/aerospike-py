@@ -226,6 +226,10 @@ class AsyncClient:
         raw = await self._inner.batch_remove(keys, policy)
         return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
+    @catch_unexpected("AsyncClient.ping")
+    async def ping(self) -> bool:
+        return await self._inner.ping()
+
     @catch_unexpected("AsyncClient.is_connected")
     def is_connected(self) -> bool:
         return self._inner.is_connected()
