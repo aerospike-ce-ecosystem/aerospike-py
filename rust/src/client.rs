@@ -111,6 +111,14 @@ impl PyClient {
         }
     }
 
+    /// Lightweight health check: returns `True` if a random node responds.
+    fn ping(&self, py: Python<'_>) -> bool {
+        match &self.inner {
+            Some(client) => py.detach(|| RUNTIME.block_on(client_ops::do_ping(client))),
+            None => false,
+        }
+    }
+
     /// Close the connection to the cluster
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
         info!("Closing client connection");
