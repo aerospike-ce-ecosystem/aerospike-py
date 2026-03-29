@@ -113,6 +113,17 @@ impl PyAsyncClient {
         self.inner.load().is_some()
     }
 
+    /// Lightweight health check: returns `True` if a random node responds.
+    fn ping<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let client = self.inner.load_full();
+        future_into_py(py, async move {
+            match client {
+                Some(c) => Ok(client_ops::do_ping(&c).await),
+                None => Ok(false),
+            }
+        })
+    }
+
     /// Close connection (async).
     fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         info!("Closing async client connection");

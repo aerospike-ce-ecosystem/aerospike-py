@@ -22,3 +22,8 @@ class TestInfoNotConnected:
             assert False, "Should have raised ClientError"
         except aerospike_py.ClientError:
             pass
+
+    def test_ping_returns_false_when_not_connected(self):
+        """ping() on unconnected client returns False (no exception)."""
+        c = aerospike_py.client(DUMMY_CONFIG)
+        assert c.ping() is False

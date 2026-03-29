@@ -437,6 +437,17 @@ pub async fn do_info_random_node(client: &AsClient, args: &InfoArgs) -> PyResult
     Ok(map.get(&args.command).cloned().unwrap_or_default())
 }
 
+/// Lightweight health check: send `info("build")` to a random node.
+/// Returns `true` if the node responds, `false` otherwise.
+pub async fn do_ping(client: &AsClient) -> bool {
+    let node = match client.cluster.get_random_node() {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    let policy = aerospike_core::AdminPolicy::default();
+    node.info(&policy, &["build"]).await.is_ok()
+}
+
 // ── Truncate ────────────────────────────────────────────────────────────────
 
 /// Truncate records in a namespace/set.
