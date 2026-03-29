@@ -1,4 +1,5 @@
 name: Publish to PyPI
+# GitHub Release 발행 시 maturin으로 wheel 빌드 후 PyPI에 배포 (Linux/macOS, Python 3.10~3.14)
 
 on:
   release:

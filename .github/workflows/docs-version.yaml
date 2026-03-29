@@ -1,4 +1,5 @@
 name: Freeze Docs Version
+# GitHub Release 발행 시 Docusaurus docs:version 명령으로 해당 버전 문서를 스냅샷
 
 on:
   release:
