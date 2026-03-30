@@ -279,12 +279,23 @@ fn is_retryable_result_code(rc: &aerospike_core::ResultCode) -> bool {
     )
 }
 
+/// Compute backoff duration in milliseconds using Full Jitter strategy.
+///
+/// Returns a random value in `[0, min(cap_ms, base_ms * 2^attempt)]`.
+/// The shift exponent is capped at 6 to prevent overflow (`10 * 2^6 = 640 > 500`).
+fn compute_backoff_ms(attempt: u32, base_ms: u64, cap_ms: u64) -> u64 {
+    use rand::Rng;
+    let capped_attempt = std::cmp::min(attempt, 6);
+    let max_backoff = std::cmp::min(base_ms * (1u64 << capped_attempt), cap_ms);
+    rand::thread_rng().gen_range(0..=max_backoff)
+}
+
 /// Write multiple records from pre-parsed (key, bins) pairs with optional retry.
 ///
 /// When `max_retries > 0`, failed records with retryable error codes are
 /// re-submitted in subsequent batch calls, up to `max_retries` attempts.
-/// A short exponential backoff (10ms * 2^attempt, capped at 500ms) is applied
-/// between retries to avoid thundering-herd effects.
+/// A Full Jitter exponential backoff (`random_between(0, min(cap, base * 2^attempt))`)
+/// is applied between retries to avoid thundering-herd effects.
 #[allow(clippy::too_many_arguments)]
 pub async fn do_batch_write(
     client: &AsClient,
@@ -346,10 +357,8 @@ pub async fn do_batch_write(
             break;
         }
 
-        // Exponential backoff: 10ms, 20ms, 40ms, ..., capped at 500ms
-        // Cap the shift exponent to avoid overflow panic when attempt >= 64
-        let capped_attempt = std::cmp::min(attempt, 6); // 10 * 2^6 = 640 > 500
-        let backoff_ms = std::cmp::min(10u64 * (1u64 << capped_attempt), 500);
+        // Full Jitter backoff: random_between(0, min(500ms, 10ms * 2^attempt))
+        let backoff_ms = compute_backoff_ms(attempt, 10, 500);
         log::info!(
             "batch_write retry: {} failed records, attempt {}/{}, backoff {}ms",
             retry_indices.len(),
@@ -777,5 +786,35 @@ mod tests {
     #[test]
     fn test_not_retryable_bin_type_error() {
         assert!(!is_retryable_result_code(&ResultCode::BinTypeError));
+    }
+
+    #[test]
+    fn test_backoff_range() {
+        // Full Jitter: result must be in [0, min(cap, base * 2^attempt)]
+        for attempt in 0..=6 {
+            let max_expected = std::cmp::min(10u64 * (1u64 << attempt), 500);
+            for _ in 0..1000 {
+                let val = compute_backoff_ms(attempt, 10, 500);
+                assert!(val <= max_expected, "attempt={attempt}, val={val}, max={max_expected}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_backoff_cap_enforced() {
+        // Even with high attempt, backoff should never exceed cap
+        for _ in 0..1000 {
+            let val = compute_backoff_ms(10, 10, 500);
+            assert!(val <= 500, "val={val} exceeded cap 500");
+        }
+    }
+
+    #[test]
+    fn test_backoff_overflow_safety() {
+        // Very large attempt values should not panic
+        let val = compute_backoff_ms(100, 10, 500);
+        assert!(val <= 500);
+        let val = compute_backoff_ms(u32::MAX, 10, 500);
+        assert!(val <= 500);
     }
 }
