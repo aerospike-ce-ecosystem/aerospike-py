@@ -78,10 +78,10 @@ impl PyClient {
                 "Cannot connect: client is already {state_name}. Close the client before reconnecting."
             )));
         }
-        self.state = CONNECTING;
 
+        // Validate and parse config BEFORE transitioning state so that
+        // config errors don't leave the client stuck in CONNECTING.
         if username.is_some() && password.is_none() {
-            self.state = DISCONNECTED;
             return Err(crate::errors::ClientError::new_err(
                 "Password is required when username is provided.",
             ));
@@ -100,6 +100,9 @@ impl PyClient {
         let (max_ops, timeout_ms) = parse_backpressure_config(&effective_config)?;
 
         let cluster_name = client_common::extract_cluster_name(&effective_config)?;
+
+        // Config parsed successfully — now transition to Connecting.
+        self.state = CONNECTING;
 
         self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
             server_address: Arc::from(parsed.first_address.as_str()),

@@ -74,6 +74,29 @@ impl PyAsyncClient {
         password: Option<&str>,
     ) -> PyResult<Bound<'py, PyAny>> {
         // Guard: only allow Disconnected → Connecting transition.
+        // Validate and parse config BEFORE the CAS so that config errors
+        // don't leave the client stuck in CONNECTING.
+        if username.is_some() && password.is_none() {
+            return Err(crate::errors::ClientError::new_err(
+                "Password is required when username is provided.",
+            ));
+        }
+
+        let config_dict = self.config.bind(py).cast::<PyDict>()?;
+        let effective_config = config_dict.copy()?;
+
+        if let (Some(user), Some(pass)) = (username, password) {
+            effective_config.set_item("user", user)?;
+            effective_config.set_item("password", pass)?;
+        }
+
+        let parsed = parse_hosts_from_config(&effective_config)?;
+        let client_policy = parse_client_policy(&effective_config)?;
+        let (max_ops, timeout_ms) = parse_backpressure_config(&effective_config)?;
+
+        let cluster_name = client_common::extract_cluster_name(&effective_config)?;
+
+        // Config parsed successfully — now atomically transition to Connecting.
         if self
             .state
             .compare_exchange(DISCONNECTED, CONNECTING, Ordering::SeqCst, Ordering::SeqCst)
@@ -91,28 +114,8 @@ impl PyAsyncClient {
             )));
         }
 
-        if username.is_some() && password.is_none() {
-            self.state.store(DISCONNECTED, Ordering::SeqCst);
-            return Err(crate::errors::ClientError::new_err(
-                "Password is required when username is provided.",
-            ));
-        }
-
-        let config_dict = self.config.bind(py).cast::<PyDict>()?;
-        let effective_config = config_dict.copy()?;
-
-        if let (Some(user), Some(pass)) = (username, password) {
-            effective_config.set_item("user", user)?;
-            effective_config.set_item("password", pass)?;
-        }
-
-        let parsed = parse_hosts_from_config(&effective_config)?;
-        let client_policy = parse_client_policy(&effective_config)?;
-        let (max_ops, timeout_ms) = parse_backpressure_config(&effective_config)?;
         let inner = self.inner.clone();
         let state = self.state.clone();
-
-        let cluster_name = client_common::extract_cluster_name(&effective_config)?;
 
         self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
             server_address: Arc::from(parsed.first_address.as_str()),
