@@ -28,9 +28,17 @@ config.versions.current = {
   banner: 'unreleased',
 };
 
+// 이전 lastVersion의 path를 버전 번호로 변경 (root에서 밀어냄)
+const prevLatest = config.lastVersion;
+if (prevLatest && config.versions[prevLatest]) {
+  config.versions[prevLatest].path = prevLatest;
+  config.versions[prevLatest].banner = 'unmaintained';
+  config.versions[prevLatest].label = prevLatest;
+}
+
 // 새 릴리스 버전을 latest 위치(root path)에 추가
 config.versions[version] = {
-  label: version,
+  label: `${version} (Latest)`,
   path: '',
   banner: 'none',
 };
