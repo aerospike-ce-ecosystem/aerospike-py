@@ -8,16 +8,16 @@
     },
     "0.0.3": {
       "label": "0.0.3",
-      "path": "",
-      "banner": "none"
+      "path": "0.0.3",
+      "banner": "unmaintained"
     },
     "0.0.4": {
       "label": "0.0.4",
-      "path": "",
-      "banner": "none"
+      "path": "0.0.4",
+      "banner": "unmaintained"
     },
     "0.0.5": {
-      "label": "0.0.5",
+      "label": "0.0.5 (Latest)",
       "path": "",
       "banner": "none"
     }

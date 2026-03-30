@@ -767,7 +767,7 @@ Execute operations on multiple records in a single batch call.
 | `ops` | List of operation dicts to apply to each record. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** ``BatchRecords`` containing per-record result codes.
+**Returns:** A list of ``BatchRecord`` NamedTuples with per-record result codes.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -809,7 +809,7 @@ Delete multiple records in a single batch call.
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** ``BatchRecords`` containing per-record result codes.
+**Returns:** A list of ``BatchRecord`` NamedTuples with per-record result codes.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
