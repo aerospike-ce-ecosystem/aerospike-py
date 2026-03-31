@@ -24,16 +24,27 @@
 
 use std::sync::LazyLock;
 
-use log::info;
+use log::{info, warn};
+
+/// Maximum allowed worker threads to prevent accidental resource exhaustion.
+const MAX_WORKERS: usize = 32;
 
 /// Read the configured worker count from `AEROSPIKE_RUNTIME_WORKERS` env var.
-/// Defaults to 2, minimum 1.
+/// Defaults to 2, minimum 1, maximum [`MAX_WORKERS`].
 fn configured_workers() -> usize {
-    std::env::var("AEROSPIKE_RUNTIME_WORKERS")
+    let raw = std::env::var("AEROSPIKE_RUNTIME_WORKERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(2)
-        .max(1)
+        .max(1);
+    if raw > MAX_WORKERS {
+        warn!(
+            "AEROSPIKE_RUNTIME_WORKERS={raw} exceeds maximum {MAX_WORKERS}, clamping to {MAX_WORKERS}"
+        );
+        MAX_WORKERS
+    } else {
+        raw
+    }
 }
 
 /// Global multi-threaded Tokio runtime shared across all sync client operations.
