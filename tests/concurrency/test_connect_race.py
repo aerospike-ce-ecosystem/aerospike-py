@@ -29,14 +29,15 @@ class TestAsyncConnectRace:
             return_exceptions=True,
         )
 
-        successes = [r for r in results if r is None]
-        errors = [r for r in results if isinstance(r, aerospike_py.ClientError)]
+        # connect() returns self on success (not None), so check for non-Exception results.
+        successes = [r for r in results if not isinstance(r, Exception)]
+        guard_errors = [r for r in results if isinstance(r, aerospike_py.ClientError)]
 
-        assert len(successes) == 1, f"Expected exactly 1 success, got {len(successes)}"
-        assert len(errors) == 2, f"Expected 2 ClientError, got {len(errors)}"
+        assert len(successes) == 1, f"Expected exactly 1 success, got {len(successes)}: {results}"
+        assert len(guard_errors) == 2, f"Expected 2 ClientError, got {len(guard_errors)}: {results}"
 
         # Verify the error message mentions the state.
-        for err in errors:
+        for err in guard_errors:
             assert "already" in str(err).lower()
 
         assert client.is_connected() is True
