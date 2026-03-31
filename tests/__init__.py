@@ -12,4 +12,6 @@ AEROSPIKE_CONFIG = {
 }
 
 # Lightweight config for unit tests that never connect to a real server.
-DUMMY_CONFIG = {"hosts": [("127.0.0.1", 3000)]}
+# Use a non-standard port (19999) so the connection always fails, even in CI
+# where an Aerospike server may be running on port 3000.
+DUMMY_CONFIG = {"hosts": [("127.0.0.1", 19999)]}
