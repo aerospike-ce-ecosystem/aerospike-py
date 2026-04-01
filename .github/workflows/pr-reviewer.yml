@@ -8,7 +8,7 @@ jobs:
   review:
     if: github.event.label.name == 'needs-review'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ vars.CLAUDE_REVIEW_TIMEOUT }}
     permissions:
       contents: write
       issues: write
@@ -24,11 +24,11 @@ jobs:
       - name: Run Claude Code - PR Review
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GH_AW_GITHUB_TOKEN }}
-          bot_id: '24240623'
-          bot_name: 'KimSoungRyoul'
-          allowed_bots: '*'
+          bot_id: '${{ vars.CLAUDE_BOT_ID }}'
+          bot_name: '${{ vars.CLAUDE_BOT_NAME }}'
+          allowed_bots: '${{ vars.CLAUDE_ALLOWED_BOTS }}'
           branch_prefix: ''
           prompt: |
             You are an AI code review agent for the **aerospike-py** project.
@@ -41,9 +41,9 @@ jobs:
             ## Task
             Review PR #${{ github.event.pull_request.number }} and auto-fix HIGH severity issues.
 
-            ### Review Loop (max 3 iterations)
+            ### Review Loop (max ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }} iterations)
 
-            For each iteration (up to 3):
+            For each iteration (up to ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }}):
 
             **1. Analyze Changes**
             - Run `gh pr diff ${{ github.event.pull_request.number }}` to read the diff
@@ -54,11 +54,11 @@ jobs:
               - **INFO**: Observations, positive feedback
 
             **2. Decision**
-            - If HIGH or MEDIUM issues exist and iteration < 3:
+            - If HIGH or MEDIUM issues exist and iteration < ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }}:
               - Fix all HIGH and MEDIUM issues by editing the affected files
               - Commit: `git add -A && git commit -m "fix(review): <description>"`
               - Push: `git push`
-              - Comment: `gh pr comment ${{ github.event.pull_request.number }} --body "🔄 Review iteration N/3: Fixed M HIGH + MEDIUM severity issue(s). Re-reviewing..."`
+              - Comment: `gh pr comment ${{ github.event.pull_request.number }} --body "🔄 Review iteration N/${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }}: Fixed M HIGH + MEDIUM severity issue(s). Re-reviewing..."`
               - Re-read the diff and continue to next iteration
             - If no HIGH/MEDIUM issues OR iteration limit reached:
               - Break the loop
@@ -70,7 +70,7 @@ jobs:
             ## 📋 PR Review Summary
 
             **Status**: ✅ APPROVED / ⚠️ CHANGES_REQUESTED
-            **Review iterations**: N/3
+            **Review iterations**: N/${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }}
             **Issues found**: X HIGH, Y MEDIUM, Z LOW
 
             ### HIGH Severity (auto-fixed)
@@ -94,12 +94,12 @@ jobs:
             ```
 
             ## Constraints
-            - Maximum 3 review iterations
+            - Maximum ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }} review iterations
             - Auto-fix HIGH and MEDIUM severity issues
             - Leave LOW as suggestions only
             - Always mention @kimsoungryoul in the final comment
           claude_args: |
-            --max-turns 300
-            --model claude-opus-4-6
+            --max-turns ${{ vars.CLAUDE_MAX_TURNS }}
+            --model ${{ vars.CLAUDE_MODEL }}
             --dangerously-skip-permissions
-          settings: '{"git":{"includeCoAuthor":false},"env":{"CLAUDE_CODE_EFFORT":"high"}}'
+          settings: '${{ vars.CLAUDE_SETTINGS }}'
