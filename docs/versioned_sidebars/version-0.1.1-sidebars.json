@@ -1,0 +1,89 @@
+{
+  "docsSidebar": [
+    "getting-started",
+    {
+      "type": "category",
+      "label": "Guides",
+      "collapsed": false,
+      "items": [
+        "guides/architecture",
+        {
+          "type": "category",
+          "label": "Client Config",
+          "items": [
+            "guides/config/client-config",
+            "guides/config/performance-tuning",
+            "guides/config/migration"
+          ]
+        },
+        {
+          "type": "category",
+          "label": "Read",
+          "items": [
+            "guides/crud/read",
+            "guides/query-scan/query-scan",
+            "guides/query-scan/expression-filters",
+            "guides/crud/numpy-batch"
+          ]
+        },
+        {
+          "type": "category",
+          "label": "Write",
+          "items": [
+            "guides/crud/write",
+            "guides/crud/operations",
+            "guides/crud/numpy-batch-write"
+          ]
+        },
+        {
+          "type": "category",
+          "label": "Admin",
+          "items": [
+            "guides/admin/admin",
+            "guides/admin/udf",
+            "guides/admin/error-handling"
+          ]
+        },
+        "guides/api-comparison",
+        "guides/troubleshooting"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Integrations",
+      "items": [
+        "integrations/fastapi",
+        {
+          "type": "category",
+          "label": "Observability",
+          "items": [
+            "integrations/observability/logging",
+            "integrations/observability/metrics",
+            "integrations/observability/tracing"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Performance",
+      "items": [
+        "performance/overview",
+        "performance/benchmark-results"
+      ]
+    },
+    {
+      "type": "category",
+      "label": "API Reference",
+      "items": [
+        "api/client",
+        "api/types",
+        "api/exceptions",
+        "api/constants",
+        "api/query-scan"
+      ]
+    },
+    "contributing",
+    "faq"
+  ]
+}
