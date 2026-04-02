@@ -1,0 +1,10 @@
+{
+  "label": "Integrations",
+  "position": 4,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Integrations",
+    "description": "Framework integration guides for aerospike-py"
+  }
+}
