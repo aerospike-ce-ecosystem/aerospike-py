@@ -96,7 +96,7 @@ pub struct PutArgs {
 
 pub enum PutPolicy {
     Default,
-    Custom(WritePolicy),
+    Custom(Box<WritePolicy>),
 }
 
 pub fn prepare_put_args(
@@ -123,7 +123,7 @@ pub fn prepare_put_args(
     let put_policy = if policy.is_none() && meta.is_none() {
         PutPolicy::Default
     } else {
-        PutPolicy::Custom(parse_write_policy(policy, meta)?)
+        PutPolicy::Custom(Box::new(parse_write_policy(policy, meta)?))
     };
 
     Ok(PutArgs {
