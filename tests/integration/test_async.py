@@ -100,3 +100,43 @@ class TestAsyncBatchWrite:
             else:
                 assert val == 77
         await async_client.batch_remove(keys)
+
+
+class TestAsyncBatchWriteGeneric:
+    """Test async batch_write() — generic dict-based batch write."""
+
+    async def test_async_batch_write_new_records(self, async_client):
+        records = [
+            (("test", "demo", "abw_gen_1"), {"name": "Alice", "age": 30}),
+            (("test", "demo", "abw_gen_2"), {"name": "Bob", "age": 25}),
+        ]
+        results = await async_client.batch_write(records)
+        assert len(results.batch_records) == 2
+        for br in results.batch_records:
+            assert br.result == 0
+
+        # Verify
+        _, _, bins = await async_client.get(("test", "demo", "abw_gen_1"))
+        assert bins["name"] == "Alice"
+        assert bins["age"] == 30
+
+        # Cleanup
+        await async_client.batch_remove([k for k, _ in records])
+
+    async def test_async_batch_write_different_bins(self, async_client):
+        records = [
+            (("test", "demo", "abw_diff_1"), {"x": 1}),
+            (("test", "demo", "abw_diff_2"), {"a": "hello", "b": 42}),
+        ]
+        results = await async_client.batch_write(records)
+        for br in results.batch_records:
+            assert br.result == 0
+
+        _, _, bins = await async_client.get(("test", "demo", "abw_diff_2"))
+        assert bins == {"a": "hello", "b": 42}
+
+        await async_client.batch_remove([k for k, _ in records])
+
+    async def test_async_batch_write_empty(self, async_client):
+        results = await async_client.batch_write([])
+        assert len(results.batch_records) == 0

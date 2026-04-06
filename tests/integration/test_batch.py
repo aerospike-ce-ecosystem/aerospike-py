@@ -264,6 +264,116 @@ class TestBatchWrite:
             assert br.record is not None
 
 
+class TestBatchWriteGeneric:
+    """Test batch_write() — generic dict-based batch write."""
+
+    def test_batch_write_new_records(self, client, cleanup):
+        """Write 3 new records and verify with get()."""
+        records = [
+            (("test", "demo", "bw_gen_1"), {"name": "Alice", "age": 30}),
+            (("test", "demo", "bw_gen_2"), {"name": "Bob", "age": 25}),
+            (("test", "demo", "bw_gen_3"), {"name": "Charlie", "age": 35}),
+        ]
+        for key, _ in records:
+            cleanup.append(key)
+
+        results = client.batch_write(records)
+        assert len(results.batch_records) == 3
+        for br in results.batch_records:
+            assert br.result == 0
+
+        # Verify each record
+        _, _, bins = client.get(("test", "demo", "bw_gen_1"))
+        assert bins["name"] == "Alice"
+        assert bins["age"] == 30
+        _, _, bins = client.get(("test", "demo", "bw_gen_3"))
+        assert bins["name"] == "Charlie"
+
+    def test_batch_write_overwrite_existing(self, client, cleanup):
+        """Overwrite existing records and verify generation increments."""
+        key = ("test", "demo", "bw_gen_ow")
+        cleanup.append(key)
+
+        client.put(key, {"name": "old", "score": 1})
+        _, meta_before, _ = client.get(key)
+
+        results = client.batch_write([(key, {"name": "new", "score": 999})])
+        assert results.batch_records[0].result == 0
+
+        _, meta_after, bins = client.get(key)
+        assert bins["name"] == "new"
+        assert bins["score"] == 999
+        assert meta_after.gen > meta_before.gen
+
+    def test_batch_write_different_bins_per_key(self, client, cleanup):
+        """Each record has different bin names."""
+        records = [
+            (("test", "demo", "bw_diff_1"), {"x": 1, "y": 2}),
+            (("test", "demo", "bw_diff_2"), {"a": "hello", "b": "world", "c": 42}),
+        ]
+        for key, _ in records:
+            cleanup.append(key)
+
+        results = client.batch_write(records)
+        for br in results.batch_records:
+            assert br.result == 0
+
+        _, _, bins1 = client.get(("test", "demo", "bw_diff_1"))
+        assert bins1 == {"x": 1, "y": 2}
+
+        _, _, bins2 = client.get(("test", "demo", "bw_diff_2"))
+        assert bins2 == {"a": "hello", "b": "world", "c": 42}
+
+    def test_batch_write_empty_records(self, client):
+        """Empty records list returns empty BatchRecords."""
+        results = client.batch_write([])
+        assert len(results.batch_records) == 0
+
+    def test_batch_write_large_batch(self, client, cleanup):
+        """Write 200 records in one batch."""
+        n = 200
+        records = [(("test", "demo", f"bw_large_{i}"), {"idx": i, "val": f"v{i}"}) for i in range(n)]
+        for key, _ in records:
+            cleanup.append(key)
+
+        results = client.batch_write(records)
+        assert len(results.batch_records) == n
+        for br in results.batch_records:
+            assert br.result == 0
+
+    def test_batch_write_mixed_types(self, client, cleanup):
+        """Write records with different value types."""
+        key = ("test", "demo", "bw_mixed")
+        cleanup.append(key)
+
+        bins = {
+            "str_bin": "hello",
+            "int_bin": 42,
+            "float_bin": 3.14,
+            "list_bin": [1, 2, 3],
+            "map_bin": {"nested": "value"},
+        }
+        results = client.batch_write([(key, bins)])
+        assert results.batch_records[0].result == 0
+
+        _, _, read_bins = client.get(key)
+        assert read_bins["str_bin"] == "hello"
+        assert read_bins["int_bin"] == 42
+        assert read_bins["list_bin"] == [1, 2, 3]
+        assert read_bins["map_bin"] == {"nested": "value"}
+
+    def test_batch_write_with_policy(self, client, cleanup):
+        """Pass a batch policy dict."""
+        key = ("test", "demo", "bw_policy")
+        cleanup.append(key)
+
+        results = client.batch_write(
+            [(key, {"val": 1})],
+            policy={"total_timeout": 5000},
+        )
+        assert results.batch_records[0].result == 0
+
+
 class TestBatchRemove:
     def test_batch_remove(self, client):
         keys = [

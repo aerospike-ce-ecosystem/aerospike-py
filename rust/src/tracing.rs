@@ -58,6 +58,8 @@ pub fn op_to_upper(op: &str) -> Cow<'static, str> {
         "batch_read" => Cow::Borrowed("BATCH_READ"),
         "batch_operate" => Cow::Borrowed("BATCH_OPERATE"),
         "batch_remove" => Cow::Borrowed("BATCH_REMOVE"),
+        "batch_write" => Cow::Borrowed("BATCH_WRITE"),
+        "batch_write_retry" => Cow::Borrowed("BATCH_WRITE_RETRY"),
         "batch_write_numpy" => Cow::Borrowed("BATCH_WRITE_NUMPY"),
         "batch_write_numpy_retry" => Cow::Borrowed("BATCH_WRITE_NUMPY_RETRY"),
         "query" => Cow::Borrowed("QUERY"),

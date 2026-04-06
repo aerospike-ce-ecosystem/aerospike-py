@@ -220,6 +220,11 @@ class Client(_NativeClient):
         raw = super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
         return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
+    @catch_unexpected("Client.batch_write")
+    def batch_write(self, records, policy=None, retry=0) -> BatchRecordsTuple:
+        raw = super().batch_write(records, policy, retry)
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+
     @catch_unexpected("Client.batch_operate")
     def batch_operate(self, keys, ops, policy=None) -> BatchRecordsTuple:
         raw = super().batch_operate(keys, ops, policy)

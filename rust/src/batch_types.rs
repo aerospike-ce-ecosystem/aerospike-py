@@ -1,5 +1,5 @@
 //! Python-visible batch record types for all batch operations
-//! (`batch_read`, `batch_operate`, `batch_remove`, `batch_write_numpy`).
+//! (`batch_read`, `batch_write`, `batch_operate`, `batch_remove`, `batch_write_numpy`).
 
 use aerospike_core::BatchRecord;
 use log::trace;

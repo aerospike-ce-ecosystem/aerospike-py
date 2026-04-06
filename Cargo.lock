@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "aerospike"
-version = "2.0.0-alpha.10"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9262641046aa6b2071e9c9f3aee86d943d24dafae5287e36c09d3ba6bf72e3cc"
+checksum = "b6f67b09c3d3b3cf9e255fbd708744f158325497ae3fef0d8bfa25f1648571a3"
 dependencies = [
  "aerospike-core",
  "aerospike-macro",
@@ -14,9 +14,9 @@ dependencies = [
 
 [[package]]
 name = "aerospike-core"
-version = "2.0.0-alpha.10"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b58c52f5a73bb54d51db315422beca3e555130cadc28962f81368def9ccda29"
+checksum = "6cdc5849159c5b6a078a950d1782a6f5f1ba873b55ff019d8afcaff2c7161303"
 dependencies = [
  "aerospike-rt",
  "async-channel",
@@ -37,9 +37,9 @@ dependencies = [
 
 [[package]]
 name = "aerospike-macro"
-version = "2.0.0-alpha.10"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b92cee2ec92acc24d7bf4cc3d60c9c4ba8d069ac09755614b2a04db99c3b5a6b"
+checksum = "44aa1da0db0cf6d2789980ef8359d24969ef8cee472dfd66034d374027a4d129"
 dependencies = [
  "aerospike-rt",
  "proc-macro2",
@@ -63,15 +63,16 @@ dependencies = [
  "prometheus-client",
  "pyo3",
  "pyo3-async-runtimes",
+ "rand 0.8.5",
  "ripemd",
  "tokio",
 ]
 
 [[package]]
 name = "aerospike-rt"
-version = "2.0.0-alpha.10"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36cbe306a1fa1555e5312b22e8a607501108fb57365bc8cde6a16a8364b417a3"
+checksum = "9f02dd7c03ad4b8feb49703e6f75bd69dbf0b96fd8a92f188fb16dc819b1977b"
 dependencies = [
  "tokio",
 ]

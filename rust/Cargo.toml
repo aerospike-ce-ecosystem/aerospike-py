@@ -13,8 +13,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 pyo3 = { version = "0.28.2" }
 pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
-aerospike = { version = "2.0.0-alpha.10", features = ["async", "rt-tokio"], default-features = false }
-aerospike-core = { version = "2.0.0-alpha.10" }
+aerospike = { version = "2.0.0-alpha.11", features = ["async", "rt-tokio"], default-features = false }
+aerospike-core = { version = "2.0.0-alpha.11" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "io-util", "macros"] }
 arc-swap = "1"
 futures = "0.3"
