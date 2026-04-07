@@ -70,7 +70,7 @@ class BatchRecord(NamedTuple):
     key: AerospikeKey | None
     result: int
     record: Record | None
-    in_doubt: bool
+    in_doubt: bool = False
 
 
 class BatchRecords(NamedTuple):

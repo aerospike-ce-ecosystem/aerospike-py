@@ -125,6 +125,39 @@ for br in results.batch_records:
         logger.warning("Key %s failed (code=%d)", br.key, br.result)
 ```
 
+### `batch_write` and the `in_doubt` Flag
+
+`batch_write` returns per-record results that include an `in_doubt` flag. When `in_doubt` is `True`, the write may have completed on the server despite a transient error (e.g., timeout after the write was sent). Check `in_doubt` before retrying to avoid duplicate writes on non-idempotent operations:
+
+```python
+from aerospike_py.exception import AerospikeError
+
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+]
+
+try:
+    results = client.batch_write(records)
+except AerospikeError:
+    # Entire batch failed (e.g., cluster unavailable)
+    raise
+
+retry_records = []
+for br in results.batch_records:
+    if br.result != 0:
+        if br.in_doubt:
+            # Write may have succeeded -- verify before retrying
+            logger.warning("Key %s in doubt (code=%d), skipping retry", br.key, br.result)
+        else:
+            # Safe to retry
+            retry_records.append(br.key)
+```
+
+:::tip
+Use the built-in `retry` parameter for automatic transient-failure retries with exponential backoff: `client.batch_write(records, retry=3)`. For non-idempotent operations where duplicates are unacceptable, keep `retry=0` (default) and handle retries manually using the `in_doubt` flag as shown above.
+:::
+
 ## Async Error Handling
 
 Exception types are identical for sync and async clients. Use standard `try`/`except` with `await`:

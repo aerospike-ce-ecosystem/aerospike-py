@@ -683,7 +683,7 @@ class Client:
             results = client.batch_write(records)
             for br in results.batch_records:
                 if br.result != 0:
-                    print(f"Failed: {br.key}, code={br.result}")
+                    print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
             ```
         """
         ...
@@ -1652,7 +1652,7 @@ class AsyncClient:
             results = await client.batch_write(records)
             for br in results.batch_records:
                 if br.result != 0:
-                    print(f"Failed: {br.key}, code={br.result}")
+                    print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
             ```
         """
         ...
