@@ -180,9 +180,3 @@ module-name = "aerospike_py._aerospike"
 manifest-path = "rust/Cargo.toml"
 features = ["extension-module", "otel"]
 include = ["LICENSE"]
-
-[tool.uv.workspace]
-members = [
-    "aaaa",
-    "bbbb",
-]
