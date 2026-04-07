@@ -11,7 +11,7 @@ use aerospike_core::{
 };
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::operations::py_ops_to_rust;
 use crate::policy::admin_policy::parse_admin_policy;
@@ -96,7 +96,7 @@ pub struct PutArgs {
 
 pub enum PutPolicy {
     Default,
-    Custom(WritePolicy),
+    Custom(Box<WritePolicy>),
 }
 
 pub fn prepare_put_args(
@@ -123,7 +123,7 @@ pub fn prepare_put_args(
     let put_policy = if policy.is_none() && meta.is_none() {
         PutPolicy::Default
     } else {
-        PutPolicy::Custom(parse_write_policy(policy, meta)?)
+        PutPolicy::Custom(Box::new(parse_write_policy(policy, meta)?))
     };
 
     Ok(PutArgs {
@@ -612,6 +612,62 @@ impl BatchRemoveArgs {
             .map(|k| BatchOperation::delete(&delete_policy, k.clone()))
             .collect()
     }
+}
+
+// ── batch_write (generic) ───────────────────────────────────────────────────
+
+pub struct BatchWriteGenericArgs {
+    pub records: Vec<(Key, Vec<Bin>)>,
+    pub batch_policy: aerospike_core::BatchPolicy,
+    pub batch_ns: String,
+    pub batch_set: String,
+    pub otel: OtelContext,
+    pub max_retries: u32,
+}
+
+pub fn prepare_batch_write_args(
+    py: Python<'_>,
+    records: &Bound<'_, PyList>,
+    policy: Option<&Bound<'_, PyDict>>,
+    retry: u32,
+    conn_info: &Arc<ConnectionInfo>,
+) -> PyResult<BatchWriteGenericArgs> {
+    let batch_policy = parse_batch_policy(policy)?;
+    let mut rust_records = Vec::with_capacity(records.len());
+
+    for item in records.iter() {
+        let tuple = item.cast::<PyTuple>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "Each record must be a tuple of (key, bins)",
+            )
+        })?;
+        if tuple.len() < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "Each record tuple must have at least 2 elements: (key, bins)",
+            ));
+        }
+        let key = py_to_key(&tuple.get_item(0)?)?;
+        let bins_obj = tuple.get_item(1)?;
+        let bins_dict = bins_obj.cast::<PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err("bins element must be a dict")
+        })?;
+        let bins = py_dict_to_bins(bins_dict)?;
+        rust_records.push((key, bins));
+    }
+
+    let (batch_ns, batch_set) = rust_records
+        .first()
+        .map(|(k, _)| (k.namespace.clone(), k.set_name.clone()))
+        .unwrap_or_default();
+
+    Ok(BatchWriteGenericArgs {
+        records: rust_records,
+        batch_policy,
+        batch_ns,
+        batch_set,
+        otel: OtelContext::new(py, conn_info),
+        max_retries: retry,
+    })
 }
 
 // ── info_all / info_random_node ──────────────────────────────────────────────

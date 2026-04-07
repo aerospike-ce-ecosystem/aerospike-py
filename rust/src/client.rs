@@ -1170,6 +1170,46 @@ impl PyClient {
         Ok(Py::new(py, batch)?.into_any())
     }
 
+    /// Write multiple records with per-record bins.
+    ///
+    /// Each record is a (key, bins) tuple. Unlike `batch_operate()` (which applies
+    /// the same operations to all keys), `batch_write()` writes different bins per key.
+    #[allow(clippy::unit_arg)]
+    #[pyo3(signature = (records, policy=None, retry=0))]
+    fn batch_write(
+        &self,
+        py: Python<'_>,
+        records: &Bound<'_, PyList>,
+        policy: Option<&Bound<'_, PyDict>>,
+        retry: u32,
+    ) -> PyResult<Py<PyAny>> {
+        debug!("batch_write: records_count={}", records.len());
+        let client = self.get_client()?.clone();
+        let args = client_common::prepare_batch_write_args(
+            py, records, policy, retry, &self.connection_info,
+        )?;
+        let limiter = self.limiter.clone();
+        let results = py.detach(|| {
+            RUNTIME.block_on(async {
+                let _permit = limiter.acquire_named("batch_write").await?;
+                client_ops::do_batch_write(
+                    &client,
+                    &args.batch_policy,
+                    &args.records,
+                    &args.batch_ns,
+                    &args.batch_set,
+                    args.otel.parent_ctx,
+                    args.otel.conn_info,
+                    args.max_retries,
+                    "batch_write",
+                )
+                .await
+            })
+        })?;
+        let batch = batch_to_batch_records_py(py, &results)?;
+        Ok(Py::new(py, batch)?.into_any())
+    }
+
     /// Write multiple records from a numpy structured array.
     ///
     /// Each row becomes a separate write operation in the batch.
@@ -1218,6 +1258,7 @@ impl PyClient {
                     parent_ctx,
                     conn_info,
                     retry,
+                    "batch_write_numpy",
                 )
                 .await
             })

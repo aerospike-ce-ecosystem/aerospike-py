@@ -578,7 +578,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                     1 => ListOrderType::Ordered,
                     _ => ListOrderType::Unordered,
                 };
-                list_ops::set_order(&name, order_type, vec![])
+                list_ops::set_order(&name, order_type)
             }
 
             // ── Map CDT operations ───────────────────────────

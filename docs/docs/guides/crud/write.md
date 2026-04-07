@@ -139,6 +139,33 @@ result = await client.operate_ordered(key, ops)
   </TabItem>
 </Tabs>
 
+## Batch Write
+
+Write multiple records with **per-record bins** in a single batch call. This is the batch version of `put()` — each record can have different bin names and values.
+
+```python
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+    (("test", "demo", "user3"), {"name": "Charlie", "age": 35}),
+]
+results = client.batch_write(records)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
+```
+
+**Retry with auto-recovery:** Records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff:
+
+```python
+# Retry failed records up to 5 times
+results = client.batch_write(records, retry=5)
+```
+
+:::tip[in_doubt flag]
+When `br.in_doubt` is `True`, the write may have completed on the server despite the error (e.g., timeout after the write was sent). Check `in_doubt` before retrying to avoid duplicate writes on non-idempotent operations.
+:::
+
 ## Batch Operate / Remove
 
 ```python

@@ -306,6 +306,7 @@ pub async fn do_batch_write(
     parent_ctx: client_common::ParentContext,
     conn_info: Arc<crate::tracing::ConnectionInfo>,
     max_retries: u32,
+    op_name: &str,
 ) -> PyResult<Vec<BatchRecord>> {
     let write_policy = BatchWritePolicy::default();
 
@@ -321,12 +322,12 @@ pub async fn do_batch_write(
 
     // First attempt
     let mut results: Vec<BatchRecord> = traced_op!(
-        "batch_write_numpy",
+        op_name,
         ns,
         set,
         parent_ctx,
         conn_info,
-        { client.batch(batch_policy, &batch_ops).await }
+        client.batch(batch_policy, &batch_ops).await
     )?;
 
     if max_retries == 0 {
@@ -379,13 +380,14 @@ pub async fn do_batch_write(
             })
             .collect();
 
+        let retry_op_name = format!("{}_retry", op_name);
         let retry_results: Vec<BatchRecord> = match traced_op!(
-            "batch_write_numpy_retry",
+            &retry_op_name,
             ns,
             set,
             parent_ctx,
             conn_info,
-            { client.batch(batch_policy, &retry_ops).await }
+            client.batch(batch_policy, &retry_ops).await
         ) {
             Ok(r) => r,
             Err(e) => {

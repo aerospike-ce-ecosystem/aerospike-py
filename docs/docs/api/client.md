@@ -800,6 +800,49 @@ for br in results.batch_records:
   </TabItem>
 </Tabs>
 
+### `batch_write(records, policy=None, retry=0)`
+
+Write multiple records with per-record bins in a single batch call. Each record is a `(key, bins)` tuple where bins is a dict. Unlike `batch_operate()` which applies the same operations to all keys, each record can have different bins.
+
+| Parameter | Description |
+|-----------|-------------|
+| `records` | List of ``(key, bins)`` tuples. Key is ``(namespace, set, primary_key)``, bins is a dict. |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
+| `retry` | Max retries for transient failures (default ``0``). Failed records are retried with exponential backoff. |
+
+**Returns:** ``BatchRecords`` with per-record result codes. Each ``BatchRecord`` includes an ``in_doubt`` flag indicating whether the write may have completed despite the error.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+]
+results = client.batch_write(records, retry=3)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+]
+results = await client.batch_write(records, retry=3)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
+```
+
+  </TabItem>
+</Tabs>
+
 ### `batch_remove(keys, policy=None)`
 
 Delete multiple records in a single batch call.

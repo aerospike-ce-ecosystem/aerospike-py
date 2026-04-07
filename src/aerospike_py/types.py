@@ -65,11 +65,12 @@ class OperateOrderedResult(NamedTuple):
 
 
 class BatchRecord(NamedTuple):
-    """Single record result from a batch read operation."""
+    """Single record result from a batch operation."""
 
     key: AerospikeKey | None
     result: int
     record: Record | None
+    in_doubt: bool = False
 
 
 class BatchRecords(NamedTuple):
