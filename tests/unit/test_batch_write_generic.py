@@ -2,6 +2,8 @@
 
 import inspect
 
+import pytest
+
 import aerospike_py
 from aerospike_py.types import BatchRecord
 
@@ -47,3 +49,22 @@ class TestBatchWriteSignature:
         sig = inspect.signature(aerospike_py.AsyncClient.batch_write)
         assert "retry" in sig.parameters
         assert sig.parameters["retry"].default == 0
+
+
+class TestBatchWriteInputValidation:
+    """Verify batch_write() raises correct errors for invalid inputs."""
+
+    def test_record_must_be_tuple(self, client):
+        """Non-tuple record raises TypeError."""
+        with pytest.raises(TypeError, match="must be a tuple"):
+            client.batch_write([{"key": ("test", "demo", "k1"), "bins": {"a": 1}}])
+
+    def test_tuple_must_have_at_least_2_elements(self, client):
+        """Single-element tuple raises ValueError."""
+        with pytest.raises(ValueError, match="at least 2 elements"):
+            client.batch_write([(("test", "demo", "k1"),)])
+
+    def test_bins_must_be_dict(self, client):
+        """Non-dict bins element raises TypeError."""
+        with pytest.raises(TypeError, match="must be a dict"):
+            client.batch_write([(("test", "demo", "k1"), [("a", 1)])])

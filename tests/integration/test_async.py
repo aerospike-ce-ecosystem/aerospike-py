@@ -29,12 +29,15 @@ class TestAsyncConnection:
 class TestAsyncBatchWrite:
     """Test async batch_operate used as batch write (OPERATOR_WRITE)."""
 
-    async def test_async_batch_write_new_records(self, async_client):
+    async def test_async_batch_write_new_records(self, async_client, async_cleanup):
         keys = [
             ("test", "demo", "async_bw_1"),
             ("test", "demo", "async_bw_2"),
             ("test", "demo", "async_bw_3"),
         ]
+        for k in keys:
+            async_cleanup.append(k)
+
         ops = [
             {"op": aerospike_py.OPERATOR_WRITE, "bin": "name", "val": "async_test"},
             {"op": aerospike_py.OPERATOR_WRITE, "bin": "score", "val": 200},
@@ -43,6 +46,7 @@ class TestAsyncBatchWrite:
         assert len(results.batch_records) == 3
         for br in results.batch_records:
             assert br.result == 0
+            assert br.in_doubt is False
 
         # Verify records were written
         for k in keys:
@@ -50,14 +54,16 @@ class TestAsyncBatchWrite:
             assert meta is not None
             assert bins["name"] == "async_test"
             assert bins["score"] == 200
-        await async_client.batch_remove(keys)
 
-    async def test_async_batch_write_partial_failure(self, async_client):
+    async def test_async_batch_write_partial_failure(self, async_client, async_cleanup):
         """OPERATOR_INCR on string bin causes per-record failure."""
         keys = [
             ("test", "demo", "async_bwf_ok"),
             ("test", "demo", "async_bwf_fail"),
         ]
+        for k in keys:
+            async_cleanup.append(k)
+
         await async_client.put(keys[0], {"counter": 10})
         await async_client.put(keys[1], {"counter": "not_a_number"})
 
@@ -78,13 +84,14 @@ class TestAsyncBatchWrite:
         assert br1.result != 0
         assert br1.record is None
 
-        await async_client.batch_remove(keys)
-
-    async def test_async_batch_write_with_read_back(self, async_client):
+    async def test_async_batch_write_with_read_back(self, async_client, async_cleanup):
         keys = [
             ("test", "demo", "async_bwr_1"),
             ("test", "demo", "async_bwr_2"),
         ]
+        for k in keys:
+            async_cleanup.append(k)
+
         ops = [
             {"op": aerospike_py.OPERATOR_WRITE, "bin": "val", "val": 77},
             {"op": aerospike_py.OPERATOR_READ, "bin": "val", "val": None},
@@ -93,49 +100,52 @@ class TestAsyncBatchWrite:
         assert len(results.batch_records) == 2
         for br in results.batch_records:
             assert br.result == 0
+            assert br.in_doubt is False
             assert br.record is not None
             val = br.record.bins["val"]
             if isinstance(val, list):
                 assert val[-1] == 77
             else:
                 assert val == 77
-        await async_client.batch_remove(keys)
 
 
 class TestAsyncBatchWriteGeneric:
     """Test async batch_write() — generic dict-based batch write."""
 
-    async def test_async_batch_write_new_records(self, async_client):
+    async def test_async_batch_write_new_records(self, async_client, async_cleanup):
         records = [
             (("test", "demo", "abw_gen_1"), {"name": "Alice", "age": 30}),
             (("test", "demo", "abw_gen_2"), {"name": "Bob", "age": 25}),
         ]
+        for key, _ in records:
+            async_cleanup.append(key)
+
         results = await async_client.batch_write(records)
         assert len(results.batch_records) == 2
         for br in results.batch_records:
             assert br.result == 0
+            assert br.in_doubt is False
 
         # Verify
         _, _, bins = await async_client.get(("test", "demo", "abw_gen_1"))
         assert bins["name"] == "Alice"
         assert bins["age"] == 30
 
-        # Cleanup
-        await async_client.batch_remove([k for k, _ in records])
-
-    async def test_async_batch_write_different_bins(self, async_client):
+    async def test_async_batch_write_different_bins(self, async_client, async_cleanup):
         records = [
             (("test", "demo", "abw_diff_1"), {"x": 1}),
             (("test", "demo", "abw_diff_2"), {"a": "hello", "b": 42}),
         ]
+        for key, _ in records:
+            async_cleanup.append(key)
+
         results = await async_client.batch_write(records)
         for br in results.batch_records:
             assert br.result == 0
+            assert br.in_doubt is False
 
         _, _, bins = await async_client.get(("test", "demo", "abw_diff_2"))
         assert bins == {"a": "hello", "b": 42}
-
-        await async_client.batch_remove([k for k, _ in records])
 
     async def test_async_batch_write_empty(self, async_client):
         results = await async_client.batch_write([])

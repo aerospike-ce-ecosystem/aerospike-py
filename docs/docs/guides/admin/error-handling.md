@@ -143,18 +143,21 @@ except AerospikeError:
     # Entire batch failed (e.g., cluster unavailable)
     raise
 
-# Build lookup for retry
+# Build lookup for retry (use 3-tuple keys to match input format)
 records_by_key = {k: bins for k, bins in records}
 retry_records = []
 
 for br in results.batch_records:
     if br.result != 0:
+        # br.key is a 4-tuple AerospikeKey(namespace, set_name, user_key, digest);
+        # extract the 3-tuple to match the original input keys.
+        input_key = (br.key[0], br.key[1], br.key[2]) if br.key else None
         if br.in_doubt:
             # Write may have succeeded -- verify before retrying
             logger.warning("Key %s in doubt (code=%d), skipping retry", br.key, br.result)
-        elif br.key in records_by_key:
+        elif input_key in records_by_key:
             # Definite failure -- safe to retry
-            retry_records.append((br.key, records_by_key[br.key]))
+            retry_records.append((input_key, records_by_key[input_key]))
 
 if retry_records:
     client.batch_write(retry_records)

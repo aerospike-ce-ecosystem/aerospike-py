@@ -218,6 +218,10 @@ class AsyncClient:
 
     @catch_unexpected("AsyncClient.batch_write")
     async def batch_write(self, records, policy=None, retry=0) -> BatchRecordsTuple:
+        """Write multiple records with per-record bins in a single batch call (async).
+
+        See :meth:`AsyncClient.batch_write` in ``__init__.pyi`` for full documentation.
+        """
         raw = await self._inner.batch_write(records, policy, retry)
         return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
