@@ -374,6 +374,17 @@ class TestBatchWriteGeneric:
         )
         assert results.batch_records[0].result == 0
 
+    def test_batch_write_with_retry(self, client, cleanup):
+        """retry parameter is accepted and write succeeds."""
+        key = ("test", "demo", "bw_retry")
+        cleanup.append(key)
+
+        results = client.batch_write([(key, {"val": 1})], retry=2)
+        assert results.batch_records[0].result == 0
+
+        _, _, bins = client.get(key)
+        assert bins["val"] == 1
+
 
 class TestBatchRemove:
     def test_batch_remove(self, client):

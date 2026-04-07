@@ -703,6 +703,8 @@ class Client:
 
         Returns:
             A list of ``BatchRecord`` NamedTuples with per-record result codes.
+            Each ``BatchRecord`` also includes an ``in_doubt`` flag
+            (see :meth:`batch_write` for details).
 
         Example:
             ```python
@@ -731,6 +733,8 @@ class Client:
 
         Returns:
             A list of ``BatchRecord`` NamedTuples with per-record result codes.
+            Each ``BatchRecord`` also includes an ``in_doubt`` flag
+            (see :meth:`batch_write` for details).
 
         Example:
             ```python
@@ -1672,6 +1676,8 @@ class AsyncClient:
 
         Returns:
             A list of ``BatchRecord`` NamedTuples with per-record result codes.
+            Each ``BatchRecord`` also includes an ``in_doubt`` flag
+            (see :meth:`batch_write` for details).
 
         Example:
             ```python
@@ -1700,6 +1706,8 @@ class AsyncClient:
 
         Returns:
             A list of ``BatchRecord`` NamedTuples with per-record result codes.
+            Each ``BatchRecord`` also includes an ``in_doubt`` flag
+            (see :meth:`batch_write` for details).
 
         Example:
             ```python

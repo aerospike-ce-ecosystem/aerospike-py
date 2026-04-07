@@ -222,6 +222,10 @@ class Client(_NativeClient):
 
     @catch_unexpected("Client.batch_write")
     def batch_write(self, records, policy=None, retry=0) -> BatchRecordsTuple:
+        """Write multiple records with per-record bins in a single batch call.
+
+        See :meth:`Client.batch_write` in ``__init__.pyi`` for full documentation.
+        """
         raw = super().batch_write(records, policy, retry)
         return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 

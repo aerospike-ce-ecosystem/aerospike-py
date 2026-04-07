@@ -56,6 +56,7 @@ Returned by: batch operations (inside `BatchRecords.batch_records`)
 | `key` | `AerospikeKey \| None` | Record key |
 | `result` | `int` | Per-record result code (0 = success) |
 | `record` | `Record \| None` | Record data (`None` if operation failed) |
+| `in_doubt` | `bool` | Whether the write may have completed despite a transient error (default `False`) |
 
 ```python
 results = client.batch_operate(keys, ops)
@@ -66,7 +67,7 @@ for br in results.batch_records:
 
 ### `BatchRecords`
 
-Returned by: `batch_read()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
+Returned by: `batch_read()`, `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -124,7 +125,7 @@ Returned by: `operate_ordered()`
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
 | `batch_read()` | `BatchRecords` \| `NumpyBatchRecords` |
-| `batch_operate()`, `batch_remove()` | `BatchRecords` |
+| `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchRecords` |
 | `batch_write_numpy()` | `BatchRecords` |
 | `Query.results()` | `list[Record]` |
 
