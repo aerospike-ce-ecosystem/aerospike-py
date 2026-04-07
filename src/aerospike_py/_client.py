@@ -58,7 +58,7 @@ def _wrap_operate_ordered(raw: tuple) -> OperateOrderedResult:
 def _wrap_batch_record(br) -> BatchRecordTuple:
     key = _wrap_key(br.key)
     record = _wrap_record(br.record) if br.record is not None else None
-    return BatchRecordTuple(key=key, result=br.result, record=record)
+    return BatchRecordTuple(key=key, result=br.result, record=record, in_doubt=br.in_doubt)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +218,11 @@ class Client(_NativeClient):
             ```
         """
         raw = super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+
+    @catch_unexpected("Client.batch_write")
+    def batch_write(self, records, policy=None, retry=0) -> BatchRecordsTuple:
+        raw = super().batch_write(records, policy, retry)
         return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_operate")

@@ -650,6 +650,44 @@ class Client:
         """
         ...
 
+    def batch_write(
+        self,
+        records: list[tuple[Key, dict[str, Any]]],
+        policy: Optional[dict[str, Any]] = None,
+        retry: int = 0,
+    ) -> BatchRecords:
+        """Write multiple records with per-record bins in a single batch call.
+
+        Each record is a ``(key, bins)`` tuple where key is
+        ``(namespace, set, primary_key)`` and bins is a dict of bin
+        name-to-value mappings. Unlike ``batch_operate`` (which applies
+        the same operations to all keys), each record can have different bins.
+
+        Args:
+            records: List of ``(key, bins)`` tuples.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+            retry: Maximum number of retries for failed records (default ``0``).
+                When > 0, records that fail with transient errors (timeout,
+                device overload, key busy) are automatically retried with
+                exponential backoff.
+
+        Returns:
+            A ``BatchRecords`` containing per-record result codes.
+
+        Example:
+            ```python
+            records = [
+                (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+                (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+            ]
+            results = client.batch_write(records)
+            for br in results.batch_records:
+                if br.result != 0:
+                    print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
+            ```
+        """
+        ...
+
     def batch_operate(
         self,
         keys: list[Key],
@@ -1578,6 +1616,43 @@ class AsyncClient:
             for br in results.batch_records:
                 if br.result != 0:
                     print(f"Failed: {br.key}, code={br.result}")
+            ```
+        """
+        ...
+
+    async def batch_write(
+        self,
+        records: list[tuple[Key, dict[str, Any]]],
+        policy: Optional[dict[str, Any]] = None,
+        retry: int = 0,
+    ) -> BatchRecords:
+        """Write multiple records with per-record bins (async).
+
+        Each record is a ``(key, bins)`` tuple where key is
+        ``(namespace, set, primary_key)`` and bins is a dict of bin
+        name-to-value mappings.
+
+        Args:
+            records: List of ``(key, bins)`` tuples.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+            retry: Maximum number of retries for failed records (default ``0``).
+                When > 0, records that fail with transient errors (timeout,
+                device overload, key busy) are automatically retried with
+                exponential backoff.
+
+        Returns:
+            A ``BatchRecords`` containing per-record result codes.
+
+        Example:
+            ```python
+            records = [
+                (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+                (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+            ]
+            results = await client.batch_write(records)
+            for br in results.batch_records:
+                if br.result != 0:
+                    print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
             ```
         """
         ...

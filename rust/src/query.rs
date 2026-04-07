@@ -6,8 +6,7 @@
 
 use std::sync::Arc;
 
-#[allow(unused_imports)]
-use aerospike_core::as_val;
+use aerospike_core::query::Filter;
 use aerospike_core::{
     Bins, Client as AsClient, CollectionIndexType, Error as AsError, PartitionFilter, Statement,
     Value,
@@ -164,18 +163,18 @@ fn build_statement(
     for pred in predicates {
         let filter = match pred {
             Predicate::Equals { bin, val } => {
-                aerospike_core::as_eq!(bin.as_str(), val.clone())
+                Filter::equal(bin.as_str(), val.clone())
             }
             Predicate::Between { bin, min, max } => {
-                aerospike_core::as_range!(bin.as_str(), *min, *max)
+                Filter::range(bin.as_str(), *min, *max)
             }
             Predicate::ContainsString { bin, val, col_type } => {
                 let ct = int_to_collection_index_type(*col_type);
-                aerospike_core::as_contains!(bin.as_str(), val.as_str(), ct)
+                Filter::contains(bin.as_str(), val.as_str(), ct)
             }
             Predicate::ContainsInteger { bin, val, col_type } => {
                 let ct = int_to_collection_index_type(*col_type);
-                aerospike_core::as_contains!(bin.as_str(), *val, ct)
+                Filter::contains(bin.as_str(), *val, ct)
             }
             Predicate::GeoWithinRegion { .. }
             | Predicate::GeoWithinRadius { .. }
