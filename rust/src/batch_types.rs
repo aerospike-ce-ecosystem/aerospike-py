@@ -29,6 +29,61 @@ pub struct PyBatchRecords {
     batch_records: Vec<Py<PyBatchRecord>>,
 }
 
+// ── Deferred conversion types for async client ─────────────────────
+//
+// These types hold Rust data from completed I/O and implement `IntoPyObject`
+// so that `pyo3-async-runtimes::future_into_py` can convert them to Python
+// objects inside the **single** GIL acquisition it already performs
+// (via `spawn_blocking`). This avoids calling `Python::attach()` on a
+// Tokio worker thread, which would block the worker on GIL contention
+// and prevent new I/O from being initiated under concurrent load.
+
+/// Deferred batch records → Python conversion for `batch_operate`,
+/// `batch_write`, `batch_write_numpy`, and `batch_remove`.
+pub struct PendingBatchRecords {
+    pub results: Vec<BatchRecord>,
+}
+
+impl<'py> IntoPyObject<'py> for PendingBatchRecords {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        let batch = batch_to_batch_records_py(py, &self.results)?;
+        Ok(Py::new(py, batch)?.into_bound(py).into_any())
+    }
+}
+
+/// Deferred batch read → Python conversion supporting both standard
+/// and numpy output paths.
+pub enum PendingBatchRead {
+    Standard(Vec<BatchRecord>),
+    Numpy {
+        results: Vec<BatchRecord>,
+        dtype: Py<PyAny>,
+    },
+}
+
+impl<'py> IntoPyObject<'py> for PendingBatchRead {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        match self {
+            PendingBatchRead::Standard(results) => {
+                let batch = batch_to_batch_records_py(py, &results)?;
+                Ok(Py::new(py, batch)?.into_bound(py).into_any())
+            }
+            PendingBatchRead::Numpy { results, dtype } => {
+                crate::numpy_support::batch_to_numpy_py(py, &results, &dtype.into_bound(py))
+                    .map(|obj| obj.into_bound(py))
+            }
+        }
+    }
+}
+
 /// Convert a slice of `BatchRecord`s into a Python [`PyBatchRecords`] object.
 pub fn batch_to_batch_records_py(
     py: Python<'_>,

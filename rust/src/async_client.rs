@@ -17,7 +17,7 @@ const CONNECTING: u8 = 1;
 const CONNECTED: u8 = 2;
 const CLOSING: u8 = 3;
 
-use crate::batch_types::batch_to_batch_records_py;
+use crate::batch_types::{PendingBatchRead, PendingBatchRecords};
 use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::{parse_backpressure_config, parse_client_policy};
@@ -719,19 +719,18 @@ impl PyAsyncClient {
         future_into_py(py, async move {
             let _permit = limiter.acquire_named("batch_read").await?;
             let results = client_ops::do_batch_read(&client, &args).await?;
-            Python::attach(|py| {
-                if use_numpy {
-                    let dtype = dtype_py.ok_or_else(|| {
+            if use_numpy {
+                Ok(PendingBatchRead::Numpy {
+                    results,
+                    dtype: dtype_py.ok_or_else(|| {
                         pyo3::exceptions::PyValueError::new_err(
                             "internal error: numpy path reached without dtype",
                         )
-                    })?;
-                    crate::numpy_support::batch_to_numpy_py(py, &results, &dtype.into_bound(py))
-                } else {
-                    let batch_records = batch_to_batch_records_py(py, &results)?;
-                    Ok(Py::new(py, batch_records)?.into_any())
-                }
-            })
+                    })?,
+                })
+            } else {
+                Ok(PendingBatchRead::Standard(results))
+            }
         })
     }
 
@@ -758,10 +757,7 @@ impl PyAsyncClient {
         future_into_py(py, async move {
             let _permit = limiter.acquire_named("batch_operate").await?;
             let results = client_ops::do_batch_operate(&client, &args).await?;
-            Python::attach(|py| {
-                let batch = batch_to_batch_records_py(py, &results)?;
-                Ok(Py::new(py, batch)?.into_any())
-            })
+            Ok(PendingBatchRecords { results })
         })
     }
 
@@ -796,10 +792,7 @@ impl PyAsyncClient {
                 "batch_write",
             )
             .await?;
-            Python::attach(|py| {
-                let batch = batch_to_batch_records_py(py, &results)?;
-                Ok(Py::new(py, batch)?.into_any())
-            })
+            Ok(PendingBatchRecords { results })
         })
     }
 
@@ -849,10 +842,7 @@ impl PyAsyncClient {
                 "batch_write_numpy",
             )
             .await?;
-            Python::attach(|py| {
-                let batch = batch_to_batch_records_py(py, &results)?;
-                Ok(Py::new(py, batch)?.into_any())
-            })
+            Ok(PendingBatchRecords { results })
         })
     }
 
@@ -873,10 +863,7 @@ impl PyAsyncClient {
         future_into_py(py, async move {
             let _permit = limiter.acquire_named("batch_remove").await?;
             let results = client_ops::do_batch_remove(&client, &args).await?;
-            Python::attach(|py| {
-                let batch = batch_to_batch_records_py(py, &results)?;
-                Ok(Py::new(py, batch)?.into_any())
-            })
+            Ok(PendingBatchRecords { results })
         })
     }
 
