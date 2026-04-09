@@ -1,6 +1,9 @@
 """aerospike-py: High-performance Aerospike client (Rust/PyO3).
 
-Claude Code: ``claude install aerospike-ce-ecosystem``
+Claude Code Plugin::
+
+    claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+    claude plugin install aerospike-ce-ecosystem
 """
 
 import logging

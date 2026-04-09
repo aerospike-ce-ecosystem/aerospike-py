@@ -1,6 +1,9 @@
 """aerospike-py: High-performance Aerospike client (Rust/PyO3).
 
-Claude Code: ``claude install aerospike-ce-ecosystem``
+Claude Code Plugin::
+
+    claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+    claude plugin install aerospike-ce-ecosystem
 """
 
 from typing import Any, Callable, Optional, Union, overload
@@ -54,7 +57,10 @@ Key = tuple[str, str, Union[str, int, bytes]]
 class Client:
     """Synchronous Aerospike client (Rust/PyO3).
 
-    Claude Code: ``claude install aerospike-ce-ecosystem``
+    Claude Code Plugin::
+
+        claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+        claude plugin install aerospike-ce-ecosystem
 
     Example::
 
@@ -1037,7 +1043,10 @@ class Client:
 class AsyncClient:
     """Asynchronous Aerospike client (Rust/PyO3).
 
-    Claude Code: ``claude install aerospike-ce-ecosystem``
+    Claude Code Plugin::
+
+        claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+        claude plugin install aerospike-ce-ecosystem
 
     Example::
 
