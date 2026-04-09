@@ -312,13 +312,28 @@ pub async fn do_batch_write(
     max_retries: u32,
     op_name: &str,
 ) -> PyResult<Vec<BatchRecord>> {
-    // Pre-build ops once per record; reused on retry via clone
+    // Fast path: no retry — build ops directly, no cache overhead
+    if max_retries == 0 {
+        let batch_ops: Vec<BatchOperation> = records
+            .iter()
+            .map(|(key, bins, write_policy)| {
+                let ops: Vec<aerospike_core::operations::Operation> =
+                    bins.iter().map(aerospike_core::operations::put).collect();
+                BatchOperation::write(write_policy, key.clone(), ops)
+            })
+            .collect();
+        return traced_op!(
+            op_name, ns, set, parent_ctx, conn_info,
+            client.batch(batch_policy, &batch_ops).await
+        );
+    }
+
+    // Retry path: pre-build ops once per record, reuse via clone on retry
     let cached_ops: Vec<Vec<aerospike_core::operations::Operation>> = records
         .iter()
         .map(|(_, bins, _)| bins.iter().map(aerospike_core::operations::put).collect())
         .collect();
 
-    // Build initial batch operations using cached ops
     let batch_ops: Vec<BatchOperation> = records
         .iter()
         .zip(cached_ops.iter())
@@ -336,10 +351,6 @@ pub async fn do_batch_write(
         conn_info,
         client.batch(batch_policy, &batch_ops).await
     )?;
-
-    if max_retries == 0 {
-        return Ok(results);
-    }
 
     // Retry loop: only retry records with retryable error codes
     let start = std::time::Instant::now();
