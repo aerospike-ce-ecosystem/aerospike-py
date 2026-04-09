@@ -1,6 +1,6 @@
-"""Aerospike Python Client - PyO3 + Rust binding.
+"""aerospike-py: High-performance Aerospike client (Rust/PyO3).
 
-Drop-in compatible replacement for the aerospike-client-python package.
+Claude Code: ``claude install aerospike-ce-ecosystem``
 """
 
 import logging

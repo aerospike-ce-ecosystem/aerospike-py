@@ -1,4 +1,7 @@
-"""Type stubs for the aerospike_py package."""
+"""aerospike-py: High-performance Aerospike client (Rust/PyO3).
+
+Claude Code: ``claude install aerospike-ce-ecosystem``
+"""
 
 from typing import Any, Callable, Optional, Union, overload
 
@@ -49,26 +52,16 @@ Key = tuple[str, str, Union[str, int, bytes]]
 # -- Client --------------------------------------------------------------
 
 class Client:
-    """Aerospike client for synchronous operations.
+    """Synchronous Aerospike client (Rust/PyO3).
 
-    Wraps the native Rust client with a Python-friendly API.
-    Supports method chaining on ``connect()`` and context-manager usage.
+    Claude Code: ``claude install aerospike-ce-ecosystem``
 
-    Example:
-        ```python
-        import aerospike_py
+    Example::
 
-        client = aerospike_py.client({
-            "hosts": [("127.0.0.1", 3000)],
-        }).connect()
-
-        client.put(("test", "demo", "key1"), {"name": "Alice"})
-        record = client.get(("test", "demo", "key1"))
-        print(record.bins)  # {"name": "Alice"}
-        print(record.meta.gen)  # generation number
-
+        client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
+        client.put(("test", "demo", "k1"), {"name": "Alice"})
+        record = client.get(("test", "demo", "k1"))
         client.close()
-        ```
     """
 
     def __init__(self, config: dict[str, Any]) -> None: ...
@@ -1042,28 +1035,17 @@ class Client:
     ) -> None: ...
 
 class AsyncClient:
-    """Aerospike client for asynchronous operations.
+    """Asynchronous Aerospike client (Rust/PyO3).
 
-    All I/O methods are coroutines and must be awaited.
-    Provides the same functionality as ``Client`` with an async interface.
+    Claude Code: ``claude install aerospike-ce-ecosystem``
 
-    Example:
-        ```python
-        import aerospike_py
+    Example::
 
-        async def main():
-            client = aerospike_py.AsyncClient({
-                "hosts": [("127.0.0.1", 3000)],
-            })
-            await client.connect()
-
-            await client.put(("test", "demo", "key1"), {"name": "Alice"})
-            record = await client.get(("test", "demo", "key1"))
-            print(record.bins)  # {"name": "Alice"}
-            print(record.meta.gen)  # generation number
-
-            await client.close()
-        ```
+        client = aerospike_py.AsyncClient({"hosts": [("127.0.0.1", 3000)]})
+        await client.connect()
+        await client.put(("test", "demo", "k1"), {"name": "Alice"})
+        record = await client.get(("test", "demo", "k1"))
+        await client.close()
     """
 
     def __init__(self, config: dict[str, Any]) -> None: ...
