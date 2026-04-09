@@ -15,7 +15,7 @@ pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePoli
 /// Convert a TTL integer value to an [`Expiration`] enum.
 ///
 /// Special values: `0` = namespace default, `-1` = never expire, `-2` = don't update.
-fn parse_ttl(ttl_val: i64) -> PyResult<Expiration> {
+pub(crate) fn parse_ttl(ttl_val: i64) -> PyResult<Expiration> {
     match ttl_val {
         0 => Ok(Expiration::NamespaceDefault),
         -1 => Ok(Expiration::Never),

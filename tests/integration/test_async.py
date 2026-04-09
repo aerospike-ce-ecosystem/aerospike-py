@@ -150,3 +150,57 @@ class TestAsyncBatchWriteGeneric:
     async def test_async_batch_write_empty(self, async_client):
         results = await async_client.batch_write([])
         assert len(results.batch_records) == 0
+
+
+class TestAsyncBatchWriteTTL:
+    """Test async batch_write() TTL support."""
+
+    async def test_async_batch_write_policy_ttl(self, async_client, async_cleanup):
+        """Batch-level TTL via policy is applied to all records."""
+        keys = [
+            ("test", "demo", "abw_ttl_pol_1"),
+            ("test", "demo", "abw_ttl_pol_2"),
+        ]
+        for k in keys:
+            async_cleanup.append(k)
+
+        ttl_seconds = 2592000  # 30 days
+        records = [(k, {"val": i}) for i, k in enumerate(keys)]
+        results = await async_client.batch_write(records, policy={"ttl": ttl_seconds})
+        for br in results.batch_records:
+            assert br.result == 0
+
+        for k in keys:
+            _, meta, _ = await async_client.get(k)
+            assert meta is not None
+            assert meta.ttl > 0
+            assert meta.ttl <= ttl_seconds
+
+    async def test_async_batch_write_per_record_meta_ttl(self, async_client, async_cleanup):
+        """Per-record TTL via (key, bins, meta) tuple."""
+        key = ("test", "demo", "abw_ttl_meta")
+        async_cleanup.append(key)
+
+        ttl_seconds = 3600
+        results = await async_client.batch_write([(key, {"val": 1}, {"ttl": ttl_seconds})])
+        assert results.batch_records[0].result == 0
+
+        _, meta, _ = await async_client.get(key)
+        assert meta is not None
+        assert meta.ttl > 0
+        assert meta.ttl <= ttl_seconds
+
+    async def test_async_batch_write_ttl_never_expire(self, async_client, async_cleanup):
+        """TTL_NEVER_EXPIRE via policy in async batch_write."""
+        key = ("test", "demo", "abw_ttl_never")
+        async_cleanup.append(key)
+
+        results = await async_client.batch_write(
+            [(key, {"val": 1})],
+            policy={"ttl": aerospike_py.TTL_NEVER_EXPIRE},
+        )
+        assert results.batch_records[0].result == 0
+
+        _, meta, _ = await async_client.get(key)
+        assert meta is not None
+        assert meta.ttl > 0

@@ -300,7 +300,11 @@ fn compute_backoff_ms(attempt: u32, base_ms: u64, cap_ms: u64) -> u64 {
 pub async fn do_batch_write(
     client: &AsClient,
     batch_policy: &aerospike_core::BatchPolicy,
-    records: &[(aerospike_core::Key, Vec<aerospike_core::Bin>)],
+    records: &[(
+        aerospike_core::Key,
+        Vec<aerospike_core::Bin>,
+        BatchWritePolicy,
+    )],
     ns: &str,
     set: &str,
     parent_ctx: client_common::ParentContext,
@@ -308,15 +312,13 @@ pub async fn do_batch_write(
     max_retries: u32,
     op_name: &str,
 ) -> PyResult<Vec<BatchRecord>> {
-    let write_policy = BatchWritePolicy::default();
-
-    // Build initial batch operations
+    // Build initial batch operations using per-record write policies
     let batch_ops: Vec<BatchOperation> = records
         .iter()
-        .map(|(key, bins)| {
+        .map(|(key, bins, write_policy)| {
             let ops: Vec<aerospike_core::operations::Operation> =
                 bins.iter().map(aerospike_core::operations::put).collect();
-            BatchOperation::write(&write_policy, key.clone(), ops)
+            BatchOperation::write(write_policy, key.clone(), ops)
         })
         .collect();
 
@@ -335,20 +337,18 @@ pub async fn do_batch_write(
     }
 
     // Retry loop: only retry records with retryable error codes
+    let mut retry_indices: Vec<usize> = Vec::new();
     for attempt in 0..max_retries {
         // Find indices of failed records that are retryable
-        let retry_indices: Vec<usize> = results
-            .iter()
-            .enumerate()
-            .filter_map(|(i, br)| {
-                if let Some(rc) = &br.result_code {
-                    if *rc != aerospike_core::ResultCode::Ok && is_retryable_result_code(rc) {
-                        return Some(i);
-                    }
+        retry_indices.clear();
+        retry_indices.extend(results.iter().enumerate().filter_map(|(i, br)| {
+            if let Some(rc) = &br.result_code {
+                if *rc != aerospike_core::ResultCode::Ok && is_retryable_result_code(rc) {
+                    return Some(i);
                 }
-                None
-            })
-            .collect();
+            }
+            None
+        }));
 
         if retry_indices.is_empty() {
             log::debug!(
@@ -373,10 +373,10 @@ pub async fn do_batch_write(
         let retry_ops: Vec<BatchOperation> = retry_indices
             .iter()
             .map(|&i| {
-                let (key, bins) = &records[i];
+                let (key, bins, write_policy) = &records[i];
                 let ops: Vec<aerospike_core::operations::Operation> =
                     bins.iter().map(aerospike_core::operations::put).collect();
-                BatchOperation::write(&write_policy, key.clone(), ops)
+                BatchOperation::write(write_policy, key.clone(), ops)
             })
             .collect();
 
@@ -409,10 +409,10 @@ pub async fn do_batch_write(
                 retry_results.len()
             );
         }
-        for (retry_pos, &original_idx) in retry_indices.iter().enumerate() {
-            if retry_pos < retry_results.len() {
-                results[original_idx] = retry_results[retry_pos].clone();
-            }
+        for (original_idx, retry_record) in
+            retry_indices.iter().copied().zip(retry_results.into_iter())
+        {
+            results[original_idx] = retry_record;
         }
     }
 
@@ -437,10 +437,7 @@ pub async fn do_info_all(
 
 /// Send an info command to a random node.
 pub async fn do_info_random_node(client: &AsClient, args: &InfoArgs) -> PyResult<String> {
-    let node = client
-        .cluster
-        .get_random_node()
-        .map_err(as_to_pyerr)?;
+    let node = client.cluster.get_random_node().map_err(as_to_pyerr)?;
     let map = node
         .info(&args.admin_policy, &[&args.command])
         .await
@@ -797,7 +794,10 @@ mod tests {
             let max_expected = std::cmp::min(10u64 * (1u64 << attempt), 500);
             for _ in 0..1000 {
                 let val = compute_backoff_ms(attempt, 10, 500);
-                assert!(val <= max_expected, "attempt={attempt}, val={val}, max={max_expected}");
+                assert!(
+                    val <= max_expected,
+                    "attempt={attempt}, val={val}, max={max_expected}"
+                );
             }
         }
     }

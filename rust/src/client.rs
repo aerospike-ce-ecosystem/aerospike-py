@@ -1186,7 +1186,11 @@ impl PyClient {
         debug!("batch_write: records_count={}", records.len());
         let client = self.get_client()?.clone();
         let args = client_common::prepare_batch_write_args(
-            py, records, policy, retry, &self.connection_info,
+            py,
+            records,
+            policy,
+            retry,
+            &self.connection_info,
         )?;
         let limiter = self.limiter.clone();
         let results = py.detach(|| {
@@ -1238,9 +1242,14 @@ impl PyClient {
         let parent_ctx = client_common::extract_parent_context(py);
         let conn_info = self.connection_info.clone();
 
-        let records = crate::numpy_support::numpy_to_records(
+        let raw_records = crate::numpy_support::numpy_to_records(
             py, data, _dtype, namespace, set_name, key_field,
         )?;
+        let write_policy = crate::policy::batch_policy::parse_batch_write_policy(policy)?;
+        let records: Vec<_> = raw_records
+            .into_iter()
+            .map(|(k, b)| (k, b, write_policy.clone()))
+            .collect();
 
         let ns = namespace.to_string();
         let set = set_name.to_string();

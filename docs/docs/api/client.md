@@ -802,13 +802,15 @@ for br in results.batch_records:
 
 ### `batch_write(records, policy=None, retry=0)`
 
-Write multiple records with per-record bins in a single batch call. Each record is a `(key, bins)` tuple where bins is a dict. Unlike `batch_operate()` which applies the same operations to all keys, each record can have different bins.
+Write multiple records with per-record bins in a single batch call. Each record is a `(key, bins)` or `(key, bins, meta)` tuple. Unlike `batch_operate()` which applies the same operations to all keys, each record can have different bins and TTL.
 
 | Parameter | Description |
 |-----------|-------------|
-| `records` | List of ``(key, bins)`` tuples. Key is ``(namespace, set, primary_key)``, bins is a dict. |
-| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
+| `records` | List of ``(key, bins)`` or ``(key, bins, meta)`` tuples. Key is ``(namespace, set, primary_key)``, bins is a dict, meta is an optional [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``). |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. Supports ``"ttl"`` key for batch-level TTL (seconds). |
 | `retry` | Max retries for transient failures (default ``0``). Failed records are retried with exponential backoff. |
+
+**TTL precedence:** Per-record `meta["ttl"]` overrides batch-level `policy["ttl"]`. Records without meta use the batch-level TTL (or namespace default if unset).
 
 **Returns:** ``BatchRecords`` with per-record result codes. Each ``BatchRecord`` includes an ``in_doubt`` flag indicating whether the write may have completed despite the error.
 
@@ -821,9 +823,16 @@ records = [
     (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
 ]
 results = client.batch_write(records, retry=3)
-for br in results.batch_records:
-    if br.result != 0:
-        print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
+
+# With batch-level TTL (30 days)
+results = client.batch_write(records, policy={"ttl": 2592000})
+
+# With per-record TTL
+records_with_ttl = [
+    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),
+    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
+]
+results = client.batch_write(records_with_ttl)
 ```
 
   </TabItem>
@@ -835,9 +844,16 @@ records = [
     (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
 ]
 results = await client.batch_write(records, retry=3)
-for br in results.batch_records:
-    if br.result != 0:
-        print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
+
+# With batch-level TTL (30 days)
+results = await client.batch_write(records, policy={"ttl": 2592000})
+
+# With per-record TTL
+records_with_ttl = [
+    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),
+    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
+]
+results = await client.batch_write(records_with_ttl)
 ```
 
   </TabItem>

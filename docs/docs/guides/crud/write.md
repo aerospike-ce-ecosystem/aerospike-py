@@ -176,6 +176,56 @@ for br in results.batch_records:
   </TabItem>
 </Tabs>
 
+### Batch Write with TTL
+
+TTL can be set at two levels:
+
+- **Batch-level**: `policy={"ttl": N}` applies to all records in the batch.
+- **Per-record**: `(key, bins, {"ttl": N})` overrides the batch-level TTL for that specific record.
+
+<Tabs>
+  <TabItem value="sync" label="Sync" default>
+
+```python
+# Batch-level TTL — all records expire in 30 days
+results = client.batch_write(records, policy={"ttl": 2592000})
+
+# Per-record TTL — each record has its own expiration
+records_with_ttl = [
+    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),     # 1 hour
+    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),      # 1 day
+    (("test", "demo", "user3"), {"name": "Charlie"}),                   # namespace default
+]
+results = client.batch_write(records_with_ttl)
+
+# Mix: batch-level default + per-record override
+results = client.batch_write(
+    [
+        (("test", "demo", "user1"), {"name": "Alice"}),                 # uses batch-level TTL
+        (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 3600}),   # overrides to 1 hour
+    ],
+    policy={"ttl": 86400},  # default: 1 day
+)
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async">
+
+```python
+# Batch-level TTL
+results = await client.batch_write(records, policy={"ttl": 2592000})
+
+# Per-record TTL
+records_with_ttl = [
+    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),
+    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
+]
+results = await client.batch_write(records_with_ttl)
+```
+
+  </TabItem>
+</Tabs>
+
 **Retry with auto-recovery:** Records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff:
 
 <Tabs>

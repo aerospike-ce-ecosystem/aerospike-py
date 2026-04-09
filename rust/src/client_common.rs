@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use crate::policy::batch_policy::{apply_record_meta, parse_batch_write_policy};
 use aerospike_core::{
     operations::Operation, BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy,
     Bin, Bins, Key, ReadPolicy, UDFLang, Value, WritePolicy,
@@ -617,7 +618,7 @@ impl BatchRemoveArgs {
 // ── batch_write (generic) ───────────────────────────────────────────────────
 
 pub struct BatchWriteGenericArgs {
-    pub records: Vec<(Key, Vec<Bin>)>,
+    pub records: Vec<(Key, Vec<Bin>, BatchWritePolicy)>,
     pub batch_policy: aerospike_core::BatchPolicy,
     pub batch_ns: String,
     pub batch_set: String,
@@ -633,13 +634,13 @@ pub fn prepare_batch_write_args(
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchWriteGenericArgs> {
     let batch_policy = parse_batch_policy(policy)?;
+    // Parse batch-level write policy once (TTL default for all records)
+    let base_write_policy = parse_batch_write_policy(policy)?;
     let mut rust_records = Vec::with_capacity(records.len());
 
     for item in records.iter() {
         let tuple = item.cast::<PyTuple>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err(
-                "Each record must be a tuple of (key, bins)",
-            )
+            pyo3::exceptions::PyTypeError::new_err("Each record must be a tuple of (key, bins)")
         })?;
         if tuple.len() < 2 {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -648,16 +649,28 @@ pub fn prepare_batch_write_args(
         }
         let key = py_to_key(&tuple.get_item(0)?)?;
         let bins_obj = tuple.get_item(1)?;
-        let bins_dict = bins_obj.cast::<PyDict>().map_err(|_| {
-            pyo3::exceptions::PyTypeError::new_err("bins element must be a dict")
-        })?;
+        let bins_dict = bins_obj
+            .cast::<PyDict>()
+            .map_err(|_| pyo3::exceptions::PyTypeError::new_err("bins element must be a dict"))?;
         let bins = py_dict_to_bins(bins_dict)?;
-        rust_records.push((key, bins));
+
+        // Per-record meta (3rd tuple element) overrides batch-level TTL
+        let write_policy = if tuple.len() >= 3 {
+            let meta_obj = tuple.get_item(2)?;
+            let meta_dict = meta_obj.cast::<PyDict>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err("meta element must be a dict")
+            })?;
+            apply_record_meta(&base_write_policy, meta_dict)?
+        } else {
+            base_write_policy.clone()
+        };
+
+        rust_records.push((key, bins, write_policy));
     }
 
     let (batch_ns, batch_set) = rust_records
         .first()
-        .map(|(k, _)| (k.namespace.clone(), k.set_name.clone()))
+        .map(|(k, _, _)| (k.namespace.clone(), k.set_name.clone()))
         .unwrap_or_default();
 
     Ok(BatchWriteGenericArgs {

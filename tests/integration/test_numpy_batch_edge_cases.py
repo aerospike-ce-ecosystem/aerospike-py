@@ -460,3 +460,29 @@ class TestMetaAfterWrite:
         read = client.batch_read([(NS, SET, 8101)], _dtype=read_dtype)
         assert read.meta[0]["gen"] >= 2
         assert read.batch_records[0]["val"] == 2
+
+
+# ── batch_write_numpy TTL ────────────────────────────────────────────
+
+
+class TestBatchWriteNumpyTTL:
+    """Test batch_write_numpy() with policy TTL."""
+
+    def test_batch_write_numpy_policy_ttl(self, client, cleanup):
+        """Policy TTL is applied to all records written via batch_write_numpy."""
+        dtype = np.dtype([("_key", "i4"), ("val", "i4")])
+        data = np.array([(9901, 42), (9902, 84)], dtype=dtype)
+        ttl_seconds = 2592000  # 30 days
+
+        results = client.batch_write_numpy(data, NS, SET, dtype, policy={"ttl": ttl_seconds})
+        keys = [(NS, SET, 9901), (NS, SET, 9902)]
+        for k in keys:
+            cleanup.append(k)
+        for br in results.batch_records:
+            assert br.result == 0
+
+        for k in keys:
+            _, meta, _ = client.get(k)
+            assert meta is not None
+            assert meta.ttl > 0
+            assert meta.ttl <= ttl_seconds
