@@ -474,9 +474,7 @@ class TestBatchWriteNumpyTTL:
         data = np.array([(9901, 42), (9902, 84)], dtype=dtype)
         ttl_seconds = 2592000  # 30 days
 
-        results = client.batch_write_numpy(
-            data, NS, SET, dtype, policy={"ttl": ttl_seconds}
-        )
+        results = client.batch_write_numpy(data, NS, SET, dtype, policy={"ttl": ttl_seconds})
         keys = [(NS, SET, 9901), (NS, SET, 9902)]
         for k in keys:
             cleanup.append(k)

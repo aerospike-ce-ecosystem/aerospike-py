@@ -465,9 +465,7 @@ class TestBatchWriteTTL:
             cleanup.append(k)
 
         records = [(k, {"val": i}) for i, k in enumerate(keys)]
-        results = client.batch_write(
-            records, policy={"ttl": aerospike_py.TTL_NEVER_EXPIRE}
-        )
+        results = client.batch_write(records, policy={"ttl": aerospike_py.TTL_NEVER_EXPIRE})
         for br in results.batch_records:
             assert br.result == 0
 
@@ -481,9 +479,7 @@ class TestBatchWriteTTL:
         key = ("test", "demo", "bw_ttl_meta_never")
         cleanup.append(key)
 
-        results = client.batch_write(
-            [(key, {"val": 1}, {"ttl": aerospike_py.TTL_NEVER_EXPIRE})]
-        )
+        results = client.batch_write([(key, {"val": 1}, {"ttl": aerospike_py.TTL_NEVER_EXPIRE})])
         assert results.batch_records[0].result == 0
 
         _, meta, _ = client.get(key)
@@ -499,9 +495,7 @@ class TestBatchWriteTTL:
         client.put(key, {"val": 1}, meta={"ttl": 3600})
 
         # Step 2: update bins via batch_write with DONT_UPDATE
-        results = client.batch_write(
-            [(key, {"val": 2}, {"ttl": aerospike_py.TTL_DONT_UPDATE})]
-        )
+        results = client.batch_write([(key, {"val": 2}, {"ttl": aerospike_py.TTL_DONT_UPDATE})])
         assert results.batch_records[0].result == 0
 
         _, meta, bins = client.get(key)
@@ -517,9 +511,9 @@ class TestBatchWriteTTL:
             cleanup.append(k)
 
         records = [
-            (key_a, {"val": 1}, {"ttl": 3600}),   # 1 hour
-            (key_b, {"val": 2}, {"ttl": 86400}),   # 1 day
-            (key_c, {"val": 3}),                    # uses batch policy TTL
+            (key_a, {"val": 1}, {"ttl": 3600}),  # 1 hour
+            (key_b, {"val": 2}, {"ttl": 86400}),  # 1 day
+            (key_c, {"val": 3}),  # uses batch policy TTL
         ]
         results = client.batch_write(records, policy={"ttl": 300})
         for br in results.batch_records:

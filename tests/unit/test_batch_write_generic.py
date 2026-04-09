@@ -96,6 +96,4 @@ class TestBatchWriteInputValidation:
     def test_meta_ttl_invalid_type_raises(self, client):
         """Non-integer TTL in meta raises an error."""
         with pytest.raises((TypeError, aerospike_py.InvalidArgError)):
-            client.batch_write(
-                [(("test", "demo", "k1"), {"a": 1}, {"ttl": "not_a_number"})]
-            )
+            client.batch_write([(("test", "demo", "k1"), {"a": 1}, {"ttl": "not_a_number"})])
