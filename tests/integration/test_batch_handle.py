@@ -11,7 +11,6 @@ import asyncio
 
 import pytest
 
-
 NS = "test"
 SET = "batch_handle"
 
@@ -101,7 +100,7 @@ class TestBatchReadHandle:
         """found_count() counts successful records without conversion."""
         keys = _seed_records
         # Add a non-existent key
-        all_keys = keys + [(NS, SET, "nonexistent_key")]
+        all_keys = [*keys, (NS, SET, "nonexistent_key")]
         handle = await async_client.batch_read(all_keys)
 
         assert handle.found_count() == 5
