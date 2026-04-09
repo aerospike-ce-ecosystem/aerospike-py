@@ -34,8 +34,10 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
 
 /// Parse a Python policy/meta dict into a [`BatchWritePolicy`] with TTL support.
 ///
-/// `meta` takes precedence over `policy_dict` for the `"ttl"` key, mirroring
-/// the behavior of [`parse_write_policy()`](super::write_policy::parse_write_policy).
+/// `policy_dict` provides the batch-level default TTL; `meta` (per-record)
+/// overrides it. Note: this is the **inverse** of
+/// [`parse_write_policy()`](super::write_policy::parse_write_policy), where
+/// `policy_dict` takes precedence over `meta`.
 pub fn parse_batch_write_policy(
     policy_dict: Option<&Bound<'_, PyDict>>,
     meta: Option<&Bound<'_, PyDict>>,
