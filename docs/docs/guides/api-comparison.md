@@ -41,7 +41,7 @@ A comprehensive comparison between the **official C-based client** (`aerospike` 
 
 | Operation | Official C Client | aerospike-py | Notes |
 |-----------|------------------|--------------|-------|
-| Batch get | `client.get_many(keys)` | `client.batch_read(keys)` | **Method renamed**; returns `BatchRecords` |
+| Batch get | `client.get_many(keys)` | `client.batch_read(keys)` | **Method renamed**; sync returns `BatchRecords`, async returns `BatchReadHandle` |
 | Batch exists | `client.exists_many(keys)` | `client.batch_read(keys, bins=[])` | Use empty `bins` list for existence check |
 | Batch select | `client.select_many(keys, bins)` | `client.batch_read(keys, bins=bins)` | Unified under `batch_read` |
 | Batch operate | `client.batch_operate(keys, ops)` | `client.batch_operate(keys, ops)` | Same; official client uses `aerospike_helpers` |
