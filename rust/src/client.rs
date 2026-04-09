@@ -1135,7 +1135,7 @@ impl PyClient {
         match _dtype {
             Some(d) => crate::numpy_support::batch_to_numpy_py(py, &results, d),
             None => {
-                let br = batch_to_batch_records_py(py, &results)?;
+                let br = batch_to_batch_records_py(py, results)?;
                 Ok(Py::new(py, br)?.into_any())
             }
         }
@@ -1166,7 +1166,7 @@ impl PyClient {
                 client_ops::do_batch_operate(&client, &args).await
             })
         })?;
-        let batch = batch_to_batch_records_py(py, &results)?;
+        let batch = batch_to_batch_records_py(py, results)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 
@@ -1206,7 +1206,7 @@ impl PyClient {
                 .await
             })
         })?;
-        let batch = batch_to_batch_records_py(py, &results)?;
+        let batch = batch_to_batch_records_py(py, results)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 
@@ -1264,7 +1264,7 @@ impl PyClient {
             })
         })?;
 
-        let batch = batch_to_batch_records_py(py, &results)?;
+        let batch = batch_to_batch_records_py(py, results)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 
@@ -1287,7 +1287,7 @@ impl PyClient {
                 client_ops::do_batch_remove(&client, &args).await
             })
         })?;
-        let batch = batch_to_batch_records_py(py, &results)?;
+        let batch = batch_to_batch_records_py(py, results)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 }

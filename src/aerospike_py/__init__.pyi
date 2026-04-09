@@ -1,5 +1,6 @@
 """Type stubs for the aerospike_py package."""
 
+from collections.abc import Iterator
 from typing import Any, Callable, Optional, Union, overload
 
 import numpy as np
@@ -1041,6 +1042,29 @@ class Client:
         policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
 
+class BatchReadHandle:
+    """Handle wrapping raw Rust batch read results with deferred conversion.
+
+    Returned by ``AsyncClient.batch_read()``. The async future completes with
+    near-zero GIL cost; actual data conversion is deferred to method calls.
+    """
+
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Iterator[BatchRecord]: ...
+    def as_dict(self) -> dict[Union[str, int], dict[str, Any]]:
+        """Fastest access path: returns ``dict[key, bins_dict]`` directly."""
+        ...
+    @property
+    def batch_records(self) -> list[BatchRecord]:
+        """Compatibility path: ``list[BatchRecord]`` NamedTuples."""
+        ...
+    def found_count(self) -> int:
+        """Count of records with successful result code."""
+        ...
+    def keys(self) -> list[Union[str, int]]:
+        """Extract just the user keys without converting record data."""
+        ...
+
 class AsyncClient:
     """Aerospike client for asynchronous operations.
 
@@ -1538,7 +1562,7 @@ class AsyncClient:
         bins: Optional[list[str]] = None,
         policy: Optional[dict[str, Any]] = None,
         _dtype: None = None,
-    ) -> BatchRecords: ...
+    ) -> BatchReadHandle: ...
     @overload
     async def batch_read(
         self,
@@ -1554,8 +1578,11 @@ class AsyncClient:
         bins: Optional[list[str]] = None,
         policy: Optional[dict[str, Any]] = None,
         _dtype: Optional[np.dtype] = None,
-    ) -> Union[BatchRecords, NumpyBatchRecords]:
+    ) -> Union[BatchReadHandle, NumpyBatchRecords]:
         """Read multiple records in a single batch call.
+
+        Returns a :class:`BatchReadHandle` — a zero-conversion handle wrapping
+        raw Rust results. The async future completes with near-zero GIL cost.
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
@@ -1563,16 +1590,21 @@ class AsyncClient:
                 an empty list performs an existence check only.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             _dtype: Optional NumPy dtype. When provided, returns
-                ``NumpyBatchRecords`` instead of ``BatchRecords``.
+                ``NumpyBatchRecords`` instead of ``BatchReadHandle``.
 
         Returns:
-            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+            ``BatchReadHandle`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            batch = await client.batch_read(keys, bins=["name", "age"])
-            for br in batch.batch_records:
+            handle = await client.batch_read(keys, bins=["name", "age"])
+
+            # Fast path — dict[key, bins_dict]:
+            data = handle.as_dict()
+
+            # Compat path — list[BatchRecord] NamedTuples:
+            for br in handle.batch_records:
                 if br.result == 0 and br.record is not None:
                     print(br.record.bins)
             ```
