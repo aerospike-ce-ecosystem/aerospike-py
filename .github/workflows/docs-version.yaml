@@ -87,3 +87,9 @@ jobs:
             docs/versions-config.json
           git commit -m "docs: freeze version ${{ steps.version.outputs.version }}"
           git push origin main
+
+      - name: Trigger docs publish
+        if: steps.check.outputs.already_exists == 'false'
+        run: gh workflow run "Publish Docs" --ref main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
