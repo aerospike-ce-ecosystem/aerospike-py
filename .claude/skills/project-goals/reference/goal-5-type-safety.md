@@ -1,35 +1,35 @@
-# Goal 5: Type 기반 객체
+# Goal 5: Type-based Objects
 
-## NamedTuple (7종) — `src/aerospike_py/types.py`
+## NamedTuples (7 types) — `src/aerospike_py/types.py`
 
-| 타입 | 용도 |
+| Type | Purpose |
 |------|------|
 | `AerospikeKey` | namespace, set_name, user_key, digest |
 | `RecordMetadata` | gen, ttl |
 | `Record` | key, meta, bins |
 | `ExistsResult` | key, meta |
-| `BinTuple` | name, value (operate_ordered 용) |
+| `BinTuple` | name, value (for operate_ordered) |
 | `OperateOrderedResult` | key, meta, ordered_bins |
 | `InfoNodeResult` | node_name, error_code, response |
 
-## TypedDict (13종)
+## TypedDicts (13 types)
 
 `types.py`: `ReadPolicy`, `WritePolicy`, `BatchPolicy`, `AdminPolicy`, `QueryPolicy`, `WriteMeta`, `ClientConfig`, `Privilege`, `UserInfo`, `RoleInfo`
 `_types.py`: `ListPolicy`, `MapPolicy`, `HLLPolicy`
 
-## 2단계 변환 아키텍처
+## Two-stage Conversion Architecture
 
 ```
 Rust → plain PyTuple/PyDict
   → Python _wrap_record() / _wrap_exists() / _wrap_operate_ordered()
-      → NamedTuple 반환
+      → NamedTuple return
 ```
 
-`_client.py` / `_async_client.py` 에서 모든 read 결과에 일관 적용.
+Applied consistently to all read results in `_client.py` / `_async_client.py`.
 
-## 주요 파일
+## Key Files
 
-- `src/aerospike_py/types.py` — NamedTuple + TypedDict 정의
-- `src/aerospike_py/__init__.pyi` — 완전한 타입 스텁
-- `rust/src/types/record.rs` — Rust → Python 원시 변환
-- `rust/src/record_helpers.rs` — 지연 변환 패턴
+- `src/aerospike_py/types.py` — NamedTuple + TypedDict definitions
+- `src/aerospike_py/__init__.pyi` — complete type stubs
+- `rust/src/types/record.rs` — Rust → Python raw conversion
+- `rust/src/record_helpers.rs` — lazy conversion pattern

@@ -1,28 +1,28 @@
-# Goal 2: 성능 (GIL-free, C 클라이언트 대비 우위)
+# Goal 2: Performance (GIL-free, outperform C client)
 
-## 설계 원칙
+## Design Principles
 
-- Tokio worker 기본 2개 (`AEROSPIKE_RUNTIME_WORKERS`): GIL reacquire contention 최소화
-- signal driver 비활성화(`enable_io()` + `enable_time()`, not `enable_all()`): Python signal 핸들러 충돌 방지
-- ArcSwapOption: async client 상태 lock-free 접근
+- Default 2 Tokio workers (`AEROSPIKE_RUNTIME_WORKERS`): minimizes GIL reacquire contention
+- Signal driver disabled (`enable_io()` + `enable_time()`, not `enable_all()`): prevents Python signal handler conflicts
+- ArcSwapOption: lock-free access to async client state
 
-## 벤치마크 결과 (vs aerospike-client-python C 클라이언트)
+## Benchmark Results (vs aerospike-client-python C client)
 
-| 경로 | put | get | batch_read_numpy |
+| Path | put | get | batch_read_numpy |
 |------|-----|-----|-----------------|
-| Sync (sequential) | ~1.1x 느림 | ~1.1x 느림 | — |
-| Async (concurrent) | **2.1x 빠름** | **1.6x 빠름** | **3.4x 빠름** |
+| Sync (sequential) | ~1.1x slower | ~1.1x slower | — |
+| Async (concurrent) | **2.1x faster** | **1.6x faster** | **3.4x faster** |
 
-## Sync gap 원인 (구조적 한계)
+## Sync Gap Root Cause (structural limitation)
 
-1. `py.detach()` GIL 전환 비용 ~3-5µs
-2. async-only crate → `block_on` Future 생성 오버헤드
-3. PyO3 타입 변환 ~1-3µs
+1. `py.detach()` GIL transition cost ~3-5µs
+2. async-only crate → `block_on` Future creation overhead
+3. PyO3 type conversion ~1-3µs
 
-→ 절대값 ~12µs 차이. async 경로가 핵심 차별화 포인트.
+→ Absolute difference ~12µs. The async path is the key differentiator.
 
-## 주요 파일
+## Key Files
 
-- `rust/src/runtime.rs` — 런타임 튜닝 근거
-- `benchmark/bench_compare.py` — 비교 벤치마크
-- `benchmark/RESULTS.md` — 상세 분석 및 근거
+- `rust/src/runtime.rs` — runtime tuning rationale
+- `benchmark/bench_compare.py` — comparison benchmark
+- `benchmark/RESULTS.md` — detailed analysis and rationale

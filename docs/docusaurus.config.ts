@@ -92,8 +92,8 @@ const config: Config = {
           editUrl:
             'https://github.com/KimSoungRyoul/aerospike-py/tree/main/docs/',
           showLastUpdateTime: true,
-          // Versioning: versions-config.json에서 관리
-          // 릴리스 시 docs-version.yaml 워크플로우가 자동으로 업데이트
+          // Versioning: managed via versions-config.json
+          // Automatically updated by the docs-version.yaml workflow on release
           lastVersion: versionsConfig.lastVersion,
           versions: versionsConfig.versions,
         },

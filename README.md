@@ -121,11 +121,11 @@ Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to und
 
 ## Claude Code Skills & Agents
 
-이 프로젝트는 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 자동화가 설정되어 있습니다.
+This project has [Claude Code](https://docs.anthropic.com/en/docs/claude-code) automation configured.
 
-### Ecosystem Plugin 설치
+### Ecosystem Plugin Installation
 
-[aerospike-ce-ecosystem-plugins](https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins)를 설치하면 aerospike-py API 레퍼런스, 배포 가이드 등 ecosystem 전체 스킬을 사용할 수 있습니다.
+Install [aerospike-ce-ecosystem-plugins](https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins) to access the full ecosystem skill set, including the aerospike-py API reference and deployment guides.
 
 ```bash
 claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
@@ -134,34 +134,34 @@ claude plugin install aerospike-ce-ecosystem
 
 ### Skills
 
-`/skill-name`으로 호출합니다.
+Invoke with `/skill-name`.
 
-| Skill | 명령어 | 설명 |
-|-------|--------|------|
-| **run-tests** | `/run-tests [type]` | 빌드 → Aerospike 서버 보장 → 테스트 실행 (unit/integration/concurrency/compat/all/matrix) |
-| **release-check** | `/release-check` | 릴리스 전 검증 (lint, unit test, pyright, type stub 일관성, 버전 확인) |
-| **bench-compare** | `/bench-compare` | aerospike-py vs 공식 C 클라이언트 벤치마크 비교 |
-| **test-sample-fastapi** | `/test-sample-fastapi` | aerospike-py 빌드 → sample-fastapi 설치 → 통합 테스트 실행 |
-| **new-api** | `/new-api [method] [desc]` | 새 Client/AsyncClient API 메서드 추가 가이드 (Rust → Python 래퍼 → 타입 스텁 → 테스트) |
+| Skill | Command | Description |
+|-------|---------|-------------|
+| **run-tests** | `/run-tests [type]` | Build → ensure Aerospike server is running → run tests (unit/integration/concurrency/compat/all/matrix) |
+| **release-check** | `/release-check` | Pre-release validation (lint, unit tests, pyright, type stub consistency, version check) |
+| **bench-compare** | `/bench-compare` | Benchmark comparison: aerospike-py vs the official C client |
+| **test-sample-fastapi** | `/test-sample-fastapi` | Build aerospike-py → install sample-fastapi → run integration tests |
+| **new-api** | `/new-api [method] [desc]` | Guide for adding a new Client/AsyncClient API method (Rust → Python wrapper → type stubs → tests) |
 
 ### Subagents
 
-코드 리뷰/분석 시 자동으로 활용됩니다.
+Invoked automatically during code review and analysis.
 
-| Agent | 설명 |
-|-------|------|
-| **pyo3-reviewer** | PyO3 바인딩 리뷰 (GIL 관리, 타입 변환, async 안전성, 메모리 안전성) |
-| **type-stub-sync** | `__init__.pyi` stub과 Rust 소스 간 일관성 검증 |
+| Agent | Description |
+|-------|-------------|
+| **pyo3-reviewer** | Reviews PyO3 bindings (GIL management, type conversions, async safety, memory safety) |
+| **type-stub-sync** | Validates consistency between `__init__.pyi` stubs and Rust source |
 
 ### Hooks
 
-파일 편집 시 자동 실행됩니다.
+Run automatically when files are edited.
 
-| Hook | 트리거 | 동작 |
-|------|--------|------|
-| Python auto-format | `.py` 편집 후 | `ruff format` + `ruff check --fix` |
-| Rust auto-format | `.rs` 편집 후 | `cargo fmt` |
-| Binary/lock 보호 | `.so`, `.dylib`, `.whl`, `uv.lock` 편집 시 | 편집 차단 |
+| Hook | Trigger | Action |
+|------|---------|--------|
+| Python auto-format | After editing `.py` | `ruff format` + `ruff check --fix` |
+| Rust auto-format | After editing `.rs` | `cargo fmt` |
+| Binary/lock protection | On editing `.so`, `.dylib`, `.whl`, `uv.lock` | Blocks the edit |
 
 ## Contributing
 
@@ -169,33 +169,49 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and
 
 ## Code stats
 
-[tokei](https://github.com/XAMPPRocky/tokei) 기반 (`tokei.toml` + `.tokeignore`).
+Powered by [tokei](https://github.com/XAMPPRocky/tokei). Configuration: `tokei.toml` + `.tokeignore`
 
-### 코드 규모
+### Code Size
 
-| 레이어 | 파일 수 | 코드 라인 | 역할 |
+| Layer | Files | Code Lines | Role |
 |--------|--------:|----------:|------|
-| **aerospike-core** (Rust) | 100 | 19,635 | Aerospike 프로토콜, 클러스터 관리, 명령 실행 |
-| **rust/src** (PyO3 바인딩) | 32 | 9,582 | Python ↔ Rust 변환, async/sync 클라이언트, 정책 파싱 |
-| **src/aerospike_py** (Python) | 24 | 6,877 | 타입 스텁(.pyi), NamedTuple 래퍼, 헬퍼 |
-| **합계** | **156** | **36,094** | Rust 81% · Python 19% |
+| **aerospike-core** (Rust) | 100 | 19,635 | Aerospike protocol, cluster management, command execution |
+| **rust/src** (PyO3 bindings) | 32 | 9,582 | Python ↔ Rust conversion, async/sync client, policy parsing |
+| **src/aerospike_py** (Python) | 24 | 6,877 | Type stubs (.pyi), NamedTuple wrappers, helpers |
+| **Total** | **156** | **36,094** | Rust 81% · Python 19% |
 
-### 타 DB 클라이언트 대비
+### Compared to Other DB Clients
 
-| 클라이언트 | 구현 코드 | 비고 |
+| Client | Implementation Code | Notes |
 |-----------|----------:|------|
-| **aerospike-py** (Rust+Python) | ~36K | 프로토콜 자체 구현 |
-| aerospike-client-python (공식) | ~15K | C client(100K+) 래핑, C 코드 별도 |
-| redis-rs (Rust) | ~15K | 프로토콜이 훨씬 단순 (텍스트 기반) |
-| pymongo (Python) | ~40-50K | 순수 Python, 프로토콜 자체 구현 |
-| psycopg3 (Python) | ~25-30K | libpq(C) 래핑 |
+| **aerospike-py** (Rust+Python) | ~36K | Protocol implemented from scratch |
+| aerospike-client-python (official) | ~15K | Wraps C client (100K+), C code separate |
+| redis-rs (Rust) | ~15K | Much simpler protocol (text-based) |
+| pymongo (Python) | ~40-50K | Pure Python, protocol implemented from scratch |
+| psycopg3 (Python) | ~25-30K | Wraps libpq (C) |
 
 ```bash
-# 순수 구현 코드만 (tests, examples, benchmark 제외)
+# Implementation code only (excludes tests, examples, benchmark)
 tokei
 
-# aerospike-core 포함
+# Including aerospike-core
 tokei rust/src/ src/aerospike_py/
+
+# Include tests, benchmarks, and samples
+tokei src rust/src tests benchmark examples
+```
+
+Implementation code only (excludes tests, examples, benchmark):
+```
+$ tokei -C
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Language                                 Files        Lines         Code     Comments       Blanks
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Rust                                        34         9729         8581          260          888
+ Python                                      25         8116         6754          238         1124
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Total                                       59        18511        15335         1067         2109
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 ## License

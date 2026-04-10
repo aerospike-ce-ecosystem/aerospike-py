@@ -1,32 +1,32 @@
 # sample-fastapi
 
-FastAPI + `aerospike-py` AsyncClient를 사용한 예제 프로젝트입니다. aerospike-py의 모든 주요 기능(CRUD, Batch, NumPy, Query, UDF, Admin 등)을 REST API로 제공합니다.
+An example project using FastAPI with the `aerospike-py` AsyncClient. Exposes all major aerospike-py features (CRUD, Batch, NumPy, Query, UDF, Admin, etc.) as a REST API.
 
-## 구조
+## Structure
 
 ```
 sample-fastapi/
 ├── app/
-│   ├── main.py              # FastAPI 앱, AsyncClient lifespan 관리
-│   ├── config.py            # pydantic-settings 기반 설정
-│   ├── models.py            # Pydantic 요청/응답 모델
-│   ├── dependencies.py      # FastAPI 의존성 주입 (get_client)
+│   ├── main.py              # FastAPI app, AsyncClient lifespan management
+│   ├── config.py            # pydantic-settings based configuration
+│   ├── models.py            # Pydantic request/response models
+│   ├── dependencies.py      # FastAPI dependency injection (get_client)
 │   └── routers/
 │       ├── users.py         # User CRUD
-│       ├── records.py       # Record 개별 조작 (select, exists, touch, append, increment 등)
+│       ├── records.py       # Individual record operations (select, exists, touch, append, increment, etc.)
 │       ├── operations.py    # Multi-operation (operate, operate_ordered)
 │       ├── batch.py         # Batch read/operate/remove
-│       ├── numpy_batch.py   # NumPy columnar batch read, 벡터 유사도 검색
-│       ├── indexes.py       # Secondary index 생성/삭제
+│       ├── numpy_batch.py   # NumPy columnar batch read, vector similarity search
+│       ├── indexes.py       # Secondary index create/drop
 │       ├── truncate.py      # Set truncate
-│       ├── udf.py           # UDF 등록/삭제/실행
-│       ├── admin_users.py   # Admin 유저 관리
-│       ├── admin_roles.py   # Admin 역할 관리
-│       └── cluster.py       # 클러스터 연결 상태/노드 조회
+│       ├── udf.py           # UDF register/remove/apply
+│       ├── admin_users.py   # Admin user management
+│       ├── admin_roles.py   # Admin role management
+│       └── cluster.py       # Cluster connection status/node listing
 ├── tests/
-│   ├── conftest.py          # testcontainers 기반 Aerospike 컨테이너 픽스처
+│   ├── conftest.py          # testcontainers-based Aerospike container fixture
 │   ├── fixtures/
-│   │   └── test_udf.lua     # UDF 테스트용 Lua 스크립트
+│   │   └── test_udf.lua     # Lua script for UDF testing
 │   ├── test_health.py
 │   ├── test_users.py
 │   ├── test_records.py
@@ -37,153 +37,153 @@ sample-fastapi/
 │   ├── test_truncate.py
 │   ├── test_udf.py
 │   ├── test_cluster.py
-│   ├── test_admin_users.py  # CE에서는 skip
-│   └── test_admin_roles.py  # CE에서는 skip
+│   ├── test_admin_users.py  # skipped on CE
+│   └── test_admin_roles.py  # skipped on CE
 └── pyproject.toml
 ```
 
-## 실행 방법
+## Running
 
-### 1. Aerospike 서버 시작
+### 1. Start the Aerospike server
 
 ```bash
-# 프로젝트 루트에서
+# from the project root
 podman compose -f compose.sample-fastapi.yaml up -d
 ```
 
-### 2. 의존성 설치 및 서버 실행
+### 2. Install dependencies and start the server
 
 ```bash
 uv sync --extra dev
 uvicorn app.main:app --reload
 ```
 
-http://localhost:8000/docs 에서 Swagger UI를 확인할 수 있습니다.
+The Swagger UI is available at http://localhost:8000/docs.
 
-## 테스트
+## Tests
 
-`testcontainers`로 Aerospike 컨테이너를 자동으로 띄우므로, Docker가 실행 중이어야 합니다.
+Tests use `testcontainers` to automatically spin up an Aerospike container, so Docker must be running.
 
 ```bash
-# sample-fastapi 디렉터리에서
+# from the sample-fastapi directory
 uv run pytest
 
-# 저장소 루트에서
+# from the repository root
 uv run --project examples/sample-fastapi pytest
 ```
 
-> Admin 관련 테스트(16건)는 Aerospike CE에서 보안 기능을 지원하지 않아 자동 skip됩니다.
+> Admin-related tests (16 cases) are automatically skipped because Aerospike CE does not support security features.
 
-## API 엔드포인트
+## API Endpoints
 
 ### Health & Cluster
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `GET` | `/health` | 헬스 체크 |
-| `GET` | `/cluster/connected` | 클라이언트 연결 상태 |
-| `GET` | `/cluster/nodes` | 클러스터 노드 목록 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `GET` | `/cluster/connected` | Client connection status |
+| `GET` | `/cluster/nodes` | Cluster node list |
 
 ### Users (CRUD)
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `POST` | `/users` | 유저 생성 |
-| `GET` | `/users` | 전체 유저 조회 |
-| `GET` | `/users/{user_id}` | 유저 단건 조회 |
-| `PUT` | `/users/{user_id}` | 유저 수정 (partial update) |
-| `DELETE` | `/users/{user_id}` | 유저 삭제 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/users` | Create a user |
+| `GET` | `/users` | List all users |
+| `GET` | `/users/{user_id}` | Get a single user |
+| `PUT` | `/users/{user_id}` | Update a user (partial update) |
+| `DELETE` | `/users/{user_id}` | Delete a user |
 
-### Records (개별 레코드 조작)
+### Records (Individual Record Operations)
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `POST` | `/records/select` | 특정 bin만 조회 |
-| `POST` | `/records/exists` | 레코드 존재 여부 확인 |
-| `POST` | `/records/touch` | TTL 갱신 |
-| `POST` | `/records/append` | 문자열 bin에 append |
-| `POST` | `/records/prepend` | 문자열 bin에 prepend |
-| `POST` | `/records/increment` | 숫자 bin increment |
-| `POST` | `/records/remove-bin` | 특정 bin 삭제 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/records/select` | Read specific bins only |
+| `POST` | `/records/exists` | Check whether a record exists |
+| `POST` | `/records/touch` | Refresh TTL |
+| `POST` | `/records/append` | Append to a string bin |
+| `POST` | `/records/prepend` | Prepend to a string bin |
+| `POST` | `/records/increment` | Increment a numeric bin |
+| `POST` | `/records/remove-bin` | Remove a specific bin |
 
-### Operations (단일 레코드 다중 연산)
+### Operations (Multiple Operations on a Single Record)
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `POST` | `/operations/operate` | 여러 연산을 원자적으로 실행 |
-| `POST` | `/operations/operate-ordered` | 연산 순서대로 결과 반환 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/operations/operate` | Execute multiple operations atomically |
+| `POST` | `/operations/operate-ordered` | Execute operations and return results in order |
 
-### Batch (다중 레코드 일괄 처리)
+### Batch (Bulk Multi-Record Operations)
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `POST` | `/batch/read` | 다수 레코드 일괄 조회 |
-| `POST` | `/batch/operate` | 다수 레코드에 연산 일괄 실행 |
-| `POST` | `/batch/remove` | 다수 레코드 일괄 삭제 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/batch/read` | Bulk read multiple records |
+| `POST` | `/batch/operate` | Apply operations to multiple records in bulk |
+| `POST` | `/batch/remove` | Bulk delete multiple records |
 
-### NumPy Batch (columnar 조회 & 벡터 검색)
+### NumPy Batch (Columnar Read & Vector Search)
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `POST` | `/numpy-batch/read` | NumPy structured array 기반 columnar 조회 |
-| `POST` | `/numpy-batch/vector-search` | 코사인 유사도 벡터 검색 (top-k) |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/numpy-batch/read` | Columnar read using NumPy structured arrays |
+| `POST` | `/numpy-batch/vector-search` | Cosine similarity vector search (top-k) |
 
 ### Index
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `POST` | `/indexes/integer` | 정수 secondary index 생성 |
-| `POST` | `/indexes/string` | 문자열 secondary index 생성 |
-| `POST` | `/indexes/geo2dsphere` | 지리공간 index 생성 |
-| `DELETE` | `/indexes/{ns}/{name}` | Index 삭제 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/indexes/integer` | Create an integer secondary index |
+| `POST` | `/indexes/string` | Create a string secondary index |
+| `POST` | `/indexes/geo2dsphere` | Create a geospatial index |
+| `DELETE` | `/indexes/{ns}/{name}` | Drop an index |
 
 ### Truncate & UDF
 
-| Method | Path | 설명 |
-|--------|------|------|
+| Method | Path | Description |
+|--------|------|-------------|
 | `POST` | `/truncate` | Set truncate |
-| `POST` | `/udf/modules` | UDF 모듈 등록 |
-| `DELETE` | `/udf/modules/{name}` | UDF 모듈 삭제 |
-| `POST` | `/udf/apply` | UDF 함수 실행 |
+| `POST` | `/udf/modules` | Register a UDF module |
+| `DELETE` | `/udf/modules/{name}` | Remove a UDF module |
+| `POST` | `/udf/apply` | Execute a UDF function |
 
-### Admin (Enterprise Edition 전용)
+### Admin (Enterprise Edition Only)
 
-| Method | Path | 설명 |
-|--------|------|------|
-| `POST` | `/admin/users` | 관리자 유저 생성 |
-| `DELETE` | `/admin/users/{username}` | 관리자 유저 삭제 |
-| `PUT` | `/admin/users/{username}/password` | 비밀번호 변경 |
-| `POST` | `/admin/users/{username}/grant-roles` | 역할 부여 |
-| `POST` | `/admin/users/{username}/revoke-roles` | 역할 회수 |
-| `GET` | `/admin/users/{username}` | 유저 정보 조회 |
-| `GET` | `/admin/users` | 전체 유저 정보 조회 |
-| `POST` | `/admin/roles` | 역할 생성 |
-| `DELETE` | `/admin/roles/{role}` | 역할 삭제 |
-| `POST` | `/admin/roles/{role}/grant-privileges` | 권한 부여 |
-| `POST` | `/admin/roles/{role}/revoke-privileges` | 권한 회수 |
-| `GET` | `/admin/roles/{role}` | 역할 정보 조회 |
-| `GET` | `/admin/roles` | 전체 역할 조회 |
-| `PUT` | `/admin/roles/{role}/whitelist` | IP 화이트리스트 설정 |
-| `PUT` | `/admin/roles/{role}/quotas` | 읽기/쓰기 쿼터 설정 |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/admin/users` | Create an admin user |
+| `DELETE` | `/admin/users/{username}` | Delete an admin user |
+| `PUT` | `/admin/users/{username}/password` | Change password |
+| `POST` | `/admin/users/{username}/grant-roles` | Grant roles |
+| `POST` | `/admin/users/{username}/revoke-roles` | Revoke roles |
+| `GET` | `/admin/users/{username}` | Get user info |
+| `GET` | `/admin/users` | List all users |
+| `POST` | `/admin/roles` | Create a role |
+| `DELETE` | `/admin/roles/{role}` | Delete a role |
+| `POST` | `/admin/roles/{role}/grant-privileges` | Grant privileges |
+| `POST` | `/admin/roles/{role}/revoke-privileges` | Revoke privileges |
+| `GET` | `/admin/roles/{role}` | Get role info |
+| `GET` | `/admin/roles` | List all roles |
+| `PUT` | `/admin/roles/{role}/whitelist` | Set IP whitelist |
+| `PUT` | `/admin/roles/{role}/quotas` | Set read/write quotas |
 
-## 환경 변수
+## Environment Variables
 
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `APP_AEROSPIKE_HOST` | `127.0.0.1` | Aerospike 호스트 |
-| `APP_AEROSPIKE_PORT` | `3000` | Aerospike 포트 |
-| `APP_AEROSPIKE_NAMESPACE` | `test` | 사용할 namespace |
-| `APP_AEROSPIKE_SET` | `users` | 사용할 set 이름 |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_AEROSPIKE_HOST` | `127.0.0.1` | Aerospike host |
+| `APP_AEROSPIKE_PORT` | `3000` | Aerospike port |
+| `APP_AEROSPIKE_NAMESPACE` | `test` | Namespace to use |
+| `APP_AEROSPIKE_SET` | `users` | Set name to use |
 
-## 사용 예시
+## Usage Examples
 
 ```bash
-# 유저 생성
+# Create a user
 curl -X POST http://localhost:8000/users \
   -H "Content-Type: application/json" \
   -d '{"name": "Alice", "email": "alice@example.com", "age": 30}'
 
-# 전체 유저 조회
+# List all users
 curl http://localhost:8000/users
 
 # Batch read
@@ -200,6 +200,6 @@ curl -X POST http://localhost:8000/operations/operate \
   -d '{"key": {"namespace": "test", "set_name": "users", "key": "user1"},
        "ops": [{"op": 2, "bin": "age", "val": 1}, {"op": 1, "bin": "age"}]}'
 
-# 클러스터 노드 조회
+# List cluster nodes
 curl http://localhost:8000/cluster/nodes
 ```

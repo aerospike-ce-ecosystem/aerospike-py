@@ -1,5 +1,5 @@
 name: Publish Docs
-# main push 또는 release 시 Docusaurus 빌드 후 GitHub Pages에 배포
+# Builds Docusaurus and deploys to GitHub Pages on main push or release
 
 on:
   workflow_dispatch:

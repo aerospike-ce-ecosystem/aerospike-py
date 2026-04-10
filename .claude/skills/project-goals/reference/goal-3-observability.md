@@ -2,24 +2,24 @@
 
 ## Logging
 
-Rust `log` 크레이트 → Python `logging` 브릿지.
-`Python::try_attach`로 GIL 획득 후 `logging.getLogger(target)` 전달.
+Rust `log` crate → Python `logging` bridge.
+Acquires GIL via `Python::try_attach` then forwards to `logging.getLogger(target)`.
 
 ## OTel Tracing
 
-- `otel` feature (maturin build에 항상 활성화) — cargo feature gate
-- `traced_op!` 매크로: OTel span + Prometheus 타이머 동시 기록
-- fast-path: OTel 비활성 시 `timed_op!`만 실행 (Python 호출 없음)
-- W3C TraceContext 전파: `opentelemetry.propagate.inject()` 경유
+- `otel` feature (always enabled in maturin build) — cargo feature gate
+- `traced_op!` macro: records OTel span + Prometheus timer simultaneously
+- Fast path: when OTel is inactive, only `timed_op!` runs (no Python calls)
+- W3C TraceContext propagation: via `opentelemetry.propagate.inject()`
 - Python optional dep: `pip install aerospike-py[otel]` → `opentelemetry-api>=1.20`
 
 ## Prometheus Metrics
 
-- `db_client_operation_duration_seconds` 히스토그램 (라벨: namespace, set, operation, error_type)
-- 내장 HTTP 서버: `start_metrics_server(port)` / `stop_metrics_server()`
-- `METRICS_ENABLED` AtomicBool로 전역 토글 가능
+- `db_client_operation_duration_seconds` histogram (labels: namespace, set, operation, error_type)
+- Built-in HTTP server: `start_metrics_server(port)` / `stop_metrics_server()`
+- Global toggle via `METRICS_ENABLED` AtomicBool
 
-## 주요 파일
+## Key Files
 
 - `rust/src/logging.rs`
 - `rust/src/tracing.rs`

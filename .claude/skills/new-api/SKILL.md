@@ -6,62 +6,62 @@ args: "[method-name] [description]"
 
 # New API Method
 
-aerospike-py에 새로운 Client/AsyncClient API 메서드를 추가합니다. Rust 구현부터 Python 타입 스텁, 테스트까지 모든 레이어를 일관되게 생성합니다.
+Adds a new Client/AsyncClient API method to aerospike-py. Consistently creates all layers from the Rust implementation through Python type stubs and tests.
 
-## 인자
+## Arguments
 
-`/new-api [method-name] [description]` 형식으로 호출합니다.
+Invoke with `/new-api [method-name] [description]`.
 
-- `method-name`: 추가할 메서드 이름 (예: `get_key_digest`)
-- `description`: 메서드 동작 설명 (예: "키의 RIPEMD-160 digest를 반환")
+- `method-name`: Name of the method to add (e.g., `get_key_digest`)
+- `description`: Description of the method behavior (e.g., "Returns the RIPEMD-160 digest of the key")
 
-## 수정 대상 파일 체크리스트
+## File Modification Checklist
 
-새 API 메서드를 추가할 때 반드시 아래 파일들을 **모두** 수정해야 합니다:
+When adding a new API method, you **must** modify all of the following files:
 
-| 순서 | 파일 | 역할 |
+| Order | File | Role |
 |------|------|------|
-| 1 | `rust/src/client_common.rs` | 공유 파라미터 파싱 함수 (`prepare_*_args`) |
-| 2 | `rust/src/client.rs` | Sync Client Rust 구현 (`#[pymethods] impl PyClient`) |
-| 3 | `rust/src/async_client.rs` | Async Client Rust 구현 (`#[pymethods] impl PyAsyncClient`) |
-| 4 | `src/aerospike_py/__init__.py` | Python 래퍼 (NamedTuple 변환이 필요한 경우만) |
-| 5 | `src/aerospike_py/__init__.pyi` | 타입 스텁 (Client 클래스 + AsyncClient 클래스 양쪽) |
-| 6 | `tests/unit/test_*.py` | 유닛 테스트 (서버 불필요, 인자 검증 등) |
-| 7 | `tests/integration/test_*.py` | 통합 테스트 (실제 Aerospike 서버 필요) |
+| 1 | `rust/src/client_common.rs` | Shared parameter parsing functions (`prepare_*_args`) |
+| 2 | `rust/src/client.rs` | Sync Client Rust implementation (`#[pymethods] impl PyClient`) |
+| 3 | `rust/src/async_client.rs` | Async Client Rust implementation (`#[pymethods] impl PyAsyncClient`) |
+| 4 | `src/aerospike_py/__init__.py` | Python wrapper (only when NamedTuple conversion is needed) |
+| 5 | `src/aerospike_py/__init__.pyi` | Type stubs (both Client and AsyncClient classes) |
+| 6 | `tests/unit/test_*.py` | Unit tests (no server required — argument validation, etc.) |
+| 7 | `tests/integration/test_*.py` | Integration tests (requires running Aerospike server) |
 
-필요에 따라 추가로 수정할 수 있는 파일:
+Additional files that may need modification:
 
-| 파일 | 조건 |
+| File | Condition |
 |------|------|
-| `rust/src/policy/*.rs` | 새 정책 타입이 필요한 경우 |
-| `rust/src/types/*.rs` | 새 타입 변환이 필요한 경우 |
-| `rust/src/errors.rs` | 새 에러 타입이 필요한 경우 |
-| `rust/src/operations.rs` | operate 연산 추가 시 |
-| `src/aerospike_py/types.py` | 새 NamedTuple/TypedDict가 필요한 경우 |
+| `rust/src/policy/*.rs` | When a new policy type is needed |
+| `rust/src/types/*.rs` | When a new type conversion is needed |
+| `rust/src/errors.rs` | When a new error type is needed |
+| `rust/src/operations.rs` | When adding operate operations |
+| `src/aerospike_py/types.py` | When a new NamedTuple/TypedDict is needed |
 
-## 실행 단계
+## Steps
 
-### 1. aerospike_core API 확인
+### 1. Check the aerospike_core API
 
-먼저 `aerospike_core` 크레이트에서 사용할 수 있는 API를 확인합니다:
+First, check the available APIs in the `aerospike_core` crate:
 
 ```bash
 cargo doc --manifest-path rust/Cargo.toml --open
 ```
 
-또는 `rust/Cargo.toml`에서 aerospike-core 버전(`2.0.0-alpha.9`)을 확인하고 docs.rs에서 API를 검색합니다.
+Alternatively, check the aerospike-core version (`2.0.0-alpha.9`) in `rust/Cargo.toml` and search for the API on docs.rs.
 
-### 2. 공유 파라미터 파싱 (`rust/src/client_common.rs`)
+### 2. Shared Parameter Parsing (`rust/src/client_common.rs`)
 
-sync/async 클라이언트 양쪽에서 동일한 파라미터 파싱 로직을 공유하기 위해 `prepare_*_args` 함수를 먼저 정의합니다.
+Define a `prepare_*_args` function first so both sync/async clients share the same parameter parsing logic.
 
-**기존 패턴 참조** (예: `prepare_get_args`):
+**Reference existing pattern** (e.g., `prepare_get_args`):
 
 ```rust
 /// Parsed arguments for `get` / `select` operations.
 pub(crate) struct GetArgs {
     pub key: aerospike_core::Key,
-    pub parent_ctx: ParentContext,  // OTel 컨텍스트 (otel feature 시 opentelemetry::Context)
+    pub parent_ctx: ParentContext,  // OTel context (opentelemetry::Context when otel feature is enabled)
     pub conn_info: ConnectionInfo,
     read_policy: Option<aerospike_core::ReadPolicy>,
 }
@@ -98,16 +98,16 @@ pub(crate) fn prepare_get_args(
 }
 ```
 
-**핵심 포인트:**
-- `ParentContext` 타입은 `otel` feature에 따라 `opentelemetry::Context` 또는 `()`.
-- OTel 컨텍스트 추출은 **GIL 보유 상태에서** 수행해야 함 (Python SDK 호출 필요).
-- 정책이 `None`이면 기본 정책(`DEFAULT_*_POLICY`)을 사용하는 빠른 경로 제공.
+**Key points:**
+- `ParentContext` type is `opentelemetry::Context` or `()` depending on the `otel` feature.
+- OTel context extraction must be performed **while holding the GIL** (requires Python SDK calls).
+- Provide a fast path using default policies (`DEFAULT_*_POLICY`) when policy is `None`.
 
-### 3. Rust Sync Client 구현 (`rust/src/client.rs`)
+### 3. Rust Sync Client Implementation (`rust/src/client.rs`)
 
-`#[pymethods] impl PyClient` 블록 안에 메서드를 추가합니다.
+Add the method inside the `#[pymethods] impl PyClient` block.
 
-**실제 코드 패턴** (`put` 메서드 기준):
+**Actual code pattern** (based on the `put` method):
 
 ```rust
 /// Write a record
@@ -120,13 +120,13 @@ fn put(
     meta: Option<&Bound<'_, PyDict>>,
     policy: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<()> {
-    // 1. 공유 함수로 파라미터 파싱 (GIL 보유 상태)
+    // 1. Parse parameters using shared function (while holding GIL)
     let args = client_common::prepare_put_args(
         py, key, bins, meta, policy, &self.connection_info
     )?;
     let client = self.get_client()?;
 
-    // 2. py.detach()로 GIL 해제 + RUNTIME.block_on()으로 async 실행
+    // 2. Release GIL with py.detach() + execute async via RUNTIME.block_on()
     match args.policy {
         PutPolicy::Default => {
             let wp = &*DEFAULT_WRITE_POLICY;
@@ -159,20 +159,20 @@ fn put(
 }
 ```
 
-**핵심 규칙:**
-- `#[pyo3(signature = (...))]` 매크로로 Python 시그니처 명시.
-- `self.get_client()?`로 연결 상태 확인 (미연결 시 `ClientError` 발생).
-- `py.detach(|| { ... })` 패턴으로 GIL을 해제하고 블로킹 실행.
-- `RUNTIME.block_on(async { ... })` 안에서 aerospike_core의 async API 호출.
-- `traced_op!` 매크로로 OTel 스팬 + Prometheus 메트릭 자동 계측.
-- 에러는 `traced_op!` 매크로 내부에서 `as_to_pyerr()`로 Python 예외 변환.
-- 반환 타입 변환: `record_to_py()`, `key_to_py()`, `value_to_py()` 등 기존 헬퍼 활용.
+**Key rules:**
+- Specify the Python signature with `#[pyo3(signature = (...))]` macro.
+- Check connection state with `self.get_client()?` (raises `ClientError` if not connected).
+- Use the `py.detach(|| { ... })` pattern to release the GIL and execute blocking code.
+- Call aerospike_core's async API inside `RUNTIME.block_on(async { ... })`.
+- Use the `traced_op!` macro for automatic OTel span + Prometheus metric instrumentation.
+- Errors are converted to Python exceptions via `as_to_pyerr()` inside the `traced_op!` macro.
+- Return type conversion: use existing helpers like `record_to_py()`, `key_to_py()`, `value_to_py()`.
 
-### 4. Rust Async Client 구현 (`rust/src/async_client.rs`)
+### 4. Rust Async Client Implementation (`rust/src/async_client.rs`)
 
-Sync와 동일한 로직이지만, `future_into_py`로 감쌉니다.
+Same logic as sync, but wrapped with `future_into_py`.
 
-**실제 코드 패턴** (`get` 메서드 기준):
+**Actual code pattern** (based on the `get` method):
 
 ```rust
 /// Read a record
@@ -188,7 +188,7 @@ fn get<'py>(
         py, key, policy, &self.connection_info
     )?;
 
-    // future_into_py: Python awaitable 반환
+    // future_into_py: returns a Python awaitable
     future_into_py(py, async move {
         let rp = args.read_policy();
         let record = traced_op!(
@@ -200,24 +200,24 @@ fn get<'py>(
             { client.get(rp, &args.key, Bins::All).await }
         )?;
 
-        // GIL 재획득하여 Python 객체 생성
+        // Reacquire GIL to create Python objects
         Python::attach(|py| record_to_py(py, &record, Some(&args.key)))
     })
 }
 ```
 
-**Sync와의 핵심 차이:**
-- 반환 타입이 `PyResult<Bound<'py, PyAny>>` (Python awaitable).
-- `future_into_py(py, async move { ... })` 사용.
-- aerospike_core 호출에 `.await` 직접 사용 (block_on 불필요).
-- Python 객체 생성 시 `Python::attach(|py| ...)` 로 GIL 재획득.
-- `SharedClientState`: `Arc<Mutex<Option<Arc<AsClient>>>>` 패턴으로 안전한 공유.
+**Key differences from sync:**
+- Return type is `PyResult<Bound<'py, PyAny>>` (Python awaitable).
+- Uses `future_into_py(py, async move { ... })`.
+- Uses `.await` directly for aerospike_core calls (no block_on needed).
+- Reacquires GIL with `Python::attach(|py| ...)` when creating Python objects.
+- `SharedClientState`: safe sharing via `Arc<Mutex<Option<Arc<AsClient>>>>` pattern.
 
-### 5. Python 래퍼 (`src/aerospike_py/__init__.py`)
+### 5. Python Wrapper (`src/aerospike_py/__init__.py`)
 
-반환값이 NamedTuple로 변환이 필요한 경우에만 래퍼를 추가합니다.
+Add a wrapper only when the return value needs NamedTuple conversion.
 
-**`Client` 클래스** (`class Client(_NativeClient):`):
+**`Client` class** (`class Client(_NativeClient):`):
 ```python
 def get(self, key, policy=None):
     return _wrap_record(super().get(key, policy))
@@ -226,7 +226,7 @@ def exists(self, key, policy=None):
     return _wrap_exists(super().exists(key, policy))
 ```
 
-**`AsyncClient` 클래스** (`class AsyncClient:`):
+**`AsyncClient` class** (`class AsyncClient:`):
 ```python
 async def get(self, key, policy=None):
     return _wrap_record(await self._inner.get(key, policy))
@@ -235,19 +235,19 @@ async def exists(self, key, policy=None):
     return _wrap_exists(await self._inner.exists(key, policy))
 ```
 
-**래핑 헬퍼 함수:**
+**Wrapping helper functions:**
 - `_wrap_record(raw)` -> `Record(key, meta, bins)` NamedTuple
 - `_wrap_exists(raw)` -> `ExistsResult(key, meta)` NamedTuple
 - `_wrap_operate_ordered(raw)` -> `OperateOrderedResult(key, meta, bin_list)` NamedTuple
 
-NamedTuple 래핑이 필요 없는 메서드(예: `put`, `remove` 등 void 반환 또는 단순 타입 반환)는 네이티브 메서드가 직접 노출되므로 래퍼 불필요.
+Methods that don't need NamedTuple wrapping (e.g., `put`, `remove` — void return or simple types) are exposed directly from the native method, so no wrapper is needed.
 
-### 6. 타입 스텁 (`src/aerospike_py/__init__.pyi`)
+### 6. Type Stubs (`src/aerospike_py/__init__.pyi`)
 
-**Client 클래스**와 **AsyncClient 클래스** 양쪽에 시그니처를 추가합니다:
+Add signatures to **both** the Client and AsyncClient classes:
 
 ```python
-# Client 클래스 내
+# Inside Client class
 def method_name(
     self,
     key: Key,
@@ -256,7 +256,7 @@ def method_name(
     policy: Optional[ReadPolicy] = None,
 ) -> Record: ...
 
-# AsyncClient 클래스 내
+# Inside AsyncClient class
 async def method_name(
     self,
     key: Key,
@@ -266,11 +266,11 @@ async def method_name(
 ) -> Record: ...
 ```
 
-**주의:** 기존 메서드 시그니처와 일관된 순서, 네이밍, 타입을 유지합니다.
+**Note:** Maintain consistent ordering, naming, and types with existing method signatures.
 
-### 7. 유닛 테스트 (`tests/unit/`)
+### 7. Unit Tests (`tests/unit/`)
 
-서버 없이 실행 가능한 테스트를 작성합니다. 주로 인자 검증, 타입 에러, 연결 안 된 상태에서의 에러를 테스트합니다:
+Write tests that can run without a server. Mainly test argument validation, type errors, and errors when not connected:
 
 ```python
 import pytest
@@ -288,15 +288,15 @@ class TestMethodName:
             client.method_name("invalid_key", "param1")
 ```
 
-### 8. 통합 테스트 (`tests/integration/`)
+### 8. Integration Tests (`tests/integration/`)
 
-실제 Aerospike 서버와 통신하는 테스트를 작성합니다. `conftest.py`의 fixture를 활용합니다:
+Write tests that communicate with a real Aerospike server. Use fixtures from `conftest.py`:
 
-**주요 fixture:**
-- `client` (module-scoped) - sync 클라이언트, 서버 미가용 시 자동 skip
-- `async_client` (function-scoped) - async 클라이언트, 서버 미가용 시 자동 skip
-- `cleanup` (function-scoped) - `keys` 리스트에 append하면 테스트 후 자동 삭제
-- `async_cleanup` (function-scoped) - async 버전의 cleanup
+**Key fixtures:**
+- `client` (module-scoped) — sync client, auto-skips if server unavailable
+- `async_client` (function-scoped) — async client, auto-skips if server unavailable
+- `cleanup` (function-scoped) — append keys to the `keys` list for automatic deletion after test
+- `async_cleanup` (function-scoped) — async version of cleanup
 
 ```python
 import pytest
@@ -319,55 +319,55 @@ class TestMethodName:
         assert result is not None
 ```
 
-**참고:** `asyncio_mode = "auto"` 설정이므로 async 테스트에 `@pytest.mark.asyncio` 데코레이터가 불필요합니다.
+**Note:** With `asyncio_mode = "auto"` configured, the `@pytest.mark.asyncio` decorator is not needed for async tests.
 
-### 9. 빌드 및 검증
+### 9. Build and Verify
 
 ```bash
-# 컴파일 체크 (빠른 확인)
+# Compilation check (quick verification)
 cargo check --manifest-path rust/Cargo.toml
 
-# 빌드
+# Build
 make build
 
-# 타입 체크
+# Type check
 uv run pyright
 
-# 유닛 테스트
+# Unit tests
 uv run pytest tests/unit/ -v -k "test_method_name"
 
-# 통합 테스트 (서버 필요)
+# Integration tests (requires server)
 uv run pytest tests/integration/ -v -k "test_method_name"
 ```
 
-## `traced_op!` 매크로 상세
+## `traced_op!` Macro Details
 
-`traced_op!` 매크로는 OTel 스팬과 Prometheus 메트릭을 동시에 기록합니다:
+The `traced_op!` macro records both OTel spans and Prometheus metrics simultaneously:
 
 ```rust
 traced_op!(
-    "operation_name",          // 연산 이름 (span name: "OP ns.set")
+    "operation_name",          // Operation name (span name: "OP ns.set")
     &args.key.namespace,       // namespace (metrics label)
     &args.key.set_name,        // set (metrics label)
-    args.parent_ctx,           // OTel 부모 컨텍스트
+    args.parent_ctx,           // OTel parent context
     args.conn_info,            // ConnectionInfo (server.address, server.port, cluster_name)
-    { client.operation(...).await }  // 실행할 async 블록 (Result<T, aerospike_core::Error>)
+    { client.operation(...).await }  // Async block to execute (Result<T, aerospike_core::Error>)
 )
-// 반환: Result<T, PyErr>
+// Returns: Result<T, PyErr>
 ```
 
-**`otel` feature 미활성화 시**: `traced_op!`은 `timed_op!`으로 폴백 (Prometheus 메트릭만 기록).
+**When `otel` feature is disabled**: `traced_op!` falls back to `timed_op!` (Prometheus metrics only).
 
-**`traced_exists_op!`**: `exists` 연산 전용. `KeyNotFoundError`를 에러로 취급하지 않음. 반환 타입이 `Result<T, aerospike_core::Error>` (PyErr가 아님).
+**`traced_exists_op!`**: Dedicated to `exists` operations. Does not treat `KeyNotFoundError` as an error. Return type is `Result<T, aerospike_core::Error>` (not PyErr).
 
-## 주의사항
+## Important Notes
 
-- **Sync/Async 일관성**: 반드시 `client.rs`와 `async_client.rs` 양쪽에 구현합니다.
-- **client_common.rs에 파싱 로직 공유**: 파라미터 파싱은 `prepare_*_args` 패턴으로 공유 함수에 위치합니다.
-- **OTel 트레이싱**: 모든 I/O 메서드는 `traced_op!` 매크로로 감싸야 합니다.
-- **타입 스텁 동기화**: `.pyi` 파일의 시그니처가 Rust 구현과 정확히 일치해야 합니다.
-- **NamedTuple 반환**: `get`, `select`, `exists`, `operate`, `operate_ordered`, `info_all` 등은 Python 래퍼에서 NamedTuple로 변환합니다. 새 메서드도 복합 반환값이면 적절한 NamedTuple을 정의합니다.
-- **GIL 안전성**:
-  - Sync: `py.detach(|| { ... })` 패턴으로 GIL 해제 후 블로킹.
-  - Async: `future_into_py()` 안에서 Python 객체 생성 시 `Python::attach(|py| ...)` 로 GIL 재획득.
-- **`otel` feature gate**: OTel 컨텍스트 추출 코드에 `#[cfg(feature = "otel")]`를 사용합니다. `client_common.rs`에서 이미 처리되므로 보통 신경 쓸 필요 없음.
+- **Sync/Async consistency**: Always implement in both `client.rs` and `async_client.rs`.
+- **Share parsing logic in client_common.rs**: Parameter parsing goes in shared `prepare_*_args` functions.
+- **OTel tracing**: All I/O methods must be wrapped with the `traced_op!` macro.
+- **Type stub synchronization**: `.pyi` file signatures must exactly match the Rust implementation.
+- **NamedTuple returns**: `get`, `select`, `exists`, `operate`, `operate_ordered`, `info_all`, etc. are converted to NamedTuples in the Python wrapper. New methods with compound return values should define appropriate NamedTuples.
+- **GIL safety**:
+  - Sync: `py.detach(|| { ... })` pattern to release GIL before blocking.
+  - Async: Reacquire GIL with `Python::attach(|py| ...)` when creating Python objects inside `future_into_py()`.
+- **`otel` feature gate**: Use `#[cfg(feature = "otel")]` for OTel context extraction code. Already handled in `client_common.rs`, so usually no additional work is needed.

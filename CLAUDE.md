@@ -1,148 +1,148 @@
 # aerospike-py
 
-Aerospike NoSQL 데이터베이스를 위한 Python 클라이언트 라이브러리.
-**Rust(PyO3)로 작성**되어 네이티브 바이너리로 컴파일되며, Python에서 sync/async 양쪽 API를 제공한다.
+Python client library for the Aerospike NoSQL database.
+**Written in Rust (PyO3)** and compiled to a native binary, providing both sync and async APIs from Python.
 
-## 설치
+## Installation
 
 ```bash
 pip install aerospike-py
 ```
 
-> Python 3.10~3.14 (3.14t free-threaded 포함), CPython 전용. macOS(arm64, x86_64) 및 Linux(x86_64, aarch64) 지원.
+> Python 3.10–3.14 (including 3.14t free-threaded), CPython only. Supports macOS (arm64, x86_64) and Linux (x86_64, aarch64).
 
-## 프로젝트 구조
+## Project Structure
 
 ```
 aerospike-py/
-├── rust/src/               # Rust 네이티브 모듈 (PyO3 바인딩)
-│   ├── lib.rs              # 모듈 엔트리포인트
-│   ├── client.rs           # Sync Client 구현
-│   ├── async_client.rs     # Async Client 구현
-│   ├── errors.rs           # 에러 매핑 (Aerospike → Python 예외)
-│   ├── operations.rs       # operate/operate_ordered 연산 변환
-│   ├── query.rs            # Query 객체
-│   ├── constants.rs        # 상수 정의
-│   ├── expressions.rs      # Expression 필터 파싱
-│   ├── batch_types.rs      # 배치 연산 타입 정의
-│   ├── numpy_support.rs    # NumPy 배열 변환 지원
-│   ├── record_helpers.rs   # 레코드 변환 헬퍼
-│   ├── runtime.rs          # Tokio 런타임 관리
-│   ├── logging.rs          # 로깅 설정
-│   ├── metrics.rs          # Prometheus 메트릭 수집
-│   ├── tracing.rs          # OpenTelemetry 트레이싱
-│   ├── policy/             # 정책 파싱 (read, write, admin, batch, query, client)
-│   └── types/              # 타입 변환 (key, value, record, bin, host)
-├── src/aerospike_py/       # Python 패키지
-│   ├── __init__.py         # Client/AsyncClient 래퍼, 팩토리 함수, 상수 re-export
-│   ├── __init__.pyi        # Type stubs (메인)
-│   ├── _types.py           # 내부 타입 정의
-│   ├── types.py            # 공개 타입 정의
-│   ├── exception.py        # 예외 클래스 re-export
-│   ├── exception.pyi       # 예외 타입 stubs
-│   ├── predicates.py       # 쿼리 프레디케이트 헬퍼
-│   ├── predicates.pyi      # 프레디케이트 타입 stubs
-│   ├── list_operations.py  # List CDT 연산 헬퍼
-│   ├── list_operations.pyi # List 연산 타입 stubs
-│   ├── map_operations.py   # Map CDT 연산 헬퍼
-│   ├── map_operations.pyi  # Map 연산 타입 stubs
-│   ├── exp.py              # Expression 필터 빌더
-│   ├── exp.pyi             # Expression 타입 stubs
-│   ├── numpy_batch.py      # NumPy 기반 배치 결과
-│   └── py.typed            # PEP 561 타입 마커
+├── rust/src/               # Rust native module (PyO3 bindings)
+│   ├── lib.rs              # Module entry point
+│   ├── client.rs           # Sync Client implementation
+│   ├── async_client.rs     # Async Client implementation
+│   ├── errors.rs           # Error mapping (Aerospike → Python exceptions)
+│   ├── operations.rs       # operate/operate_ordered operation translation
+│   ├── query.rs            # Query object
+│   ├── constants.rs        # Constant definitions
+│   ├── expressions.rs      # Expression filter parsing
+│   ├── batch_types.rs      # Batch operation type definitions
+│   ├── numpy_support.rs    # NumPy array conversion support
+│   ├── record_helpers.rs   # Record conversion helpers
+│   ├── runtime.rs          # Tokio runtime management
+│   ├── logging.rs          # Logging configuration
+│   ├── metrics.rs          # Prometheus metrics collection
+│   ├── tracing.rs          # OpenTelemetry tracing
+│   ├── policy/             # Policy parsing (read, write, admin, batch, query, client)
+│   └── types/              # Type conversions (key, value, record, bin, host)
+├── src/aerospike_py/       # Python package
+│   ├── __init__.py         # Client/AsyncClient wrappers, factory functions, constants re-export
+│   ├── __init__.pyi        # Type stubs (main)
+│   ├── _types.py           # Internal type definitions
+│   ├── types.py            # Public type definitions
+│   ├── exception.py        # Exception class re-exports
+│   ├── exception.pyi       # Exception type stubs
+│   ├── predicates.py       # Query predicate helpers
+│   ├── predicates.pyi      # Predicate type stubs
+│   ├── list_operations.py  # List CDT operation helpers
+│   ├── list_operations.pyi # List operation type stubs
+│   ├── map_operations.py   # Map CDT operation helpers
+│   ├── map_operations.pyi  # Map operation type stubs
+│   ├── exp.py              # Expression filter builder
+│   ├── exp.pyi             # Expression type stubs
+│   ├── numpy_batch.py      # NumPy-based batch results
+│   └── py.typed            # PEP 561 type marker
 ├── tests/
-│   ├── unit/               # 유닛 테스트 (서버 불필요)
-│   ├── integration/        # 통합 테스트 (Aerospike 서버 필요)
-│   ├── concurrency/        # 스레드 안전성 테스트
-│   ├── compatibility/      # 공식 C 클라이언트 호환성 테스트
-│   └── feasibility/        # 프레임워크 통합 테스트 (FastAPI, Gunicorn)
-└── pyproject.toml          # 빌드 설정 (maturin)
+│   ├── unit/               # Unit tests (no server required)
+│   ├── integration/        # Integration tests (requires Aerospike server)
+│   ├── concurrency/        # Thread safety tests
+│   ├── compatibility/      # Official C client compatibility tests
+│   └── feasibility/        # Framework integration tests (FastAPI, Gunicorn)
+└── pyproject.toml          # Build configuration (maturin)
 ```
 
-## 개발 환경
+## Development Environment
 
-패키지 매니저로 **uv**를 사용한다. Makefile에 주요 명령어가 정의되어 있다.
+**uv** is used as the package manager. Key commands are defined in the Makefile.
 
 ```bash
-# 의존성 설치
+# Install dependencies
 make install                        # uv sync --group dev --group bench
 
-# Rust 빌드
+# Rust build
 make build                          # uv run maturin develop --release
-cargo check --manifest-path rust/Cargo.toml  # 컴파일 체크만 (빠름)
+cargo check --manifest-path rust/Cargo.toml  # Compilation check only (fast)
 
-# 테스트
-make test-unit                      # 유닛 테스트 (서버 불필요)
-make test-integration               # 통합 테스트 (Aerospike 서버 필요)
-make test-concurrency               # 스레드 안전성 테스트
-make test-compat                    # 공식 클라이언트 호환성 테스트
-make test-all                       # 전체 테스트
-make test-matrix                    # Python 3.10~3.14 매트릭스 테스트 (tox)
+# Tests
+make test-unit                      # Unit tests (no server required)
+make test-integration               # Integration tests (requires Aerospike server)
+make test-concurrency               # Thread safety tests
+make test-compat                    # Official client compatibility tests
+make test-all                       # Full test suite
+make test-matrix                    # Python 3.10–3.14 matrix tests (tox)
 
-# 린트 & 포맷
+# Lint & format
 make lint                           # ruff check + clippy
 make fmt                            # ruff format + cargo fmt
 
-# 로컬 Aerospike 서버
-make run-aerospike-ce               # compose.local.yaml로 Aerospike CE 실행 (port 18710)
-make stop-aerospike-ce              # Aerospike CE 서버 중지
+# Local Aerospike server
+make run-aerospike-ce               # Start Aerospike CE via compose.local.yaml (port 18710)
+make stop-aerospike-ce              # Stop Aerospike CE server
 
-# 벤치마크
-make run-benchmark-report                      # 벤치마크 실행 + JSON 리포트 생성
-make run-benchmark-report BENCH_SCENARIO=all   # 전체 시나리오 (numpy 포함) + 리포트
+# Benchmarks
+make run-benchmark-report                      # Run benchmarks + generate JSON report
+make run-benchmark-report BENCH_SCENARIO=all   # All scenarios (including numpy) + report
 
-# 타입 체크 & 검증
-make typecheck                      # pyright 타입 체크
-make validate                       # fmt + lint + typecheck + unit 통합 검증
+# Type checking & validation
+make typecheck                      # pyright type check
+make validate                       # fmt + lint + typecheck + unit — full validation
 
-# 문서
-make docs-start                     # Docusaurus dev 서버 (hot reload)
-make docs-build                     # Docusaurus 프로덕션 빌드
+# Documentation
+make docs-start                     # Docusaurus dev server (hot reload)
+make docs-build                     # Docusaurus production build
 
-# 기타
-make dev-build                      # 디버그 빌드 (--release 없이, 빠름)
-make coverage                       # 테스트 커버리지 리포트 생성
-make clean                          # 빌드 아티팩트 전체 정리
-make pre-commit-install             # pre-commit 훅 설치
+# Miscellaneous
+make dev-build                      # Debug build (without --release, faster)
+make coverage                       # Generate test coverage report
+make clean                          # Remove all build artifacts
+make pre-commit-install             # Install pre-commit hooks
 ```
 
 ### Pre-commit Hooks
 
-커밋 시 자동 실행: trailing-whitespace, ruff format/lint, pyright, cargo fmt, cargo clippy (-D warnings)
+Runs automatically on commit: trailing-whitespace, ruff format/lint, pyright, cargo fmt, cargo clippy (-D warnings)
 
-### 주의사항
+### Notes
 
-- OpenTelemetry(`otel`)은 기본 빌드에 항상 포함됨 (별도 feature flag 불필요)
-- 통합 테스트 실행 전 `make run-aerospike-ce`로 로컬 서버 필요
-- maturin 버전 `>=1.9,<2.0`으로 고정
-- `AEROSPIKE_HOST`, `AEROSPIKE_PORT` 환경변수로 서버 주소 변경 가능 (기본: `127.0.0.1:18710`)
-- `AEROSPIKE_RUNTIME_WORKERS` 환경변수로 내부 Tokio 워커 스레드 수 조정 가능 (기본: 2, I/O-bound이므로 대부분 2로 충분)
-- `RUNTIME` 환경변수로 docker/podman 선택 가능 (기본: podman)
-- 컨테이너 설정은 프로젝트 루트의 compose 파일로 관리: `compose.local.yaml` (개발용), `compose.sample-fastapi.yaml` (FastAPI 예제용)
-- CI는 자체 서비스 컨테이너(port 3000)를 사용하며 `AEROSPIKE_PORT=3000` 환경변수로 설정됨
+- OpenTelemetry (`otel`) is always included in the default build — no separate feature flag needed
+- Run `make run-aerospike-ce` to start a local server before running integration tests
+- maturin version is pinned to `>=1.9,<2.0`
+- The `AEROSPIKE_HOST` and `AEROSPIKE_PORT` environment variables override the server address (default: `127.0.0.1:18710`)
+- The `AEROSPIKE_RUNTIME_WORKERS` environment variable controls the number of internal Tokio worker threads (default: 2; since the workload is I/O-bound, 2 is sufficient in most cases)
+- The `RUNTIME` environment variable selects the container runtime: docker or podman (default: podman)
+- Container configuration is managed via compose files at the project root: `compose.local.yaml` (development) and `compose.sample-fastapi.yaml` (FastAPI sample)
+- CI uses its own service container (port 3000), configured via `AEROSPIKE_PORT=3000`
 
-## API 레퍼런스
+## API Reference
 
-API 사용법은 ecosystem plugin의 `aerospike-py-api` 스킬에서 자동 로드됨.
-전체 타입/상수 정의는 `src/aerospike_py/__init__.pyi` 참조.
+API usage is automatically loaded from the `aerospike-py-api` skill in the ecosystem plugin.
+For complete type and constant definitions, see `src/aerospike_py/__init__.pyi`.
 
 ---
 
-## 테스트 설정
+## Test Configuration
 
-통합 테스트에는 Aerospike 서버가 필요하다. `tests/__init__.py`에서 기본 설정:
+Integration tests require a running Aerospike server. Default configuration in `tests/__init__.py`:
 
 ```python
 AEROSPIKE_CONFIG = {"hosts": [("127.0.0.1", 18710)], "cluster_name": "docker"}
 ```
 
-주요 fixture (`tests/conftest.py`):
-- `client` — module-scoped sync 클라이언트
-- `async_client` — function-scoped async 클라이언트
-- `cleanup` / `async_cleanup` — 테스트 후 자동 레코드 정리
+Key fixtures (`tests/conftest.py`):
+- `client` — module-scoped sync client
+- `async_client` — function-scoped async client
+- `cleanup` / `async_cleanup` — automatic record cleanup after each test
 
-pytest 설정: `asyncio_mode = "auto"` (async 테스트 자동 감지)
+pytest configuration: `asyncio_mode = "auto"` (async tests detected automatically)
 
 ## Planning
 
-plan mode 진입 시 `.claude/skills/project-goals/SKILL.md`를 반드시 읽을 것.
+When entering plan mode, always read `.claude/skills/project-goals/SKILL.md` first.

@@ -1,13 +1,13 @@
-# Goal 4: NumPy v2 통합
+# Goal 4: NumPy v2 Integration
 
 numpy >= 2.0 optional dep (`pip install aerospike-py[numpy]`).
 
-## Read 경로: batch_read → structured array
+## Read Path: batch_read → structured array
 
-1. 사용자 제공 dtype 파싱 → `FieldInfo` (offset, kind, itemsize)
-2. `np.zeros`로 배열 할당 → `__array_interface__`로 raw 포인터 획득
-3. `Vec<BatchRecord>` → `ptr::write_unaligned` 직접 기록 (Python 객체 생성 없음)
-4. 반환: `NumpyBatchRecords` (data array + meta array + result_codes + key_map)
+1. Parse user-provided dtype → `FieldInfo` (offset, kind, itemsize)
+2. Allocate array with `np.zeros` → obtain raw pointer via `__array_interface__`
+3. `Vec<BatchRecord>` → write directly with `ptr::write_unaligned` (no Python object creation)
+4. Return: `NumpyBatchRecords` (data array + meta array + result_codes + key_map)
 
 ```python
 dtype = np.dtype([("score", "f4"), ("tags", "S32")])
@@ -15,19 +15,19 @@ result = client.batch_read(keys, _dtype=dtype)
 scores = result.batch_records["score"]  # zero-copy numpy column access
 ```
 
-## Write 경로: batch_write_numpy
+## Write Path: batch_write_numpy
 
-numpy structured array → `Vec<(Key, Vec<Bin>)>` 변환 후 batch write.
-`_key` 필드(기본값)를 Aerospike key로 사용.
+numpy structured array → `Vec<(Key, Vec<Bin>)>` conversion then batch write.
+Uses `_key` field (default) as the Aerospike key.
 
-## 지원 dtype kinds
+## Supported dtype kinds
 
-`i` (int), `u` (uint), `f` (float, f16 포함), `S` (fixed bytes), `V` (void bytes)
-`U` (unicode), `O` (object) — 거부
+`i` (int), `u` (uint), `f` (float, including f16), `S` (fixed bytes), `V` (void bytes)
+`U` (unicode), `O` (object) — rejected
 
-## 주요 파일
+## Key Files
 
-- `rust/src/numpy_support.rs` — Rust 핵심 변환
-- `src/aerospike_py/numpy_batch.py` — Python `NumpyBatchRecords` 래퍼
+- `rust/src/numpy_support.rs` — core Rust conversion
+- `src/aerospike_py/numpy_batch.py` — Python `NumpyBatchRecords` wrapper
 - `tests/unit/test_numpy_batch.py`
 - `tests/integration/test_numpy_batch.py`

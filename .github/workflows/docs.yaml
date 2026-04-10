@@ -1,5 +1,5 @@
 name: Docs
-# PR에서 docs/ 변경 시 Docusaurus 빌드 검증 (배포하지 않음)
+# Validates Docusaurus build when docs/ is changed in a PR (does not deploy)
 
 on:
   push:

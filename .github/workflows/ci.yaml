@@ -1,5 +1,5 @@
 name: CI
-# Rust 빌드 + Python 3.10~3.14 유닛 테스트 + 통합 테스트 + 동시성 테스트 + 호환성 테스트 + 린트 + 보안 감사
+# Rust build + Python 3.10~3.14 unit tests + integration tests + concurrency tests + compatibility tests + lint + security audit
 
 on:
   push:

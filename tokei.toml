@@ -1,18 +1,18 @@
-# tokei - 코드 라인수 분석 설정
+# tokei - code line count analysis configuration
 #
-# 순수 구현 코드만 (기본):
+# Pure implementation code only (default):
 #   tokei
-#   → .tokeignore에 의해 tests/, examples/, benchmark/ 자동 제외
+#   → tests/, examples/, benchmark/ are auto-excluded via .tokeignore
 #
-# 테스트 + 벤치마크 + 샘플 포함:
+# Including tests + benchmarks + samples:
 #   tokei src rust/src tests benchmark examples
-#   → 유의미한 소스 전체 (docs, node_modules 등 제외)
+#   → All meaningful source (excludes docs, node_modules, etc.)
 
-# 터미널 출력 너비(칸)
+# Terminal output width (columns)
 columns = 100
-# 언어별 정렬 기준: "lines" | "code" | "comments" | "blanks"
+# Sort by language: "lines" | "code" | "comments" | "blanks"
 sort = "lines"
-# Python docstring을 주석으로 셀 것인지 (false = 코드로 카운트)
+# Whether to count Python docstrings as comments (false = count as code)
 treat_doc_strings_as_comments = false
-# Python, Rust만 집계
+# Only count Python and Rust
 types = ["Python", "Rust"]

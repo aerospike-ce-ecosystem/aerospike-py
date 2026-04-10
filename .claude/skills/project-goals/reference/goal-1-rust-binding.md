@@ -1,28 +1,28 @@
-# Goal 1: Rust v2 바인딩
+# Goal 1: Rust v2 Bindings
 
-aerospike-client-rust v2 (`2.0.0-alpha.9`)를 PyO3로 래핑하여 sync/async 양쪽 Python API를 제공한다.
+Wraps aerospike-client-rust v2 (`2.0.0-alpha.9`) via PyO3 to provide both sync/async Python APIs.
 
-## 기술 스택
+## Tech Stack
 
-| 컴포넌트 | 버전 |
+| Component | Version |
 |---------|------|
 | `aerospike` crate (features: `async`, `rt-tokio`) | `2.0.0-alpha.9` |
 | PyO3 | `0.28.2` |
 | pyo3-async-runtimes (feature: `tokio-runtime`) | `0.28` |
 | Tokio (multi-thread) | `1.x` |
 
-## GIL 패턴
+## GIL Patterns
 
-- **Sync** (`client.rs`): `py.detach(|| RUNTIME.block_on(async { ... }))` — 모든 I/O 메서드에 일관 적용
-- **Async** (`async_client.rs`): `future_into_py(py, async move { ... })` — Python awaitable 반환, `Python::attach()`로 결과 변환
+- **Sync** (`client.rs`): `py.detach(|| RUNTIME.block_on(async { ... }))` — applied consistently to all I/O methods
+- **Async** (`async_client.rs`): `future_into_py(py, async move { ... })` — returns Python awaitable, converts results via `Python::attach()`
 
-## 구현 완료 API
+## Implemented APIs
 
 CRUD · operate · batch(read/write/remove) · query · index · truncate · UDF · admin · info
 
-## 주요 파일
+## Key Files
 
 - `rust/src/client.rs` — sync PyClient
 - `rust/src/async_client.rs` — async PyAsyncClient
-- `rust/src/runtime.rs` — Tokio 런타임 초기화
-- `rust/Cargo.toml` — crate 버전 및 features
+- `rust/src/runtime.rs` — Tokio runtime initialization
+- `rust/Cargo.toml` — crate versions and features

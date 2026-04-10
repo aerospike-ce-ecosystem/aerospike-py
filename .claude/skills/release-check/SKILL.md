@@ -6,120 +6,120 @@ disable-model-invocation: true
 
 # Release Check
 
-릴리스 전 전체 검증을 수행합니다. 아래 단계를 순서대로 실행하세요.
+Performs full validation before a release. Execute the steps below in order.
 
-## 검증 단계
+## Validation Steps
 
-### 1. Lint 검사
+### 1. Lint Check
 ```bash
 make lint
 ```
-내부적으로 실행되는 명령어:
-- `uv run ruff check src/ tests/ benchmark/` - Python 린트
-- `uv run ruff format --check src/ tests/ benchmark/` - Python 포맷 확인
-- `cargo clippy --manifest-path rust/Cargo.toml --features otel -- -D warnings` - Rust 린트 (otel feature 포함, 경고를 에러로)
+Commands executed internally:
+- `uv run ruff check src/ tests/ benchmark/` — Python lint
+- `uv run ruff format --check src/ tests/ benchmark/` — Python format check
+- `cargo clippy --manifest-path rust/Cargo.toml --features otel -- -D warnings` — Rust lint (with otel feature, warnings treated as errors)
 
-모든 경고/에러가 해결되어야 합니다.
+All warnings/errors must be resolved.
 
-### 2. 포맷 자동 수정 (필요 시)
+### 2. Auto-fix Formatting (if needed)
 ```bash
 make fmt
 ```
-내부적으로 실행되는 명령어:
+Commands executed internally:
 - `uv run ruff format src/ tests/ benchmark/`
 - `uv run ruff check --fix src/ tests/ benchmark/`
 - `cargo fmt --manifest-path rust/Cargo.toml`
 
-### 3. 유닛 테스트
+### 3. Unit Tests
 ```bash
 make test-unit
 ```
-서버 없이 실행 가능한 모든 유닛 테스트를 실행합니다. 빌드 포함 (`maturin develop --release`).
+Runs all unit tests that don't require a server. Includes build (`maturin develop --release`).
 
-### 4. Pyright 타입 체크
+### 4. Pyright Type Check
 ```bash
 uv run pyright src/
 ```
-Python 타입 에러가 없는지 확인합니다. 설정 (`pyproject.toml`):
-- `pythonVersion = "3.10"` (최소 지원 버전 기준)
+Verifies there are no Python type errors. Configuration (`pyproject.toml`):
+- `pythonVersion = "3.10"` (based on minimum supported version)
 - `typeCheckingMode = "basic"`
 - `include = ["src/aerospike_py"]`
 
-### 5. Type Stub 일관성 검증
+### 5. Type Stub Consistency Verification
 
-`src/aerospike_py/__init__.pyi`와 Rust 구현을 비교합니다:
+Compares `src/aerospike_py/__init__.pyi` with the Rust implementation:
 
-**확인 사항:**
+**Verification items:**
 
-| 검증 항목 | 비교 대상 |
+| Check | Comparison Target |
 |-----------|-----------|
-| Sync Client 메서드 | `.pyi` `class Client` vs `rust/src/client.rs` `#[pymethods] impl PyClient` |
-| Async Client 메서드 | `.pyi` `class AsyncClient` vs `rust/src/async_client.rs` `#[pymethods] impl PyAsyncClient` |
-| Python 래퍼 메서드 | `.pyi` vs `src/aerospike_py/__init__.py` `class Client` / `class AsyncClient` |
-| 시그니처 일치 | 파라미터 이름, 타입, 기본값, 반환 타입 |
-| 상수 완전성 | `.pyi` 상수 vs `rust/src/constants.rs` + `__init__.py` re-export |
-| 예외 클래스 | `.pyi` / `exception.pyi` vs `rust/src/errors.rs` |
-| NamedTuple 정의 | `.pyi` 타입 vs `src/aerospike_py/types.py` |
+| Sync Client methods | `.pyi` `class Client` vs `rust/src/client.rs` `#[pymethods] impl PyClient` |
+| Async Client methods | `.pyi` `class AsyncClient` vs `rust/src/async_client.rs` `#[pymethods] impl PyAsyncClient` |
+| Python wrapper methods | `.pyi` vs `src/aerospike_py/__init__.py` `class Client` / `class AsyncClient` |
+| Signature match | Parameter names, types, defaults, return types |
+| Constant completeness | `.pyi` constants vs `rust/src/constants.rs` + `__init__.py` re-exports |
+| Exception classes | `.pyi` / `exception.pyi` vs `rust/src/errors.rs` |
+| NamedTuple definitions | `.pyi` types vs `src/aerospike_py/types.py` |
 
-**빠른 확인 방법:**
+**Quick check method:**
 ```bash
-# Rust에서 #[pyo3(signature 가 있는 메서드 목록
+# List methods with #[pyo3(signature in Rust
 grep -n '#\[pyo3(signature' rust/src/client.rs rust/src/async_client.rs
 
-# .pyi에서 정의된 메서드 목록
+# List methods defined in .pyi
 grep -n 'def ' src/aerospike_py/__init__.pyi | head -60
 ```
 
-### 6. 버전 확인
+### 6. Version Check
 
-`pyproject.toml`의 `version` 필드가 올바르게 업데이트되었는지 확인합니다:
+Verify that the `version` field in `pyproject.toml` is correctly updated:
 ```bash
 grep 'version' pyproject.toml
 ```
-참고: 이 프로젝트는 `dynamic = ["version"]`이며 maturin이 `Cargo.toml`에서 버전을 가져옵니다.
+Note: This project uses `dynamic = ["version"]` and maturin pulls the version from `Cargo.toml`.
 ```bash
 grep '^version' rust/Cargo.toml
 ```
 
-git tag와 일치하는지도 확인합니다:
+Also verify it matches the git tag:
 ```bash
 git tag --sort=-version:refname | head -5
 ```
 
-### 7. Pre-commit Hook 전체 실행
+### 7. Run Full Pre-commit Hooks
 ```bash
 uvx pre-commit run --all-files
 ```
-CI의 lint job에서도 이 명령을 실행합니다. 포함 항목:
+The CI lint job also runs this command. Includes:
 - trailing-whitespace
 - ruff format / ruff lint
 - pyright
 - cargo fmt
 - cargo clippy (-D warnings)
 
-### 8. Python 버전 매트릭스 테스트 (선택)
+### 8. Python Version Matrix Tests (optional)
 ```bash
 make test-matrix
 ```
-Python 3.10, 3.11, 3.12, 3.13, 3.14, 3.14t (free-threaded) 전체에서 유닛 테스트를 실행합니다.
-tox-uv를 사용하여 각 Python 버전별 가상환경을 자동 생성합니다.
+Runs unit tests across Python 3.10, 3.11, 3.12, 3.13, 3.14, 3.14t (free-threaded).
+Uses tox-uv to automatically create virtual environments for each Python version.
 
-### 9. 통합 테스트 (서버 필요, 선택)
+### 9. Integration Tests (requires server, optional)
 ```bash
 make test-all
 ```
-Aerospike 서버가 실행 중이어야 합니다 (`make run-aerospike-ce`).
-모든 테스트 스위트를 실행합니다 (unit + integration + concurrency + feasibility + compat).
+An Aerospike server must be running (`make run-aerospike-ce`).
+Runs all test suites (unit + integration + concurrency + feasibility + compat).
 
-## 결과 보고
+## Result Report
 
-각 단계의 성공/실패를 요약하고, 실패한 항목에 대해 수정 방법을 제안합니다.
+Summarize the success/failure of each step and suggest fixes for any failed items.
 
-**릴리스 가능 조건:**
-1. `make lint` 통과 (ruff + clippy 경고 0개)
-2. `make test-unit` 통과
-3. `uv run pyright src/` 에러 0개
-4. Type stub 일관성 확인
-5. 버전 번호 정확
-6. (권장) `make test-matrix` 전체 통과
-7. (권장) `make test-all` 전체 통과 (서버 필요)
+**Release readiness criteria:**
+1. `make lint` passes (0 ruff + clippy warnings)
+2. `make test-unit` passes
+3. `uv run pyright src/` — 0 errors
+4. Type stub consistency verified
+5. Version number is correct
+6. (Recommended) `make test-matrix` all pass
+7. (Recommended) `make test-all` all pass (requires server)
