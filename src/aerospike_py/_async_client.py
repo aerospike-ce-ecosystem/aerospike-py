@@ -11,7 +11,7 @@ from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
 from aerospike_py._client import _wrap_batch_record, _wrap_exists, _wrap_operate_ordered, _wrap_record
 from aerospike_py.types import (
-    BatchRecords as BatchRecordsTuple,
+    BatchWriteResult,
     ExistsResult,
     InfoNodeResult,
     OperateOrderedResult,
@@ -152,6 +152,12 @@ class AsyncClient:
     ) -> Any:
         """Read multiple records in a single batch call.
 
+        Returns ``dict[Key, AerospikeRecord]`` mapping each user key to its
+        bins dict. Only successful reads with a user key are included.
+
+        The async future completes with near-zero GIL cost (< 0.01ms);
+        dict conversion runs in the event loop coroutine context.
+
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             bins: Optional list of bin names to read. ``None`` reads all bins;
@@ -161,26 +167,33 @@ class AsyncClient:
                 ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+            ``BatchRecords`` (``dict[Key, AerospikeRecord]``) or
+            ``NumpyBatchRecords`` when ``_dtype`` is set.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            batch = await client.batch_read(keys, bins=["name", "age"])
-            for br in batch.batch_records:
-                if br.result == 0 and br.record is not None:
-                    print(br.record.bins)
+            result = await client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in result.items():
+                print(user_key, bins_dict)
             ```
         """
+        # The Rust future returns a PyBatchReadHandle (Arc-wrapped raw results)
+        # instead of converting to a dict inside the future_into_py callback.
+        # This keeps the GIL hold in the spawn_blocking callback under 0.01ms
+        # (just Arc::new + Py::new), so concurrent batch_read futures release
+        # their spawn_blocking threads almost immediately. The heavier dict
+        # conversion (1-5ms) runs here in the coroutine on the event loop,
+        # where there is no GIL contention between concurrent callers.
         raw = await self._inner.batch_read(keys, bins, policy, _dtype)
         if _dtype is not None:
             return raw  # NumpyBatchRecords path unchanged
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return raw.as_dict()
 
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
         self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None, retry: int = 0
-    ) -> BatchRecordsTuple:
+    ) -> BatchWriteResult:
         """Write multiple records from a numpy structured array (async).
 
         Each row of the structured array becomes a separate write operation.
@@ -214,26 +227,26 @@ class AsyncClient:
             ```
         """
         raw = await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("AsyncClient.batch_write")
-    async def batch_write(self, records, policy=None, retry=0) -> BatchRecordsTuple:
+    async def batch_write(self, records, policy=None, retry=0) -> BatchWriteResult:
         """Write multiple records with per-record bins in a single batch call (async).
 
         See :meth:`AsyncClient.batch_write` in ``__init__.pyi`` for full documentation.
         """
         raw = await self._inner.batch_write(records, policy, retry)
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("AsyncClient.batch_operate")
-    async def batch_operate(self, keys, ops, policy=None) -> BatchRecordsTuple:
+    async def batch_operate(self, keys, ops, policy=None) -> BatchWriteResult:
         raw = await self._inner.batch_operate(keys, ops, policy)
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("AsyncClient.batch_remove")
-    async def batch_remove(self, keys, policy=None) -> BatchRecordsTuple:
+    async def batch_remove(self, keys, policy=None) -> BatchWriteResult:
         raw = await self._inner.batch_remove(keys, policy)
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("AsyncClient.ping")
     async def ping(self) -> bool:

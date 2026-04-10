@@ -21,10 +21,8 @@ class TestBatchReadDocExamples:
 
         # Same pattern as the docs example
         batch = client.batch_read(keys)
-        for br in batch.batch_records:
-            if br.record:
-                assert br.record.bins is not None  # dot access works
-                assert br.record.meta is not None
+        for user_key, bins in batch.items():
+            assert bins is not None  # dict of bins for each successful read
 
     def test_batch_read_specific_bins_sync(self, client, cleanup):
         """read.md: Batch read with specific bins."""
@@ -35,13 +33,11 @@ class TestBatchReadDocExamples:
 
         # docs example: bins=["name", "age"]
         batch = client.batch_read(keys, bins=["name", "age"])
-        assert len(batch.batch_records) == 2
-        for br in batch.batch_records:
-            assert br.result == 0
-            assert br.record is not None
-            assert "name" in br.record.bins
-            assert "age" in br.record.bins
-            assert "extra" not in br.record.bins
+        assert len(batch) == 2
+        for user_key, bins in batch.items():
+            assert "name" in bins
+            assert "age" in bins
+            assert "extra" not in bins
 
     def test_batch_read_existence_check_sync(self, client, cleanup):
         """read.md: Existence check only (bins=[])."""
@@ -51,8 +47,8 @@ class TestBatchReadDocExamples:
         client.put(existing, {"val": 1})
 
         batch = client.batch_read([existing, missing], bins=[])
-        assert batch.batch_records[0].result == 0
-        assert batch.batch_records[1].result == 2  # KEY_NOT_FOUND
+        assert "doc_exists_1" in batch  # existing key is in dict
+        assert "doc_exists_missing" not in batch  # missing key is not in dict
 
     async def test_batch_read_async(self, async_client, async_cleanup):
         """read.md: Async batch read example."""
@@ -63,10 +59,9 @@ class TestBatchReadDocExamples:
 
         # docs example: await client.batch_read(keys, bins=["name", "age"])
         batch = await async_client.batch_read(keys, bins=["name"])
-        assert len(batch.batch_records) == 3
-        for br in batch.batch_records:
-            if br.result == 0 and br.record is not None:
-                assert br.record.bins is not None
+        assert len(batch) == 3
+        for user_key, bins in batch.items():
+            assert bins is not None
 
     def test_batch_read_result_code_check(self, client, cleanup):
         """error-handling.md: BatchRecord result code check pattern."""
@@ -77,21 +72,14 @@ class TestBatchReadDocExamples:
 
         batch = client.batch_read(keys)
 
-        succeeded = []
-        missing = []
-        errors = []
-
-        for br in batch.batch_records:
-            if br.result == aerospike_py.AEROSPIKE_OK and br.record:
-                succeeded.append(br.record.bins)
-            elif br.result == aerospike_py.AEROSPIKE_ERR_RECORD_NOT_FOUND:
-                missing.append(br.key)
-            else:
-                errors.append((br.key, br.result))
+        # With dict return: succeeded keys are in dict, missing keys are not
+        succeeded = list(batch.values())
+        all_user_keys = {k[2] for k in keys}
+        present_keys = set(batch.keys())
+        missing_keys = all_user_keys - present_keys
 
         assert len(succeeded) == 3
-        assert len(missing) == 2
-        assert len(errors) == 0
+        assert len(missing_keys) == 2
 
 
 class TestBatchOperateDocExamples:

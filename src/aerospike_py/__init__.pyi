@@ -19,14 +19,17 @@ from aerospike_py.numpy_batch import NumpyBatchRecords as NumpyBatchRecords
 from aerospike_py.types import (
     AdminPolicy as AdminPolicy,
     AerospikeKey as AerospikeKey,
+    AerospikeRecord as AerospikeRecord,
     BatchPolicy as BatchPolicy,
     BatchRecord as BatchRecord,
     BatchRecords as BatchRecords,
+    BatchWriteResult as BatchWriteResult,
     Bins as Bins,
     BinTuple as BinTuple,
     ClientConfig as ClientConfig,
     ExistsResult as ExistsResult,
     InfoNodeResult as InfoNodeResult,
+    UserKey as UserKey,
     OperateOrderedResult as OperateOrderedResult,
     Privilege as Privilege,
     QueryPolicy as QueryPolicy,
@@ -578,6 +581,9 @@ class Client:
     ) -> Union[BatchRecords, NumpyBatchRecords]:
         """Read multiple records in a single batch call.
 
+        Returns ``dict[UserKey, AerospikeRecord]`` mapping each user key to
+        its bins dict. Only successful reads with a user key are included.
+
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             bins: Optional list of bin names to read. ``None`` reads all bins;
@@ -587,19 +593,15 @@ class Client:
                 ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+            ``BatchRecords`` (``dict[UserKey, AerospikeRecord]``) or
+            ``NumpyBatchRecords`` when ``_dtype`` is set.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-
-            batch = client.batch_read(keys)
-            for br in batch.batch_records:
-                if br.result == 0 and br.record is not None:
-                    print(br.record.bins)
-
-            # Read specific bins
-            batch = client.batch_read(keys, bins=["name", "age"])
+            result = client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in result.items():
+                print(user_key, bins_dict)
             ```
         """
         ...
@@ -613,7 +615,7 @@ class Client:
         key_field: str = "_key",
         policy: Optional[dict[str, Any]] = None,
         retry: int = 0,
-    ) -> BatchRecords:
+    ) -> BatchWriteResult:
         """Write multiple records from a numpy structured array.
 
         Each row of the structured array becomes a separate write operation.
@@ -654,7 +656,7 @@ class Client:
         records: list[tuple[Key, dict[str, Any]] | tuple[Key, dict[str, Any], WriteMeta]],
         policy: Optional[dict[str, Any]] = None,
         retry: int = 0,
-    ) -> BatchRecords:
+    ) -> BatchWriteResult:
         """Write multiple records with per-record bins in a single batch call.
 
         Each record is a ``(key, bins)`` or ``(key, bins, meta)`` tuple where
@@ -709,7 +711,7 @@ class Client:
         keys: list[Key],
         ops: list[dict[str, Any]],
         policy: Optional[dict[str, Any]] = None,
-    ) -> BatchRecords:
+    ) -> BatchWriteResult:
         """Execute operations on multiple records in a single batch call.
 
         Args:
@@ -740,7 +742,7 @@ class Client:
         self,
         keys: list[Key],
         policy: Optional[dict[str, Any]] = None,
-    ) -> BatchRecords:
+    ) -> BatchWriteResult:
         """Delete multiple records in a single batch call.
 
         Args:
@@ -1565,6 +1567,12 @@ class AsyncClient:
     ) -> Union[BatchRecords, NumpyBatchRecords]:
         """Read multiple records in a single batch call.
 
+        Returns ``dict[UserKey, AerospikeRecord]`` mapping each user key to
+        its bins dict. Only successful reads with a user key are included.
+
+        The async future completes with near-zero GIL cost (< 0.01ms);
+        dict conversion runs in the event loop coroutine context.
+
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             bins: Optional list of bin names to read. ``None`` reads all bins;
@@ -1574,15 +1582,15 @@ class AsyncClient:
                 ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+            ``BatchRecords`` (``dict[UserKey, AerospikeRecord]``) or
+            ``NumpyBatchRecords`` when ``_dtype`` is set.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            batch = await client.batch_read(keys, bins=["name", "age"])
-            for br in batch.batch_records:
-                if br.result == 0 and br.record is not None:
-                    print(br.record.bins)
+            result = await client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in result.items():
+                print(user_key, bins_dict)
             ```
         """
         ...
@@ -1596,7 +1604,7 @@ class AsyncClient:
         key_field: str = "_key",
         policy: Optional[dict[str, Any]] = None,
         retry: int = 0,
-    ) -> BatchRecords:
+    ) -> BatchWriteResult:
         """Write multiple records from a numpy structured array (async).
 
         Each row of the structured array becomes a separate write operation.
@@ -1637,7 +1645,7 @@ class AsyncClient:
         records: list[tuple[Key, dict[str, Any]] | tuple[Key, dict[str, Any], WriteMeta]],
         policy: Optional[dict[str, Any]] = None,
         retry: int = 0,
-    ) -> BatchRecords:
+    ) -> BatchWriteResult:
         """Write multiple records with per-record bins (async).
 
         Each record is a ``(key, bins)`` or ``(key, bins, meta)`` tuple where
@@ -1690,7 +1698,7 @@ class AsyncClient:
         keys: list[Key],
         ops: list[dict[str, Any]],
         policy: Optional[dict[str, Any]] = None,
-    ) -> BatchRecords:
+    ) -> BatchWriteResult:
         """Execute operations on multiple records in a single batch call.
 
         Args:
@@ -1721,7 +1729,7 @@ class AsyncClient:
         self,
         keys: list[Key],
         policy: Optional[dict[str, Any]] = None,
-    ) -> BatchRecords:
+    ) -> BatchWriteResult:
         """Delete multiple records in a single batch call.
 
         Args:

@@ -18,14 +18,11 @@ class TestBatchRead:
         client.put(keys[2], {"a": 3})
 
         result = client.batch_read(keys)
-        assert len(result.batch_records) == 3
-        for br in result.batch_records:
-            assert br.result == 0
-            assert br.record is not None
-            _, meta, bins = br.record
-            assert meta is not None
-            assert meta.gen >= 1
-            assert "a" in bins
+        assert isinstance(result, dict)
+        assert len(result) == 3
+        assert result["batch_get_1"]["a"] == 1
+        assert result["batch_get_2"]["a"] == 2
+        assert result["batch_get_3"]["a"] == 3
 
     def test_batch_read_specific_bins(self, client, cleanup):
         keys = [
@@ -39,15 +36,14 @@ class TestBatchRead:
         client.put(keys[1], {"a": 10, "b": 20, "c": 30})
 
         result = client.batch_read(keys, bins=["a", "c"])
-        assert len(result.batch_records) == 2
-        for br in result.batch_records:
-            assert br.result == 0
-            _, meta, bins = br.record
-            assert meta is not None
+        assert len(result) == 2
+        for user_key, bins in result.items():
             assert "a" in bins
             assert "c" in bins
+            assert "b" not in bins
 
     def test_batch_read_exists(self, client, cleanup):
+        """bins=[] performs existence check; only found records in dict."""
         keys = [
             ("test", "demo", "batch_exists_1"),
             ("test", "demo", "batch_exists_2"),
@@ -60,10 +56,10 @@ class TestBatchRead:
         client.put(keys[1], {"val": 2})
 
         result = client.batch_read(keys, bins=[])
-        assert len(result.batch_records) == 3
-        assert result.batch_records[0].result == 0
-        assert result.batch_records[1].result == 0
-        assert result.batch_records[2].result == 2  # KEY_NOT_FOUND
+        # Only found records appear in dict (missing excluded)
+        assert "batch_exists_1" in result
+        assert "batch_exists_2" in result
+        assert "batch_exists_missing" not in result
 
     def test_batch_read_with_missing(self, client, cleanup):
         keys = [
@@ -75,18 +71,9 @@ class TestBatchRead:
         client.put(keys[0], {"val": 1})
 
         result = client.batch_read(keys)
-        assert len(result.batch_records) == 2
-        # First key exists
-        br0 = result.batch_records[0]
-        assert br0.result == 0
-        assert br0.record is not None
-        _, meta0, bins0 = br0.record
-        assert meta0 is not None
-        assert bins0["val"] == 1
-        # Second key missing
-        br1 = result.batch_records[1]
-        assert br1.result == 2  # KEY_NOT_FOUND
-        assert br1.record is None
+        assert len(result) == 1
+        assert result["batch_get_exists"]["val"] == 1
+        assert "batch_get_missing" not in result
 
 
 class TestBatchOperate:
@@ -258,10 +245,7 @@ class TestBatchWrite:
 
         # Verify all written
         read_result = client.batch_read(keys)
-        assert len(read_result.batch_records) == n
-        for br in read_result.batch_records:
-            assert br.result == 0
-            assert br.record is not None
+        assert len(read_result) == n
 
 
 class TestBatchWriteGeneric:

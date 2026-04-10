@@ -92,7 +92,7 @@ for br in results.batch_records:
 
 배치 작업의 전체 결과를 담는 컨테이너입니다.
 
-**반환하는 메서드**: `batch_read()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
+**반환하는 메서드**: sync `batch_read()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
@@ -171,7 +171,8 @@ for bin_tuple in result.ordered_bins:
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` | `BatchRecords` \| `NumpyBatchRecords` |
+| `batch_read()` (sync) | `BatchRecords` \| `NumpyBatchRecords` |
+| `batch_read()` (async) | `BatchReadHandle` \| `NumpyBatchRecords` |
 | `batch_operate()`, `batch_remove()` | `BatchRecords` |
 | `batch_write_numpy()` | `BatchRecords` |
 | `Query.results()` | `list[Record]` |

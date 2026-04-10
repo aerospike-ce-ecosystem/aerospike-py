@@ -698,6 +698,12 @@ impl PyAsyncClient {
     // ── Batch ─────────────────────────────────────────────────
 
     /// Read multiple records (async).
+    ///
+    /// Returns a `BatchReadHandle` — a zero-conversion handle wrapping raw
+    /// Rust results. The async future completes with near-zero GIL cost
+    /// (just `Arc::new`). Call methods on the handle to access data:
+    /// - `handle.as_dict()` — fastest, returns `dict[key, bins_dict]`
+    /// - `handle.batch_records` — compat, returns `list[BatchRecord]`
     #[pyo3(signature = (keys, bins=None, policy=None, _dtype=None))]
     fn batch_read<'py>(
         &self,
@@ -729,7 +735,7 @@ impl PyAsyncClient {
                     })?,
                 })
             } else {
-                Ok(PendingBatchRead::Standard(results))
+                Ok(PendingBatchRead::Handle(results))
             }
         })
     }

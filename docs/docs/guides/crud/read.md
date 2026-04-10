@@ -89,8 +89,13 @@ batch = client.batch_read(keys, bins=[])
   <TabItem value="async" label="Async">
 
 ```python
-batch = await client.batch_read(keys, bins=["name", "age"])
-for br in batch.batch_records:
+handle = await client.batch_read(keys, bins=["name", "age"])
+
+# Fast path — dict[key, bins_dict]:
+data = handle.as_dict()
+
+# Compat path — list[BatchRecord] NamedTuples:
+for br in handle.batch_records:
     if br.result == 0 and br.record is not None:
         print(br.record.bins)
 ```

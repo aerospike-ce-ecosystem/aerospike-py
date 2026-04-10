@@ -67,11 +67,25 @@ for br in results.batch_records:
 
 ### `BatchRecords`
 
-Returned by: `batch_read()`, `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
+Returned by: sync `batch_read()`, `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `batch_records` | `list[BatchRecord]` | Per-record results |
+
+### `BatchReadHandle`
+
+Returned by: async `batch_read()` (zero-conversion handle wrapping raw Rust results)
+
+| Method / Property | Type | Description |
+|-------------------|------|-------------|
+| `as_dict()` | `dict[str \| int, dict[str, Any]]` | Fastest path: returns `dict[key, bins_dict]` directly. Excludes digest-only and failed records. |
+| `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion, cached after first access. |
+| `found_count()` | `int` | Count of successful records (no conversion needed). |
+| `keys()` | `list[str \| int]` | Extract user keys without converting record data. |
+| `len(handle)` | `int` | Total number of records (including failures). |
+| `handle[i]` | `BatchRecord` | Index access with negative index support. |
+| `for br in handle` | `BatchRecord` | Iteration (via `batch_records`). |
 
 ### `ExistsResult`
 
@@ -124,7 +138,8 @@ Returned by: `operate_ordered()`
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` | `BatchRecords` \| `NumpyBatchRecords` |
+| `batch_read()` (sync) | `BatchRecords` \| `NumpyBatchRecords` |
+| `batch_read()` (async) | `BatchReadHandle` \| `NumpyBatchRecords` |
 | `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchRecords` |
 | `batch_write_numpy()` | `BatchRecords` |
 | `Query.results()` | `list[Record]` |

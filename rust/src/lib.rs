@@ -72,6 +72,7 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<query::PyQuery>()?;
     m.add_class::<batch_types::PyBatchRecord>()?;
     m.add_class::<batch_types::PyBatchRecords>()?;
+    m.add_class::<batch_types::PyBatchReadHandle>()?;
 
     // Register functions
     m.add_function(wrap_pyfunction!(get_metrics_text, m)?)?;
