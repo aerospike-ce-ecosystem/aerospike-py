@@ -82,15 +82,12 @@ impl OperationLimiter {
                     ))
                 })
         } else {
-            sem.acquire_owned()
-                .await
-                .map(Some)
-                .map_err(|_| {
-                    BackpressureError::new_err(format!(
-                        "Semaphore closed unexpectedly during '{}' (max_concurrent={})",
-                        operation, self.max_concurrent
-                    ))
-                })
+            sem.acquire_owned().await.map(Some).map_err(|_| {
+                BackpressureError::new_err(format!(
+                    "Semaphore closed unexpectedly during '{}' (max_concurrent={})",
+                    operation, self.max_concurrent
+                ))
+            })
         }
     }
 }

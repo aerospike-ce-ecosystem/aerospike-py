@@ -933,9 +933,8 @@ pub fn numpy_to_records(
                     digest,
                 }
             }
-            _ => Key::new(ns, set, key_value).map_err(|e| {
-                PyValueError::new_err(format!("Invalid key at row {}: {}", i, e))
-            })?,
+            _ => Key::new(ns, set, key_value)
+                .map_err(|e| PyValueError::new_err(format!("Invalid key at row {}: {}", i, e)))?,
         };
 
         // Extract bin values

@@ -162,12 +162,8 @@ fn build_statement(
 
     for pred in predicates {
         let filter = match pred {
-            Predicate::Equals { bin, val } => {
-                Filter::equal(bin.as_str(), val.clone())
-            }
-            Predicate::Between { bin, min, max } => {
-                Filter::range(bin.as_str(), *min, *max)
-            }
+            Predicate::Equals { bin, val } => Filter::equal(bin.as_str(), val.clone()),
+            Predicate::Between { bin, min, max } => Filter::range(bin.as_str(), *min, *max),
             Predicate::ContainsString { bin, val, col_type } => {
                 let ct = int_to_collection_index_type(*col_type);
                 Filter::contains(bin.as_str(), val.as_str(), ct)

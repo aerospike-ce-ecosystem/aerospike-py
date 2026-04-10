@@ -61,21 +61,13 @@ impl Log for PyLogger {
                 // GIL genuinely unavailable (interpreter shutdown)
                 DROPPED_LOG_COUNT.fetch_add(1, Ordering::Relaxed);
                 if record.level() <= Level::Warn {
-                    eprintln!(
-                        "[aerospike-py/{}] {}: {}",
-                        record.level(),
-                        target,
-                        message
-                    );
+                    eprintln!("[aerospike-py/{}] {}: {}", record.level(), target, message);
                 }
             }
             Some(Err(_)) => {
                 // GIL acquired but Python logging call failed
                 // (e.g. misconfigured handler). Always emit to stderr.
-                eprintln!(
-                    "[aerospike-py/LOGGING-ERROR] {}: {}",
-                    target, message
-                );
+                eprintln!("[aerospike-py/LOGGING-ERROR] {}: {}", target, message);
             }
         }
     }
