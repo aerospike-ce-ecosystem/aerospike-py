@@ -72,11 +72,10 @@ Read multiple records in a single network call.
 ```python
 keys: list[tuple] = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# All bins
+# All bins — returns dict[user_key, bins_dict]
 batch = client.batch_read(keys)
-for br in batch.batch_records:
-    if br.result == 0 and br.record is not None:
-        print(br.record.bins)
+for user_key, bins in batch.items():
+    print(user_key, bins)
 
 # Specific bins
 batch = client.batch_read(keys, bins=["name", "age"])
@@ -89,15 +88,10 @@ batch = client.batch_read(keys, bins=[])
   <TabItem value="async" label="Async">
 
 ```python
-handle = await client.batch_read(keys, bins=["name", "age"])
-
-# Fast path — dict[key, bins_dict]:
-data = handle.as_dict()
-
-# Compat path — list[BatchRecord] NamedTuples:
-for br in handle.batch_records:
-    if br.result == 0 and br.record is not None:
-        print(br.record.bins)
+# Same dict return type as sync
+batch = await client.batch_read(keys, bins=["name", "age"])
+for user_key, bins in batch.items():
+    print(user_key, bins)
 ```
 
   </TabItem>
