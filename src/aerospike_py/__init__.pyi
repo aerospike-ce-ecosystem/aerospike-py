@@ -632,7 +632,8 @@ class Client:
             retry: Maximum number of retries for failed records (default ``0``).
                 When > 0, records that fail with transient errors (timeout,
                 device overload, key busy) are automatically retried with
-                exponential backoff.
+                exponential backoff (Full Jitter, max 500ms). Retries stop
+                early if the elapsed time approaches ``total_timeout``.
 
         Returns:
             A list of ``BatchRecord`` NamedTuples with per-record result codes.
@@ -679,7 +680,8 @@ class Client:
             retry: Maximum number of retries for failed records (default ``0``).
                 When > 0, records that fail with transient errors (timeout,
                 device overload, key busy) are automatically retried with
-                exponential backoff.
+                exponential backoff (Full Jitter, max 500ms). Retries stop
+                early if the elapsed time approaches ``total_timeout``.
 
         Returns:
             A ``BatchRecords`` containing per-record result codes.
@@ -1621,7 +1623,8 @@ class AsyncClient:
             retry: Maximum number of retries for failed records (default ``0``).
                 When > 0, records that fail with transient errors (timeout,
                 device overload, key busy) are automatically retried with
-                exponential backoff.
+                exponential backoff (Full Jitter, max 500ms). Retries stop
+                early if the elapsed time approaches ``total_timeout``.
 
         Returns:
             A list of ``BatchRecord`` NamedTuples with per-record result codes.
@@ -1666,7 +1669,8 @@ class AsyncClient:
             retry: Maximum number of retries for failed records (default ``0``).
                 When > 0, records that fail with transient errors (timeout,
                 device overload, key busy) are automatically retried with
-                exponential backoff.
+                exponential backoff (Full Jitter, max 500ms). Retries stop
+                early if the elapsed time approaches ``total_timeout``.
 
         Returns:
             A ``BatchRecords`` containing per-record result codes.
