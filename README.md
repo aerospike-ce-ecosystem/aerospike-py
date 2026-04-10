@@ -122,53 +122,6 @@ claude plugin list
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and making changes.
 
-## Code stats
-
-Powered by [tokei](https://github.com/XAMPPRocky/tokei). Configuration: `tokei.toml` + `.tokeignore`
-
-### Code Size
-
-| Layer | Files | Code Lines | Role |
-|--------|--------:|----------:|------|
-| **aerospike-core** (Rust) | 100 | 19,635 | Aerospike protocol, cluster management, command execution |
-| **rust/src** (PyO3 bindings) | 35 | 9,681 | Python ↔ Rust conversion, async/sync client, policy parsing |
-| **src/aerospike_py** (Python) | 25 | 7,217 | Type stubs (.pyi), NamedTuple wrappers, helpers |
-| **Total** | **160** | **36,533** | Rust 80% · Python 20% |
-
-### Compared to Other DB Clients
-
-| Client | Implementation Code | Notes |
-|-----------|----------:|------|
-| **aerospike-py** (Rust+Python) | ~36K | Protocol implemented from scratch |
-| aerospike-client-python (official) | ~15K | Wraps C client (100K+), C code separate |
-| redis-rs (Rust) | ~15K | Much simpler protocol (text-based) |
-| pymongo (Python) | ~40-50K | Pure Python, protocol implemented from scratch |
-| psycopg3 (Python) | ~25-30K | Wraps libpq (C) |
-
-```bash
-# Implementation code only (excludes tests, examples, benchmark)
-tokei
-
-# Including aerospike-core
-tokei rust/src/ src/aerospike_py/
-
-# Include tests, benchmarks, and samples
-tokei src rust/src tests benchmark examples
-```
-
-Implementation code only (excludes tests, examples, benchmark):
-```
-$ tokei -C
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Language                                 Files        Lines         Code     Comments       Blanks
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Rust                                        35        11019         9681          330         1008
- Python                                      25         8664         7217          260         1187
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Total                                       60        20521        16898         1301         2322
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
