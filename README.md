@@ -80,16 +80,7 @@ Benchmark: **5,000 ops x 100 rounds**, Aerospike CE (Docker), Apple M4 Pro
 | put (ms)  |             0.140 |             0.139 |              0.058 | **2.4x faster** |
 | get (ms)  |             0.141 |             0.141 |              0.063 | **2.2x faster** |
 
-> **Sync** performance is on par with the official C client.
-> **Async** throughput is **2.2-2.4x faster** — the official C client has no Python async/await support ([attempted and removed](https://github.com/aerospike/aerospike-client-python/pull/462)).
-
-### Why async matters
-
-The official C client supports async I/O internally (libev/libuv/libevent), but its Python bindings **cannot expose `async/await`** — the attempt was abandoned and removed in [PR #462](https://github.com/aerospike/aerospike-client-python/pull/462). The only concurrency option with the C client is `asyncio.run_in_executor()` (thread pool, not true async).
-
-aerospike-py provides **native `async/await`** via Tokio + PyO3, enabling `asyncio.gather()` for true concurrent I/O — critical for modern Python web frameworks (FastAPI, Starlette, etc).
-
-> Full benchmark details: [benchmark/](benchmark/) | Run: `make run-benchmark`
+> **Sync** is on par with the official C client. **Async** is **2.2-2.4x faster** via native Tokio async/await.
 
 ## Claude Code Skills & Agents
 
@@ -126,37 +117,6 @@ claude plugin install aerospike-ce-ecosystem -s project
 claude plugin list
 # Should show: aerospike-ce-ecosystem@aerospike-ce-ecosystem ✔ enabled
 ```
-
-### Skills
-
-Invoke with `/skill-name`.
-
-| Skill | Command | Description |
-|-------|---------|-------------|
-| **run-tests** | `/run-tests [type]` | Build → ensure Aerospike server is running → run tests (unit/integration/concurrency/compat/all/matrix) |
-| **release-check** | `/release-check` | Pre-release validation (lint, unit tests, pyright, type stub consistency, version check) |
-| **bench-compare** | `/bench-compare` | Benchmark comparison: aerospike-py vs the official C client |
-| **test-sample-fastapi** | `/test-sample-fastapi` | Build aerospike-py → install sample-fastapi → run integration tests |
-| **new-api** | `/new-api [method] [desc]` | Guide for adding a new Client/AsyncClient API method (Rust → Python wrapper → type stubs → tests) |
-
-### Subagents
-
-Invoked automatically during code review and analysis.
-
-| Agent | Description |
-|-------|-------------|
-| **pyo3-reviewer** | Reviews PyO3 bindings (GIL management, type conversions, async safety, memory safety) |
-| **type-stub-sync** | Validates consistency between `__init__.pyi` stubs and Rust source |
-
-### Hooks
-
-Run automatically when files are edited.
-
-| Hook | Trigger | Action |
-|------|---------|--------|
-| Python auto-format | After editing `.py` | `ruff format` + `ruff check --fix` |
-| Rust auto-format | After editing `.rs` | `cargo fmt` |
-| Binary/lock protection | On editing `.so`, `.dylib`, `.whl`, `uv.lock` | Blocks the edit |
 
 ## Contributing
 
