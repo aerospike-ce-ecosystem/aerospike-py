@@ -10,7 +10,7 @@ from aerospike_py._bug_report import catch_unexpected
 from aerospike_py.types import (
     AerospikeKey,
     BatchRecord as BatchRecordTuple,
-    BatchRecords as BatchRecordsTuple,
+    BatchWriteResult,
     BinTuple,
     ExistsResult,
     InfoNodeResult,
@@ -167,21 +167,18 @@ class Client(_NativeClient):
                 ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+            ``BatchRecords`` (``dict[Key, AerospikeRecord]``) or
+            ``NumpyBatchRecords`` when ``_dtype`` is set.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            batch = client.batch_read(keys, bins=["name", "age"])
-            for br in batch.batch_records:
-                if br.result == 0 and br.record is not None:
-                    print(br.record.bins)
+            result = client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in result.items():
+                print(user_key, bins_dict)
             ```
         """
-        raw = super().batch_read(keys, bins, policy, _dtype)
-        if _dtype is not None:
-            return raw  # NumpyBatchRecords path unchanged
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return super().batch_read(keys, bins, policy, _dtype)
 
     @catch_unexpected("Client.batch_write_numpy")
     def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0):
@@ -218,26 +215,26 @@ class Client(_NativeClient):
             ```
         """
         raw = super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_write")
-    def batch_write(self, records, policy=None, retry=0) -> BatchRecordsTuple:
+    def batch_write(self, records, policy=None, retry=0) -> BatchWriteResult:
         """Write multiple records with per-record bins in a single batch call.
 
         See :meth:`Client.batch_write` in ``__init__.pyi`` for full documentation.
         """
         raw = super().batch_write(records, policy, retry)
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_operate")
-    def batch_operate(self, keys, ops, policy=None) -> BatchRecordsTuple:
+    def batch_operate(self, keys, ops, policy=None) -> BatchWriteResult:
         raw = super().batch_operate(keys, ops, policy)
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.batch_remove")
-    def batch_remove(self, keys, policy=None) -> BatchRecordsTuple:
+    def batch_remove(self, keys, policy=None) -> BatchWriteResult:
         raw = super().batch_remove(keys, policy)
-        return BatchRecordsTuple(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
 
     @catch_unexpected("Client.put")
     def put(self, key, bins, meta=None, policy=None) -> None:

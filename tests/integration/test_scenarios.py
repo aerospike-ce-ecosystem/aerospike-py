@@ -136,11 +136,11 @@ class TestBatchWorkflow:
             await invoke(any_client, "put", key, {"idx": i, "val": f"item_{i}"})
 
         result = await invoke(any_client, "batch_read", keys)
-        assert len(result.batch_records) == 5
-        for i, br in enumerate(result.batch_records):
-            assert br.result == 0
-            _, meta, bins = br.record
-            assert meta is not None
+        assert len(result) == 5
+        for i, key in enumerate(keys):
+            user_key = key[2]  # e.g. "bulk_0"
+            assert user_key in result
+            bins = result[user_key]
             assert bins["idx"] == i
             assert bins["val"] == f"item_{i}"
 
@@ -153,8 +153,7 @@ class TestBatchWorkflow:
         await invoke(any_client, "batch_remove", keys)
 
         result = await invoke(any_client, "batch_read", keys, bins=[])
-        for br in result.batch_records:
-            assert br.result == 2  # KEY_NOT_FOUND
+        assert len(result) == 0  # all removed, none found
 
     # ── sync-only ──
 
@@ -168,19 +167,17 @@ class TestBatchWorkflow:
             client.put(key, {"val": i})
 
         result = client.batch_read(existing + missing)
-        assert len(result.batch_records) == 5
+        assert len(result) == 3  # only existing keys present
 
         for i in range(3):
-            br = result.batch_records[i]
-            assert br.result == 0
-            _, meta, bins = br.record
-            assert meta is not None
+            user_key = f"partial_{i}"
+            assert user_key in result
+            bins = result[user_key]
             assert bins["val"] == i
 
-        for i in range(3, 5):
-            br = result.batch_records[i]
-            assert br.result == 2  # KEY_NOT_FOUND
-            assert br.record is None
+        for i in range(2):
+            user_key = f"partial_missing_{i}"
+            assert user_key not in result
 
     def test_batch_operate_then_verify(self, client, cleanup):
         """Batch operate on multiple records, then verify individually."""

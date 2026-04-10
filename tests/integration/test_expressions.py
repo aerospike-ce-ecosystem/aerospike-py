@@ -161,22 +161,17 @@ class TestExpressionBatch:
         """batch_read with filter_expression should filter at server side."""
         expr = exp.ge(exp.int_bin("score"), exp.int_val(30))
         result = client.batch_read(self.keys, policy={"filter_expression": expr})
-        assert len(result.batch_records) == 6
-        matched = [br for br in result.batch_records if br.result == 0]
-        filtered = [br for br in result.batch_records if br.result != 0]
         # score >= 30: indices 3(30), 4(40), 5(50) => 3 matched
-        assert len(matched) == 3
-        assert len(filtered) == 3
-        for br in matched:
-            _, _, bins = br.record
+        # Filtered records are excluded from the dict
+        assert len(result) == 3
+        for user_key, bins in result.items():
             assert bins["score"] >= 30
 
     def test_batch_read_expression_all_filtered(self, client):
         """batch_read where expression filters all records."""
         expr = exp.gt(exp.int_bin("score"), exp.int_val(999))
         result = client.batch_read(self.keys, policy={"filter_expression": expr})
-        for br in result.batch_records:
-            assert br.result != 0
+        assert len(result) == 0
 
 
 class TestExpressionMetadata:

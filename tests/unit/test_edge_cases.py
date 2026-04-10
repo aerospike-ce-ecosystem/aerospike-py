@@ -546,11 +546,12 @@ class TestBatchRecordNamedTuple:
         assert hasattr(BatchRecord, "result") or "result" in dir(BatchRecord)
         assert hasattr(BatchRecord, "record") or "record" in dir(BatchRecord)
 
-    def test_batch_records_has_expected_attributes(self):
+    def test_batch_records_is_type_alias(self):
         from aerospike_py import BatchRecords
 
-        # BatchRecords class exposes batch_records attribute
-        assert hasattr(BatchRecords, "batch_records") or "batch_records" in dir(BatchRecords)
+        # BatchRecords is now a TypeAlias for dict[UserKey, AerospikeRecord]
+        # It should be a dict type, not a NamedTuple
+        assert BatchRecords is dict or hasattr(BatchRecords, "__origin__")
 
     def test_batch_record_importable_from_aerospike_py(self):
         """BatchRecord and BatchRecords are importable from the top-level package."""
@@ -558,5 +559,6 @@ class TestBatchRecordNamedTuple:
 
         assert hasattr(aerospike_py, "BatchRecord")
         assert hasattr(aerospike_py, "BatchRecords")
+        assert hasattr(aerospike_py, "BatchWriteResult")
         assert "BatchRecord" in aerospike_py.__all__
         assert "BatchRecords" in aerospike_py.__all__

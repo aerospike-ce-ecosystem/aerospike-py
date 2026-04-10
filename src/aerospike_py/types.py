@@ -1,6 +1,6 @@
 """Typed data structures for aerospike-py API inputs and outputs."""
 
-from typing import Any, NamedTuple, TypedDict
+from typing import Any, NamedTuple, TypeAlias, TypedDict
 
 # ---------------------------------------------------------------------------
 # NamedTuple types (return values - runtime wrapping)
@@ -65,7 +65,7 @@ class OperateOrderedResult(NamedTuple):
 
 
 class BatchRecord(NamedTuple):
-    """Single record result from a batch operation."""
+    """Single record result from a batch write/operate/remove operation."""
 
     key: AerospikeKey | None
     result: int
@@ -73,10 +73,24 @@ class BatchRecord(NamedTuple):
     in_doubt: bool = False
 
 
-class BatchRecords(NamedTuple):
-    """Container for batch read results."""
+class BatchWriteResult(NamedTuple):
+    """Container for batch write/operate/remove results."""
 
     batch_records: list[BatchRecord]
+
+
+# ---------------------------------------------------------------------------
+# batch_read return type aliases
+# ---------------------------------------------------------------------------
+
+UserKey: TypeAlias = str | int
+"""User key type for batch_read results."""
+
+AerospikeRecord: TypeAlias = dict[str, Any]
+"""Single record bins dict: ``{bin_name: bin_value}``."""
+
+BatchRecords: TypeAlias = dict[UserKey, AerospikeRecord]
+"""batch_read return type: ``{user_key: {bin_name: bin_value}}``."""
 
 
 # ---------------------------------------------------------------------------

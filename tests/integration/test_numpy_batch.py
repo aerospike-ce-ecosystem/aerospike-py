@@ -2,7 +2,6 @@
 
 import numpy as np
 
-import aerospike_py
 from aerospike_py.numpy_batch import NumpyBatchRecords
 
 NS = "test"
@@ -43,14 +42,14 @@ class TestNumericBatchRead:
 
         np.testing.assert_array_equal(result.result_codes, [0, 0, 0])
 
-    def test_without_dtype_returns_batch_records(self, client, cleanup):
-        """Returns standard BatchRecords when _dtype=None."""
+    def test_without_dtype_returns_dict(self, client, cleanup):
+        """Returns dict when _dtype=None."""
         key = (NS, SET, "nodtype_1")
         cleanup.append(key)
         client.put(key, {"x": 1})
 
         result = client.batch_read([key])
-        assert isinstance(result, aerospike_py.BatchRecords)
+        assert isinstance(result, dict)
 
 
 # ── meta (gen, ttl) verification ───────────────────────────────

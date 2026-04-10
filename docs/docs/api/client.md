@@ -724,9 +724,9 @@ Read multiple records in a single batch call.
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `bins` | Optional list of bin names to read. ``None`` reads all bins; an empty list performs an existence check only. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
-| `_dtype` | Optional NumPy dtype. When provided, returns ``NumpyBatchRecords`` instead of ``BatchRecords``. |
+| `_dtype` | Optional NumPy dtype. When provided, returns ``NumpyBatchRecords`` instead of the default type. |
 
-**Returns:** ``BatchRecords`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+**Returns:** Sync: ``BatchRecords``. Async: ``BatchReadHandle`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -748,8 +748,13 @@ batch = client.batch_read(keys, bins=["name", "age"])
 
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
-batch = await client.batch_read(keys, bins=["name", "age"])
-for br in batch.batch_records:
+handle = await client.batch_read(keys, bins=["name", "age"])
+
+# Fast path — dict[key, bins_dict]:
+data = handle.as_dict()
+
+# Compat path — list[BatchRecord] NamedTuples:
+for br in handle.batch_records:
     if br.result == 0 and br.record is not None:
         print(br.record.bins)
 ```

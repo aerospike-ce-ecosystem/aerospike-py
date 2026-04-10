@@ -97,7 +97,7 @@ class TestAsyncConcurrency:
 
         async def batch_read_task():
             result = await async_client.batch_read(keys, bins=["v"])
-            assert len(result.batch_records) == 30
+            assert len(result) == 30
 
         await asyncio.gather(*(batch_read_task() for _ in range(4)))
 
@@ -220,7 +220,7 @@ class TestExtendedAsyncConcurrency:
 
         async def batch_reader():
             result = await async_client.batch_read(keys, bins=["v"])
-            assert len(result.batch_records) == 50
+            assert len(result) == 50
 
         await asyncio.gather(*(batch_reader() for _ in range(8)))
         await asyncio.gather(*(async_client.remove(k) for k in keys))

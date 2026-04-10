@@ -167,6 +167,28 @@ if retry_records:
 Use the built-in `retry` parameter for automatic transient-failure retries with exponential backoff: `client.batch_write(records, retry=3)`. For non-idempotent operations where duplicates are unacceptable, keep `retry=0` (default) and handle retries manually using the `in_doubt` flag as shown above.
 :::
 
+### Async Batch Read (`BatchReadHandle`)
+
+`AsyncClient.batch_read()` returns a `BatchReadHandle` instead of `BatchRecords`. Use `as_dict()` for fastest access or `batch_records` for the compatibility path:
+
+```python
+handle = await client.batch_read(keys)
+
+# Fast path — dict[key, bins_dict]:
+data = handle.as_dict()
+
+# Compat path — per-record error checking:
+for br in handle.batch_records:
+    if br.result == aerospike.AEROSPIKE_OK and br.record is not None:
+        print(br.record.bins)
+    elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
+        print(f"Missing: {br.key}")
+```
+
+:::note
+`as_dict()` only includes records with a `user_key` and a successful result. Use `batch_records` to inspect failures and digest-only records.
+:::
+
 ## Async Error Handling
 
 Exception types are identical for sync and async clients. Use standard `try`/`except` with `await`:

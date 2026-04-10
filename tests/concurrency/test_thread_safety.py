@@ -147,7 +147,7 @@ class TestBatchConcurrency:
         def batch_reader():
             try:
                 result = client.batch_read(keys, bins=["v"])
-                assert len(result.batch_records) == 50
+                assert len(result) == 50
             except Exception as e:
                 errors.put(e)
 
@@ -300,7 +300,7 @@ class TestExtendedThreadSafety:
             try:
                 barrier.wait()
                 result = client.batch_read(keys, bins=["v"])
-                assert len(result.batch_records) == 100
+                assert len(result) == 100
             except Exception as e:
                 errors.put(e)
 

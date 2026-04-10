@@ -151,26 +151,14 @@ def _create_app() -> FastAPI:
         bins = body.get("bins")
         results = await app.state.client.batch_read(keys, bins=bins)
         sanitized = []
-        for br in results.batch_records:
-            if br.record is not None:
-                k, meta, bins_data = br.record
-                sanitized.append(
-                    {
-                        "key": _sanitize_key(k),
-                        "meta": meta._asdict()
-                        if hasattr(meta, "_asdict") and meta
-                        else (meta if isinstance(meta, dict) else None),
-                        "bins": bins_data,
-                    }
-                )
-            else:
-                sanitized.append(
-                    {
-                        "key": _sanitize_key(br.key),
-                        "meta": None,
-                        "bins": None,
-                    }
-                )
+        for user_key, bins_data in results.items():
+            sanitized.append(
+                {
+                    "key": user_key,
+                    "meta": None,
+                    "bins": bins_data,
+                }
+            )
         return {"batch_records": sanitized}
 
     @app.post("/batch/operate")
