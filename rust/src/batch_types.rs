@@ -25,10 +25,7 @@ use crate::types::record::record_to_py_with_key;
 /// In practice, all access is single-threaded (GIL held), so contention is zero.
 enum LazyRecordCell {
     /// Raw Rust Record awaiting lazy conversion.
-    Pending {
-        record: Record,
-        key_py: Py<PyAny>,
-    },
+    Pending { record: Record, key_py: Py<PyAny> },
     /// Already converted to Python `(key, meta, bins)` tuple — cached.
     Converted(Py<PyAny>),
     /// Record not found (None).
@@ -217,8 +214,10 @@ impl PyBatchReadHandle {
     /// Each `BatchRecord`'s `.record` field is lazily converted on first access.
     #[getter]
     fn batch_records(&self, py: Python<'_>) -> PyResult<Vec<Py<PyBatchRecord>>> {
-        let br = batch_to_batch_records_py(py, (*self.inner).clone())?;
-        Ok(br.batch_records)
+        self.inner
+            .iter()
+            .map(|br| single_batch_record_to_py(py, br))
+            .collect()
     }
 
     /// Count of records with successful result code (no conversion needed).
@@ -240,9 +239,7 @@ impl PyBatchReadHandle {
                     aerospike_core::Value::String(s) => {
                         s.into_pyobject(py).map(|o| o.into_any()).ok()
                     }
-                    aerospike_core::Value::Int(i) => {
-                        i.into_pyobject(py).map(|o| o.into_any()).ok()
-                    }
+                    aerospike_core::Value::Int(i) => i.into_pyobject(py).map(|o| o.into_any()).ok(),
                     v => value_to_py(py, v).ok().map(|o| o.into_bound(py)),
                 })
             })

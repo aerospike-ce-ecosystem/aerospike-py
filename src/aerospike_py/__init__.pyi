@@ -635,6 +635,11 @@ class Client:
                 exponential backoff (Full Jitter, max 500ms). Retries stop
                 early if the elapsed time approaches ``total_timeout``.
 
+                **Note:** If a transport error occurs during retry, retries
+                stop and partial results are returned. Always check each
+                ``BatchRecord.result`` code. Total wall-clock time may exceed
+                ``total_timeout`` by up to one additional timeout window.
+
         Returns:
             A list of ``BatchRecord`` NamedTuples with per-record result codes.
 
@@ -682,6 +687,11 @@ class Client:
                 device overload, key busy) are automatically retried with
                 exponential backoff (Full Jitter, max 500ms). Retries stop
                 early if the elapsed time approaches ``total_timeout``.
+
+                **Note:** If a transport error occurs during retry, retries
+                stop and partial results are returned. Always check each
+                ``BatchRecord.result`` code. Total wall-clock time may exceed
+                ``total_timeout`` by up to one additional timeout window.
 
         Returns:
             A ``BatchRecords`` containing per-record result codes.
@@ -1626,6 +1636,11 @@ class AsyncClient:
                 exponential backoff (Full Jitter, max 500ms). Retries stop
                 early if the elapsed time approaches ``total_timeout``.
 
+                **Note:** If a transport error occurs during retry, retries
+                stop and partial results are returned. Always check each
+                ``BatchRecord.result`` code. Total wall-clock time may exceed
+                ``total_timeout`` by up to one additional timeout window.
+
         Returns:
             A list of ``BatchRecord`` NamedTuples with per-record result codes.
 
@@ -1671,6 +1686,11 @@ class AsyncClient:
                 device overload, key busy) are automatically retried with
                 exponential backoff (Full Jitter, max 500ms). Retries stop
                 early if the elapsed time approaches ``total_timeout``.
+
+                **Note:** If a transport error occurs during retry, retries
+                stop and partial results are returned. Always check each
+                ``BatchRecord.result`` code. Total wall-clock time may exceed
+                ``total_timeout`` by up to one additional timeout window.
 
         Returns:
             A ``BatchRecords`` containing per-record result codes.

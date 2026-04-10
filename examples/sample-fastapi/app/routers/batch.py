@@ -19,15 +19,23 @@ router = APIRouter(prefix="/batch", tags=["batch"])
 
 @router.post("/read", response_model=BatchRecordsResponse)
 async def batch_read(body: BatchReadRequest, client: AsyncClient = Depends(get_client)):
-    """Read multiple records in a single batch call."""
+    """Read multiple records in a single batch call.
+
+    Since v0.4.0, ``AsyncClient.batch_read()`` returns
+    ``dict[UserKey, AerospikeRecord]`` — only successful reads are included.
+    We reconstruct per-key results by checking dict membership.
+    """
     keys = [k.to_tuple() for k in body.keys]
     result = await client.batch_read(keys, bins=body.bins)
     records = []
-    for br in result.batch_records:
-        rec = None
-        if br.record is not None:
-            rec = RecordResponse(key=br.record.key, meta=br.record.meta, bins=br.record.bins)
-        records.append(BatchRecordResponse(key=br.key, result=br.result, record=rec))
+    for key_tuple in keys:
+        user_key = key_tuple[2]
+        if user_key in result:
+            bins_dict = result[user_key]
+            rec = RecordResponse(key=list(key_tuple), meta=None, bins=bins_dict)
+            records.append(BatchRecordResponse(key=list(key_tuple), result=0, record=rec))
+        else:
+            records.append(BatchRecordResponse(key=list(key_tuple), result=2, record=None))
     return BatchRecordsResponse(batch_records=records)
 
 

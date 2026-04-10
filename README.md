@@ -169,27 +169,33 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and
 
 ## Code stats
 
-[tokei](https://github.com/XAMPPRocky/tokei) 기반. 설정: `tokei.toml` + `.tokeignore`
+[tokei](https://github.com/XAMPPRocky/tokei) 기반 (`tokei.toml` + `.tokeignore`).
+
+### 코드 규모
+
+| 레이어 | 파일 수 | 코드 라인 | 역할 |
+|--------|--------:|----------:|------|
+| **aerospike-core** (Rust) | 100 | 19,635 | Aerospike 프로토콜, 클러스터 관리, 명령 실행 |
+| **rust/src** (PyO3 바인딩) | 32 | 9,582 | Python ↔ Rust 변환, async/sync 클라이언트, 정책 파싱 |
+| **src/aerospike_py** (Python) | 24 | 6,877 | 타입 스텁(.pyi), NamedTuple 래퍼, 헬퍼 |
+| **합계** | **156** | **36,094** | Rust 81% · Python 19% |
+
+### 타 DB 클라이언트 대비
+
+| 클라이언트 | 구현 코드 | 비고 |
+|-----------|----------:|------|
+| **aerospike-py** (Rust+Python) | ~36K | 프로토콜 자체 구현 |
+| aerospike-client-python (공식) | ~15K | C client(100K+) 래핑, C 코드 별도 |
+| redis-rs (Rust) | ~15K | 프로토콜이 훨씬 단순 (텍스트 기반) |
+| pymongo (Python) | ~40-50K | 순수 Python, 프로토콜 자체 구현 |
+| psycopg3 (Python) | ~25-30K | libpq(C) 래핑 |
 
 ```bash
 # 순수 구현 코드만 (tests, examples, benchmark 제외)
 tokei
 
-# 테스트 + 벤치마크 + 샘플 포함
-tokei src rust/src tests benchmark examples
-```
-
-순수 구현 코드 (tests, examples, benchmark 제외):
-```
-$ tokei -C
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Language                                 Files        Lines         Code     Comments       Blanks
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Rust                                        34         9729         8581          260          888
- Python                                      25         8116         6754          238         1124
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Total                                       59        18511        15335         1067         2109
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# aerospike-core 포함
+tokei rust/src/ src/aerospike_py/
 ```
 
 ## License
