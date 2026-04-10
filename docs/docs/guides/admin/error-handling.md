@@ -88,25 +88,20 @@ except AerospikeError as e:
 Batch operations do not raise exceptions for individual record failures. Instead, each `BatchRecord` carries its own result code:
 
 ```python
-import aerospike_py as aerospike
-
 keys = [("test", "demo", f"id-{i}") for i in range(100)]
+
+# batch_read returns dict[user_key, bins_dict]
+# Only successful reads with a user key are included
 batch = client.batch_read(keys)
 
-succeeded = []
-missing = []
-errors = []
+# Succeeded records are in the dict; missing keys are absent
+succeeded = list(batch.values())
+all_user_keys = {k[2] for k in keys}
+present_keys = set(batch.keys())
+missing_keys = all_user_keys - present_keys
 
-for br in batch.batch_records:
-    if br.result == aerospike.AEROSPIKE_OK and br.record is not None:
-        succeeded.append(br.record.bins)
-    elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
-        missing.append(br.key)
-    else:
-        errors.append((br.key, br.result))
-
-if errors:
-    logger.warning("Batch had %d errors", len(errors))
+if missing_keys:
+    logger.warning("Batch had %d missing keys", len(missing_keys))
 ```
 
 For `batch_operate`, failures on individual keys do not abort the entire batch:
@@ -167,27 +162,21 @@ if retry_records:
 Use the built-in `retry` parameter for automatic transient-failure retries with exponential backoff: `client.batch_write(records, retry=3)`. For non-idempotent operations where duplicates are unacceptable, keep `retry=0` (default) and handle retries manually using the `in_doubt` flag as shown above.
 :::
 
-### Async Batch Read (`BatchReadHandle`)
+### Async Batch Read
 
-`AsyncClient.batch_read()` returns a `BatchReadHandle` instead of `BatchRecords`. Use `as_dict()` for fastest access or `batch_records` for the compatibility path:
+`AsyncClient.batch_read()` returns the same `dict[UserKey, dict]` as the sync version. Missing or failed records are excluded from the dict:
 
 ```python
-handle = await client.batch_read(keys)
+batch = await client.batch_read(keys)
 
-# Fast path — dict[key, bins_dict]:
-data = handle.as_dict()
+# Same dict API as sync
+for user_key, bins in batch.items():
+    print(user_key, bins)
 
-# Compat path — per-record error checking:
-for br in handle.batch_records:
-    if br.result == aerospike.AEROSPIKE_OK and br.record is not None:
-        print(br.record.bins)
-    elif br.result == aerospike.AEROSPIKE_ERR_RECORD_NOT_FOUND:
-        print(f"Missing: {br.key}")
+# Check which keys are missing
+all_user_keys = {k[2] for k in keys}
+missing_keys = all_user_keys - set(batch.keys())
 ```
-
-:::note
-`as_dict()` only includes records with a `user_key` and a successful result. Use `batch_records` to inspect failures and digest-only records.
-:::
 
 ## Async Error Handling
 

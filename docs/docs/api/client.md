@@ -726,7 +726,7 @@ Read multiple records in a single batch call.
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 | `_dtype` | Optional NumPy dtype. When provided, returns ``NumpyBatchRecords`` instead of the default type. |
 
-**Returns:** Sync: ``BatchRecords``. Async: ``BatchReadHandle`` (or ``NumpyBatchRecords`` when ``_dtype`` is set).
+**Returns:** ``BatchRecords`` (``dict[UserKey, dict[str, Any]]``). Only successful reads with a user key are included. Missing or failed records are excluded from the dict. Returns ``NumpyBatchRecords`` when ``_dtype`` is set.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -734,10 +734,10 @@ Read multiple records in a single batch call.
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 
+# Returns dict[user_key, bins_dict]
 batch = client.batch_read(keys)
-for br in batch.batch_records:
-    if br.result == 0 and br.record is not None:
-        print(br.record.bins)
+for user_key, bins in batch.items():
+    print(user_key, bins)
 
 # Read specific bins
 batch = client.batch_read(keys, bins=["name", "age"])
@@ -748,15 +748,11 @@ batch = client.batch_read(keys, bins=["name", "age"])
 
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
-handle = await client.batch_read(keys, bins=["name", "age"])
 
-# Fast path — dict[key, bins_dict]:
-data = handle.as_dict()
-
-# Compat path — list[BatchRecord] NamedTuples:
-for br in handle.batch_records:
-    if br.result == 0 and br.record is not None:
-        print(br.record.bins)
+# Same dict return type as sync
+batch = await client.batch_read(keys, bins=["name", "age"])
+for user_key, bins in batch.items():
+    print(user_key, bins)
 ```
 
   </TabItem>
