@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/aerospike-py.svg)](https://pypi.org/project/aerospike-py/)
 [![Downloads](https://img.shields.io/pypi/dm/aerospike-py.svg)](https://pypi.org/project/aerospike-py/)
-[![CI](https://github.com/KimSoungRyoul/aerospike-py/actions/workflows/ci.yaml/badge.svg)](https://github.com/KimSoungRyoul/aerospike-py/actions/workflows/ci.yaml)
+[![CI](https://github.com/aerospike-ce-ecosystem/aerospike-py/actions/workflows/ci.yaml/badge.svg)](https://github.com/aerospike-ce-ecosystem/aerospike-py/actions/workflows/ci.yaml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![PyO3](https://img.shields.io/badge/PyO3-0.28-green.svg)](https://pyo3.rs/)
@@ -17,7 +17,7 @@ Aerospike Python Client built with PyO3 + Rust. Drop-in replacement for [aerospi
 - CDT List/Map Operations, Expression Filters
 - Full type stubs (`.pyi`) for IDE autocompletion
 
-> API details: [docs/api/](docs/api/) | Usage guides: [docs/guides/](docs/guides/)
+> API details: [Docs](https://aerospike-ce-ecosystem.github.io/aerospike-py/api/client) | Usage guides: [Guides](https://aerospike-ce-ecosystem.github.io/aerospike-py/guides/crud/read)
 
 ## Drop-in Replacement
 
@@ -108,17 +108,6 @@ aerospike-py provides **native `async/await`** via Tokio + PyO3, enabling `async
 
 > Full benchmark details: [benchmark/](benchmark/) | Run: `make run-benchmark`
 
-## For AI Agents
-
-This project supports the [llms.txt](https://llmstxt.org/) standard. Use the following prompt to give your AI agent full context about aerospike-py:
-
-```
-Fetch and read https://kimsoungryoul.github.io/aerospike-py/llms-full.txt to understand the aerospike-py Python client API, then write code based on that documentation.
-```
-
-- [`llms.txt`](https://kimsoungryoul.github.io/aerospike-py/llms.txt) — Documentation index for AI agents
-- [`llms-full.txt`](https://kimsoungryoul.github.io/aerospike-py/llms-full.txt) — Complete documentation in a single file
-
 ## Claude Code Skills & Agents
 
 This project has [Claude Code](https://docs.anthropic.com/en/docs/claude-code) automation configured.
@@ -128,7 +117,6 @@ This project has [Claude Code](https://docs.anthropic.com/en/docs/claude-code) a
 Install [aerospike-ce-ecosystem-plugins](https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins) to access the full ecosystem skill set, including the aerospike-py API reference and deployment guides.
 
 ```bash
-claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
 claude plugin install aerospike-ce-ecosystem
 ```
 
@@ -176,9 +164,9 @@ Powered by [tokei](https://github.com/XAMPPRocky/tokei). Configuration: `tokei.t
 | Layer | Files | Code Lines | Role |
 |--------|--------:|----------:|------|
 | **aerospike-core** (Rust) | 100 | 19,635 | Aerospike protocol, cluster management, command execution |
-| **rust/src** (PyO3 bindings) | 32 | 9,582 | Python ↔ Rust conversion, async/sync client, policy parsing |
-| **src/aerospike_py** (Python) | 24 | 6,877 | Type stubs (.pyi), NamedTuple wrappers, helpers |
-| **Total** | **156** | **36,094** | Rust 81% · Python 19% |
+| **rust/src** (PyO3 bindings) | 35 | 9,681 | Python ↔ Rust conversion, async/sync client, policy parsing |
+| **src/aerospike_py** (Python) | 25 | 7,217 | Type stubs (.pyi), NamedTuple wrappers, helpers |
+| **Total** | **160** | **36,533** | Rust 80% · Python 20% |
 
 ### Compared to Other DB Clients
 
@@ -207,10 +195,10 @@ $ tokei -C
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  Language                                 Files        Lines         Code     Comments       Blanks
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Rust                                        34         9729         8581          260          888
- Python                                      25         8116         6754          238         1124
+ Rust                                        35        11019         9681          330         1008
+ Python                                      25         8664         7217          260         1187
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Total                                       59        18511        15335         1067         2109
+ Total                                       60        20521        16898         1301         2322
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
