@@ -116,8 +116,32 @@ This project has [Claude Code](https://docs.anthropic.com/en/docs/claude-code) a
 
 Install [aerospike-ce-ecosystem-plugins](https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins) to access the full ecosystem skill set, including the aerospike-py API reference and deployment guides.
 
+**From GitHub (recommended)**
+
+Add the repository as a marketplace, then install:
+
 ```bash
+# Step 1: Add as marketplace
+claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+
+# Step 2: Install the plugin
 claude plugin install aerospike-ce-ecosystem
+```
+
+**Project-scoped install**
+
+To install only for the current project:
+
+```bash
+claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+claude plugin install aerospike-ce-ecosystem -s project
+```
+
+**Verify installation**
+
+```bash
+claude plugin list
+# Should show: aerospike-ce-ecosystem@aerospike-ce-ecosystem ✔ enabled
 ```
 
 ### Skills
