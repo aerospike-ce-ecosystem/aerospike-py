@@ -518,6 +518,48 @@ class TestBatchWriteTTL:
         assert meta_c.ttl <= 300
 
 
+class TestBatchWriteGen:
+    """Test batch_write() generation (CAS) support via per-record meta."""
+
+    def test_batch_write_gen_check_success(self, client, cleanup):
+        """Per-record gen check succeeds when generation matches."""
+        key = ("test", "demo", "bw_gen_ok")
+        cleanup.append(key)
+        client.put(key, {"val": 1})
+        _, meta, _ = client.get(key)
+        current_gen = meta.gen
+
+        results = client.batch_write([(key, {"val": 2}, {"gen": current_gen})])
+        assert results.batch_records[0].result == 0
+        _, _, bins = client.get(key)
+        assert bins["val"] == 2
+
+    def test_batch_write_gen_check_mismatch(self, client, cleanup):
+        """Per-record gen check fails when generation does not match."""
+        key = ("test", "demo", "bw_gen_mismatch")
+        cleanup.append(key)
+        client.put(key, {"val": 1})
+
+        # stale generation = 999
+        results = client.batch_write([(key, {"val": 2}, {"gen": 999})])
+        assert results.batch_records[0].result != 0  # GENERATION_ERROR
+
+    def test_batch_write_gen_and_ttl_combined(self, client, cleanup):
+        """Gen and TTL can be used together in WriteMeta."""
+        key = ("test", "demo", "bw_gen_ttl")
+        cleanup.append(key)
+        client.put(key, {"val": 1})
+        _, meta, _ = client.get(key)
+        current_gen = meta.gen
+
+        results = client.batch_write([(key, {"val": 2}, {"gen": current_gen, "ttl": 3600})])
+        assert results.batch_records[0].result == 0
+        _, meta2, bins = client.get(key)
+        assert bins["val"] == 2
+        assert meta2.ttl > 0
+        assert meta2.ttl <= 3600
+
+
 class TestBatchRemove:
     def test_batch_remove(self, client):
         keys = [

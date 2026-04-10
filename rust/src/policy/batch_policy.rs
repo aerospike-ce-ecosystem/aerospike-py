@@ -51,8 +51,8 @@ pub fn parse_batch_write_policy(
     Ok(policy)
 }
 
-/// Apply per-record meta TTL to a [`BatchWritePolicy`], overriding the
-/// batch-level default.
+/// Apply per-record meta (TTL, generation) to a [`BatchWritePolicy`],
+/// overriding the batch-level default.
 pub fn apply_record_meta(
     base: &BatchWritePolicy,
     meta: &Bound<'_, PyDict>,
@@ -60,6 +60,10 @@ pub fn apply_record_meta(
     let mut policy = base.clone();
     if let Some(ttl) = meta.get_item("ttl")? {
         policy.expiration = parse_ttl(ttl.extract::<i64>()?)?;
+    }
+    if let Some(gen) = meta.get_item("gen")? {
+        policy.generation = gen.extract::<u32>()?;
+        policy.generation_policy = aerospike_core::GenerationPolicy::ExpectGenEqual;
     }
     Ok(policy)
 }

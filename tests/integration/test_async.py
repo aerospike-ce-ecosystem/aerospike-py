@@ -204,3 +204,113 @@ class TestAsyncBatchWriteTTL:
         _, meta, _ = await async_client.get(key)
         assert meta is not None
         assert meta.ttl > 0
+
+    async def test_async_batch_write_per_record_meta_overrides_policy_ttl(self, async_client, async_cleanup):
+        """Per-record meta TTL overrides batch-level policy TTL."""
+        key_policy = ("test", "demo", "abw_ttl_override_pol")
+        key_meta = ("test", "demo", "abw_ttl_override_meta")
+        async_cleanup.append(key_policy)
+        async_cleanup.append(key_meta)
+
+        policy_ttl = 86400  # 1 day
+        meta_ttl = 3600  # 1 hour
+
+        records = [
+            (key_policy, {"val": 1}),  # uses batch-level TTL
+            (key_meta, {"val": 2}, {"ttl": meta_ttl}),  # overrides with per-record TTL
+        ]
+        results = await async_client.batch_write(records, policy={"ttl": policy_ttl})
+        for br in results.batch_records:
+            assert br.result == 0
+
+        _, meta_pol, _ = await async_client.get(key_policy)
+        assert meta_pol is not None
+        assert meta_pol.ttl > 3600
+
+        _, meta_m, _ = await async_client.get(key_meta)
+        assert meta_m is not None
+        assert meta_m.ttl <= meta_ttl
+        assert meta_m.ttl > 0
+
+    async def test_async_batch_write_ttl_dont_update(self, async_client, async_cleanup):
+        """TTL_DONT_UPDATE preserves original TTL while updating bins."""
+        key = ("test", "demo", "abw_ttl_dont_upd")
+        async_cleanup.append(key)
+
+        await async_client.put(key, {"val": 1}, meta={"ttl": 3600})
+
+        results = await async_client.batch_write([(key, {"val": 2}, {"ttl": aerospike_py.TTL_DONT_UPDATE})])
+        assert results.batch_records[0].result == 0
+
+        _, meta, bins = await async_client.get(key)
+        assert bins["val"] == 2
+        assert meta.ttl > 3000
+
+    async def test_async_batch_write_mixed_ttl_in_batch(self, async_client, async_cleanup):
+        """Different TTL values per record in a single batch call."""
+        key_a = ("test", "demo", "abw_ttl_mix_a")
+        key_b = ("test", "demo", "abw_ttl_mix_b")
+        key_c = ("test", "demo", "abw_ttl_mix_c")
+        for k in (key_a, key_b, key_c):
+            async_cleanup.append(k)
+
+        records = [
+            (key_a, {"val": 1}, {"ttl": 3600}),
+            (key_b, {"val": 2}, {"ttl": 86400}),
+            (key_c, {"val": 3}),
+        ]
+        results = await async_client.batch_write(records, policy={"ttl": 300})
+        for br in results.batch_records:
+            assert br.result == 0
+
+        _, meta_a, _ = await async_client.get(key_a)
+        _, meta_b, _ = await async_client.get(key_b)
+        _, meta_c, _ = await async_client.get(key_c)
+
+        assert meta_a.ttl > 300
+        assert meta_a.ttl <= 3600
+        assert meta_b.ttl > 3600
+        assert meta_b.ttl <= 86400
+        assert meta_c.ttl > 0
+        assert meta_c.ttl <= 300
+
+
+class TestAsyncBatchWriteGen:
+    """Test async batch_write() generation (CAS) support via per-record meta."""
+
+    async def test_async_batch_write_gen_check_success(self, async_client, async_cleanup):
+        """Per-record gen check succeeds when generation matches."""
+        key = ("test", "demo", "abw_gen_ok")
+        async_cleanup.append(key)
+        await async_client.put(key, {"val": 1})
+        _, meta, _ = await async_client.get(key)
+        current_gen = meta.gen
+
+        results = await async_client.batch_write([(key, {"val": 2}, {"gen": current_gen})])
+        assert results.batch_records[0].result == 0
+        _, _, bins = await async_client.get(key)
+        assert bins["val"] == 2
+
+    async def test_async_batch_write_gen_check_mismatch(self, async_client, async_cleanup):
+        """Per-record gen check fails when generation does not match."""
+        key = ("test", "demo", "abw_gen_mismatch")
+        async_cleanup.append(key)
+        await async_client.put(key, {"val": 1})
+
+        results = await async_client.batch_write([(key, {"val": 2}, {"gen": 999})])
+        assert results.batch_records[0].result != 0
+
+    async def test_async_batch_write_gen_and_ttl_combined(self, async_client, async_cleanup):
+        """Gen and TTL can be used together in WriteMeta."""
+        key = ("test", "demo", "abw_gen_ttl")
+        async_cleanup.append(key)
+        await async_client.put(key, {"val": 1})
+        _, meta, _ = await async_client.get(key)
+        current_gen = meta.gen
+
+        results = await async_client.batch_write([(key, {"val": 2}, {"gen": current_gen, "ttl": 3600})])
+        assert results.batch_records[0].result == 0
+        _, meta2, bins = await async_client.get(key)
+        assert bins["val"] == 2
+        assert meta2.ttl > 0
+        assert meta2.ttl <= 3600

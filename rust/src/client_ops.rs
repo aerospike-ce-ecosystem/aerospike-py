@@ -290,12 +290,39 @@ fn compute_backoff_ms(attempt: u32, base_ms: u64, cap_ms: u64) -> u64 {
     rand::thread_rng().gen_range(0..=max_backoff)
 }
 
+/// Collect indices of batch records with retryable error codes into `out`.
+///
+/// Clears `out` first, then appends indices of records whose `result_code`
+/// is both non-Ok and retryable (timeout, device overload, key busy,
+/// server memory error, partition unavailable).
+fn collect_retryable_indices(results: &[BatchRecord], out: &mut Vec<usize>) {
+    out.clear();
+    out.extend(results.iter().enumerate().filter_map(|(i, br)| {
+        if let Some(rc) = &br.result_code {
+            if *rc != aerospike_core::ResultCode::Ok && is_retryable_result_code(rc) {
+                return Some(i);
+            }
+        }
+        None
+    }));
+}
+
 /// Write multiple records from pre-parsed (key, bins) pairs with optional retry.
 ///
 /// When `max_retries > 0`, failed records with retryable error codes are
 /// re-submitted in subsequent batch calls, up to `max_retries` attempts.
 /// A Full Jitter exponential backoff (`random_between(0, min(cap, base * 2^attempt))`)
 /// is applied between retries to avoid thundering-herd effects.
+///
+/// **Retry behavior notes:**
+/// - If a transport-level error occurs during a retry attempt, retries stop
+///   immediately and the function returns partial results. Records that were
+///   being retried retain their previous (failed) result codes.
+/// - The elapsed time guard prevents retries when `elapsed + backoff >= total_timeout`,
+///   but does not account for the actual batch operation time. Total wall-clock
+///   time may exceed `total_timeout` by up to one additional timeout window.
+/// - Callers should always check per-record `result_code` values regardless of
+///   the overall `Ok` return status.
 #[allow(clippy::too_many_arguments)]
 pub async fn do_batch_write(
     client: &AsClient,
@@ -323,7 +350,11 @@ pub async fn do_batch_write(
             })
             .collect();
         return traced_op!(
-            op_name, ns, set, parent_ctx, conn_info,
+            op_name,
+            ns,
+            set,
+            parent_ctx,
+            conn_info,
             client.batch(batch_policy, &batch_ops).await
         );
     }
@@ -358,15 +389,7 @@ pub async fn do_batch_write(
     let mut retry_indices: Vec<usize> = Vec::new();
     for attempt in 0..max_retries {
         // Find indices of failed records that are retryable
-        retry_indices.clear();
-        retry_indices.extend(results.iter().enumerate().filter_map(|(i, br)| {
-            if let Some(rc) = &br.result_code {
-                if *rc != aerospike_core::ResultCode::Ok && is_retryable_result_code(rc) {
-                    return Some(i);
-                }
-            }
-            None
-        }));
+        collect_retryable_indices(&results, &mut retry_indices);
 
         if retry_indices.is_empty() {
             log::debug!(
@@ -849,5 +872,96 @@ mod tests {
         assert!(val <= 500);
         let val = compute_backoff_ms(u32::MAX, 10, 500);
         assert!(val <= 500);
+    }
+
+    // ── collect_retryable_indices tests ────────────────────────────────────
+
+    /// Create a minimal `BatchRecord` for testing.
+    ///
+    /// `BatchRecord::new` is `pub(crate)` in `aerospike_core`, so we build
+    /// an instance by cloning a layout-compatible repr and overwriting the
+    /// public `result_code` field.  The private `has_write: bool` field is
+    /// irrelevant to `collect_retryable_indices`.
+    fn make_batch_record(result_code: Option<ResultCode>) -> BatchRecord {
+        /// Layout-compatible mirror used solely to construct test fixtures.
+        #[repr(C)]
+        struct BatchRecordMirror {
+            key: aerospike_core::Key,
+            record: Option<Record>,
+            result_code: Option<ResultCode>,
+            in_doubt: bool,
+            has_write: bool,
+        }
+
+        let mirror = BatchRecordMirror {
+            key: aerospike_core::Key::new("test", "demo", Value::from("k1".to_string())).unwrap(),
+            record: None,
+            result_code,
+            in_doubt: false,
+            has_write: false,
+        };
+        // SAFETY: `BatchRecordMirror` has the identical field types and order
+        // as `BatchRecord`. This is only used in unit tests.
+        unsafe { std::mem::transmute(mirror) }
+    }
+
+    #[test]
+    fn test_collect_retryable_indices_all_ok() {
+        let results = vec![
+            make_batch_record(Some(ResultCode::Ok)),
+            make_batch_record(Some(ResultCode::Ok)),
+            make_batch_record(None), // None means Ok
+        ];
+        let mut indices = Vec::new();
+        collect_retryable_indices(&results, &mut indices);
+        assert!(indices.is_empty());
+    }
+
+    #[test]
+    fn test_collect_retryable_indices_retryable_only() {
+        let results = vec![
+            make_batch_record(Some(ResultCode::Ok)),
+            make_batch_record(Some(ResultCode::Timeout)),
+            make_batch_record(Some(ResultCode::Ok)),
+            make_batch_record(Some(ResultCode::KeyBusy)),
+        ];
+        let mut indices = Vec::new();
+        collect_retryable_indices(&results, &mut indices);
+        assert_eq!(indices, vec![1, 3]);
+    }
+
+    #[test]
+    fn test_collect_retryable_indices_non_retryable_excluded() {
+        let results = vec![
+            make_batch_record(Some(ResultCode::KeyExistsError)),
+            make_batch_record(Some(ResultCode::RecordTooBig)),
+            make_batch_record(Some(ResultCode::Timeout)),
+        ];
+        let mut indices = Vec::new();
+        collect_retryable_indices(&results, &mut indices);
+        assert_eq!(indices, vec![2]); // Only Timeout is retryable
+    }
+
+    #[test]
+    fn test_collect_retryable_indices_mixed() {
+        let results = vec![
+            make_batch_record(Some(ResultCode::Ok)),             // ok
+            make_batch_record(Some(ResultCode::Timeout)),        // retryable
+            make_batch_record(Some(ResultCode::KeyExistsError)), // non-retryable
+            make_batch_record(Some(ResultCode::DeviceOverload)), // retryable
+            make_batch_record(None),                             // ok (None)
+            make_batch_record(Some(ResultCode::ServerMemError)), // retryable
+        ];
+        let mut indices = Vec::new();
+        collect_retryable_indices(&results, &mut indices);
+        assert_eq!(indices, vec![1, 3, 5]);
+    }
+
+    #[test]
+    fn test_collect_retryable_indices_clears_output() {
+        let results = vec![make_batch_record(Some(ResultCode::Timeout))];
+        let mut indices = vec![99, 100]; // pre-populated
+        collect_retryable_indices(&results, &mut indices);
+        assert_eq!(indices, vec![0]); // old values cleared
     }
 }
