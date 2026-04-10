@@ -8,7 +8,7 @@
 [![PyO3](https://img.shields.io/badge/PyO3-0.28-green.svg)](https://pyo3.rs/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-Aerospike Python Client built with PyO3 + Rust. Drop-in replacement for [aerospike-client-python](https://github.com/aerospike/aerospike-client-python) powered by the [Aerospike Rust Client v2](https://github.com/aerospike/aerospike-client-rust).
+High-performance Aerospike Python Client built with PyO3 + Rust, powered by the [Aerospike Rust Client v2](https://github.com/aerospike/aerospike-client-rust).
 
 ## Features
 
@@ -17,24 +17,7 @@ Aerospike Python Client built with PyO3 + Rust. Drop-in replacement for [aerospi
 - CDT List/Map Operations, Expression Filters
 - Full type stubs (`.pyi`) for IDE autocompletion
 
-> API details: [Docs](https://aerospike-ce-ecosystem.github.io/aerospike-py/api/client) | Usage guides: [Guides](https://aerospike-ce-ecosystem.github.io/aerospike-py/guides/crud/read)
-
-## Drop-in Replacement
-
-Just change the import — your existing code works as-is:
-
-```diff
-- import aerospike
-+ import aerospike_py as aerospike
-
-config = {'hosts': [('localhost', 3000)]}
-client = aerospike.client(config).connect()
-
-key = ('test', 'demo', 'key1')
-client.put(key, {'name': 'Alice', 'age': 30})
-_, _, bins = client.get(key)
-client.close()
-```
+> [Documentation](https://aerospike-ce-ecosystem.github.io/aerospike-py/) — API reference, usage guides, integration examples
 
 ## Quickstart
 
