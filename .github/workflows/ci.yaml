@@ -341,6 +341,14 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # rustsec/audit-check creates a check-run summarizing the audit result.
+    # Workflow-level permission is `contents: read`, so this job needs an
+    # explicit elevation for `checks: write` — otherwise it fails with
+    # HTTP 403 "Resource not accessible by integration".
+    permissions:
+      contents: read
+      checks: write
+      issues: write
     steps:
       - uses: actions/checkout@v6
 
@@ -348,6 +356,13 @@ jobs:
         uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # RUSTSEC-2026-0097: `rand` is unsound only when a custom logger
+          # defined by the application itself calls `rand::rng()` while
+          # reseeding. aerospike-py's custom log bridge (rust/src/logging.rs)
+          # does not touch `rand`; thread_rng usage is confined to
+          # exponential-backoff jitter in rust/src/client_ops.rs.
+          # The unsound trigger cannot be reached through public API.
+          ignore: RUSTSEC-2026-0097
 
   compatibility:
     name: Compatibility Tests
