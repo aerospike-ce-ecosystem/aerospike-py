@@ -5,13 +5,12 @@
 //! Python until the user accesses `br.record`. This reduces GIL hold time by
 //! 70-80% for large batches where not all records' bins are accessed.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use aerospike_core::{BatchRecord, Record, ResultCode};
 use log::trace;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyString};
+use pyo3::types::{PyDict, PyList};
 
 use crate::errors::result_code_to_int;
 use crate::types::key::key_to_py;
@@ -304,21 +303,15 @@ fn single_batch_record_to_py(py: Python<'_>, br: &BatchRecord) -> PyResult<Py<Py
 /// Skips all intermediate objects (BatchRecord wrapper, key tuple, meta dict,
 /// record tuple). Only creates bins dicts + the outer dict.
 ///
-/// Allocation count for N records with B bins each and U unique bin names:
-/// - Standard path:      N × (5 key + 1 meta + 1 bins + B values + 1 tuple + 1 wrapper) = N×(9+B)
-/// - AsDict path:        N × (1 bins + B values) + 1 outer dict = N×(1+B) + 1
-/// - AsDict+NameCache:   N × (1 bins + B values) + U name strings + 1 outer dict
-///   → Bin name allocations: N×B → U (typical schemas reuse names, so U ≪ N×B).
+/// Allocation count for N records with B bins each:
+/// - Standard path: N × (5 key + 1 meta + 1 bins + B values + 1 tuple + 1 wrapper) = N×(9+B)
+/// - AsDict path:   N × (1 bins + B values) + 1 outer dict = N×(1+B) + 1
+///   → Savings: N × 8 allocations (e.g., 1800 × 8 = 14,400 alloc saved)
 pub fn batch_to_dict_py<'py>(
     py: Python<'py>,
     results: &[BatchRecord],
 ) -> PyResult<Bound<'py, PyDict>> {
     use crate::types::value::value_to_py;
-
-    // Per-call PyString cache for bin names. Typical workloads reuse the same
-    // schema (e.g., "impCnt", "clkCnt") across records, so N×B allocations
-    // collapse to U (unique bin count). Cache lives only for this call.
-    let mut name_cache: HashMap<&str, Bound<'py, PyString>> = HashMap::new();
 
     let dict = PyDict::new(py);
     for br in results {
@@ -334,11 +327,7 @@ pub fn batch_to_dict_py<'py>(
         if let Some(record) = &br.record {
             let bins = PyDict::new(py);
             for (name, value) in &record.bins {
-                let py_name = name_cache
-                    .entry(name.as_str())
-                    .or_insert_with(|| PyString::new(py, name))
-                    .clone();
-                bins.set_item(&py_name, value_to_py(py, value)?)?;
+                bins.set_item(name, value_to_py(py, value)?)?;
             }
             dict.set_item(&key_str, &bins)?;
         }
