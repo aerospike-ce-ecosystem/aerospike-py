@@ -1,5 +1,7 @@
 name: Publish to PyPI
-# On GitHub Release: builds wheels with maturin and publishes to PyPI (Linux/macOS, Python 3.10~3.14)
+# On GitHub Release: builds wheels with maturin and publishes to PyPI
+# Coverage: Linux (x86_64/aarch64), macOS (x86_64/aarch64), Windows (x64)
+#           Python 3.10 ~ 3.14 (standard) + 3.14t (free-threaded, Linux/macOS only)
 
 on:
   release:
@@ -60,6 +62,17 @@ jobs:
             3.11
             3.12
             3.13
+            3.14
+          allow-prereleases: true
+
+      # Free-threaded Python 3.14t: not officially distributed on Windows yet
+      # (actions/python-versions manifest does not publish win-x64 builds of
+      # cpython 3.14t at time of writing). Install only on Linux/macOS.
+      - name: Install free-threaded Python 3.14t (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.14t
           allow-prereleases: true
 
       - name: Extract version and update Cargo.toml
@@ -85,7 +98,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target == 'aarch64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
-          args: --release --out dist
+          args: --release --out dist --find-interpreter
 
       - name: Build wheels (Windows)
         if: runner.os == 'Windows'
