@@ -2,10 +2,10 @@
 #
 # Pure implementation code only (default):
 #   tokei
-#   → tests/, examples/, benchmark/ are auto-excluded via .tokeignore
+#   → tests/, examples/ are auto-excluded via .tokeignore
 #
-# Including tests + benchmarks + samples:
-#   tokei src rust/src tests benchmark examples
+# Including tests + samples:
+#   tokei src rust/src tests examples
 #   → All meaningful source (excludes docs, node_modules, etc.)
 
 # Terminal output width (columns)

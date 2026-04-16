@@ -2,5 +2,4 @@
 # Default tokei run counts only pure implementation code
 tests/
 examples/
-benchmark/
 aerospike-client-python/
