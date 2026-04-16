@@ -65,7 +65,7 @@ aerospike-py/
 
 ```bash
 # Install dependencies
-make install                        # uv sync --group dev --group bench
+make install                        # uv sync --group dev
 
 # Rust build
 make build                          # uv run maturin develop --release
@@ -86,10 +86,6 @@ make fmt                            # ruff format + cargo fmt
 # Local Aerospike server
 make run-aerospike-ce               # Start Aerospike CE via compose.local.yaml (port 18710)
 make stop-aerospike-ce              # Stop Aerospike CE server
-
-# Benchmarks
-make run-benchmark-report                      # Run benchmarks + generate JSON report
-make run-benchmark-report BENCH_SCENARIO=all   # All scenarios (including numpy) + report
 
 # Type checking & validation
 make typecheck                      # pyright type check

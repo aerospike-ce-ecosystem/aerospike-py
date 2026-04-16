@@ -71,7 +71,6 @@ const sidebars: SidebarsConfig = {
       label: 'Performance',
       items: [
         'performance/overview',
-        'performance/benchmark-results',
       ],
     },
     {
