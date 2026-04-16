@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aerospike-benchmark
+  namespace: mona-adagent
+  labels:
+    app: aerospike-benchmark
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aerospike-benchmark
+  template:
+    metadata:
+      labels:
+        app: aerospike-benchmark
+      annotations:
+        prometheus.io/container.scrape: "true"
+        prometheus.io/container.path: /metrics
+    spec:
+      containers:
+        - name: app
+          image: n3r-namespace-mrad1.n3r.reg.navercorp.com/mona-public/aerospike-benchmark:latest
+          ports:
+            - containerPort: 8000
+              name: http-metrics
+            - containerPort: 9464
+              name: native-metrics
+          envFrom:
+            - configMapRef:
+                name: aerospike-benchmark-config
+          env:
+            - name: PYTHONPATH
+              value: /app/src
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: PYNELO_TXT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aerospike-benchmark-secret
+                  key: PYNELO_TXT_TOKEN
+                  optional: true
+          resources:
+            requests:
+              memory: 4Gi
+              cpu: "4"
+            limits:
+              memory: 8Gi
+              cpu: "8"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5

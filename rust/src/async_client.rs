@@ -714,17 +714,35 @@ impl PyAsyncClient {
         _dtype: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_read: keys_count={}", keys.len());
+
+        // ── Stage: key_parse (GIL held) ──
+        let t_key_parse = std::time::Instant::now();
         let client = self.get_client()?;
         let limiter = self.limiter.clone();
         let args =
             client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?;
+        crate::metrics::record_internal_stage(
+            "key_parse", "batch_read", t_key_parse.elapsed().as_secs_f64(),
+        );
 
         let use_numpy = _dtype.is_some();
         let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
 
         future_into_py(py, async move {
+            // ── Stage: limiter_wait ──
+            let t_limiter = std::time::Instant::now();
             let _permit = limiter.acquire_named("batch_read").await?;
+            crate::metrics::record_internal_stage(
+                "limiter_wait", "batch_read", t_limiter.elapsed().as_secs_f64(),
+            );
+
+            // ── Stage: io (network round-trip) ──
+            let t_io = std::time::Instant::now();
             let results = client_ops::do_batch_read(&client, &args).await?;
+            crate::metrics::record_internal_stage(
+                "io", "batch_read", t_io.elapsed().as_secs_f64(),
+            );
+
             if use_numpy {
                 Ok(PendingBatchRead::Numpy {
                     results,

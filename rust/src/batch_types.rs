@@ -143,11 +143,16 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         match self {
             PendingBatchRead::Handle(results) => {
-                // GIL hold < 0.01ms: Arc::new (move, no copy) + Py::new
+                // ── Stage: into_pyobject (GIL held in spawn_blocking) ──
+                let t = std::time::Instant::now();
                 let handle = PyBatchReadHandle {
                     inner: Arc::new(results),
                 };
-                Ok(Py::new(py, handle)?.into_bound(py).into_any())
+                let result = Py::new(py, handle)?.into_bound(py).into_any();
+                crate::metrics::record_internal_stage(
+                    "into_pyobject", "batch_read", t.elapsed().as_secs_f64(),
+                );
+                Ok(result)
             }
             PendingBatchRead::Numpy { results, dtype } => {
                 crate::numpy_support::batch_to_numpy_py(py, &results, &dtype.into_bound(py))
@@ -206,7 +211,13 @@ impl PyBatchReadHandle {
     /// Records without a `user_key` (digest-only) or with a failed result are
     /// excluded from the dict. Use `batch_records` to access all records.
     fn as_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        batch_to_dict_py(py, &self.inner)
+        // ── Stage: as_dict (GIL held in event loop coroutine) ──
+        let t = std::time::Instant::now();
+        let result = batch_to_dict_py(py, &self.inner);
+        crate::metrics::record_internal_stage(
+            "as_dict", "batch_read", t.elapsed().as_secs_f64(),
+        );
+        result
     }
 
     /// Compatibility path: returns `list[BatchRecord]` with lazy per-record conversion.

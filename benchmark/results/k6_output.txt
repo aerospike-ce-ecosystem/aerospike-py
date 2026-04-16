@@ -1,0 +1,1074 @@
+
+         /\      Grafana   /‾‾/
+    /\  /  \     |\  __   /  /
+   /  \/    \    | |/ /  /   ‾‾\
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/
+
+
+     execution: local
+        script: loadtest/k6_benchmark.js
+        output: -
+
+     scenarios: (100.00%) 3 scenarios, 50 max VUs, 3m50s max duration (incl. graceful stop):
+              * warmup: 2 looping VUs for 10s (exec: warmup, gracefulStop: 30s)
+              * comparison: 10 looping VUs for 1m0s (exec: comparison, startTime: 15s, gracefulStop: 30s)
+              * stress: Up to 50 looping VUs for 2m0s over 3 stages (gracefulRampDown: 30s, exec: stress, startTime: 1m20s, gracefulStop: 30s)
+
+
+running (0m01.0s), 02/50 VUs, 2 complete and 0 interrupted iterations
+warmup       [  10% ] 2 VUs    01.0s/10s
+comparison • [   0% ] waiting  14.0s
+stress     • [   0% ] waiting  1m19.0s
+
+running (0m02.0s), 02/50 VUs, 6 complete and 0 interrupted iterations
+warmup       [  20% ] 2 VUs    02.0s/10s
+comparison • [   0% ] waiting  13.0s
+stress     • [   0% ] waiting  1m18.0s
+
+running (0m03.0s), 02/50 VUs, 10 complete and 0 interrupted iterations
+warmup       [  30% ] 2 VUs    03.0s/10s
+comparison • [   0% ] waiting  12.0s
+stress     • [   0% ] waiting  1m17.0s
+
+running (0m04.0s), 02/50 VUs, 14 complete and 0 interrupted iterations
+warmup       [  40% ] 2 VUs    04.0s/10s
+comparison • [   0% ] waiting  11.0s
+stress     • [   0% ] waiting  1m16.0s
+
+running (0m05.0s), 02/50 VUs, 18 complete and 0 interrupted iterations
+warmup       [  50% ] 2 VUs    05.0s/10s
+comparison • [   0% ] waiting  10.0s
+stress     • [   0% ] waiting  1m15.0s
+
+running (0m06.0s), 02/50 VUs, 22 complete and 0 interrupted iterations
+warmup       [  60% ] 2 VUs    06.0s/10s
+comparison • [   0% ] waiting  09.0s
+stress     • [   0% ] waiting  1m14.0s
+
+running (0m07.0s), 02/50 VUs, 26 complete and 0 interrupted iterations
+warmup       [  70% ] 2 VUs    07.0s/10s
+comparison • [   0% ] waiting  08.0s
+stress     • [   0% ] waiting  1m13.0s
+
+running (0m08.0s), 02/50 VUs, 30 complete and 0 interrupted iterations
+warmup       [  80% ] 2 VUs    08.0s/10s
+comparison • [   0% ] waiting  07.0s
+stress     • [   0% ] waiting  1m12.0s
+
+running (0m09.0s), 02/50 VUs, 32 complete and 0 interrupted iterations
+warmup       [  90% ] 2 VUs    09.0s/10s
+comparison • [   0% ] waiting  06.0s
+stress     • [   0% ] waiting  1m11.0s
+
+running (0m10.0s), 02/50 VUs, 36 complete and 0 interrupted iterations
+warmup       [ 100% ] 2 VUs    10.0s/10s
+comparison • [   0% ] waiting  05.0s
+stress     • [   0% ] waiting  1m10.0s
+
+running (0m11.0s), 00/50 VUs, 38 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison • [   0% ] waiting  04.0s
+stress     • [   0% ] waiting  1m09.0s
+
+running (0m12.0s), 00/50 VUs, 38 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison • [   0% ] waiting  03.0s
+stress     • [   0% ] waiting  1m08.0s
+
+running (0m13.0s), 00/50 VUs, 38 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison • [   0% ] waiting  02.0s
+stress     • [   0% ] waiting  1m07.0s
+
+running (0m14.0s), 00/50 VUs, 38 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison • [   0% ] waiting  01.0s
+stress     • [   0% ] waiting  1m06.0s
+
+running (0m15.0s), 00/50 VUs, 38 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison • [   0% ] waiting  00.0s
+stress     • [   0% ] waiting  1m05.0s
+
+running (0m16.0s), 10/50 VUs, 51 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [   2% ] 10 VUs   0m01.0s/1m0s
+stress     • [   0% ] waiting  1m04.0s
+
+running (0m17.0s), 10/50 VUs, 66 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [   3% ] 10 VUs   0m02.0s/1m0s
+stress     • [   0% ] waiting  1m03.0s
+
+running (0m18.0s), 10/50 VUs, 86 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [   5% ] 10 VUs   0m03.0s/1m0s
+stress     • [   0% ] waiting  1m02.0s
+
+running (0m19.0s), 10/50 VUs, 102 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [   7% ] 10 VUs   0m04.0s/1m0s
+stress     • [   0% ] waiting  1m01.0s
+
+running (0m20.0s), 10/50 VUs, 122 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [   8% ] 10 VUs   0m05.0s/1m0s
+stress     • [   0% ] waiting  1m00.0s
+
+running (0m21.0s), 10/50 VUs, 138 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  10% ] 10 VUs   0m06.0s/1m0s
+stress     • [   0% ] waiting  0m59.0s
+
+running (0m22.0s), 10/50 VUs, 157 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  12% ] 10 VUs   0m07.0s/1m0s
+stress     • [   0% ] waiting  0m58.0s
+
+running (0m23.0s), 10/50 VUs, 171 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  13% ] 10 VUs   0m08.0s/1m0s
+stress     • [   0% ] waiting  0m57.0s
+
+running (0m24.0s), 10/50 VUs, 190 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  15% ] 10 VUs   0m09.0s/1m0s
+stress     • [   0% ] waiting  0m56.0s
+
+running (0m25.0s), 10/50 VUs, 210 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  17% ] 10 VUs   0m10.0s/1m0s
+stress     • [   0% ] waiting  0m55.0s
+
+running (0m26.0s), 10/50 VUs, 228 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  18% ] 10 VUs   0m11.0s/1m0s
+stress     • [   0% ] waiting  0m54.0s
+
+running (0m27.0s), 10/50 VUs, 248 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  20% ] 10 VUs   0m12.0s/1m0s
+stress     • [   0% ] waiting  0m53.0s
+
+running (0m28.0s), 10/50 VUs, 265 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  22% ] 10 VUs   0m13.0s/1m0s
+stress     • [   0% ] waiting  0m52.0s
+
+running (0m29.0s), 10/50 VUs, 284 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  23% ] 10 VUs   0m14.0s/1m0s
+stress     • [   0% ] waiting  0m51.0s
+
+running (0m30.0s), 10/50 VUs, 301 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  25% ] 10 VUs   0m15.0s/1m0s
+stress     • [   0% ] waiting  0m50.0s
+
+running (0m31.0s), 10/50 VUs, 318 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  27% ] 10 VUs   0m16.0s/1m0s
+stress     • [   0% ] waiting  0m49.0s
+
+running (0m32.0s), 10/50 VUs, 336 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  28% ] 10 VUs   0m17.0s/1m0s
+stress     • [   0% ] waiting  0m48.0s
+
+running (0m33.0s), 10/50 VUs, 345 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  30% ] 10 VUs   0m18.0s/1m0s
+stress     • [   0% ] waiting  0m47.0s
+
+running (0m34.0s), 10/50 VUs, 363 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  32% ] 10 VUs   0m19.0s/1m0s
+stress     • [   0% ] waiting  0m46.0s
+
+running (0m35.0s), 10/50 VUs, 382 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  33% ] 10 VUs   0m20.0s/1m0s
+stress     • [   0% ] waiting  0m45.0s
+
+running (0m36.0s), 10/50 VUs, 400 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  35% ] 10 VUs   0m21.0s/1m0s
+stress     • [   0% ] waiting  0m44.0s
+
+running (0m37.0s), 10/50 VUs, 419 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  37% ] 10 VUs   0m22.0s/1m0s
+stress     • [   0% ] waiting  0m43.0s
+
+running (0m38.0s), 10/50 VUs, 437 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  38% ] 10 VUs   0m23.0s/1m0s
+stress     • [   0% ] waiting  0m42.0s
+
+running (0m39.0s), 10/50 VUs, 453 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  40% ] 10 VUs   0m24.0s/1m0s
+stress     • [   0% ] waiting  0m41.0s
+
+running (0m40.0s), 10/50 VUs, 470 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  42% ] 10 VUs   0m25.0s/1m0s
+stress     • [   0% ] waiting  0m40.0s
+
+running (0m41.0s), 10/50 VUs, 483 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  43% ] 10 VUs   0m26.0s/1m0s
+stress     • [   0% ] waiting  0m39.0s
+
+running (0m42.0s), 10/50 VUs, 506 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  45% ] 10 VUs   0m27.0s/1m0s
+stress     • [   0% ] waiting  0m38.0s
+
+running (0m43.0s), 10/50 VUs, 526 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  47% ] 10 VUs   0m28.0s/1m0s
+stress     • [   0% ] waiting  0m37.0s
+
+running (0m44.0s), 10/50 VUs, 546 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  48% ] 10 VUs   0m29.0s/1m0s
+stress     • [   0% ] waiting  0m36.0s
+
+running (0m45.0s), 10/50 VUs, 559 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  50% ] 10 VUs   0m30.0s/1m0s
+stress     • [   0% ] waiting  0m35.0s
+
+running (0m46.0s), 10/50 VUs, 580 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  52% ] 10 VUs   0m31.0s/1m0s
+stress     • [   0% ] waiting  0m34.0s
+
+running (0m47.0s), 10/50 VUs, 598 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  53% ] 10 VUs   0m32.0s/1m0s
+stress     • [   0% ] waiting  0m33.0s
+
+running (0m48.0s), 10/50 VUs, 613 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  55% ] 10 VUs   0m33.0s/1m0s
+stress     • [   0% ] waiting  0m32.0s
+
+running (0m49.0s), 10/50 VUs, 629 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  57% ] 10 VUs   0m34.0s/1m0s
+stress     • [   0% ] waiting  0m31.0s
+
+running (0m50.0s), 10/50 VUs, 647 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  58% ] 10 VUs   0m35.0s/1m0s
+stress     • [   0% ] waiting  0m30.0s
+
+running (0m51.0s), 10/50 VUs, 662 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  60% ] 10 VUs   0m36.0s/1m0s
+stress     • [   0% ] waiting  0m29.0s
+
+running (0m52.0s), 10/50 VUs, 677 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  62% ] 10 VUs   0m37.0s/1m0s
+stress     • [   0% ] waiting  0m28.0s
+
+running (0m53.0s), 10/50 VUs, 691 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  63% ] 10 VUs   0m38.0s/1m0s
+stress     • [   0% ] waiting  0m27.0s
+
+running (0m54.0s), 10/50 VUs, 710 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  65% ] 10 VUs   0m39.0s/1m0s
+stress     • [   0% ] waiting  0m26.0s
+
+running (0m55.0s), 10/50 VUs, 722 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  67% ] 10 VUs   0m40.0s/1m0s
+stress     • [   0% ] waiting  0m25.0s
+
+running (0m56.0s), 10/50 VUs, 745 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  68% ] 10 VUs   0m41.0s/1m0s
+stress     • [   0% ] waiting  0m24.0s
+
+running (0m57.0s), 10/50 VUs, 761 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  70% ] 10 VUs   0m42.0s/1m0s
+stress     • [   0% ] waiting  0m23.0s
+
+running (0m58.0s), 10/50 VUs, 783 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  72% ] 10 VUs   0m43.0s/1m0s
+stress     • [   0% ] waiting  0m22.0s
+
+running (0m59.0s), 10/50 VUs, 798 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  73% ] 10 VUs   0m44.0s/1m0s
+stress     • [   0% ] waiting  0m21.0s
+
+running (1m00.0s), 10/50 VUs, 817 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  75% ] 10 VUs   0m45.0s/1m0s
+stress     • [   0% ] waiting  0m20.0s
+
+running (1m01.0s), 10/50 VUs, 835 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  77% ] 10 VUs   0m46.0s/1m0s
+stress     • [   0% ] waiting  0m19.0s
+
+running (1m02.0s), 10/50 VUs, 854 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  78% ] 10 VUs   0m47.0s/1m0s
+stress     • [   0% ] waiting  0m18.0s
+
+running (1m03.0s), 10/50 VUs, 872 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  80% ] 10 VUs   0m48.0s/1m0s
+stress     • [   0% ] waiting  0m17.0s
+
+running (1m04.0s), 10/50 VUs, 889 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  82% ] 10 VUs   0m49.0s/1m0s
+stress     • [   0% ] waiting  0m16.0s
+
+running (1m05.0s), 10/50 VUs, 900 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  83% ] 10 VUs   0m50.0s/1m0s
+stress     • [   0% ] waiting  0m15.0s
+
+running (1m06.0s), 10/50 VUs, 919 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  85% ] 10 VUs   0m51.0s/1m0s
+stress     • [   0% ] waiting  0m14.0s
+
+running (1m07.0s), 10/50 VUs, 932 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  87% ] 10 VUs   0m52.0s/1m0s
+stress     • [   0% ] waiting  0m13.0s
+
+running (1m08.0s), 10/50 VUs, 948 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  88% ] 10 VUs   0m53.0s/1m0s
+stress     • [   0% ] waiting  0m12.0s
+
+running (1m09.0s), 10/50 VUs, 966 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  90% ] 10 VUs   0m54.0s/1m0s
+stress     • [   0% ] waiting  0m11.0s
+
+running (1m10.0s), 10/50 VUs, 988 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  92% ] 10 VUs   0m55.0s/1m0s
+stress     • [   0% ] waiting  0m10.0s
+
+running (1m11.0s), 10/50 VUs, 1006 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  93% ] 10 VUs   0m56.0s/1m0s
+stress     • [   0% ] waiting  0m09.0s
+
+running (1m12.0s), 10/50 VUs, 1020 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  95% ] 10 VUs   0m57.0s/1m0s
+stress     • [   0% ] waiting  0m08.0s
+
+running (1m13.0s), 10/50 VUs, 1036 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  97% ] 10 VUs   0m58.0s/1m0s
+stress     • [   0% ] waiting  0m07.0s
+
+running (1m14.0s), 10/50 VUs, 1051 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [  98% ] 10 VUs   0m59.0s/1m0s
+stress     • [   0% ] waiting  0m06.0s
+
+running (1m15.0s), 10/50 VUs, 1072 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison   [ 100% ] 10 VUs   1m00.0s/1m0s
+stress     • [   0% ] waiting  0m05.0s
+
+running (1m16.0s), 00/50 VUs, 1082 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison ✓ [ 100% ] 10 VUs   1m0s
+stress     • [   0% ] waiting  0m04.0s
+
+running (1m17.0s), 00/50 VUs, 1082 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison ✓ [ 100% ] 10 VUs   1m0s
+stress     • [   0% ] waiting  0m03.0s
+
+running (1m18.0s), 00/50 VUs, 1082 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison ✓ [ 100% ] 10 VUs   1m0s
+stress     • [   0% ] waiting  0m02.0s
+
+running (1m19.0s), 00/50 VUs, 1082 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison ✓ [ 100% ] 10 VUs   1m0s
+stress     • [   0% ] waiting  0m01.0s
+
+running (1m20.0s), 00/50 VUs, 1082 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs    10s
+comparison ✓ [ 100% ] 10 VUs   1m0s
+stress     • [   0% ] waiting  0m00.0s
+
+running (1m21.0s), 01/50 VUs, 1091 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   1% ] 01/50 VUs  0m01.0s/2m00.0s
+
+running (1m22.0s), 02/50 VUs, 1105 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   2% ] 02/50 VUs  0m02.0s/2m00.0s
+
+running (1m23.0s), 02/50 VUs, 1122 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   2% ] 02/50 VUs  0m03.0s/2m00.0s
+
+running (1m24.0s), 03/50 VUs, 1142 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   3% ] 03/50 VUs  0m04.0s/2m00.0s
+
+running (1m25.0s), 04/50 VUs, 1168 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   4% ] 04/50 VUs  0m05.0s/2m00.0s
+
+running (1m26.0s), 04/50 VUs, 1207 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   5% ] 04/50 VUs  0m06.0s/2m00.0s
+
+running (1m27.0s), 05/50 VUs, 1233 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   6% ] 05/50 VUs  0m07.0s/2m00.0s
+
+running (1m28.0s), 06/50 VUs, 1271 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   7% ] 06/50 VUs  0m08.0s/2m00.0s
+
+running (1m29.0s), 06/50 VUs, 1303 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   7% ] 06/50 VUs  0m09.0s/2m00.0s
+
+running (1m30.0s), 07/50 VUs, 1328 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   8% ] 07/50 VUs  0m10.0s/2m00.0s
+
+running (1m31.0s), 07/50 VUs, 1354 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [   9% ] 07/50 VUs  0m11.0s/2m00.0s
+
+running (1m32.0s), 08/50 VUs, 1385 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  10% ] 08/50 VUs  0m12.0s/2m00.0s
+
+running (1m33.0s), 09/50 VUs, 1417 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  11% ] 09/50 VUs  0m13.0s/2m00.0s
+
+running (1m34.0s), 09/50 VUs, 1453 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  12% ] 09/50 VUs  0m14.0s/2m00.0s
+
+running (1m35.0s), 10/50 VUs, 1488 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  12% ] 10/50 VUs  0m15.0s/2m00.0s
+
+running (1m36.0s), 11/50 VUs, 1519 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  13% ] 11/50 VUs  0m16.0s/2m00.0s
+
+running (1m37.0s), 11/50 VUs, 1552 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  14% ] 11/50 VUs  0m17.0s/2m00.0s
+
+running (1m38.0s), 12/50 VUs, 1595 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  15% ] 12/50 VUs  0m18.0s/2m00.0s
+
+running (1m39.0s), 13/50 VUs, 1638 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  16% ] 13/50 VUs  0m19.0s/2m00.0s
+
+running (1m40.0s), 13/50 VUs, 1674 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  17% ] 13/50 VUs  0m20.0s/2m00.0s
+
+running (1m41.0s), 14/50 VUs, 1721 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  17% ] 14/50 VUs  0m21.0s/2m00.0s
+
+running (1m42.0s), 14/50 VUs, 1759 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  18% ] 14/50 VUs  0m22.0s/2m00.0s
+
+running (1m43.0s), 15/50 VUs, 1797 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  19% ] 15/50 VUs  0m23.0s/2m00.0s
+
+running (1m44.0s), 16/50 VUs, 1840 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  20% ] 16/50 VUs  0m24.0s/2m00.0s
+
+running (1m45.0s), 16/50 VUs, 1880 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  21% ] 16/50 VUs  0m25.0s/2m00.0s
+
+running (1m46.0s), 17/50 VUs, 1924 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  22% ] 17/50 VUs  0m26.0s/2m00.0s
+
+running (1m47.0s), 18/50 VUs, 1974 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  22% ] 18/50 VUs  0m27.0s/2m00.0s
+
+running (1m48.0s), 18/50 VUs, 2029 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  23% ] 18/50 VUs  0m28.0s/2m00.0s
+
+running (1m49.0s), 19/50 VUs, 2077 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  24% ] 19/50 VUs  0m29.0s/2m00.0s
+
+running (1m50.0s), 19/50 VUs, 2127 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  25% ] 19/50 VUs  0m30.0s/2m00.0s
+
+running (1m51.0s), 20/50 VUs, 2174 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  26% ] 20/50 VUs  0m31.0s/2m00.0s
+
+running (1m52.0s), 20/50 VUs, 2224 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  27% ] 20/50 VUs  0m32.0s/2m00.0s
+
+running (1m53.0s), 21/50 VUs, 2269 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  27% ] 21/50 VUs  0m33.0s/2m00.0s
+
+running (1m54.0s), 21/50 VUs, 2317 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  28% ] 21/50 VUs  0m34.0s/2m00.0s
+
+running (1m55.0s), 22/50 VUs, 2366 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  29% ] 22/50 VUs  0m35.0s/2m00.0s
+
+running (1m56.0s), 22/50 VUs, 2412 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  30% ] 22/50 VUs  0m36.0s/2m00.0s
+
+running (1m57.0s), 23/50 VUs, 2448 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  31% ] 23/50 VUs  0m37.0s/2m00.0s
+
+running (1m58.0s), 23/50 VUs, 2502 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  32% ] 23/50 VUs  0m38.0s/2m00.0s
+
+running (1m59.0s), 24/50 VUs, 2541 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  32% ] 24/50 VUs  0m39.0s/2m00.0s
+
+running (2m00.0s), 24/50 VUs, 2588 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  33% ] 24/50 VUs  0m40.0s/2m00.0s
+
+running (2m01.0s), 25/50 VUs, 2632 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  34% ] 25/50 VUs  0m41.0s/2m00.0s
+
+running (2m02.0s), 25/50 VUs, 2682 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  35% ] 25/50 VUs  0m42.0s/2m00.0s
+
+running (2m03.0s), 26/50 VUs, 2723 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  36% ] 26/50 VUs  0m43.0s/2m00.0s
+
+running (2m04.0s), 26/50 VUs, 2778 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  37% ] 26/50 VUs  0m44.0s/2m00.0s
+
+running (2m05.0s), 27/50 VUs, 2826 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  37% ] 27/50 VUs  0m45.0s/2m00.0s
+
+running (2m06.0s), 27/50 VUs, 2875 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  38% ] 27/50 VUs  0m46.0s/2m00.0s
+
+running (2m07.0s), 28/50 VUs, 2930 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  39% ] 28/50 VUs  0m47.0s/2m00.0s
+
+running (2m08.0s), 28/50 VUs, 2984 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  40% ] 28/50 VUs  0m48.0s/2m00.0s
+
+running (2m09.0s), 29/50 VUs, 3047 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  41% ] 29/50 VUs  0m49.0s/2m00.0s
+
+running (2m10.0s), 29/50 VUs, 3105 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  42% ] 29/50 VUs  0m50.0s/2m00.0s
+
+running (2m11.0s), 30/50 VUs, 3158 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  42% ] 30/50 VUs  0m51.0s/2m00.0s
+
+running (2m12.0s), 30/50 VUs, 3232 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  43% ] 30/50 VUs  0m52.0s/2m00.0s
+
+running (2m13.0s), 31/50 VUs, 3293 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  44% ] 31/50 VUs  0m53.0s/2m00.0s
+
+running (2m14.0s), 31/50 VUs, 3349 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  45% ] 31/50 VUs  0m54.0s/2m00.0s
+
+running (2m15.0s), 32/50 VUs, 3388 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  46% ] 32/50 VUs  0m55.0s/2m00.0s
+
+running (2m16.0s), 32/50 VUs, 3445 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  47% ] 32/50 VUs  0m56.0s/2m00.0s
+
+running (2m17.0s), 33/50 VUs, 3501 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  47% ] 33/50 VUs  0m57.0s/2m00.0s
+
+running (2m18.0s), 33/50 VUs, 3563 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  48% ] 33/50 VUs  0m58.0s/2m00.0s
+
+running (2m19.0s), 34/50 VUs, 3615 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  49% ] 34/50 VUs  0m59.0s/2m00.0s
+
+running (2m20.0s), 34/50 VUs, 3681 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  50% ] 34/50 VUs  1m00.0s/2m00.0s
+
+running (2m21.0s), 35/50 VUs, 3745 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  51% ] 35/50 VUs  1m01.0s/2m00.0s
+
+running (2m22.0s), 35/50 VUs, 3788 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  52% ] 35/50 VUs  1m02.0s/2m00.0s
+
+running (2m23.0s), 36/50 VUs, 3840 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  52% ] 36/50 VUs  1m03.0s/2m00.0s
+
+running (2m24.0s), 36/50 VUs, 3896 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  53% ] 36/50 VUs  1m04.0s/2m00.0s
+
+running (2m25.0s), 37/50 VUs, 3930 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  54% ] 37/50 VUs  1m05.0s/2m00.0s
+
+running (2m26.0s), 37/50 VUs, 3980 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  55% ] 37/50 VUs  1m06.0s/2m00.0s
+
+running (2m27.0s), 38/50 VUs, 4032 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  56% ] 38/50 VUs  1m07.0s/2m00.0s
+
+running (2m28.0s), 38/50 VUs, 4080 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  57% ] 38/50 VUs  1m08.0s/2m00.0s
+
+running (2m29.0s), 39/50 VUs, 4129 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  57% ] 39/50 VUs  1m09.0s/2m00.0s
+
+running (2m30.0s), 39/50 VUs, 4165 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  58% ] 39/50 VUs  1m10.0s/2m00.0s
+
+running (2m31.0s), 40/50 VUs, 4220 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  59% ] 40/50 VUs  1m11.0s/2m00.0s
+
+running (2m32.0s), 40/50 VUs, 4255 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  60% ] 40/50 VUs  1m12.0s/2m00.0s
+
+running (2m33.0s), 41/50 VUs, 4305 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  61% ] 41/50 VUs  1m13.0s/2m00.0s
+
+running (2m34.0s), 41/50 VUs, 4356 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  62% ] 41/50 VUs  1m14.0s/2m00.0s
+
+running (2m35.0s), 42/50 VUs, 4411 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  62% ] 42/50 VUs  1m15.0s/2m00.0s
+
+running (2m36.0s), 42/50 VUs, 4466 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  63% ] 42/50 VUs  1m16.0s/2m00.0s
+
+running (2m37.0s), 43/50 VUs, 4526 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  64% ] 43/50 VUs  1m17.0s/2m00.0s
+
+running (2m38.0s), 43/50 VUs, 4586 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  65% ] 43/50 VUs  1m18.0s/2m00.0s
+
+running (2m39.0s), 44/50 VUs, 4640 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  66% ] 44/50 VUs  1m19.0s/2m00.0s
+
+running (2m40.0s), 44/50 VUs, 4687 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  67% ] 44/50 VUs  1m20.0s/2m00.0s
+
+running (2m41.0s), 45/50 VUs, 4743 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  67% ] 45/50 VUs  1m21.0s/2m00.0s
+
+running (2m42.0s), 45/50 VUs, 4782 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  68% ] 45/50 VUs  1m22.0s/2m00.0s
+
+running (2m43.0s), 46/50 VUs, 4839 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  69% ] 46/50 VUs  1m23.0s/2m00.0s
+
+running (2m44.0s), 46/50 VUs, 4892 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  70% ] 46/50 VUs  1m24.0s/2m00.0s
+
+running (2m45.0s), 47/50 VUs, 4953 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  71% ] 47/50 VUs  1m25.0s/2m00.0s
+
+running (2m46.0s), 47/50 VUs, 5011 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  72% ] 47/50 VUs  1m26.0s/2m00.0s
+
+running (2m47.0s), 48/50 VUs, 5043 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  72% ] 48/50 VUs  1m27.0s/2m00.0s
+
+running (2m48.0s), 48/50 VUs, 5095 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  73% ] 48/50 VUs  1m28.0s/2m00.0s
+
+running (2m49.0s), 49/50 VUs, 5155 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  74% ] 49/50 VUs  1m29.0s/2m00.0s
+
+running (2m50.0s), 49/50 VUs, 5212 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  75% ] 49/50 VUs  1m30.0s/2m00.0s
+
+running (2m51.0s), 49/50 VUs, 5260 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  76% ] 49/50 VUs  1m31.0s/2m00.0s
+
+running (2m52.0s), 48/50 VUs, 5329 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  77% ] 48/50 VUs  1m32.0s/2m00.0s
+
+running (2m53.0s), 47/50 VUs, 5381 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  77% ] 47/50 VUs  1m33.0s/2m00.0s
+
+running (2m54.0s), 47/50 VUs, 5437 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  78% ] 47/50 VUs  1m34.0s/2m00.0s
+
+running (2m55.0s), 44/50 VUs, 5495 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  79% ] 44/50 VUs  1m35.0s/2m00.0s
+
+running (2m56.0s), 42/50 VUs, 5553 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  80% ] 42/50 VUs  1m36.0s/2m00.0s
+
+running (2m57.0s), 41/50 VUs, 5620 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  81% ] 41/50 VUs  1m37.0s/2m00.0s
+
+running (2m58.0s), 38/50 VUs, 5667 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  82% ] 38/50 VUs  1m38.0s/2m00.0s
+
+running (2m59.0s), 37/50 VUs, 5719 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  82% ] 37/50 VUs  1m39.0s/2m00.0s
+
+running (3m00.0s), 35/50 VUs, 5770 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  83% ] 35/50 VUs  1m40.0s/2m00.0s
+
+running (3m01.0s), 33/50 VUs, 5822 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  84% ] 33/50 VUs  1m41.0s/2m00.0s
+
+running (3m02.0s), 33/50 VUs, 5868 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  85% ] 33/50 VUs  1m42.0s/2m00.0s
+
+running (3m03.0s), 29/50 VUs, 5926 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  86% ] 29/50 VUs  1m43.0s/2m00.0s
+
+running (3m04.0s), 29/50 VUs, 5982 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  87% ] 29/50 VUs  1m44.0s/2m00.0s
+
+running (3m05.0s), 26/50 VUs, 6040 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  87% ] 26/50 VUs  1m45.0s/2m00.0s
+
+running (3m06.0s), 25/50 VUs, 6093 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  88% ] 25/50 VUs  1m46.0s/2m00.0s
+
+running (3m07.0s), 23/50 VUs, 6133 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  89% ] 23/50 VUs  1m47.0s/2m00.0s
+
+running (3m08.0s), 21/50 VUs, 6172 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  90% ] 21/50 VUs  1m48.0s/2m00.0s
+
+running (3m09.0s), 20/50 VUs, 6211 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  91% ] 20/50 VUs  1m49.0s/2m00.0s
+
+running (3m10.0s), 18/50 VUs, 6258 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  92% ] 18/50 VUs  1m50.0s/2m00.0s
+
+running (3m11.0s), 17/50 VUs, 6306 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  92% ] 17/50 VUs  1m51.0s/2m00.0s
+
+running (3m12.0s), 14/50 VUs, 6353 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  93% ] 14/50 VUs  1m52.0s/2m00.0s
+
+running (3m13.0s), 13/50 VUs, 6388 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  94% ] 13/50 VUs  1m53.0s/2m00.0s
+
+running (3m14.0s), 12/50 VUs, 6426 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  95% ] 12/50 VUs  1m54.0s/2m00.0s
+
+running (3m15.0s), 09/50 VUs, 6465 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  96% ] 09/50 VUs  1m55.0s/2m00.0s
+
+running (3m16.0s), 07/50 VUs, 6501 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  97% ] 07/50 VUs  1m56.0s/2m00.0s
+
+running (3m17.0s), 06/50 VUs, 6526 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  97% ] 06/50 VUs  1m57.0s/2m00.0s
+
+running (3m18.0s), 04/50 VUs, 6551 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  98% ] 04/50 VUs  1m58.0s/2m00.0s
+
+running (3m19.0s), 02/50 VUs, 6576 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [  99% ] 02/50 VUs  1m59.0s/2m00.0s
+
+running (3m20.0s), 01/50 VUs, 6590 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress       [ 100% ] 01/50 VUs  2m00.0s/2m00.0s
+
+
+  █ THRESHOLDS
+
+    error_rate
+    ✗ 'rate<0.01' rate=100.00%
+
+    official_latency_ms
+    ✓ 'p(95)<500' p(95)=378.906
+    ✓ 'p(99)<1000' p(99)=576.0883
+
+    py_async_latency_ms
+    ✗ 'p(95)<200' p(95)=1365.0485
+    ✗ 'p(99)<500' p(99)=1999.5982
+
+
+  █ TOTAL RESULTS
+
+    checks_total.......: 7635   38.170174/s
+    checks_succeeded...: 99.98% 7634 out of 7635
+    checks_failed......: 0.01%  1 out of 7635
+
+    ✓ warmup ok
+    ✓ official 200
+    ✓ py-async 200
+    ✗ stress ok
+      ↳  99% — ✓ 5508 / ✗ 1
+
+    CUSTOM
+    error_rate.....................: 100.00% 1 out of 1
+    official_latency_ms............: avg=132.11773  min=17.73   med=75.19    max=767     p(90)=302.672 p(95)=378.906
+    py_async_latency_ms............: avg=279.458278 min=13.76   med=99.155   max=2668.31 p(90)=891.864 p(95)=1365.0485
+
+    HTTP
+    http_req_duration..............: avg=428.45ms   min=22.33ms med=167.77ms max=4.14s   p(90)=1.33s   p(95)=2.14s
+      { expected_response:true }...: avg=428.47ms   min=22.33ms med=167.75ms max=4.14s   p(90)=1.33s   p(95)=2.14s
+    http_req_failed................: 0.01%   1 out of 7635
+    http_reqs......................: 7635    38.170174/s
+
+    EXECUTION
+    iteration_duration.............: avg=574.69ms   min=78.48ms med=278.24ms max=4.19s   p(90)=1.54s   p(95)=2.32s
+    iterations.....................: 6591    32.950834/s
+    vus............................: 1       min=0         max=49
+    vus_max........................: 50      min=50        max=50
+
+    NETWORK
+    data_received..................: 88 MB   439 kB/s
+    data_sent......................: 970 kB  4.9 kB/s
+
+
+
+
+running (3m20.0s), 00/50 VUs, 6591 complete and 0 interrupted iterations
+warmup     ✓ [ 100% ] 2 VUs      10s
+comparison ✓ [ 100% ] 10 VUs     1m0s
+stress     ✓ [ 100% ] 00/50 VUs  2m0s
+time="2026-04-16T14:18:59+09:00" level=error msg="thresholds on metrics 'error_rate, py_async_latency_ms' have been crossed"

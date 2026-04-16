@@ -1,0 +1,47 @@
+[project]
+name = "aerospike-benchmark"
+version = "0.2.0"
+description = "Aerospike batch_read benchmark: aerospike-py (Rust) vs official C client — with OTel tracing, Prometheus metrics, NELO logging"
+readme = "README.md"
+authors = [
+    { name = "kimsoungryoul", email = "soungryoul.kim@navercorp.com" },
+]
+requires-python = ">=3.11"
+dependencies = [
+    # Aerospike clients
+    "aerospike>=19.0.0",
+    "rich>=14.0",
+    # FastAPI serving
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.0",
+    # ML
+    "torch",
+    "numpy>=2.0",
+    # OTel — Tracing
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    # opentelemetry-instrumentation-aerospike==0.61b0.dev0 is installed
+    # separately in Docker — its transitive dep (opentelemetry-instrumentation
+    # ==0.61b0.dev0) is not on PyPI yet.
+    # OTel — Metrics
+    "prometheus-client>=0.20.0",
+    # Logging
+    "pynelo[async]>=1.3.0",
+    # ASGI benchmark
+    "httpx>=0.27.0,<1",
+]
+
+[tool.uv]
+prerelease = "allow"
+index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+name = "navercorp"
+url = "https://artifactory.navercorp.com/artifactory/api/pypi/pypi-virtual/simple"
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"

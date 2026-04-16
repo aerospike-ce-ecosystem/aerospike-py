@@ -43,10 +43,23 @@ struct OperationLabels {
     error_type: Cow<'static, str>,
 }
 
+/// Internal stage labels for batch_read breakdown metrics.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct InternalStageLabels {
+    stage: Cow<'static, str>,
+    db_operation_name: Cow<'static, str>,
+}
+
 struct MetricsState {
     registry: Mutex<Registry>,
     op_duration: Family<OperationLabels, Histogram>,
+    internal_stage: Family<InternalStageLabels, Histogram>,
 }
+
+/// Fine-grained bucket boundaries for sub-millisecond internal stages.
+const INTERNAL_BUCKETS: &[f64] = &[
+    0.000_01, 0.000_05, 0.000_1, 0.000_5, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5, 1.0,
+];
 
 static METRICS: LazyLock<MetricsState> = LazyLock::new(|| {
     let mut registry = Registry::default();
@@ -58,9 +71,18 @@ static METRICS: LazyLock<MetricsState> = LazyLock::new(|| {
         "Duration of database client operations",
         op_duration.clone(),
     );
+    let internal_stage = Family::<InternalStageLabels, Histogram>::new_with_constructor(|| {
+        Histogram::new(INTERNAL_BUCKETS.iter().cloned())
+    });
+    registry.register(
+        "db_client_internal_stage_seconds",
+        "Internal stage durations within a database operation (key_parse, limiter_wait, io, into_pyobject, as_dict)",
+        internal_stage.clone(),
+    );
     MetricsState {
         registry: Mutex::new(registry),
         op_duration,
+        internal_stage,
     }
 });
 
@@ -129,6 +151,20 @@ pub fn error_type_from_aerospike_error(err: &AsError) -> Cow<'static, str> {
         AsError::NoMoreConnections => Cow::Borrowed("NoMoreConnections"),
         _ => Cow::Borrowed("Unknown"),
     }
+}
+
+/// Record an internal stage duration for fine-grained profiling.
+///
+/// Stages: `key_parse`, `limiter_wait`, `io`, `into_pyobject`, `as_dict`
+pub fn record_internal_stage(stage: &'static str, op_name: &str, duration_secs: f64) {
+    if !is_metrics_enabled() {
+        return;
+    }
+    let labels = InternalStageLabels {
+        stage: Cow::Borrowed(stage),
+        db_operation_name: Cow::Owned(op_name.to_string()),
+    };
+    METRICS.internal_stage.get_or_create(&labels).observe(duration_secs);
 }
 
 /// Encode all registered metrics in Prometheus text exposition format.
