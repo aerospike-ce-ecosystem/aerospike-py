@@ -68,8 +68,7 @@
       "type": "category",
       "label": "Performance",
       "items": [
-        "performance/overview",
-        "performance/benchmark-results"
+        "performance/overview"
       ]
     },
     {

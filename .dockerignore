@@ -7,7 +7,6 @@ node_modules/
 aerospike-desktop-manager/frontend/node_modules/
 aerospike-desktop-manager/frontend/.vite/
 docs/
-benchmark/
 tests/
 .tox/
 .ruff_cache/

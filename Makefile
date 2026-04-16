@@ -4,23 +4,13 @@ AEROSPIKE_HOST ?= 127.0.0.1
 AEROSPIKE_PORT ?= 18710
 
 RUNTIME ?= podman
-BENCH_COUNT ?= 1000
-BENCH_ROUNDS ?= 5
-BENCH_CONCURRENCY ?= 50
-BENCH_BATCH_GROUPS ?= 10
-BENCH_SCENARIO ?= latency
-
-NUMPY_BENCH_ROUNDS ?= 10
-NUMPY_BENCH_CONCURRENCY ?= 50
-NUMPY_BENCH_BATCH_GROUPS ?= 10
-
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
 
 .PHONY: install
 install: ## Install project dependencies via uv
-	uv sync --group dev --group bench
+	uv sync --group dev
 
 .PHONY: build
 build: install ## Build Rust extension locally (maturin develop)
@@ -45,35 +35,19 @@ stop-aerospike-ce: ## Stop and remove Aerospike CE container
 	$(RUNTIME) compose -f compose.local.yaml down 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# Benchmark
-# ---------------------------------------------------------------------------
-
-# Common benchmark arguments
-BENCH_ARGS = --count $(BENCH_COUNT) --rounds $(BENCH_ROUNDS) \
-	--concurrency $(BENCH_CONCURRENCY) --batch-groups $(BENCH_BATCH_GROUPS) \
-	--host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT)
-
-.PHONY: run-benchmark-report
-run-benchmark-report: build run-aerospike-ce ## Run benchmark + generate JSON report (BENCH_SCENARIO=latency|memory|concurrency|all)
-	AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
-	uv run python benchmark/bench_compare.py \
-		$(BENCH_ARGS) --scenario $(BENCH_SCENARIO) --report; \
-	$(MAKE) stop-aerospike-ce
-
-# ---------------------------------------------------------------------------
 # Lint & Format
 # ---------------------------------------------------------------------------
 
 .PHONY: lint
 lint: ## Run all linters (ruff + clippy)
-	uv run ruff check src/ tests/ benchmark/
-	uv run ruff format --check src/ tests/ benchmark/
+	uv run ruff check src/ tests/
+	uv run ruff format --check src/ tests/
 	cargo clippy --manifest-path rust/Cargo.toml --features otel -- -D warnings
 
 .PHONY: fmt
 fmt: ## Auto-format Python (ruff) and Rust (cargo fmt)
-	uv run ruff format src/ tests/ benchmark/
-	uv run ruff check --fix src/ tests/ benchmark/
+	uv run ruff format src/ tests/
+	uv run ruff check --fix src/ tests/
 	cargo fmt --manifest-path rust/Cargo.toml
 
 # ---------------------------------------------------------------------------
