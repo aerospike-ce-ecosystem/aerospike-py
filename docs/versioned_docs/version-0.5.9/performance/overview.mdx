@@ -1,0 +1,127 @@
+---
+title: Performance Overview
+sidebar_label: Overview
+sidebar_position: 1
+description: aerospike-py architecture comparison, GIL optimization, concurrency scaling, and benchmark analysis
+---
+
+import BrowserOnly from '@docusaurus/BrowserOnly';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import { RequestFlow, GilTimeline, ConcurrencyViz, ThroughputSlider, MemoryViz, ConditionGrid, ThroughputSim, MemorySim, GilChart } from '@site/src/components/ArchitectureComparison';
+
+## Comparison with Official Client
+
+### How Requests Are Processed
+
+What happens behind `client.get(key)` / `await client.get(key)` differs across three patterns.
+
+<BrowserOnly>
+  {() => <RequestFlow />}
+</BrowserOnly>
+
+:::info Sync is the simplest but most limited
+The calling thread is completely blocked during I/O, so only one request can be processed at a time.
+To handle concurrent requests, you must manage Python threading yourself.
+:::
+
+<Tabs>
+  <TabItem value="gil" label="GIL Hold Time" default>
+
+The CPython GIL allows only one thread to execute Python code at a time.
+Each pattern handles GIL ownership differently.
+
+<BrowserOnly>
+  {() => <GilTimeline />}
+</BrowserOnly>
+
+:::caution
+**Sync has the fewest GIL transitions**, but the calling thread itself blocks during I/O, making concurrent processing impossible.
+Async executor enables concurrency but adds a GIL contender for each thread.
+Only aerospike-py achieves both minimal GIL usage and concurrent processing.
+:::
+
+  </TabItem>
+  <TabItem value="concurrency" label="Concurrent Request Handling">
+
+<BrowserOnly>
+  {() => <ConcurrencyViz />}
+</BrowserOnly>
+
+  </TabItem>
+  <TabItem value="throughput" label="Throughput Scaling">
+
+<BrowserOnly>
+  {() => <ThroughputSlider />}
+</BrowserOnly>
+
+  </TabItem>
+  <TabItem value="memory" label="Memory Usage">
+
+<BrowserOnly>
+  {() => <MemoryViz />}
+</BrowserOnly>
+
+:::caution K8s Environments
+Sync cannot handle concurrent processing at all.
+Async executor is limited to 64 concurrent requests under a 512MB Pod memory limit.
+aerospike-py can handle tens of thousands of concurrent requests.
+:::
+
+  </TabItem>
+</Tabs>
+
+:::tip Key Takeaway
+**Sync** has low single-request latency but cannot handle concurrency, making it unsuitable for server environments.
+**Async executor** adds concurrency but is bottlenecked by thread pool limits and GIL contention.
+**aerospike-py** is fast even for single requests, and is the only pattern where the gap widens as concurrency increases.
+:::
+
+## Benchmark Limitations
+
+The current benchmark represents conditions where aerospike-py's advantage is **smallest**. Here we visualize what differences emerge in real production environments.
+
+<BrowserOnly>
+  {() => <ConditionGrid />}
+</BrowserOnly>
+
+:::caution
+In a localhost environment, I/O wait is nearly zero, so **the cost of thread blocking is effectively 0**. When I/O wait increases on a real network, the gap between thread pool and Tokio models grows dramatically.
+:::
+
+<Tabs>
+  <TabItem value="io-sim" label="I/O x Concurrency" default>
+
+Adjust the sliders to compare throughput changes between Official async (`run_in_executor`) and aerospike-py (Tokio).
+
+<BrowserOnly>
+  {() => <ThroughputSim />}
+</BrowserOnly>
+
+
+  </TabItem>
+  <TabItem value="memory-sim" label="Memory Efficiency">
+
+<BrowserOnly>
+  {() => <MemorySim />}
+</BrowserOnly>
+
+  </TabItem>
+  <TabItem value="gil-chart" label="GIL Contention Patterns">
+
+<BrowserOnly>
+  {() => <GilChart />}
+</BrowserOnly>
+
+:::tip
+At concurrency=50, the difference is minimal, but at **500+**, Official's p99 spikes sharply. The current benchmark measures at 50, so this gap is not captured.
+:::
+
+  </TabItem>
+</Tabs>
+
+:::info Conclusion
+The current benchmark validates "Can we match C extension single-request latency?" The answer is **"slightly faster"**.
+But the real reason aerospike-py exists is **"exceeding the limits of thread-based models under high concurrency + real network conditions"** — an area the current benchmark doesn't measure.
+:::
+
