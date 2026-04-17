@@ -19,9 +19,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "
 arc-swap = "1"
 futures = "0.3"
 half = "2"
-ripemd = "0.1"
+ripemd = "0.2"
 log = "0.4"
-rand = "0.8"
+rand = "0.10"
 prometheus-client = "0.24"
 opentelemetry = { version = "0.31", optional = true }
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"], optional = true }

@@ -284,10 +284,10 @@ fn is_retryable_result_code(rc: &aerospike_core::ResultCode) -> bool {
 /// Returns a random value in `[0, min(cap_ms, base_ms * 2^attempt)]`.
 /// The shift exponent is capped at 6 to prevent overflow (`10 * 2^6 = 640 > 500`).
 fn compute_backoff_ms(attempt: u32, base_ms: u64, cap_ms: u64) -> u64 {
-    use rand::Rng;
+    use rand::RngExt;
     let capped_attempt = std::cmp::min(attempt, 6);
     let max_backoff = std::cmp::min(base_ms * (1u64 << capped_attempt), cap_ms);
-    rand::thread_rng().gen_range(0..=max_backoff)
+    rand::rng().random_range(0..=max_backoff)
 }
 
 /// Collect indices of batch records with retryable error codes into `out`.
