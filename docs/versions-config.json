@@ -1,5 +1,5 @@
 {
-  "lastVersion": "0.5.9",
+  "lastVersion": "0.5.10",
   "versions": {
     "current": {
       "label": "main",
@@ -127,7 +127,12 @@
       "banner": "unmaintained"
     },
     "0.5.9": {
-      "label": "0.5.9 (Latest)",
+      "label": "0.5.9",
+      "path": "0.5.9",
+      "banner": "unmaintained"
+    },
+    "0.5.10": {
+      "label": "0.5.10 (Latest)",
       "path": "",
       "banner": "none"
     }
