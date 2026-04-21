@@ -9,20 +9,67 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
-/// Global toggle for metrics collection.
-/// When `false`, `timed_op!` skips timer creation entirely (~1ns atomic load).
+/// Global toggle for operational metrics collection (`db_client_operation_duration_seconds`).
+///
+/// When `false`, `timed_op!` / `traced_op!` skip timer creation entirely (~1ns atomic load).
+/// Separate from `INTERNAL_STAGE_ENABLED` which gates fine-grained stage profiling.
 static METRICS_ENABLED: AtomicBool = AtomicBool::new(true);
 
-/// Enable or disable metrics collection.
+/// Global toggle for internal stage profiling metrics (`db_client_internal_stage_seconds`).
+///
+/// Default: `false` — stage profiling is a debug feature with non-zero overhead
+/// (many `Instant::now()` calls on batch hot paths). Enable via
+/// [`set_internal_stage_enabled`], the `AEROSPIKE_PY_INTERNAL_METRICS=1` env var,
+/// or the `internal_stage_profiling()` Python context manager.
+///
+/// When `false`, [`stage_timer!`](crate::stage_timer) and related paths skip
+/// `Instant::now()` entirely — single `Ordering::Relaxed` atomic load (~1ns).
+static INTERNAL_STAGE_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Enable or disable operational metrics collection.
 #[inline]
 pub fn set_metrics_enabled(enabled: bool) {
     METRICS_ENABLED.store(enabled, Ordering::Release);
 }
 
-/// Check if metrics collection is currently enabled.
+/// Check if operational metrics collection is currently enabled.
 #[inline]
 pub fn is_metrics_enabled() -> bool {
     METRICS_ENABLED.load(Ordering::Acquire)
+}
+
+/// Enable or disable internal stage profiling metrics.
+///
+/// Runtime toggle. Safe to call from any thread. When disabled, all stage
+/// timing call sites skip `Instant::now()` calls — zero heap and near-zero CPU
+/// overhead.
+#[inline]
+pub fn set_internal_stage_enabled(enabled: bool) {
+    INTERNAL_STAGE_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Check if internal stage profiling is currently enabled. Hot path.
+#[inline]
+pub fn is_internal_stage_enabled() -> bool {
+    INTERNAL_STAGE_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Initialize internal stage profiling from the `AEROSPIKE_PY_INTERNAL_METRICS`
+/// environment variable. Called once during native module init.
+///
+/// Truthy values (case-insensitive: `1`, `true`, `yes`, `on`) enable profiling at
+/// startup. Surrounding whitespace is trimmed. Anything else (including missing)
+/// leaves the flag at its default `false`.
+pub fn init_internal_stage_from_env() {
+    let enabled = std::env::var("AEROSPIKE_PY_INTERNAL_METRICS")
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false);
+    INTERNAL_STAGE_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
 use aerospike_core::{Error as AsError, ResultCode};
@@ -43,10 +90,27 @@ struct OperationLabels {
     error_type: Cow<'static, str>,
 }
 
+/// Internal stage labels for batch_read breakdown metrics.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+struct InternalStageLabels {
+    stage: Cow<'static, str>,
+    db_operation_name: Cow<'static, str>,
+}
+
 struct MetricsState {
     registry: Mutex<Registry>,
     op_duration: Family<OperationLabels, Histogram>,
+    internal_stage: Family<InternalStageLabels, Histogram>,
 }
+
+/// Fine-grained bucket boundaries for sub-millisecond internal stages.
+///
+/// Extended range starting at 1μs to precisely capture sub-microsecond stages
+/// like `key_parse` and `into_pyobject` that touch only a handful of pointers.
+const INTERNAL_BUCKETS: &[f64] = &[
+    0.000_001, 0.000_005, 0.000_01, 0.000_05, 0.000_1, 0.000_5, 0.001, 0.002, 0.005, 0.01, 0.02,
+    0.05, 0.1, 0.5, 1.0,
+];
 
 static METRICS: LazyLock<MetricsState> = LazyLock::new(|| {
     let mut registry = Registry::default();
@@ -58,9 +122,18 @@ static METRICS: LazyLock<MetricsState> = LazyLock::new(|| {
         "Duration of database client operations",
         op_duration.clone(),
     );
+    let internal_stage = Family::<InternalStageLabels, Histogram>::new_with_constructor(|| {
+        Histogram::new(INTERNAL_BUCKETS.iter().cloned())
+    });
+    registry.register(
+        "db_client_internal_stage_seconds",
+        "Internal stage durations within a database operation (key_parse, limiter_wait, io, into_pyobject, as_dict)",
+        internal_stage.clone(),
+    );
     MetricsState {
         registry: Mutex::new(registry),
         op_duration,
+        internal_stage,
     }
 });
 
@@ -131,6 +204,54 @@ pub fn error_type_from_aerospike_error(err: &AsError) -> Cow<'static, str> {
     }
 }
 
+/// Record an internal stage duration for fine-grained profiling.
+///
+/// Gated by [`is_internal_stage_enabled`]. Prefer the [`stage_timer!`](crate::stage_timer)
+/// macro at call sites so that the flag check also elides the surrounding
+/// `Instant::now()` / `.elapsed()` work.
+///
+/// Stages include (non-exhaustive): `key_parse`, `tokio_schedule_delay`,
+/// `limiter_wait`, `io`, `spawn_blocking_delay`, `into_pyobject`,
+/// `event_loop_resume_delay`, `as_dict`, `merge_as_dict`, `future_into_py_setup`.
+pub fn record_internal_stage(stage: &'static str, op_name: &str, duration_secs: f64) {
+    if !is_internal_stage_enabled() {
+        return;
+    }
+    record_internal_stage_unchecked(stage, op_name, duration_secs);
+}
+
+/// Record an internal stage without re-checking the toggle flag.
+///
+/// For use inside [`stage_timer!`](crate::stage_timer) and `if let Some(t) = ...`
+/// blocks where the caller has already verified [`is_internal_stage_enabled`].
+/// Avoids a redundant atomic load on the recording path.
+#[inline]
+pub fn record_internal_stage_unchecked(stage: &'static str, op_name: &str, duration_secs: f64) {
+    let labels = InternalStageLabels {
+        stage: Cow::Borrowed(stage),
+        db_operation_name: Cow::Owned(op_name.to_string()),
+    };
+    METRICS
+        .internal_stage
+        .get_or_create(&labels)
+        .observe(duration_secs);
+}
+
+/// Capture `Instant::now()` only when internal stage profiling is enabled.
+///
+/// Returns `Some(Instant)` if profiling is ON, `None` otherwise. Use this at
+/// the start of a cross-boundary timing window (one that can't be wrapped in
+/// a single `stage_timer!` block, e.g. timestamps that travel through `async`
+/// boundaries or struct fields).
+#[inline]
+pub fn maybe_now() -> Option<Instant> {
+    if is_internal_stage_enabled() {
+        Some(Instant::now())
+    } else {
+        None
+    }
+}
+
 /// Encode all registered metrics in Prometheus text exposition format.
 pub fn get_text() -> String {
     let mut buf = String::new();
@@ -150,6 +271,39 @@ pub fn get_text() -> String {
         log::error!("Failed to encode Prometheus metrics: {e}");
     }
     buf
+}
+
+/// Wrap a code block with internal-stage timing.
+///
+/// When [`is_internal_stage_enabled`] is `false`, the expression runs with no
+/// timing overhead (single atomic load). When `true`, wraps the expression in
+/// `Instant::now()` / `.elapsed()` and emits a `db_client_internal_stage_seconds`
+/// observation with `stage` and `op_name` labels.
+///
+/// Works with both sync and `async` expressions — use inside an `async` block
+/// as `stage_timer!("io", "batch_read", { foo.await? })`.
+///
+/// ```ignore
+/// stage_timer!("key_parse", "batch_read", {
+///     parse_keys(py, keys)?
+/// })
+/// ```
+#[macro_export]
+macro_rules! stage_timer {
+    ($stage:expr, $op:expr, $body:expr) => {{
+        if $crate::metrics::is_internal_stage_enabled() {
+            let __stage_start = ::std::time::Instant::now();
+            let __stage_result = $body;
+            $crate::metrics::record_internal_stage_unchecked(
+                $stage,
+                $op,
+                __stage_start.elapsed().as_secs_f64(),
+            );
+            __stage_result
+        } else {
+            $body
+        }
+    }};
 }
 
 /// Instrument a data operation with metrics.

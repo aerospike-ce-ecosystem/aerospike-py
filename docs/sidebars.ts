@@ -62,6 +62,7 @@ const sidebars: SidebarsConfig = {
             'integrations/observability/logging',
             'integrations/observability/metrics',
             'integrations/observability/tracing',
+            'integrations/observability/internal-stage-metrics',
           ],
         },
       ],

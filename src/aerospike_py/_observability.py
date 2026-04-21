@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Iterator
 
 from aerospike_py._aerospike import dropped_log_count as _dropped_log_count
 from aerospike_py._aerospike import get_metrics_text as _get_metrics_text
 from aerospike_py._aerospike import init_tracing as _init_tracing
+from aerospike_py._aerospike import (
+    is_internal_stage_metrics_enabled as _is_internal_stage_metrics_enabled,
+)
 from aerospike_py._aerospike import is_metrics_enabled as _is_metrics_enabled
+from aerospike_py._aerospike import (
+    set_internal_stage_metrics_enabled as _set_internal_stage_metrics_enabled,
+)
 from aerospike_py._aerospike import set_metrics_enabled as _set_metrics_enabled
 from aerospike_py._aerospike import shutdown_tracing as _shutdown_tracing
 
@@ -96,6 +104,67 @@ def is_metrics_enabled() -> bool:
         ``True`` if metrics are enabled (default), ``False`` otherwise.
     """
     return _is_metrics_enabled()
+
+
+def set_internal_stage_metrics_enabled(enabled: bool) -> None:
+    """Enable or disable internal stage profiling metrics.
+
+    Controls the ``db_client_internal_stage_seconds`` histogram, which
+    captures fine-grained timing for ``batch_read`` stages (``key_parse``,
+    ``tokio_schedule_delay``, ``limiter_wait``, ``io``, ``spawn_blocking_delay``,
+    ``into_pyobject``, ``event_loop_resume_delay``, ``as_dict``, ``merge_as_dict``,
+    ``future_into_py_setup``).
+
+    Disabled by default — enable only for debug/profiling sessions. When
+    disabled, every stage timer call site elides its ``Instant::now()`` call
+    entirely (~1ns atomic load) so there is no hot-path overhead.
+
+    The ``AEROSPIKE_PY_INTERNAL_METRICS=1`` environment variable sets the
+    initial state at process start.
+
+    Args:
+        enabled: ``True`` to collect internal stage metrics, ``False`` to skip.
+
+    Example:
+        ```python
+        aerospike_py.set_internal_stage_metrics_enabled(True)
+        handle = await client.batch_read(keys)
+        # ... inspect metrics ...
+        aerospike_py.set_internal_stage_metrics_enabled(False)
+        ```
+    """
+    _set_internal_stage_metrics_enabled(enabled)
+
+
+def is_internal_stage_metrics_enabled() -> bool:
+    """Check if internal stage profiling metrics are currently enabled.
+
+    Returns:
+        ``True`` if stage profiling is on, ``False`` otherwise (default).
+    """
+    return _is_internal_stage_metrics_enabled()
+
+
+@contextmanager
+def internal_stage_profiling() -> Iterator[None]:
+    """Scoped enable of internal stage profiling metrics.
+
+    Restores the previous state on exit, even if an exception propagates.
+    Use for short debug windows without affecting global state:
+
+    ```python
+    with aerospike_py.internal_stage_profiling():
+        handle = await client.batch_read(keys)
+        dump = aerospike_py.get_metrics()
+    # profiling is back to its previous state here
+    ```
+    """
+    prev = _is_internal_stage_metrics_enabled()
+    _set_internal_stage_metrics_enabled(True)
+    try:
+        yield
+    finally:
+        _set_internal_stage_metrics_enabled(prev)
 
 
 _metrics_server = None

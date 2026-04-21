@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aerospike-benchmark-config
+  namespace: mona-adagent
+data:
+  AEROSPIKE_HOSTS: "maiasp025-sa:3000,maiasp026-sa:3000,maiasp027-sa:3000,maiasp028-sa:3000,maiasp029-sa:3000,maiasp030-sa:3000,maiasp031-sa:3000,maiasp032-sa:3000"
+  AEROSPIKE_NAMESPACE: "aidev"
+  THREAD_POOL_SIZE: "16"
+  MAX_CONCURRENT_OPS: "512"
+  AEROSPIKE_RUNTIME_WORKERS: "4"
+  OTEL_SERVICE_NAME: "aerospike-benchmark"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://main-otel-collector.monitoring.svc:4317"
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=mona-adagent,service.version=0.2.0"
+  NELO_ENABLED: "true"

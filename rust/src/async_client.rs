@@ -714,29 +714,70 @@ impl PyAsyncClient {
         _dtype: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_read: keys_count={}", keys.len());
+
+        // ── Stage: key_parse (GIL held) ──
         let client = self.get_client()?;
         let limiter = self.limiter.clone();
-        let args =
-            client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?;
+        let args = crate::stage_timer!("key_parse", "batch_read", {
+            client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?
+        });
 
         let use_numpy = _dtype.is_some();
         let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
 
-        future_into_py(py, async move {
-            let _permit = limiter.acquire_named("batch_read").await?;
-            let results = client_ops::do_batch_read(&client, &args).await?;
-            if use_numpy {
-                Ok(PendingBatchRead::Numpy {
-                    results,
-                    dtype: dtype_py.ok_or_else(|| {
-                        pyo3::exceptions::PyValueError::new_err(
-                            "internal error: numpy path reached without dtype",
-                        )
-                    })?,
-                })
-            } else {
-                Ok(PendingBatchRead::Handle(results))
-            }
+        // ── (A) future_into_py setup (sync, GIL held) ──
+        // spawned_at: Option<Instant> — None when profiling disabled, so the
+        // closure captures only a cheap Option instead of triggering an
+        // Instant::now() syscall on every batch_read.
+        //
+        // NOTE: spawned_at is captured BEFORE future_into_py's synchronous
+        // setup runs. The resulting `tokio_schedule_delay` observation
+        // therefore measures (future_into_py_setup + tokio pickup delay),
+        // not pure scheduling. See
+        // docs/docs/integrations/observability/internal-stage-metrics.md
+        // for the recommended subtraction.
+        let spawned_at = crate::metrics::maybe_now();
+        crate::stage_timer!("future_into_py_setup", "batch_read", {
+            future_into_py(py, async move {
+                // ── (B) Tokio task scheduling delay ──
+                if let Some(t) = spawned_at {
+                    crate::metrics::record_internal_stage_unchecked(
+                        "tokio_schedule_delay",
+                        "batch_read",
+                        t.elapsed().as_secs_f64(),
+                    );
+                }
+
+                // ── Stage: limiter_wait ──
+                let _permit = crate::stage_timer!("limiter_wait", "batch_read", {
+                    limiter.acquire_named("batch_read").await?
+                });
+
+                // ── Stage: io (network round-trip) ──
+                let results = crate::stage_timer!("io", "batch_read", {
+                    client_ops::do_batch_read(&client, &args).await?
+                });
+
+                // Handoff timestamp for spawn_blocking queue delay — only when
+                // profiling is ON (Option<Instant>).
+                let io_complete_at = crate::metrics::maybe_now();
+
+                if use_numpy {
+                    Ok(PendingBatchRead::Numpy {
+                        results,
+                        dtype: dtype_py.ok_or_else(|| {
+                            pyo3::exceptions::PyValueError::new_err(
+                                "internal error: numpy path reached without dtype",
+                            )
+                        })?,
+                    })
+                } else {
+                    Ok(PendingBatchRead::Handle {
+                        results,
+                        io_complete_at,
+                    })
+                }
+            })
         })
     }
 

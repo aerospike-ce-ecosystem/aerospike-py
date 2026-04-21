@@ -50,6 +50,24 @@ fn is_metrics_enabled() -> bool {
     metrics::is_metrics_enabled()
 }
 
+/// Enable or disable internal stage profiling metrics
+/// (`db_client_internal_stage_seconds`).
+///
+/// Separate from `set_metrics_enabled` — this flag controls fine-grained
+/// profiling spans like `key_parse`, `io`, `into_pyobject`, etc. Default is
+/// `false`. When disabled, all stage timer call sites skip `Instant::now()`
+/// entirely (single atomic load, ~1ns).
+#[pyfunction]
+fn set_internal_stage_metrics_enabled(enabled: bool) {
+    metrics::set_internal_stage_enabled(enabled);
+}
+
+/// Check if internal stage profiling metrics are currently enabled.
+#[pyfunction]
+fn is_internal_stage_metrics_enabled() -> bool {
+    metrics::is_internal_stage_enabled()
+}
+
 /// Return the number of log messages dropped because the Python GIL
 /// was unavailable (e.g. during interpreter shutdown).
 #[pyfunction]
@@ -66,6 +84,11 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Limits worker threads to reduce GIL contention in AsyncClient.
     runtime::init_async_runtime();
 
+    // Read AEROSPIKE_PY_INTERNAL_METRICS=1 / true to enable stage profiling
+    // at process start. Runtime toggle remains available via
+    // `set_internal_stage_metrics_enabled`.
+    metrics::init_internal_stage_from_env();
+
     // Register classes
     m.add_class::<client::PyClient>()?;
     m.add_class::<async_client::PyAsyncClient>()?;
@@ -78,6 +101,8 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_metrics_text, m)?)?;
     m.add_function(wrap_pyfunction!(set_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(is_metrics_enabled, m)?)?;
+    m.add_function(wrap_pyfunction!(set_internal_stage_metrics_enabled, m)?)?;
+    m.add_function(wrap_pyfunction!(is_internal_stage_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(dropped_log_count, m)?)?;
     m.add_function(wrap_pyfunction!(tracing::init_tracing, m)?)?;
     m.add_function(wrap_pyfunction!(tracing::shutdown_tracing, m)?)?;
