@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 [Unreleased]: https://github.com/KimSoungRyoul/aerospike-py/compare/v0.0.1.beta2...HEAD
 
 ### Changed (BREAKING)
+- `AsyncClient.__aexit__` now raises `ClientError` when the client is in the `CONNECTING` state, matching the existing behaviour of `close()`. Previously it silently returned `False`, leaving a half-initialized client if the `async with` block exited while `connect()` was still in flight. Closes #293.
 - `BatchRecords` is now a `TypeAlias = dict[UserKey, AerospikeRecord]` (was a `NamedTuple` with a `batch_records` attribute). This is the return type of both `Client.batch_read` and `AsyncClient.batch_read`. Migration:
     ```python
     # Before

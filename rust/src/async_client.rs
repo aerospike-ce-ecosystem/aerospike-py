@@ -17,6 +17,22 @@ const CONNECTING: u8 = 1;
 const CONNECTED: u8 = 2;
 const CLOSING: u8 = 3;
 
+/// Outcome of preparing a close transition — see [`PyAsyncClient::prepare_close`].
+///
+/// Computed synchronously while holding `&mut self` so the subsequent async
+/// future borrows no references from `self`.
+enum CloseOutcome {
+    /// Client was already disconnected or mid-close; caller should resolve
+    /// its Python awaitable with the idempotent no-op value.
+    Idempotent,
+    /// Client was connected; caller should drive `client.close()` in the
+    /// returned future and transition state to `DISCONNECTED` on completion.
+    Proceed {
+        client: Option<Arc<AsClient>>,
+        state: Arc<AtomicU8>,
+    },
+}
+
 use crate::batch_types::{PendingBatchRead, PendingBatchRecords};
 use crate::errors::as_to_pyerr;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
@@ -169,35 +185,19 @@ impl PyAsyncClient {
     /// Close connection (async).
     fn close<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         info!("Closing async client connection");
-        let current = self.state.load(Ordering::SeqCst);
-        if current == DISCONNECTED || current == CLOSING {
-            // Already disconnected or closing — idempotent no-op.
-            return future_into_py(py, async move { Ok(()) });
+        match self.prepare_close()? {
+            CloseOutcome::Idempotent => future_into_py(py, async move { Ok(()) }),
+            CloseOutcome::Proceed { client, state } => future_into_py(py, async move {
+                let result = if let Some(c) = client {
+                    c.close().await.map_err(as_to_pyerr)
+                } else {
+                    Ok(())
+                };
+                // Always transition to Disconnected — inner is already None.
+                state.store(DISCONNECTED, Ordering::SeqCst);
+                result
+            }),
         }
-        if current == CONNECTING {
-            return Err(crate::errors::ClientError::new_err(
-                "Cannot close: client is currently connecting.",
-            ));
-        }
-
-        self.state.store(CLOSING, Ordering::SeqCst);
-        let client = self.inner.swap(None);
-        let state = self.state.clone();
-
-        // Reset connection metadata and limiter to default.
-        self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());
-        self.limiter = Arc::new(OperationLimiter::new(0, 0));
-
-        future_into_py(py, async move {
-            let result = if let Some(c) = client {
-                c.close().await.map_err(as_to_pyerr)
-            } else {
-                Ok(())
-            };
-            // Always transition to Disconnected — inner is already None.
-            state.store(DISCONNECTED, Ordering::SeqCst);
-            result
-        })
     }
 
     /// Get node names (sync, no I/O, lock-free).
@@ -244,6 +244,11 @@ impl PyAsyncClient {
     }
 
     /// Async context manager exit.
+    ///
+    /// Shares the close path with `close()`. In particular, exiting the
+    /// `async with` block while `connect()` is still in flight raises a
+    /// `ClientError` — the same behaviour as calling `close()` explicitly —
+    /// rather than silently leaking a half-initialized client.
     #[pyo3(signature = (_exc_type=None, _exc_val=None, _exc_tb=None))]
     fn __aexit__<'py>(
         &mut self,
@@ -252,28 +257,19 @@ impl PyAsyncClient {
         _exc_val: Option<&Bound<'_, PyAny>>,
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let current = self.state.load(Ordering::SeqCst);
-        if current != CONNECTED {
-            return future_into_py(py, async move { Ok(false) });
+        match self.prepare_close()? {
+            CloseOutcome::Idempotent => future_into_py(py, async move { Ok(false) }),
+            CloseOutcome::Proceed { client, state } => future_into_py(py, async move {
+                let result = if let Some(c) = client {
+                    c.close().await.map_err(as_to_pyerr)
+                } else {
+                    Ok(())
+                };
+                // Always transition to Disconnected — inner is already None.
+                state.store(DISCONNECTED, Ordering::SeqCst);
+                result.map(|()| false)
+            }),
         }
-        self.state.store(CLOSING, Ordering::SeqCst);
-        let client = self.inner.swap(None);
-        let state = self.state.clone();
-
-        // Reset connection metadata and limiter to default.
-        self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());
-        self.limiter = Arc::new(OperationLimiter::new(0, 0));
-
-        future_into_py(py, async move {
-            let result = if let Some(c) = client {
-                c.close().await.map_err(as_to_pyerr)
-            } else {
-                Ok(())
-            };
-            // Always transition to Disconnected — inner is already None.
-            state.store(DISCONNECTED, Ordering::SeqCst);
-            result.map(|()| false)
-        })
     }
 
     // ── CRUD ──────────────────────────────────────────────────
@@ -1361,6 +1357,41 @@ impl PyAsyncClient {
         self.inner.load_full().ok_or_else(|| {
             crate::errors::ClientError::new_err("Client is not connected. Call connect() first.")
         })
+    }
+
+    /// Shared pre-close step for `close()` and `__aexit__`.
+    ///
+    /// Atomically inspects state and, when CONNECTED, transitions to CLOSING,
+    /// swaps the inner `AsClient` out, and resets connection metadata and the
+    /// limiter. Returns:
+    ///
+    /// - `Ok(CloseOutcome::Idempotent)` when state is already `DISCONNECTED`
+    ///   or `CLOSING` — both `close()` and `__aexit__` treat this as a no-op.
+    /// - `Err(ClientError)` when state is `CONNECTING` — closing while an
+    ///   in-flight `connect()` may still be racing the inner `Arc` would leak
+    ///   a half-initialized client.
+    /// - `Ok(CloseOutcome::Proceed { client, state })` when state is
+    ///   `CONNECTED` — the caller drives `client.close()` and stores
+    ///   `DISCONNECTED` on completion.
+    fn prepare_close(&mut self) -> PyResult<CloseOutcome> {
+        let current = self.state.load(Ordering::SeqCst);
+        match current {
+            DISCONNECTED | CLOSING => Ok(CloseOutcome::Idempotent),
+            CONNECTING => Err(crate::errors::ClientError::new_err(
+                "Cannot close: client is currently connecting.",
+            )),
+            CONNECTED => {
+                self.state.store(CLOSING, Ordering::SeqCst);
+                let client = self.inner.swap(None);
+                self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());
+                self.limiter = Arc::new(OperationLimiter::new(0, 0));
+                Ok(CloseOutcome::Proceed {
+                    client,
+                    state: self.state.clone(),
+                })
+            }
+            _ => unreachable!("invalid AsyncClient state: {current}"),
+        }
     }
 
     /// Internal helper for index creation (async).
