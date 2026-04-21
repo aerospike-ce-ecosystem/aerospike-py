@@ -729,6 +729,13 @@ impl PyAsyncClient {
         // spawned_at: Option<Instant> — None when profiling disabled, so the
         // closure captures only a cheap Option instead of triggering an
         // Instant::now() syscall on every batch_read.
+        //
+        // NOTE: spawned_at is captured BEFORE future_into_py's synchronous
+        // setup runs. The resulting `tokio_schedule_delay` observation
+        // therefore measures (future_into_py_setup + tokio pickup delay),
+        // not pure scheduling. See
+        // docs/docs/integrations/observability/internal-stage-metrics.md
+        // for the recommended subtraction.
         let spawned_at = crate::metrics::maybe_now();
         crate::stage_timer!("future_into_py_setup", "batch_read", {
             future_into_py(py, async move {

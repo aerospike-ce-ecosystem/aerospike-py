@@ -22,7 +22,10 @@ use crate::types::record::record_to_py_with_key;
 /// Python tuple `(key, meta, bins)` after first access.
 ///
 /// Uses `Mutex` to satisfy `Send + Sync` required by `#[pyclass]`.
-/// In practice, all access is single-threaded (GIL held), so contention is zero.
+/// Under standard CPython with the GIL, concurrent access from Python
+/// is impossible and the Mutex is effectively uncontended. Under
+/// free-threaded CPython (3.13t, 3.14t) the Mutex provides real mutual
+/// exclusion during first-access conversion and caching.
 enum LazyRecordCell {
     /// Raw Rust Record awaiting lazy conversion.
     Pending { record: Record, key_py: Py<PyAny> },
@@ -60,8 +63,9 @@ pub struct PyBatchRecord {
     key: Py<PyAny>,
     #[pyo3(get)]
     result: i32,
-    /// Lazy-converted record cell. `Mutex` satisfies `Send + Sync` for pyclass.
-    /// In practice, the GIL prevents concurrent access from Python.
+    /// Lazy-converted record cell. `Mutex` satisfies `Send + Sync` for pyclass
+    /// and provides real mutual exclusion under free-threaded CPython
+    /// (3.13t, 3.14t); under GIL builds it is effectively uncontended.
     record_cell: Mutex<LazyRecordCell>,
     #[pyo3(get)]
     in_doubt: bool,

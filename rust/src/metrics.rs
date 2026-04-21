@@ -57,11 +57,17 @@ pub fn is_internal_stage_enabled() -> bool {
 /// Initialize internal stage profiling from the `AEROSPIKE_PY_INTERNAL_METRICS`
 /// environment variable. Called once during native module init.
 ///
-/// Truthy values (`1`, `true`, `True`, `TRUE`, `yes`, `on`) enable profiling at
-/// startup. Anything else (including missing) leaves the flag at its default `false`.
+/// Truthy values (case-insensitive: `1`, `true`, `yes`, `on`) enable profiling at
+/// startup. Surrounding whitespace is trimmed. Anything else (including missing)
+/// leaves the flag at its default `false`.
 pub fn init_internal_stage_from_env() {
     let enabled = std::env::var("AEROSPIKE_PY_INTERNAL_METRICS")
-        .map(|v| matches!(v.trim(), "1" | "true" | "True" | "TRUE" | "yes" | "on"))
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false);
     INTERNAL_STAGE_ENABLED.store(enabled, Ordering::Relaxed);
 }

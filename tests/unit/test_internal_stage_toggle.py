@@ -133,6 +133,15 @@ class TestEnvVarInit:
     def test_enabled_by_env_on(self):
         assert self._run(env_value="on") is True
 
+    def test_enabled_by_env_yes_upper(self):
+        assert self._run(env_value="YES") is True
+
+    def test_enabled_by_env_on_titlecase(self):
+        assert self._run(env_value="On") is True
+
+    def test_enabled_by_env_true_mixed(self):
+        assert self._run(env_value="TrUe") is True
+
     def test_disabled_by_env_zero(self):
         assert self._run(env_value="0") is False
 
