@@ -18,6 +18,7 @@ is skipped rather than flaking.
 from __future__ import annotations
 
 import asyncio
+from typing import ClassVar
 
 import pytest
 
@@ -77,7 +78,7 @@ class TestConnectingStateRace:
 
     # Non-routable TEST-NET-1 address (RFC 5737). Guaranteed to make the
     # aerospike_core TCP connect hang until its default timeout.
-    UNREACHABLE_CONFIG = {
+    UNREACHABLE_CONFIG: ClassVar[dict] = {
         "hosts": [("192.0.2.1", 3000)],
         "cluster_name": "unreachable-test",
     }
@@ -105,7 +106,7 @@ class TestConnectingStateRace:
         task.cancel()
         try:
             await task
-        except (BaseException,):  # connect errors or CancelledError
+        except BaseException:  # connect errors or CancelledError
             pass
 
     async def test_aexit_during_connecting_raises(self):
@@ -122,5 +123,5 @@ class TestConnectingStateRace:
         task.cancel()
         try:
             await task
-        except (BaseException,):
+        except BaseException:
             pass
