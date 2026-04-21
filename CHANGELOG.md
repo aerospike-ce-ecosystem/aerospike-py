@@ -8,7 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [Unreleased]: https://github.com/KimSoungRyoul/aerospike-py/compare/v0.0.1.beta2...HEAD
 
+### Changed (BREAKING)
+- `BatchRecords` is now a `TypeAlias = dict[UserKey, AerospikeRecord]` (was a `NamedTuple` with a `batch_records` attribute). This is the return type of `Client.batch_read` / `AsyncClient.batch_read`. Migration:
+    ```python
+    # Before
+    for br in result.batch_records:
+        if br.result == 0: print(br.record.bins)
+    # After
+    for user_key, bins in result.items():
+        print(user_key, bins)
+    ```
+  Batch write/operate/remove APIs still return the NamedTuple-based `BatchWriteResult` with `.batch_records`, unchanged.
+- `Client.batch_read` (sync) now returns `dict[UserKey, AerospikeRecord]` (previously `BatchReadHandle`), matching the async client and the type-stub declaration in `__init__.pyi`.
+- `BatchRecord` (used inside `BatchWriteResult`) now carries an `in_doubt: bool = False` field indicating whether a transport-level ambiguity occurred.
+
 ### Added
+- `Client.batch_write` / `AsyncClient.batch_write` — per-record bins with optional per-record TTL via `WriteMeta`. Each entry is `(key, bins)` or `(key, bins, meta)`.
+- `BatchReadHandle` — zero-conversion handle for async `batch_read`; methods include `as_dict()`, `batch_records`, `keys()`, `found_count()`, and a static `merge_as_dict()` for combining multiple handles in a single GIL acquisition.
+- `AsyncClient` lifecycle state machine — explicit `Disconnected → Connecting → Connected → Closing` transitions with idempotent `close()`; `connect()` now errors when called on a non-disconnected client.
+- Internal stage profiling metric `db_client_internal_stage_seconds` — off by default, opt-in via `aerospike_py.set_internal_stage_metrics_enabled(True)`, the `aerospike_py.internal_stage_profiling()` context manager, or the `AEROSPIKE_PY_INTERNAL_METRICS=1` environment variable (case-insensitive: `1`, `true`, `yes`, `on`). Stages captured for `batch_read`: `key_parse`, `future_into_py_setup`, `tokio_schedule_delay`, `limiter_wait`, `io`, `spawn_blocking_delay`, `into_pyobject`, `event_loop_resume_delay`, `as_dict`, `merge_as_dict`.
 - NumPy-based batch write support (`batch_write_numpy`) for high-throughput ingestion
 - OpenTelemetry distributed tracing with OTLP export and connection-level attributes
 - Prometheus-compatible metrics for database operation monitoring
