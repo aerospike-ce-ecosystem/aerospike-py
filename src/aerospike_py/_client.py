@@ -178,10 +178,7 @@ class Client(_NativeClient):
                 print(user_key, bins_dict)
             ```
         """
-        raw = super().batch_read(keys, bins, policy, _dtype)
-        if _dtype is not None:
-            return raw  # NumpyBatchRecords path unchanged
-        return raw.as_dict()
+        return super().batch_read(keys, bins, policy, _dtype)
 
     @catch_unexpected("Client.batch_write_numpy")
     def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0):
