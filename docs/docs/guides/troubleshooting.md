@@ -156,7 +156,14 @@ aerospike_py.ClientError: Client is not connected
    try:
        record = await client.get(key)
    finally:
-       client.close()
+       await client.close()
+   ```
+
+   Or use the async context manager, which awaits `close()` for you:
+   ```python
+   async with aerospike_py.AsyncClient(config) as client:
+       await client.connect()
+       record = await client.get(key)
    ```
 
 ## Build and Installation Issues
