@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 [Unreleased]: https://github.com/KimSoungRyoul/aerospike-py/compare/v0.0.1.beta2...HEAD
 
 ### Changed (BREAKING)
-- `BatchRecords` is now a `TypeAlias = dict[UserKey, AerospikeRecord]` (was a `NamedTuple` with a `batch_records` attribute). This is the return type of `Client.batch_read` / `AsyncClient.batch_read`. Migration:
+- `BatchRecords` is now a `TypeAlias = dict[UserKey, AerospikeRecord]` (was a `NamedTuple` with a `batch_records` attribute). This is the return type of both `Client.batch_read` and `AsyncClient.batch_read`. Migration:
     ```python
     # Before
     for br in result.batch_records:
@@ -18,9 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     for user_key, bins in result.items():
         print(user_key, bins)
     ```
-  Batch write/operate/remove APIs still return the NamedTuple-based `BatchWriteResult` with `.batch_records`, unchanged.
-- `Client.batch_read` (sync) now returns `dict[UserKey, AerospikeRecord]` (previously `BatchReadHandle`), matching the async client and the type-stub declaration in `__init__.pyi`.
-- `BatchRecord` (used inside `BatchWriteResult`) now carries an `in_doubt: bool = False` field indicating whether a transport-level ambiguity occurred.
+- `Client.batch_operate`, `Client.batch_remove`, `AsyncClient.batch_operate`, `AsyncClient.batch_remove` now declare their return type as `BatchWriteResult` in the type stubs (previously `BatchRecords`). Runtime shape is unchanged — `BatchWriteResult` is a NamedTuple with `.batch_records: list[BatchRecord]`. Typecheckers may flag code that still expects the old annotation.
+- `BatchRecord` (used inside `BatchWriteResult`) now carries an `in_doubt: bool = False` field indicating whether a transport-level ambiguity occurred. Positional unpacking (`key, result, record = br`) breaks; switch to attribute access.
+- New top-level exports in `aerospike_py.__all__`: `BatchWriteResult`, `UserKey`, `AerospikeRecord`. Previously only `BatchRecord` and `BatchRecords` were exported.
 
 ### Added
 - `Client.batch_write` / `AsyncClient.batch_write` — per-record bins with optional per-record TTL via `WriteMeta`. Each entry is `(key, bins)` or `(key, bins, meta)`.

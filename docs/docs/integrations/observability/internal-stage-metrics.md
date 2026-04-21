@@ -60,7 +60,7 @@ A **histogram** tracking per-stage durations inside a single database operation.
 |---|---|
 | `key_parse` | Python keys → Rust tuples (GIL held) |
 | `future_into_py_setup` | `future_into_py` sync setup (GIL held) |
-| `tokio_schedule_delay` | Gap from *before* `future_into_py` setup to the start of the async body on a Tokio worker. **Note:** includes the synchronous `future_into_py_setup` window as well as pure scheduling delay — subtract `future_into_py_setup` for the isolated scheduling component. |
+| `tokio_schedule_delay` | Gap from *before* `future_into_py` setup to the start of the async body on a Tokio worker. **Note:** includes the synchronous `future_into_py_setup` window as well as pure scheduling delay — subtracting `future_into_py_setup` approximates the isolated scheduling component (a small `stage_timer!` macro overhead also falls inside this window). |
 | `limiter_wait` | Time waiting for the backpressure semaphore |
 | `io` | Aerospike network round-trip |
 | `spawn_blocking_delay` | Gap between I/O completion and `IntoPyObject::into_pyobject` starting on a spawn-blocking thread (GIL-bound) |
