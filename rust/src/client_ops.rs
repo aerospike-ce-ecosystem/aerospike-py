@@ -330,7 +330,7 @@ pub async fn do_batch_write(
     records: &[(
         aerospike_core::Key,
         Vec<aerospike_core::Bin>,
-        BatchWritePolicy,
+        Arc<BatchWritePolicy>,
     )],
     ns: &str,
     set: &str,

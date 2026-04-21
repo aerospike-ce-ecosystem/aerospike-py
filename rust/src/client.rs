@@ -1245,10 +1245,15 @@ impl PyClient {
         let raw_records = crate::numpy_support::numpy_to_records(
             py, data, _dtype, namespace, set_name, key_field,
         )?;
-        let write_policy = crate::policy::batch_policy::parse_batch_write_policy(policy)?;
+        // Share one BatchWritePolicy allocation across every record via Arc;
+        // `numpy_to_records` never emits per-record meta, so the same policy
+        // applies to all N rows.
+        let write_policy = Arc::new(crate::policy::batch_policy::parse_batch_write_policy(
+            policy,
+        )?);
         let records: Vec<_> = raw_records
             .into_iter()
-            .map(|(k, b)| (k, b, write_policy.clone()))
+            .map(|(k, b)| (k, b, Arc::clone(&write_policy)))
             .collect();
 
         let ns = namespace.to_string();
