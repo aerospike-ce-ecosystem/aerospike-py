@@ -618,7 +618,7 @@ impl BatchRemoveArgs {
 // ── batch_write (generic) ───────────────────────────────────────────────────
 
 pub struct BatchWriteGenericArgs {
-    pub records: Vec<(Key, Vec<Bin>, BatchWritePolicy)>,
+    pub records: Vec<(Key, Vec<Bin>, Arc<BatchWritePolicy>)>,
     pub batch_policy: aerospike_core::BatchPolicy,
     pub batch_ns: String,
     pub batch_set: String,
@@ -634,8 +634,11 @@ pub fn prepare_batch_write_args(
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchWriteGenericArgs> {
     let batch_policy = parse_batch_policy(policy)?;
-    // Parse batch-level write policy once (TTL default for all records)
-    let base_write_policy = parse_batch_write_policy(policy)?;
+    // Parse batch-level write policy once (TTL default for all records).
+    // Wrap in Arc so the common "all records share the batch policy" path
+    // reuses a single allocation via Arc::clone (refcount bump) rather than
+    // a deep BatchWritePolicy clone per record.
+    let base_write_policy = Arc::new(parse_batch_write_policy(policy)?);
     let mut rust_records = Vec::with_capacity(records.len());
 
     for item in records.iter() {
@@ -654,15 +657,17 @@ pub fn prepare_batch_write_args(
             .map_err(|_| pyo3::exceptions::PyTypeError::new_err("bins element must be a dict"))?;
         let bins = py_dict_to_bins(bins_dict)?;
 
-        // Per-record meta (3rd tuple element) overrides batch-level TTL
+        // Per-record meta (3rd tuple element) overrides batch-level TTL.
+        // When present we allocate a fresh Arc; without meta all records
+        // share a refcounted clone of the base policy.
         let write_policy = if tuple.len() >= 3 {
             let meta_obj = tuple.get_item(2)?;
             let meta_dict = meta_obj.cast::<PyDict>().map_err(|_| {
                 pyo3::exceptions::PyTypeError::new_err("meta element must be a dict")
             })?;
-            apply_record_meta(&base_write_policy, meta_dict)?
+            Arc::new(apply_record_meta(&base_write_policy, meta_dict)?)
         } else {
-            base_write_policy.clone()
+            Arc::clone(&base_write_policy)
         };
 
         rust_records.push((key, bins, write_policy));

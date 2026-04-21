@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Renamed `TimeoutError`/`IndexError` to avoid shadowing Python builtins
 
 ### Performance
+- `batch_write` / `batch_write_numpy` now share a single `Arc<BatchWritePolicy>` across all records instead of deep-cloning the policy per record. Per-record meta still allocates a fresh `Arc`, but the common no-meta path (the whole numpy hot path) drops to a refcount bump. Closes #294.
 - PyO3 binding CPU overhead reduced via OTel fast-path and type conversion optimizations
 - Cargo release profile with LTO and single codegen unit for smaller, faster binaries
 - Cached default policies eliminate repeated allocation on `put()`/`get()`/`select()`/`exists()`
