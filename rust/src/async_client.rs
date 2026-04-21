@@ -245,10 +245,18 @@ impl PyAsyncClient {
 
     /// Async context manager exit.
     ///
-    /// Shares the close path with `close()`. In particular, exiting the
-    /// `async with` block while `connect()` is still in flight raises a
+    /// Shares the close path with `close()` via `prepare_close()`. In
+    /// particular, exiting while `connect()` is still in flight raises
     /// `ClientError` — the same behaviour as calling `close()` explicitly —
     /// rather than silently leaking a half-initialized client.
+    ///
+    /// **Note:** the Python wrapper in `src/aerospike_py/_async_client.py`
+    /// defines its own `__aexit__` that delegates to `self.close()`, so
+    /// Python user code going through `aerospike_py.AsyncClient` never
+    /// reaches this native method. It is kept consistent with `close()`
+    /// for callers that interact with the PyO3 class directly (e.g. via
+    /// `client._inner`) and to avoid a latent behaviour divergence if the
+    /// Python wrapper's delegation is ever removed.
     #[pyo3(signature = (_exc_type=None, _exc_val=None, _exc_tb=None))]
     fn __aexit__<'py>(
         &mut self,

@@ -9,7 +9,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 [Unreleased]: https://github.com/KimSoungRyoul/aerospike-py/compare/v0.0.1.beta2...HEAD
 
 ### Changed (BREAKING)
-- `AsyncClient.__aexit__` now raises `ClientError` when the client is in the `CONNECTING` state, matching the existing behaviour of `close()`. Previously it silently returned `False`, leaving a half-initialized client if the `async with` block exited while `connect()` was still in flight. Closes #293.
 - `BatchRecords` is now a `TypeAlias = dict[UserKey, AerospikeRecord]` (was a `NamedTuple` with a `batch_records` attribute). This is the return type of both `Client.batch_read` and `AsyncClient.batch_read`. Migration:
     ```python
     # Before
@@ -22,6 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Client.batch_operate`, `Client.batch_remove`, `AsyncClient.batch_operate`, `AsyncClient.batch_remove` now declare their return type as `BatchWriteResult` in the type stubs (previously `BatchRecords`). Runtime shape is unchanged — `BatchWriteResult` is a NamedTuple with `.batch_records: list[BatchRecord]`. Typecheckers may flag code that still expects the old annotation.
 - `BatchRecord` (used inside `BatchWriteResult`) now carries an `in_doubt: bool = False` field indicating whether a transport-level ambiguity occurred. Positional unpacking (`key, result, record = br`) breaks; switch to attribute access.
 - New top-level exports in `aerospike_py.__all__`: `BatchWriteResult`, `UserKey`, `AerospikeRecord`. Previously only `BatchRecord` and `BatchRecords` were exported.
+
+### Changed
+- Internal: `PyAsyncClient::close` and `PyAsyncClient::__aexit__` (Rust, PyO3) share a new `prepare_close()` helper. Python users of `aerospike_py.AsyncClient` see no behaviour change — the Python wrapper's `__aexit__` already delegated to `close()`, so `async with` exiting during an in-flight `connect()` has always raised `ClientError`. The refactor removes a dead-code divergence at the native layer. Closes #293.
 
 ### Added
 - `Client.batch_write` / `AsyncClient.batch_write` — per-record bins with optional per-record TTL via `WriteMeta`. Each entry is `(key, bins)` or `(key, bins, meta)`.
