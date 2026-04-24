@@ -6,19 +6,30 @@
 
 상세 측정값은 `results/` 하위 문서 참고.
 
+## 📖 값 읽는 법 (전체 공통 범례)
+
+- **↓ 낮을수록 좋음** — latency/시간/지연 지표. 단위가 `ms`/`μs` 면 이쪽 (예: p50, p95, p99, avg, mean)
+- **↑ 높을수록 좋음** — throughput/처리량 지표. 단위가 `req/s`/`TPS`/`iter/s` 면 이쪽
+- **(우세)** — 같은 행 비교에서 우위에 있는 값
+- **−XX%** (latency) / **+XX%** (TPS) — 우세한 변화량
+- **N× faster / N× higher** — N배 우위
+- 🔥 — 특히 큰 폭의 개선 (약 50% 이상)
+
 ---
 
 ## 1. aerospike-py vs 공식 Python client (Python 3.11 + GIL)
 
 **같은 부하, 같은 서버, 같은 FastAPI 앱. 클라이언트만 교체하여 비교.**
 
-| 지표 | aerospike-py | 공식 aerospike | aerospike-py 우위 |
+> 📖 **읽는 법**: 아래 모든 값은 **latency(ms) — 낮을수록 좋음 ↓**. 각 행에서 작은 값이 우세.
+
+| 지표 (ms, ↓ 낮을수록 좋음) | aerospike-py | 공식 aerospike | aerospike-py 우위 |
 |---|---:|---:|---:|
-| single mode p95 (k6) | **189 ms** | 324 ms | **−42%** |
-| single mode avg | **126 ms** | 188 ms | **1.49× faster** |
-| single mode median | **101 ms** | 192 ms | **1.90× faster** |
-| gather mode p95 | **234 ms** | 266 ms | **−12%** |
-| FastAPI E2E p95 (서버 측정) | **202 ms** | 274 ms | **−26%** |
+| single mode p95 (k6) | **189 ms** (우세) | 324 ms | **−42%** |
+| single mode avg | **126 ms** (우세) | 188 ms | **1.49× faster** |
+| single mode median | **101 ms** (우세) | 192 ms | **1.90× faster** |
+| gather mode p95 | **234 ms** (우세) | 266 ms | **−12%** |
+| FastAPI E2E p95 (서버 측정) | **202 ms** (우세) | 274 ms | **−26%** |
 
 **결론**: 일반적인 production 조건(3.11 + GIL)에서 **p95 기준 1.5~1.7배 빠름**. 동시 호출(gather)에서도 우위 유지.
 
@@ -40,17 +51,19 @@ aerospike-py 의 이점은 **주변 스택이 얇을수록 크게 드러남**. D
 
 ### 환경별 aerospike-py vs 공식 client
 
-| 환경 | 지표 | aerospike-py | 공식 aerospike | aerospike-py 우위 |
-|---|---|---:|---:|---:|
-| **A) 순수 DB client** | avg latency | **22.45 ms** | 107.56 ms | **4.8× faster** |
-|  | TPS | **373.7** | 138.2 | **2.7× higher** |
-|  | p99 | **120.67 ms** | 195.34 ms | 1.6× |
-| **B) uvicorn ASGI only**¹ | total mean | **228.49 ms** | 289.56 ms | **1.3× faster** |
-|  | TPS | **19.4** | 16.6 | 1.2× |
-|  | Aerospike 구간만 | 221.12 ms | 280.00 ms | 1.27× |
-| **C) uvicorn + DLRM CPU** | single p95 (k6) | **189 ms** | 324 ms | **1.71×** |
-|  | avg | 126 ms | 188 ms | 1.49× |
-|  | TPS (E2E) | ~40 req/s | ~24 req/s² | ~1.7× |
+> 📖 **읽는 법**: `ms` 단위는 **낮을수록 좋음 ↓**, `TPS`(req/s)는 **높을수록 좋음 ↑**. 각 행에서 우세한 값에 **(우세)** 표기.
+
+| 환경 | 지표 | 방향 | aerospike-py | 공식 aerospike | aerospike-py 우위 |
+|---|---|---|---:|---:|---:|
+| **A) 순수 DB client** | avg latency (ms) | ↓ 낮을수록 좋음 | **22.45 ms** (우세) | 107.56 ms | **4.8× faster** |
+|  | TPS (req/s) | ↑ 높을수록 좋음 | **373.7** (우세) | 138.2 | **2.7× higher** |
+|  | p99 (ms) | ↓ 낮을수록 좋음 | **120.67 ms** (우세) | 195.34 ms | 1.6× |
+| **B) uvicorn ASGI only**¹ | total mean (ms) | ↓ 낮을수록 좋음 | **228.49 ms** (우세) | 289.56 ms | **1.3× faster** |
+|  | TPS (req/s) | ↑ 높을수록 좋음 | **19.4** (우세) | 16.6 | 1.2× |
+|  | Aerospike 구간만 (ms) | ↓ 낮을수록 좋음 | **221.12 ms** (우세) | 280.00 ms | 1.27× |
+| **C) uvicorn + DLRM CPU** | single p95 (k6, ms) | ↓ 낮을수록 좋음 | **189 ms** (우세) | 324 ms | **1.71×** |
+|  | avg (ms) | ↓ 낮을수록 좋음 | **126 ms** (우세) | 188 ms | 1.49× |
+|  | TPS (E2E, req/s) | ↑ 높을수록 좋음 | **~40 req/s** (우세) | ~24 req/s² | ~1.7× |
 
 ¹ concurrency=5, iter=50, 9 set × 200 keys (상세: `results/asgi_20260416_134730/asgi-report.md`).
 ² 공식 client 는 워밍업 윈도우 영향으로 샘플 편차 있음. 정상 구간 평균치.
@@ -73,20 +86,24 @@ aerospike-py 의 이점은 **주변 스택이 얇을수록 크게 드러남**. D
 
 ### 각 클라이언트의 자체 개선 (3.11 → 3.14t)
 
-| 클라이언트 | p95 개선 | TPS 개선 |
+> 📖 **읽는 법**: `p95 개선`은 latency 변화 — **오른쪽 값이 낮을수록 좋음 ↓**. `TPS 개선`은 처리량 변화 — **오른쪽 값이 높을수록 좋음 ↑**.
+
+| 클라이언트 | p95 개선 (ms, ↓) | TPS 개선 (iter/s, ↑) |
 |---|---:|---:|
-| aerospike-py | 189 → **97 ms** (**−49%**) | 41.6 → **61.2 iter/s** (**+47%**) |
-| 공식 aerospike | 324 → **128 ms** (**−60%**) | — |
+| aerospike-py | 189 → **97 ms** (**−49%** 🔥) | 41.6 → **61.2** (**+47%** 🔥) |
+| 공식 aerospike | 324 → **128 ms** (**−60%** 🔥) | — |
 
 GIL 을 공유 자원으로 놓고 경합하던 비용이 사라져서 **두 클라이언트 모두 큰 폭으로 개선**. aerospike-py 는 Rust 코드 변경 없이 Python 3.14t 런타임만 바꿔서 얻은 효과.
 
 ### 같은 3.14t 조건에서 클라이언트 간 비교
 
-| 구성 | aerospike-py p95 | 공식 aerospike p95 | 차이 |
+> 📖 **읽는 법**: p95 latency — **낮을수록 좋음 ↓**. 각 행에서 우세한 값에 **(우세)** 표기.
+
+| 구성 | aerospike-py p95 (ms, ↓) | 공식 aerospike p95 (ms, ↓) | 차이 |
 |---|---:|---:|---|
 | 둘 다 같이 부하 (공정한 서버 부하) | 126 ms | 128 ms | **≈ 동등** (노이즈 수준) |
-| 각각 단독 부하, 서버 독점 | **97 ms** | 134 ms | aerospike-py **−28%** |
-| 단독 부하, gather mode | **107 ms** | 253 ms | aerospike-py **−58%** |
+| 각각 단독 부하, 서버 독점 | **97 ms** (우세) | 134 ms | aerospike-py **−28%** |
+| 단독 부하, gather mode | **107 ms** (우세) | 253 ms | aerospike-py **−58%** |
 
 **결론**:
 - **3.11 에 있던 42% latency 격차는 GIL 제거로 대부분 소멸** — 공동 부하 조건에서 두 클라이언트가 거의 동등.
@@ -127,11 +144,17 @@ GIL 을 공유 자원으로 놓고 경합하던 비용이 사라져서 **두 클
 
 ## 4. 최종 권장 사항
 
+> 📖 **읽는 법**: `p95` 는 **낮을수록 좋음 ↓**, `TPS` 는 **높을수록 좋음 ↑**.
+
 | 순위 | 조치 | 예상 효과 |
 |---|---|---|
-| 1 | 공식 client 쓰는 기존 Python 앱을 **aerospike-py 로 교체** | p95 **−42%** (3.11 기준) |
-| 2 | Python 런타임을 **3.14t free-threaded 로 전환** | p95 **−49%** 추가, TPS **+47%** (Rust 변경 불필요) |
-| 3 | `gather(N회)` → 단일 `batch_read(mixed keys)` 패턴 적용 | GIL 하에서 p95 **−33%** |
+| 1 | 공식 client 쓰는 기존 Python 앱을 **aerospike-py 로 교체** | p95 **−42%** ↓ (3.11 기준) |
+| 2 | Python 런타임을 **3.14t free-threaded 로 전환** | p95 **−49%** ↓ 추가, TPS **+47%** ↑ (Rust 변경 불필요) |
+| 3 | `gather(N회)` → 단일 `batch_read(mixed keys)` 패턴 적용 | GIL 하에서 p95 **−33%** ↓ |
 | 4 | Stage profiling toggle 을 prod 에 **상시 ON** | 회귀 즉시 감지, 오버헤드 ≈ 0 |
 
-합쳐 적용 시 **3.14t + aerospike-py + single batch_read** 로 p95 **97ms** 수준 달성 (원본 공식 + 3.11 대비 **약 3.3배 빠름**).
+합쳐 적용 시 **3.14t + aerospike-py + single batch_read** 로 p95 **97ms** (↓ 낮을수록 좋음) 수준 달성 — 원본 공식 + 3.11 대비 **약 3.3배 빠름**.
+
+---
+
+(범례는 문서 상단의 "📖 값 읽는 법" 참조.)
