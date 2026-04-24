@@ -1,11 +1,9 @@
 # aerospike-py
 
 [![PyPI](https://img.shields.io/pypi/v/aerospike-py.svg)](https://pypi.org/project/aerospike-py/)
-[![Downloads](https://img.shields.io/pypi/dm/aerospike-py.svg)](https://pypi.org/project/aerospike-py/)
+[![Downloads](https://img.shields.io/pypi/dm/aerospike-py.svg)](https://pypistats.org/packages/aerospike-py)
 [![CI](https://github.com/aerospike-ce-ecosystem/aerospike-py/actions/workflows/ci.yaml/badge.svg)](https://github.com/aerospike-ce-ecosystem/aerospike-py/actions/workflows/ci.yaml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
-[![PyO3](https://img.shields.io/badge/PyO3-0.28-green.svg)](https://pyo3.rs/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 High-performance Aerospike Python Client built with PyO3 + Rust, powered by the [Aerospike Rust Client v2](https://github.com/aerospike/aerospike-client-rust).
