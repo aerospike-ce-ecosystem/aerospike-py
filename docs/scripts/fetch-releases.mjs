@@ -10,7 +10,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO = 'KimSoungRyoul/aerospike-py';
+const REPO = 'aerospike-ce-ecosystem/aerospike-py';
 const API_URL = `https://api.github.com/repos/${REPO}/releases`;
 const OUTPUT = join(__dirname, '..', 'src', 'pages', 'releases.mdx');
 
