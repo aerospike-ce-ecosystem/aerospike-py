@@ -42,10 +42,10 @@ const config: Config = {
   },
   themes: ['@docusaurus/theme-mermaid'],
 
-  url: 'https://kimsoungryoul.github.io',
+  url: 'https://aerospike-ce-ecosystem.github.io',
   baseUrl: '/aerospike-py/',
 
-  organizationName: 'KimSoungRyoul',
+  organizationName: 'aerospike-ce-ecosystem',
   projectName: 'aerospike-py',
 
   onBrokenLinks: 'throw',
@@ -90,7 +90,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           editUrl:
-            'https://github.com/KimSoungRyoul/aerospike-py/tree/main/docs/',
+            'https://github.com/aerospike-ce-ecosystem/aerospike-py/tree/main/docs/',
           showLastUpdateTime: true,
           // Versioning: managed via versions-config.json
           // Automatically updated by the docs-version.yaml workflow on release
@@ -136,7 +136,7 @@ const config: Config = {
           position: 'right',
         },
         {
-          href: 'https://github.com/KimSoungRyoul/aerospike-py',
+          href: 'https://github.com/aerospike-ce-ecosystem/aerospike-py',
           label: 'GitHub',
           position: 'right',
         },
@@ -175,7 +175,7 @@ const config: Config = {
             },
             {
               label: 'GitHub',
-              href: 'https://github.com/KimSoungRyoul/aerospike-py',
+              href: 'https://github.com/aerospike-ce-ecosystem/aerospike-py',
             },
           ],
         },
