@@ -26,6 +26,47 @@
 
 ---
 
+## 1-bis. 환경별 성능 차이 요약 (같은 3.11 + GIL 조건)
+
+aerospike-py 의 이점은 **주변 스택이 얇을수록 크게 드러남**. DB 호출만 있는 환경에서는 5배 가까이 빠르지만, uvicorn/FastAPI/DLRM 이 붙을수록 `torch CPU inference`, `http parsing`, `feature extraction` 같은 DB 무관 비용이 분모에 더해져 비율이 줄어듦.
+
+### 측정한 3가지 환경
+
+| 환경 | 구성 | DB 외 추가 요소 |
+|---|---|---|
+| **A) 순수 DB client** | 파이썬 루프에서 `batch_read` 반복 호출 (`benchmark/src/benchmark/runner.py`) | 없음 |
+| **B) uvicorn ASGI only** | FastAPI 엔드포인트 → `batch_read` → JSON 응답 (`serving/asgi_benchmark.py`) | uvicorn/ASGI, HTTP 파싱, JSON serialize |
+| **C) uvicorn + DLRM torch CPU** | FastAPI → key extraction → 9 set `batch_read` → feature extraction → DLRM inference → response (`endpoints/predict.py`) | uvicorn, DLRM (PyTorch CPU), feature extractor |
+
+### 환경별 aerospike-py vs 공식 client
+
+| 환경 | 지표 | aerospike-py | 공식 aerospike | aerospike-py 우위 |
+|---|---|---:|---:|---:|
+| **A) 순수 DB client** | avg latency | **22.45 ms** | 107.56 ms | **4.8× faster** |
+|  | TPS | **373.7** | 138.2 | **2.7× higher** |
+|  | p99 | **120.67 ms** | 195.34 ms | 1.6× |
+| **B) uvicorn ASGI only**¹ | total mean | **228.49 ms** | 289.56 ms | **1.3× faster** |
+|  | TPS | **19.4** | 16.6 | 1.2× |
+|  | Aerospike 구간만 | 221.12 ms | 280.00 ms | 1.27× |
+| **C) uvicorn + DLRM CPU** | single p95 (k6) | **189 ms** | 324 ms | **1.71×** |
+|  | avg | 126 ms | 188 ms | 1.49× |
+|  | TPS (E2E) | ~40 req/s | ~24 req/s² | ~1.7× |
+
+¹ concurrency=5, iter=50, 9 set × 200 keys (상세: `results/asgi_20260416_134730/asgi-report.md`).
+² 공식 client 는 워밍업 윈도우 영향으로 샘플 편차 있음. 정상 구간 평균치.
+
+### 해석
+
+1. **순수 DB client 에서 차이가 가장 큼 (4.8×)** — PyO3 Rust/Tokio 의 이점이 희석 요소 없이 그대로 노출. 공식 client 는 sync 호출이 concurrency 10 에서 GIL 경합으로 평균 100ms 수준까지 올라가지만, aerospike-py 는 20ms 수준 유지.
+
+2. **uvicorn ASGI 만 추가되면 격차가 1.3× 로 급감** — ASGI 레이어(HTTP 파싱, 이벤트 루프 스케줄링, 응답 직렬화)가 공통 비용으로 추가되어 두 클라이언트에 동일하게 더해짐. 분모가 커져서 비율 감소.
+
+3. **uvicorn + DLRM 까지 붙은 실제 서빙 구성에서는 1.5~1.7× 로 안정** — DLRM inference 가 ~20~40ms 소비되지만, 동시에 동시성이 10 VUs 로 올라가면서 GIL 경합이 재현됨. ASGI-only 보다 오히려 비율이 약간 회복되는 경향.
+
+4. **시사점**: DB 호출이 워크로드의 큰 비중을 차지할수록(cache-like 워크로드, lookup-heavy API 등) aerospike-py 의 효과가 가장 크게 드러남. CPU-heavy 서빙 앱(ML inference, 복잡한 비즈니스 로직 포함)에서는 이점이 1.5× 수준으로 수렴하지만 여전히 유효.
+
+---
+
 ## 2. Free-threaded 환경 (Python 3.14t, GIL 제거)
 
 **같은 하드웨어, 같은 앱, 같은 이미지(C client 를 소스 빌드해서 포함) — Python 런타임만 3.14t 로 교체.**
