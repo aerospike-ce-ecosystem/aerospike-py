@@ -1,6 +1,6 @@
 # aerospike-py batch_read 병목 분석 보고서
 
-> 2026-04-16 | K8s mrad1 클러스터, mona-adagent namespace
+> 2026-04-16 | K8s 클러스터, benchmark namespace
 > aerospike-py v0.1.0 (Rust/PyO3), official aerospike C client v19.2.0
 
 ## 1. 문제 정의
@@ -40,18 +40,18 @@ batch_read의 5개 내부 단계를 개별 측정:
 
 ### 2.3 테스트 환경
 
-- **K8s**: mrad1 클러스터, mona-adagent namespace, 2 replicas
+- **K8s**: 클러스터, benchmark namespace, 2 replicas
 - **Aerospike**: 8노드 (maiasp025-032), namespace `aidev`
 - **부하**: k6 10 VUs, 60초, Istio HTTPRoute 경유
 - **모델**: DLRM (PyTorch CPU), 9 set × 200 keys per request
-- **관측**: Grafana MCP (`n3r-m1-service` datasource), Prometheus scrape 15s
+- **관측**: Grafana MCP (Prometheus datasource), Prometheus scrape 15s
 
 ## 3. Rust 내부 구간별 실측 결과
 
 ```
 Grafana PromQL:
   sum by (stage) (rate(db_client_internal_stage_seconds_sum{
-    namespace="mona-adagent", db_operation_name="batch_read"
+    namespace="benchmark", db_operation_name="batch_read"
   }[5m])) / sum by (stage) (rate(db_client_internal_stage_seconds_count{...}[5m]))
 ```
 
