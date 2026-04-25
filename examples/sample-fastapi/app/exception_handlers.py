@@ -25,6 +25,7 @@ from aerospike_py.exception import (
     RecordGenerationError,
     RecordNotFound,
     RecordTooBig,
+    RustPanicError,
 )
 
 logger = logging.getLogger("aerospike_py.fastapi")
@@ -40,6 +41,9 @@ _STATUS_MAP: dict[type, int] = {
     BackpressureError: 503,
     AerospikeTimeoutError: 504,
     ClusterError: 503,
+    # 422 — record contains data the native client cannot decode
+    # (e.g. PYTHON_BLOB / JAVA_BLOB legacy particle types, issue #280).
+    RustPanicError: 422,
     ClientError: 502,
 }
 

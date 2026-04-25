@@ -35,6 +35,7 @@ enum CloseOutcome {
 
 use crate::batch_types::{PendingBatchRead, PendingBatchRecords};
 use crate::errors::as_to_pyerr;
+use crate::panic_safety::future_into_py_panic_safe;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::{parse_backpressure_config, parse_client_policy};
 use crate::record_helpers::{PendingExists, PendingOrderedRecord, PendingRecord};
@@ -300,7 +301,7 @@ impl PyAsyncClient {
             "async put: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.put", async move {
             let _permit = limiter.acquire_named("put").await?;
             client_ops::do_put(&client, args).await
         })
@@ -323,7 +324,7 @@ impl PyAsyncClient {
         );
         let key_py = key_to_py(py, &args.key)?;
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.get", async move {
             let _permit = limiter.acquire_named("get").await?;
             let record = client_ops::do_get(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
@@ -349,7 +350,7 @@ impl PyAsyncClient {
         );
         let key_py = key_to_py(py, &args.key)?;
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.select", async move {
             let _permit = limiter.acquire_named("select").await?;
             let record = client_ops::do_select(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
@@ -373,7 +374,7 @@ impl PyAsyncClient {
         );
         let key_py = key_to_py(py, &args.key)?;
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.exists", async move {
             let _permit = limiter.acquire_named("exists").await?;
             let result = client_ops::do_exists(&client, &args).await;
             Ok(PendingExists { result, key_py })
@@ -397,7 +398,7 @@ impl PyAsyncClient {
             "async remove: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.remove", async move {
             let _permit = limiter.acquire_named("remove").await?;
             client_ops::do_remove(&client, args).await
         })
@@ -421,7 +422,7 @@ impl PyAsyncClient {
             "async touch: ns={} set={}",
             args.key.namespace, args.key.set_name
         );
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.touch", async move {
             let _permit = limiter.acquire_named("touch").await?;
             client_ops::do_touch(&client, args).await
         })
@@ -453,7 +454,7 @@ impl PyAsyncClient {
             "async increment: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.increment", async move {
             let _permit = limiter.acquire_named("increment").await?;
             client_ops::do_increment(&client, args).await
         })
@@ -481,7 +482,7 @@ impl PyAsyncClient {
         );
         let key_py = key_to_py(py, &args.key)?;
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.operate", async move {
             let _permit = limiter.acquire_named("operate").await?;
             let record = client_ops::do_operate(&client, &args).await?;
             Ok(PendingRecord { record, key_py })
@@ -516,7 +517,7 @@ impl PyAsyncClient {
             "async append: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.append", async move {
             let _permit = limiter.acquire_named("append").await?;
             client_ops::do_append(&client, args).await
         })
@@ -548,7 +549,7 @@ impl PyAsyncClient {
             "async prepend: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
         );
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.prepend", async move {
             let _permit = limiter.acquire_named("prepend").await?;
             client_ops::do_prepend(&client, args).await
         })
@@ -574,7 +575,7 @@ impl PyAsyncClient {
             policy,
             &self.connection_info,
         )?;
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.remove_bin", async move {
             let _permit = limiter.acquire_named("remove_bin").await?;
             client_ops::do_remove_bin(&client, args).await
         })
@@ -604,7 +605,7 @@ impl PyAsyncClient {
         );
         let pre_key_py = key_to_py(py, &args.key)?;
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.operate_ordered", async move {
             let _permit = limiter.acquire_named("operate_ordered").await?;
             let record = client_ops::do_operate_ordered(&client, &args).await?;
             Ok(PendingOrderedRecord {
@@ -690,7 +691,7 @@ impl PyAsyncClient {
             a.key.namespace, a.key.set_name, a.module, a.function
         );
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.apply", async move {
             let result = client_ops::do_apply(&client, &a).await?;
             Python::attach(|py| match result {
                 Some(val) => value_to_py(py, &val),
@@ -742,7 +743,7 @@ impl PyAsyncClient {
         // for the recommended subtraction.
         let spawned_at = crate::metrics::maybe_now();
         crate::stage_timer!("future_into_py_setup", "batch_read", {
-            future_into_py(py, async move {
+            future_into_py_panic_safe(py, "AsyncClient.batch_read", async move {
                 // ── (B) Tokio task scheduling delay ──
                 if let Some(t) = spawned_at {
                     crate::metrics::record_internal_stage_unchecked(
@@ -805,7 +806,7 @@ impl PyAsyncClient {
             &self.connection_info,
         )?;
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.batch_operate", async move {
             let _permit = limiter.acquire_named("batch_operate").await?;
             let results = client_ops::do_batch_operate(&client, &args).await?;
             Ok(PendingBatchRecords { results })
@@ -833,7 +834,7 @@ impl PyAsyncClient {
             &self.connection_info,
         )?;
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.batch_write", async move {
             let _permit = limiter.acquire_named("batch_write").await?;
             let results = client_ops::do_batch_write(
                 &client,
@@ -893,7 +894,7 @@ impl PyAsyncClient {
         let ns = namespace.to_string();
         let set = set_name.to_string();
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.batch_write_numpy", async move {
             let _permit = limiter.acquire_named("batch_write_numpy").await?;
             let results = client_ops::do_batch_write(
                 &client,
@@ -925,7 +926,7 @@ impl PyAsyncClient {
         let args =
             client_common::prepare_batch_remove_args(py, keys, policy, &self.connection_info)?;
 
-        future_into_py(py, async move {
+        future_into_py_panic_safe(py, "AsyncClient.batch_remove", async move {
             let _permit = limiter.acquire_named("batch_remove").await?;
             let results = client_ops::do_batch_remove(&client, &args).await?;
             Ok(PendingBatchRecords { results })

@@ -17,6 +17,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::errors::as_to_pyerr;
+use crate::panic_safety::catch_panic_sync;
 use crate::policy::query_policy::parse_query_policy;
 use crate::runtime::RUNTIME;
 use crate::types::record::record_to_py;
@@ -213,19 +214,26 @@ fn execute_query_collect(
     debug!("Executing {}", op_name);
 
     let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
-    let result: Result<Vec<_>, AsError> = py.detach(|| {
-        RUNTIME.block_on(async {
-            let rs = client
-                .query(&query_policy, PartitionFilter::all(), statement)
-                .await?;
-            let mut stream = rs.into_stream();
-            let mut results = Vec::new();
-            while let Some(result) = stream.next().await {
-                results.push(result?);
-            }
-            Ok(results)
-        })
-    });
+    let panic_op: &'static str = match op_name {
+        "scan" => "Query.scan",
+        "query" => "Query.query",
+        _ => "Query.execute",
+    };
+    let result: Result<Vec<_>, AsError> = catch_panic_sync(panic_op, || {
+        Ok(py.detach(|| {
+            RUNTIME.block_on(async {
+                let rs = client
+                    .query(&query_policy, PartitionFilter::all(), statement)
+                    .await?;
+                let mut stream = rs.into_stream();
+                let mut results = Vec::new();
+                while let Some(result) = stream.next().await {
+                    results.push(result?);
+                }
+                Ok(results)
+            })
+        }))
+    })?;
 
     match &result {
         Ok(_) => timer.finish(""),
