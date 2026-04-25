@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+import aerospike_py
+from app.exception_handlers import _STATUS_MAP
+
 NS, SET = "test", "exc_test"
+
+
+def test_rust_panic_error_mapped_to_422():
+    """Issue #280: a native Rust panic (e.g. legacy PYTHON_BLOB) surfaces
+    as HTTP 422 so callers can distinguish it from a generic client
+    error (502)."""
+    assert aerospike_py.RustPanicError in _STATUS_MAP
+    assert _STATUS_MAP[aerospike_py.RustPanicError] == 422
 
 
 def test_get_nonexistent_user_returns_404(client):

@@ -2,8 +2,15 @@
 members = ["rust"]
 resolver = "2"
 
+# `panic = "unwind"` lets us catch panics from aerospike-core in `read` paths
+# (notably `bytes_to_particle()` panicking on PYTHON_BLOB / JAVA_BLOB / etc. —
+# see issue #280). Switching from "abort" adds DWARF unwind tables to the
+# release wheel (~+33% on macOS arm64 with LTO=fat: 2.0 → 2.6 MB; lower on
+# Linux x86_64). Hot-path runtime cost is negligible: LLVM uses `invoke`
+# instead of `call`, indistinguishable from `call` on modern CPUs unless a
+# panic actually propagates.
 [profile.release]
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
-panic = "abort"
+panic = "unwind"

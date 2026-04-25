@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [Unreleased]: https://github.com/KimSoungRyoul/aerospike-py/compare/v0.0.1.beta2...HEAD
 
+### Fixed
+- Reading a record with a language-specific blob particle type (PYTHON_BLOB=8, JAVA_BLOB=5, CSHARP_BLOB=7, RUBY_BLOB=9, PHP_BLOB=10, ERLANG_BLOB=11, LUA_BLOB=22) no longer aborts the Python process. The native panic from `aerospike-core` is now caught at every read/write entry point and surfaced to Python as `aerospike_py.RustPanicError` (subclass of `ClientError`), so callers can `try/except` around individual operations or per-record in scans/batch reads. The bin data itself is not recovered — the operation reports the failure and aborts; only the Python process survives. Closes #280.
+
+### Changed
+- Release profile panic policy switched from `"abort"` to `"unwind"` to enable the `RustPanicError` recovery path. Wheel size grows accordingly: `+0.63 MB` / `+33%` on macOS arm64 with LTO=fat (1.99 MB → 2.66 MB); typically smaller on Linux x86_64. Hot-path read/write throughput is unaffected (LLVM `invoke` vs `call` is a no-op on modern CPUs when no panic propagates).
+
+### Added
+- `aerospike_py.RustPanicError` — re-exported from the top-level package and from `aerospike_py.exception`. Catch it (or its parent `ClientError`) to handle records that the underlying Rust client cannot decode.
+
 ### Changed (BREAKING)
 - `BatchRecords` is now a `TypeAlias = dict[UserKey, AerospikeRecord]` (was a `NamedTuple` with a `batch_records` attribute). This is the return type of both `Client.batch_read` and `AsyncClient.batch_read`. Migration:
     ```python
