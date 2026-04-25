@@ -53,11 +53,6 @@ otel = [
 ]
 
 [package.dev-dependencies]
-bench = [
-    { name = "aerospike" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
 dev = [
     { name = "hypothesis" },
     { name = "maturin" },
@@ -124,10 +119,6 @@ requires-dist = [
 provides-extras = ["numpy", "otel"]
 
 [package.metadata.requires-dev]
-bench = [
-    { name = "aerospike", specifier = ">=17.0.0" },
-    { name = "numpy", specifier = ">=2.0" },
-]
 dev = [
     { name = "hypothesis", specifier = ">=6.0" },
     { name = "maturin", specifier = ">=1.9,<2" },

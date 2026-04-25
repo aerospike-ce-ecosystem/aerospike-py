@@ -5,6 +5,7 @@ Exception hierarchy::
     AerospikeError (base)
       +-- ClientError              (connection, configuration, internal)
       |     +-- BackpressureError  (concurrent operations limit exceeded)
+      |     +-- RustPanicError     (native Rust panic; process survived)
       +-- ServerError              (server-side errors)
       |     +-- AerospikeIndexError
       |     |     +-- IndexNotFound
@@ -62,6 +63,18 @@ class BackpressureError(ClientError):
     Only raised when ``max_concurrent_operations`` is configured in the client
     config and the ``operation_queue_timeout_ms`` deadline expires while waiting
     for a free slot.
+    """
+
+class RustPanicError(ClientError):
+    """Raised when a native Rust panic was caught at a client API boundary.
+
+    The Python process survived; the operation did not complete. The most
+    common cause on legacy clusters is a record carrying a language-specific
+    blob particle type (``PYTHON_BLOB`` = 8, ``JAVA_BLOB`` = 5, etc.) that
+    ``aerospike-core`` 2.0.0 cannot decode. See issue #280.
+
+    Catch this per-record (in scans / batch reads) to skip the bad record
+    instead of failing the whole request.
     """
 
 class InvalidArgError(AerospikeError):

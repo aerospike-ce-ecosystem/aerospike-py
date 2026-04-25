@@ -20,6 +20,7 @@ from aerospike_py._aerospike import (  # noqa: F401
     ServerError,
     AerospikeTimeoutError,
     BackpressureError,
+    RustPanicError,
     TimeoutError,  # deprecated alias for AerospikeTimeoutError
     RecordNotFound,
     RecordExistsError,
@@ -404,6 +405,7 @@ __all__ = [
     "ServerError",
     "AerospikeTimeoutError",
     "BackpressureError",
+    "RustPanicError",
     "TimeoutError",  # deprecated alias
     "RecordNotFound",
     "RecordExistsError",

@@ -71,6 +71,15 @@ pyo3::create_exception!(
     ClientError,
     "Maximum concurrent operations exceeded; retry after backoff."
 );
+pyo3::create_exception!(
+    aerospike,
+    RustPanicError,
+    ClientError,
+    "Native Rust panic during an operation. The Python process survived; the \
+     operation did not complete. Common cause: legacy records carrying \
+     language-specific blob particle types (PYTHON_BLOB, JAVA_BLOB, ...) that \
+     aerospike-core 2.0.0 cannot decode (see issue #280)."
+);
 
 // Record-level exceptions
 pyo3::create_exception!(
@@ -351,6 +360,7 @@ pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("TimeoutError", py.get_type::<AerospikeTimeoutError>())?; // backward compat
     m.add("InvalidArgError", py.get_type::<InvalidArgError>())?;
     m.add("BackpressureError", py.get_type::<BackpressureError>())?;
+    m.add("RustPanicError", py.get_type::<RustPanicError>())?;
     // Record-level exceptions
     m.add("RecordNotFound", py.get_type::<RecordNotFound>())?;
     m.add("RecordExistsError", py.get_type::<RecordExistsError>())?;
