@@ -1,0 +1,10 @@
+{
+  "label": "Guides",
+  "position": 3,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Guides",
+    "description": "CRUD, query, expression filters, CDT, UDF, and admin guides"
+  }
+}
