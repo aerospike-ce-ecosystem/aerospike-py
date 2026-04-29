@@ -674,16 +674,27 @@ class Client:
         Unlike ``batch_operate`` (which applies the same operations to all
         keys), each record can have different bins.
 
-        TTL can be set at two levels:
+        Write fields can be set at two levels and follow a uniform precedence
+        rule — **per-record meta always overrides the batch-level policy**.
+        The fields below mirror the corresponding [`WritePolicy`](types.md#writepolicy)
+        keys used by :meth:`put`:
 
-        - **Batch-level**: ``policy={"ttl": N}`` applies to all records.
-        - **Per-record**: ``(key, bins, {"ttl": N})`` overrides the
-          batch-level TTL for that specific record.
+        | Field            | Batch-level (``policy``) | Per-record (``meta``) | Notes                                            |
+        |------------------|--------------------------|-----------------------|--------------------------------------------------|
+        | ``ttl``          | ✅                       | ✅                    | Seconds, or ``TTL_NEVER_EXPIRE`` / ``TTL_DONT_UPDATE``. |
+        | ``key``          | ✅                       | ✅                    | ``POLICY_KEY_DIGEST`` (default) / ``POLICY_KEY_SEND``. |
+        | ``exists``       | ✅                       | ✅                    | ``POLICY_EXISTS_*`` (UPDATE / CREATE_ONLY / etc.). |
+        | ``gen``          | ✅ (enum index)          | ✅ (expected value)   | Batch-level: ``POLICY_GEN_*``. Per-record: int forces ``POLICY_GEN_EQ`` with this generation. |
+        | ``commit_level`` | ✅                       | ✅                    | ``POLICY_COMMIT_LEVEL_ALL`` (default) / ``_MASTER``. |
+        | ``durable_delete`` | ✅                     | ✅                    | EE 3.10+ tombstone semantics.                    |
 
         Args:
             records: List of ``(key, bins)`` or ``(key, bins, meta)`` tuples.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-                Supports ``"ttl"`` key for batch-level TTL (seconds).
+                Accepts the write fields above plus standard batch transport
+                keys (``socket_timeout``, ``total_timeout``, ``max_retries``,
+                ``filter_expression``, ``allow_inline``, ``allow_inline_ssd``,
+                ``respond_all_keys``).
             retry: Maximum number of retries for failed records (default ``0``).
                 When > 0, records that fail with transient errors (timeout,
                 device overload, key busy) are automatically retried with
@@ -717,6 +728,26 @@ class Client:
                 (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
             ]
             results = client.batch_write(records_with_ttl)
+
+            # Persist user keys server-side (POLICY_KEY_SEND) — visible via
+            # ``scan`` / ``query`` / ``aql SELECT *``.
+            results = client.batch_write(
+                records,
+                policy={"key": aerospike_py.POLICY_KEY_SEND},
+            )
+
+            # Mix per-record overrides: only ``user1`` stores its key.
+            results = client.batch_write([
+                (("test", "demo", "user1"), {"name": "Alice"},
+                 {"key": aerospike_py.POLICY_KEY_SEND}),
+                (("test", "demo", "user2"), {"name": "Bob"}),
+            ])
+
+            # CREATE_ONLY semantics — fail per-record if it already exists.
+            results = client.batch_write(
+                records,
+                policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+            )
             ```
         """
         ...
@@ -1672,21 +1703,15 @@ class AsyncClient:
     ) -> BatchWriteResult:
         """Write multiple records with per-record bins (async).
 
-        Each record is a ``(key, bins)`` or ``(key, bins, meta)`` tuple where
-        key is ``(namespace, set, primary_key)``, bins is a dict of bin
-        name-to-value mappings, and meta is an optional
-        [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``).
-
-        TTL can be set at two levels:
-
-        - **Batch-level**: ``policy={"ttl": N}`` applies to all records.
-        - **Per-record**: ``(key, bins, {"ttl": N})`` overrides the
-          batch-level TTL for that specific record.
+        See :meth:`Client.batch_write` for the full description of write
+        fields supported at both batch-level (``policy``) and per-record
+        (``meta``) levels — ``ttl``, ``key`` (send_key), ``exists``, ``gen``,
+        ``commit_level``, ``durable_delete``. Per-record meta always
+        overrides the batch-level policy.
 
         Args:
             records: List of ``(key, bins)`` or ``(key, bins, meta)`` tuples.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-                Supports ``"ttl"`` key for batch-level TTL (seconds).
             retry: Maximum number of retries for failed records (default ``0``).
                 When > 0, records that fail with transient errors (timeout,
                 device overload, key busy) are automatically retried with
@@ -1704,22 +1729,25 @@ class AsyncClient:
 
         Example:
             ```python
-            # Basic usage
             records = [
                 (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
                 (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
             ]
             results = await client.batch_write(records)
 
-            # With batch-level TTL (30 days)
-            results = await client.batch_write(records, policy={"ttl": 2592000})
+            # Persist user keys server-side
+            results = await client.batch_write(
+                records,
+                policy={"key": aerospike_py.POLICY_KEY_SEND},
+            )
 
-            # With per-record TTL
-            records_with_ttl = [
-                (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),
+            # Per-record overrides
+            records_with_meta = [
+                (("test", "demo", "user1"), {"name": "Alice"},
+                 {"ttl": 3600, "key": aerospike_py.POLICY_KEY_SEND}),
                 (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
             ]
-            results = await client.batch_write(records_with_ttl)
+            results = await client.batch_write(records_with_meta)
             ```
         """
         ...

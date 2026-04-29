@@ -300,6 +300,47 @@ class TestPolicySendKey:
 
         assert r_key[2] == o_key[2] == 12345
 
+    def test_batch_send_key_via_policy(self, rust_client, official_client, cleanup):
+        """``batch_write(policy={'key': SEND})`` persists user keys (issue #303)."""
+        key = (NS, SET, "pol_batch_sendkey_pol")
+        cleanup.append(key)
+
+        rust_client.batch_write(
+            [(key, {"val": 1})],
+            policy={"key": aerospike_py.POLICY_KEY_SEND},
+        )
+
+        r_key, _, _ = rust_client.get(key, policy={"key": aerospike_py.POLICY_KEY_SEND})
+        o_key, _, _ = official_client.get(key, policy={"key": aerospike.POLICY_KEY_SEND})
+
+        assert r_key[2] == "pol_batch_sendkey_pol"
+        assert o_key[2] == "pol_batch_sendkey_pol"
+
+    def test_batch_send_key_via_per_record_meta(self, rust_client, official_client, cleanup):
+        """``(key, bins, {'key': SEND})`` persists user key for that record only."""
+        key = (NS, SET, "pol_batch_sendkey_meta")
+        cleanup.append(key)
+
+        rust_client.batch_write([(key, {"val": 1}, {"key": aerospike_py.POLICY_KEY_SEND})])
+
+        r_key, _, _ = rust_client.get(key, policy={"key": aerospike_py.POLICY_KEY_SEND})
+        o_key, _, _ = official_client.get(key, policy={"key": aerospike.POLICY_KEY_SEND})
+
+        assert r_key[2] == "pol_batch_sendkey_meta"
+        assert o_key[2] == "pol_batch_sendkey_meta"
+
+    def test_batch_send_key_default_digest_only(self, rust_client, official_client, cleanup):
+        """Without policy/meta, batch_write stores digest only — official client confirms no user key."""
+        key = (NS, SET, "pol_batch_sendkey_none")
+        cleanup.append(key)
+
+        rust_client.batch_write([(key, {"val": 1})])
+
+        # The official C client does not echo the request user_key back, so its
+        # response is the source of truth for what the server actually stored.
+        o_key, _, _ = official_client.get(key)
+        assert o_key[2] is None
+
 
 # ── CREATE_ONLY Policy ─────────────────────────────────────────────
 

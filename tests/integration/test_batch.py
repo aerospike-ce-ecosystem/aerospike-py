@@ -560,6 +560,164 @@ class TestBatchWriteGen:
         assert meta2.ttl <= 3600
 
 
+class TestBatchWriteSendKey:
+    """Test batch_write() POLICY_KEY_SEND support (issue #303).
+
+    With ``key=POLICY_KEY_SEND``, the original user-supplied primary key is
+    persisted on the server alongside the digest. The presence of a stored
+    user key is verified via ``query().results()`` — unlike ``get()``, a
+    query scan does not echo the request user key, so ``record.key.user_key``
+    is populated only when the server has it.
+    """
+
+    @staticmethod
+    def _scan_user_keys(client_, ns: str, set_name: str) -> list[str | int | bytes | None]:
+        """Return the server-stored user keys for every record in the set."""
+        records = client_.query(ns, set_name).results()
+        return [r.key.user_key for r in records if r.key is not None]
+
+    def test_batch_write_policy_send_key(self, client, cleanup):
+        """Batch-level ``policy={"key": POLICY_KEY_SEND}`` applies to all records."""
+        keys = [
+            ("test", "bw_sendkey_pol", "bw_sendkey_pol_1"),
+            ("test", "bw_sendkey_pol", "bw_sendkey_pol_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        records = [(k, {"val": i}) for i, k in enumerate(keys)]
+        results = client.batch_write(records, policy={"key": aerospike_py.POLICY_KEY_SEND})
+        for br in results.batch_records:
+            assert br.result == 0
+
+        scanned = self._scan_user_keys(client, "test", "bw_sendkey_pol")
+        assert sorted(str(v) for v in scanned) == ["bw_sendkey_pol_1", "bw_sendkey_pol_2"]
+
+    def test_batch_write_per_record_send_key(self, client, cleanup):
+        """Per-record meta ``{"key": POLICY_KEY_SEND}`` persists user key."""
+        key = ("test", "bw_sendkey_meta", "bw_sendkey_meta_user")
+        cleanup.append(key)
+
+        results = client.batch_write([(key, {"val": 1}, {"key": aerospike_py.POLICY_KEY_SEND})])
+        assert results.batch_records[0].result == 0
+
+        scanned = self._scan_user_keys(client, "test", "bw_sendkey_meta")
+        assert scanned == ["bw_sendkey_meta_user"]
+
+    def test_batch_write_per_record_overrides_policy(self, client, cleanup):
+        """Per-record meta send_key overrides batch-level policy.
+
+        Batch policy = DIGEST, but the first record's meta = SEND. Only the
+        first record's user key should be persisted server-side.
+        """
+        key_send = ("test", "bw_sendkey_override", "override_send")
+        key_digest = ("test", "bw_sendkey_override", "override_digest")
+        cleanup.append(key_send)
+        cleanup.append(key_digest)
+
+        records = [
+            (key_send, {"val": 1}, {"key": aerospike_py.POLICY_KEY_SEND}),
+            (key_digest, {"val": 2}),
+        ]
+        results = client.batch_write(records, policy={"key": aerospike_py.POLICY_KEY_DIGEST})
+        for br in results.batch_records:
+            assert br.result == 0
+
+        scanned = self._scan_user_keys(client, "test", "bw_sendkey_override")
+        # Exactly one record has a stored user key; the other is None.
+        stored = [v for v in scanned if v is not None]
+        assert stored == ["override_send"]
+        assert sum(1 for v in scanned if v is None) == 1
+
+    def test_batch_write_send_key_default_is_digest(self, client, cleanup):
+        """Without policy/meta, batch_write defaults to digest-only (no user key stored)."""
+        key = ("test", "bw_sendkey_default", "bw_sendkey_default_user")
+        cleanup.append(key)
+
+        results = client.batch_write([(key, {"val": 1})])
+        assert results.batch_records[0].result == 0
+
+        scanned = self._scan_user_keys(client, "test", "bw_sendkey_default")
+        assert scanned == [None]
+
+
+class TestBatchWriteWriteFields:
+    """Test batch_write() parity with put() for the remaining BatchWritePolicy fields."""
+
+    def test_batch_write_exists_create_only_new_record(self, client, cleanup):
+        """``exists=POLICY_EXISTS_CREATE_ONLY`` succeeds when the record does not exist."""
+        key = ("test", "demo", "bw_exists_create_new")
+        cleanup.append(key)
+
+        results = client.batch_write(
+            [(key, {"val": 1})],
+            policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+        )
+        assert results.batch_records[0].result == 0
+
+    def test_batch_write_exists_create_only_existing_record(self, client, cleanup):
+        """``exists=POLICY_EXISTS_CREATE_ONLY`` fails when the record already exists."""
+        key = ("test", "demo", "bw_exists_create_existing")
+        cleanup.append(key)
+        client.put(key, {"val": 1})
+
+        results = client.batch_write(
+            [(key, {"val": 2})],
+            policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+        )
+        # KEY_EXISTS_ERROR (server result code 5) — non-zero is sufficient here.
+        assert results.batch_records[0].result != 0
+
+        # Original value preserved.
+        _, _, bins = client.get(key)
+        assert bins["val"] == 1
+
+    def test_batch_write_exists_per_record_override(self, client, cleanup):
+        """Per-record ``exists`` overrides batch-level."""
+        key_existing = ("test", "demo", "bw_exists_per_rec_existing")
+        key_new = ("test", "demo", "bw_exists_per_rec_new")
+        cleanup.append(key_existing)
+        cleanup.append(key_new)
+
+        client.put(key_existing, {"val": 1})
+
+        # Batch policy = UPDATE (default), per-record meta = CREATE_ONLY.
+        records = [
+            (
+                key_existing,
+                {"val": 2},
+                {"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+            ),
+            (
+                key_new,
+                {"val": 99},
+                {"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+            ),
+        ]
+        results = client.batch_write(records)
+        assert results.batch_records[0].result != 0  # CREATE_ONLY on existing → fail
+        assert results.batch_records[1].result == 0  # CREATE_ONLY on new → succeed
+
+    def test_batch_write_commit_level_master(self, client, cleanup):
+        """``commit_level=POLICY_COMMIT_LEVEL_MASTER`` is accepted at batch level."""
+        key = ("test", "demo", "bw_commit_master")
+        cleanup.append(key)
+
+        results = client.batch_write(
+            [(key, {"val": 1})],
+            policy={"commit_level": aerospike_py.POLICY_COMMIT_LEVEL_MASTER},
+        )
+        assert results.batch_records[0].result == 0
+
+    def test_batch_write_durable_delete_accepted(self, client, cleanup):
+        """``durable_delete`` is accepted (no-op on writes / CE; must not be rejected)."""
+        key = ("test", "demo", "bw_durable_delete")
+        cleanup.append(key)
+
+        results = client.batch_write([(key, {"val": 1})], policy={"durable_delete": True})
+        assert results.batch_records[0].result == 0
+
+
 class TestBatchRemove:
     def test_batch_remove(self, client):
         keys = [

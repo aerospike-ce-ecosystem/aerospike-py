@@ -2,12 +2,15 @@
 
 use std::sync::LazyLock;
 
-use aerospike_core::{CommitLevel, Expiration, GenerationPolicy, RecordExistsAction, WritePolicy};
+use aerospike_core::{Expiration, GenerationPolicy, WritePolicy};
 use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use super::{extract_filter_expression, extract_policy_fields};
+use super::{
+    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_generation_policy,
+    parse_record_exists_action,
+};
 
 /// Lazily-initialized default write policy used when no policy dict is provided.
 pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePolicy::default);
@@ -64,42 +67,22 @@ pub fn parse_write_policy(
 
     // Key (send_key)
     if let Some(val) = dict.get_item("key")? {
-        let key_val: i32 = val.extract()?;
-        policy.send_key = key_val == 1;
+        policy.send_key = val.extract::<i32>()? == 1;
     }
 
     // Exists (record_exists_action)
     if let Some(val) = dict.get_item("exists")? {
-        let exists_val: i32 = val.extract()?;
-        policy.record_exists_action = match exists_val {
-            0 => RecordExistsAction::Update,
-            1 => RecordExistsAction::UpdateOnly,
-            2 => RecordExistsAction::Replace,
-            3 => RecordExistsAction::ReplaceOnly,
-            4 => RecordExistsAction::CreateOnly,
-            _ => RecordExistsAction::Update,
-        };
+        policy.record_exists_action = parse_record_exists_action(val.extract::<i32>()?);
     }
 
     // Gen policy
     if let Some(val) = dict.get_item("gen")? {
-        let gen_val: i32 = val.extract()?;
-        policy.generation_policy = match gen_val {
-            0 => GenerationPolicy::None,
-            1 => GenerationPolicy::ExpectGenEqual,
-            2 => GenerationPolicy::ExpectGenGreater,
-            _ => GenerationPolicy::None,
-        };
+        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?);
     }
 
     // Commit level
     if let Some(val) = dict.get_item("commit_level")? {
-        let commit_val: i32 = val.extract()?;
-        policy.commit_level = match commit_val {
-            0 => CommitLevel::CommitAll,
-            1 => CommitLevel::CommitMaster,
-            _ => CommitLevel::CommitAll,
-        };
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
     }
 
     // TTL / expiration

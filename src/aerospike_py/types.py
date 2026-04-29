@@ -128,6 +128,18 @@ class BatchPolicy(TypedDict, total=False):
     total_timeout: int
     max_retries: int
     filter_expression: Any
+    allow_inline: bool
+    allow_inline_ssd: bool
+    respond_all_keys: bool
+    # Batch-level write defaults — used by ``batch_write``. Per-record
+    # ``WriteMeta`` entries override these fields (matching the existing
+    # ``ttl``/``gen`` precedence rule).
+    key: int
+    exists: int
+    gen: int
+    commit_level: int
+    durable_delete: bool
+    ttl: int
 
 
 class AdminPolicy(TypedDict, total=False):
@@ -147,6 +159,10 @@ class QueryPolicy(TypedDict, total=False):
 class WriteMeta(TypedDict, total=False):
     gen: int
     ttl: int
+    key: int
+    exists: int
+    commit_level: int
+    durable_delete: bool
 
 
 class ClientConfig(TypedDict, total=False):

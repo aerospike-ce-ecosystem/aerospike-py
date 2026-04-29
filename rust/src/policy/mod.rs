@@ -6,6 +6,7 @@ pub mod read_policy;
 pub mod write_policy;
 
 use aerospike_core::expressions::Expression;
+use aerospike_core::{CommitLevel, GenerationPolicy, RecordExistsAction};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -36,4 +37,42 @@ pub fn extract_filter_expression(dict: &Bound<'_, PyDict>) -> PyResult<Option<Ex
         }
     }
     Ok(None)
+}
+
+/// Map a `POLICY_EXISTS_*` integer constant to a [`RecordExistsAction`].
+///
+/// Unknown values fall back to [`RecordExistsAction::Update`] to mirror
+/// pre-existing behavior in `parse_write_policy`.
+pub(crate) fn parse_record_exists_action(val: i32) -> RecordExistsAction {
+    match val {
+        0 => RecordExistsAction::Update,
+        1 => RecordExistsAction::UpdateOnly,
+        2 => RecordExistsAction::Replace,
+        3 => RecordExistsAction::ReplaceOnly,
+        4 => RecordExistsAction::CreateOnly,
+        _ => RecordExistsAction::Update,
+    }
+}
+
+/// Map a `POLICY_GEN_*` integer constant to a [`GenerationPolicy`].
+///
+/// Unknown values fall back to [`GenerationPolicy::None`].
+pub(crate) fn parse_generation_policy(val: i32) -> GenerationPolicy {
+    match val {
+        0 => GenerationPolicy::None,
+        1 => GenerationPolicy::ExpectGenEqual,
+        2 => GenerationPolicy::ExpectGenGreater,
+        _ => GenerationPolicy::None,
+    }
+}
+
+/// Map a `POLICY_COMMIT_LEVEL_*` integer constant to a [`CommitLevel`].
+///
+/// Unknown values fall back to [`CommitLevel::CommitAll`].
+pub(crate) fn parse_commit_level(val: i32) -> CommitLevel {
+    match val {
+        0 => CommitLevel::CommitAll,
+        1 => CommitLevel::CommitMaster,
+        _ => CommitLevel::CommitAll,
+    }
 }
