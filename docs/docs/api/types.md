@@ -201,7 +201,9 @@ Used by: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`,
 
 ### `BatchPolicy`
 
-Used by: `batch_read()`, `batch_operate()`, `batch_remove()`
+Used by: `batch_read()`, `batch_operate()`, `batch_write()`, `batch_remove()`
+
+#### Transport / batch-level fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -209,6 +211,22 @@ Used by: `batch_read()`, `batch_operate()`, `batch_remove()`
 | `total_timeout` | `int` | `1000` | Total transaction timeout (ms) |
 | `max_retries` | `int` | `2` | Max retries |
 | `filter_expression` | `Any` | | Expression filter |
+| `allow_inline` | `bool` | `true` | Allow server inline processing in receiving thread |
+| `allow_inline_ssd` | `bool` | `false` | Allow inline processing for SSD namespaces |
+| `respond_all_keys` | `bool` | `true` | Attempt all keys regardless of per-record errors |
+
+#### Write defaults (used by `batch_write`)
+
+These fields apply to every record in a `batch_write()` call. Per-record [`WriteMeta`](#writemeta) overrides them — see the [precedence rule](#write-field-precedence-batch_write).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `key` | `int` | `POLICY_KEY_DIGEST` | Key send policy. Set `POLICY_KEY_SEND` to persist user keys server-side. |
+| `exists` | `int` | `POLICY_EXISTS_UPDATE` | Existence policy (`UPDATE`, `CREATE_ONLY`, `REPLACE`, etc.). |
+| `gen` | `int` | `POLICY_GEN_IGNORE` | Generation policy. Note: at batch-level, this is the `POLICY_GEN_*` enum index. Per-record `WriteMeta["gen"]` is the expected generation value. |
+| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | Commit level (`ALL` or `MASTER`). |
+| `durable_delete` | `bool` | `false` | Durable delete (Enterprise 3.10+). |
+| `ttl` | `int` | `0` | Record TTL in seconds (`0` = namespace default, `-1` = never expire, `-2` = don't update). |
 
 ### `QueryPolicy`
 
@@ -233,12 +251,31 @@ Used by: all `admin_*` methods, index operations, `truncate()`
 
 ### `WriteMeta`
 
-Used by: `put()`, `remove()`, `touch()`, `operate()` etc. as `meta` parameter
+Used by: `put()`, `remove()`, `touch()`, `operate()` as the `meta` parameter, **and per-record in `batch_write()`** as the third tuple element `(key, bins, meta)`.
+
+In `batch_write()`, fields set in per-record `WriteMeta` override the corresponding batch-level [`BatchPolicy`](#batchpolicy) defaults — see the [precedence rule](#write-field-precedence-batch_write).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `gen` | `int` | Expected generation (for `POLICY_GEN_EQ`) |
-| `ttl` | `int` | Record TTL in seconds |
+| `gen` | `int` | Expected generation. Setting this implies `POLICY_GEN_EQ` (CAS-style write). |
+| `ttl` | `int` | Record TTL in seconds. Special values: `0` = namespace default, `-1` = never expire, `-2` = don't update. |
+| `key` | `int` | Key send policy (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
+| `exists` | `int` | Existence policy (`POLICY_EXISTS_*`). |
+| `commit_level` | `int` | Commit level (`POLICY_COMMIT_LEVEL_ALL` / `_MASTER`). |
+| `durable_delete` | `bool` | Durable delete (Enterprise 3.10+). |
+
+#### Write field precedence (batch_write)
+
+For every write field, **per-record `WriteMeta` always wins over batch-level `BatchPolicy`**:
+
+| Field            | `BatchPolicy` (batch-level) | `WriteMeta` (per-record) | Notes |
+|------------------|-----------------------------|--------------------------|-------|
+| `ttl`            | ✅                          | ✅                       | Same semantics on both sides. |
+| `key`            | ✅                          | ✅                       | Set `POLICY_KEY_SEND` to persist user keys server-side. |
+| `exists`         | ✅                          | ✅                       | e.g. `POLICY_EXISTS_CREATE_ONLY` for upsert-fail-on-exists. |
+| `gen`            | ✅ (enum index)             | ✅ (expected value)      | Asymmetric: batch-level = `POLICY_GEN_*` enum index; per-record = numeric generation that forces `POLICY_GEN_EQ`. |
+| `commit_level`   | ✅                          | ✅                       | |
+| `durable_delete` | ✅                          | ✅                       | |
 
 ### `Privilege`
 

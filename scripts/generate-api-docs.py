@@ -342,7 +342,7 @@ CLIENT_METHOD_SECTIONS = [
     ("CRUD Operations", ["put", "get", "select", "exists", "remove", "touch"]),
     ("String / Numeric Operations", ["append", "prepend", "increment", "remove_bin"]),
     ("Multi-Operation", ["operate", "operate_ordered"]),
-    ("Batch Operations", ["batch_read", "batch_operate", "batch_remove"]),
+    ("Batch Operations", ["batch_read", "batch_write", "batch_write_numpy", "batch_operate", "batch_remove"]),
     ("Query & Scan", ["query", "scan"]),
     ("Index Management", ["index_integer_create", "index_string_create", "index_geo2dsphere_create", "index_remove"]),
     ("Truncate", ["truncate"]),
