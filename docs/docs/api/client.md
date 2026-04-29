@@ -719,28 +719,27 @@ result = await client.operate_ordered(
 
 Read multiple records in a single batch call.
 
+Returns ``dict[UserKey, AerospikeRecord]`` mapping each user key to
+its bins dict. Only successful reads with a user key are included.
+
 | Parameter | Description |
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `bins` | Optional list of bin names to read. ``None`` reads all bins; an empty list performs an existence check only. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
-| `_dtype` | Optional NumPy dtype. When provided, returns ``NumpyBatchRecords`` instead of the default type. |
+| `_dtype` | Optional NumPy dtype. When provided, returns ``NumpyBatchRecords`` instead of ``BatchRecords``. |
 
-**Returns:** ``BatchRecords`` (``dict[UserKey, dict[str, Any]]``). Only successful reads with a user key are included. Missing or failed records are excluded from the dict. Returns ``NumpyBatchRecords`` when ``_dtype`` is set.
+**Returns:** ``BatchRecords`` (``dict[UserKey, AerospikeRecord]``) or
+    ``NumpyBatchRecords`` when ``_dtype`` is set.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
-
-# Returns dict[user_key, bins_dict]
-batch = client.batch_read(keys)
-for user_key, bins in batch.items():
-    print(user_key, bins)
-
-# Read specific bins
-batch = client.batch_read(keys, bins=["name", "age"])
+result = client.batch_read(keys, bins=["name", "age"])
+for user_key, bins_dict in result.items():
+    print(user_key, bins_dict)
 ```
 
   </TabItem>
@@ -748,11 +747,165 @@ batch = client.batch_read(keys, bins=["name", "age"])
 
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
+result = await client.batch_read(keys, bins=["name", "age"])
+for user_key, bins_dict in result.items():
+    print(user_key, bins_dict)
+```
 
-# Same dict return type as sync
-batch = await client.batch_read(keys, bins=["name", "age"])
-for user_key, bins in batch.items():
-    print(user_key, bins)
+  </TabItem>
+</Tabs>
+
+### `batch_write(records, policy=None, retry=0)`
+
+Write multiple records with per-record bins in a single batch call.
+
+Each record is a ``(key, bins)`` or ``(key, bins, meta)`` tuple where
+key is ``(namespace, set, primary_key)``, bins is a dict of bin
+name-to-value mappings, and meta is an optional
+[`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``).
+Unlike ``batch_operate`` (which applies the same operations to all
+keys), each record can have different bins.
+
+Write fields can be set at two levels and follow a uniform precedence
+rule — **per-record meta always overrides the batch-level policy**.
+The fields below mirror the corresponding [`WritePolicy`](types.md#writepolicy)
+keys used by :meth:`put`:
+
+| Field            | Batch-level (``policy``) | Per-record (``meta``) | Notes                                            |
+|------------------|--------------------------|-----------------------|--------------------------------------------------|
+| ``ttl``          | ✅                       | ✅                    | Seconds, or ``TTL_NEVER_EXPIRE`` / ``TTL_DONT_UPDATE``. |
+| ``key``          | ✅                       | ✅                    | ``POLICY_KEY_DIGEST`` (default) / ``POLICY_KEY_SEND``. |
+| ``exists``       | ✅                       | ✅                    | ``POLICY_EXISTS_*`` (UPDATE / CREATE_ONLY / etc.). |
+| ``gen``          | ✅ (enum index)          | ✅ (expected value)   | Batch-level: ``POLICY_GEN_*``. Per-record: int forces ``POLICY_GEN_EQ`` with this generation. |
+| ``commit_level`` | ✅                       | ✅                    | ``POLICY_COMMIT_LEVEL_ALL`` (default) / ``_MASTER``. |
+| ``durable_delete`` | ✅                     | ✅                    | EE 3.10+ tombstone semantics.                    |
+
+| Parameter | Description |
+|-----------|-------------|
+| `records` | List of ``(key, bins)`` or ``(key, bins, meta)`` tuples. |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. Accepts the write fields above plus standard batch transport keys (``socket_timeout``, ``total_timeout``, ``max_retries``, ``filter_expression``, ``allow_inline``, ``allow_inline_ssd``, ``respond_all_keys``). |
+| `retry` | Maximum number of retries for failed records (default ``0``). When > 0, records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff (Full Jitter, max 500ms). Retries stop early if the elapsed time approaches ``total_timeout``.  **Note:** If a transport error occurs during retry, retries stop and partial results are returned. Always check each ``BatchRecord.result`` code. Total wall-clock time may exceed ``total_timeout`` by up to one additional timeout window. |
+
+**Returns:** A ``BatchWriteResult`` containing per-record result codes in
+    ``batch_records: list[BatchRecord]``.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+# Basic usage
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+]
+results = client.batch_write(records)
+
+# With batch-level TTL (30 days)
+results = client.batch_write(records, policy={"ttl": 2592000})
+
+# With per-record TTL
+records_with_ttl = [
+    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),
+    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
+]
+results = client.batch_write(records_with_ttl)
+
+# Persist user keys server-side (POLICY_KEY_SEND) — visible via
+# ``scan`` / ``query`` / ``aql SELECT *``.
+results = client.batch_write(
+    records,
+    policy={"key": aerospike_py.POLICY_KEY_SEND},
+)
+
+# Mix per-record overrides: only ``user1`` stores its key.
+results = client.batch_write([
+    (("test", "demo", "user1"), {"name": "Alice"},
+     {"key": aerospike_py.POLICY_KEY_SEND}),
+    (("test", "demo", "user2"), {"name": "Bob"}),
+])
+
+# CREATE_ONLY semantics — fail per-record if it already exists.
+results = client.batch_write(
+    records,
+    policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+)
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+]
+results = await client.batch_write(records)
+
+# Persist user keys server-side
+results = await client.batch_write(
+    records,
+    policy={"key": aerospike_py.POLICY_KEY_SEND},
+)
+
+# Per-record overrides
+records_with_meta = [
+    (("test", "demo", "user1"), {"name": "Alice"},
+     {"ttl": 3600, "key": aerospike_py.POLICY_KEY_SEND}),
+    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
+]
+results = await client.batch_write(records_with_meta)
+```
+
+  </TabItem>
+</Tabs>
+
+### `batch_write_numpy(data, namespace, set_name, _dtype, key_field=_key, policy=None, retry=0)`
+
+Write multiple records from a numpy structured array.
+
+Each row of the structured array becomes a separate write operation.
+The dtype must contain a key field (default ``_key``) for the record key.
+Remaining non-underscore-prefixed fields become bins.
+
+| Parameter | Description |
+|-----------|-------------|
+| `data` | numpy structured array with record data. |
+| `namespace` | Target namespace. |
+| `set_name` | Target set. |
+| `_dtype` | numpy dtype describing the array layout. |
+| `key_field` | Name of the dtype field to use as the user key (default ``"_key"``). |
+| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
+| `retry` | Maximum number of retries for failed records (default ``0``). When > 0, records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff (Full Jitter, max 500ms). Retries stop early if the elapsed time approaches ``total_timeout``.  **Note:** If a transport error occurs during retry, retries stop and partial results are returned. Always check each ``BatchRecord.result`` code. Total wall-clock time may exceed ``total_timeout`` by up to one additional timeout window. |
+
+**Returns:** A ``BatchWriteResult`` with per-record result codes in
+    ``batch_records: list[BatchRecord]``.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+import numpy as np
+
+dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
+data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
+results = client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed: {br.key}, code={br.result}")
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+import numpy as np
+
+dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
+data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
+results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed: {br.key}, code={br.result}")
 ```
 
   </TabItem>
@@ -768,7 +921,10 @@ Execute operations on multiple records in a single batch call.
 | `ops` | List of operation dicts to apply to each record. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** A list of ``BatchRecord`` NamedTuples with per-record result codes.
+**Returns:** A ``BatchWriteResult`` with per-record result codes in
+    ``batch_records: list[BatchRecord]``.
+    Each ``BatchRecord`` also includes an ``in_doubt`` flag
+    (see :meth:`batch_write` for details).
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -801,65 +957,6 @@ for br in results.batch_records:
   </TabItem>
 </Tabs>
 
-### `batch_write(records, policy=None, retry=0)`
-
-Write multiple records with per-record bins in a single batch call. Each record is a `(key, bins)` or `(key, bins, meta)` tuple. Unlike `batch_operate()` which applies the same operations to all keys, each record can have different bins and TTL.
-
-| Parameter | Description |
-|-----------|-------------|
-| `records` | List of ``(key, bins)`` or ``(key, bins, meta)`` tuples. Key is ``(namespace, set, primary_key)``, bins is a dict, meta is an optional [`WriteMeta`](types.md#writemeta) dict (e.g. ``{"ttl": 300}``). |
-| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. Supports ``"ttl"`` key for batch-level TTL (seconds). |
-| `retry` | Max retries for transient failures (default ``0``). Failed records are retried with exponential backoff. |
-
-**TTL precedence:** Per-record `meta["ttl"]` overrides batch-level `policy["ttl"]`. Records without meta use the batch-level TTL (or namespace default if unset).
-
-**Returns:** ``BatchRecords`` with per-record result codes. Each ``BatchRecord`` includes an ``in_doubt`` flag indicating whether the write may have completed despite the error.
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-```python
-records = [
-    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
-    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
-]
-results = client.batch_write(records, retry=3)
-
-# With batch-level TTL (30 days)
-results = client.batch_write(records, policy={"ttl": 2592000})
-
-# With per-record TTL
-records_with_ttl = [
-    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),
-    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
-]
-results = client.batch_write(records_with_ttl)
-```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-records = [
-    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
-    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
-]
-results = await client.batch_write(records, retry=3)
-
-# With batch-level TTL (30 days)
-results = await client.batch_write(records, policy={"ttl": 2592000})
-
-# With per-record TTL
-records_with_ttl = [
-    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),
-    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
-]
-results = await client.batch_write(records_with_ttl)
-```
-
-  </TabItem>
-</Tabs>
-
 ### `batch_remove(keys, policy=None)`
 
 Delete multiple records in a single batch call.
@@ -869,7 +966,10 @@ Delete multiple records in a single batch call.
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
-**Returns:** A list of ``BatchRecord`` NamedTuples with per-record result codes.
+**Returns:** A ``BatchWriteResult`` with per-record result codes in
+    ``batch_records: list[BatchRecord]``.
+    Each ``BatchRecord`` also includes an ``in_doubt`` flag
+    (see :meth:`batch_write` for details).
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
