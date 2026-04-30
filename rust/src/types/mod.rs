@@ -9,5 +9,6 @@
 pub mod bin;
 pub mod host;
 pub mod key;
+pub mod partition_filter;
 pub mod record;
 pub mod value;

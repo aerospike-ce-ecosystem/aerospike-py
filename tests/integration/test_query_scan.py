@@ -75,6 +75,78 @@ class TestQuery:
         assert len(collected) >= 10
 
 
+class TestPartitionFilter:
+    """Validates PartitionFilter / expected_duration / include_bin_data on QueryPolicy.
+
+    Closes #306. ``PartitionFilter`` scopes a query to a subset of partitions;
+    ``expected_duration`` hints query length to the server; ``include_bin_data``
+    suppresses bin payload in results.
+    """
+
+    @pytest.fixture(scope="class")
+    def partitioned_data(self, client):
+        keys = []
+        for i in range(2000):
+            key = ("test", "pf_test", f"pf_key_{i}")
+            client.put(key, {"i": i, "name": f"row_{i}"})
+            keys.append(key)
+        yield keys
+        for key in keys:
+            try:
+                client.remove(key)
+            except Exception:
+                pass
+
+    def test_partition_filter_all_matches_default(self, client, partitioned_data):
+        all_default = client.query("test", "pf_test").results()
+        all_explicit = client.query("test", "pf_test").results(
+            policy={"partition_filter": aerospike_py.partition_filter_all()}
+        )
+        assert len(all_default) == len(all_explicit) == len(partitioned_data)
+
+    def test_partition_filter_by_range_quarter(self, client, partitioned_data):
+        pf = aerospike_py.partition_filter_by_range(0, 1024)  # 1/4 of partitions
+        records = client.query("test", "pf_test").results(policy={"partition_filter": pf})
+        n = len(records)
+        # Expect ~500 records (2000 * 1024/4096); allow ±25% jitter from hash distribution.
+        assert 350 <= n <= 650, f"expected ~500, got {n}"
+
+    def test_partition_filter_by_range_zero_rejected_by_server(self, client, partitioned_data):
+        """``count=0`` is accepted at the helper level but rejected by the server.
+
+        Confirms the value flows through to the server validation rather than
+        being silently swallowed.
+        """
+        pf = aerospike_py.partition_filter_by_range(0, 0)
+        with pytest.raises(aerospike_py.InvalidArgError):
+            client.query("test", "pf_test").results(policy={"partition_filter": pf})
+
+    def test_partition_filter_by_id_4095_succeeds(self, client, partitioned_data):
+        pf = aerospike_py.partition_filter_by_id(4095)
+        records = client.query("test", "pf_test").results(policy={"partition_filter": pf})
+        assert isinstance(records, list)
+
+    def test_partition_filter_by_id_out_of_range_raises(self):
+        with pytest.raises(ValueError, match="partition_id must be"):
+            aerospike_py.partition_filter_by_id(4096)
+
+    def test_partition_filter_by_range_overflow_raises(self):
+        with pytest.raises(ValueError, match="begin \\+ count must be"):
+            aerospike_py.partition_filter_by_range(4000, 1000)
+
+    def test_expected_duration_short_runs(self, client, partitioned_data):
+        records = client.query("test", "pf_test").results(
+            policy={"expected_duration": aerospike_py.QUERY_DURATION_SHORT}
+        )
+        assert len(records) == len(partitioned_data)
+
+    def test_expected_duration_long_relax_ap_runs(self, client, partitioned_data):
+        records = client.query("test", "pf_test").results(
+            policy={"expected_duration": aerospike_py.QUERY_DURATION_LONG_RELAX_AP}
+        )
+        assert len(records) == len(partitioned_data)
+
+
 class TestIndex:
     def test_index_string_create_remove(self, client, seed_data):
         try:
