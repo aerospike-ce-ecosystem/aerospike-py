@@ -963,34 +963,26 @@ Delete multiple records in a single batch call.
 
 | Parameter | Description |
 |-----------|-------------|
-| `keys` | List of ``(namespace, set, primary_key)`` tuples. |
-| `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
+| `keys` | Either a list of bare ``Key`` tuples (back-compat) or a list mixing bare keys and ``(key, meta)`` pairs where ``meta`` is a [`BatchDeleteMeta`](types.md#batchdeletemeta) dict for per-record overrides (CAS deletes, durable_delete per record, etc.). |
+| `policy` | Optional dict combining a transport-level [`BatchPolicy`](types.md#batchpolicy) with batch-level [`BatchDeletePolicy`](types.md#batchdeletepolicy) defaults: ``gen``, ``key`` (send_key), ``commit_level``, ``durable_delete``, ``filter_expression``. |
 
 **Returns:** A ``BatchWriteResult`` with per-record result codes in
     ``batch_records: list[BatchRecord]``.
     Each ``BatchRecord`` also includes an ``in_doubt`` flag
     (see :meth:`batch_write` for details).
 
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
 ```python
+# Legacy: bare keys.
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
 results = client.batch_remove(keys)
-failed = [br for br in results.batch_records if br.result != 0]
+
+# CAS delete: only delete user_1 if generation is still 3.
+_, meta, _ = client.get(("test", "demo", "user_1"))
+results = client.batch_remove([
+    (("test", "demo", "user_1"), {"gen": meta.gen}),
+    ("test", "demo", "user_2"),  # bare key, no CAS
+])
 ```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-keys = [("test", "demo", f"user_{i}") for i in range(10)]
-results = await client.batch_remove(keys)
-failed = [br for br in results.batch_records if br.result != 0]
-```
-
-  </TabItem>
-</Tabs>
 
 ## Query & Scan
 
