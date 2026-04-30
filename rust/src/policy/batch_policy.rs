@@ -1,6 +1,8 @@
 //! Batch policy parsing from Python dicts.
 
-use aerospike_core::{BatchPolicy, BatchWritePolicy, GenerationPolicy};
+use aerospike_core::{
+    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchWritePolicy, GenerationPolicy,
+};
 use log::trace;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -92,6 +94,97 @@ pub fn parse_batch_write_policy(
 
     // Filter expression
     policy.filter_expression = extract_filter_expression(dict)?;
+
+    Ok(policy)
+}
+
+/// Parse the per-record-policy dict into a [`BatchReadPolicy`].
+///
+/// Mirrors [`parse_batch_write_policy`] but covers only the read-side
+/// fields exposed by `aerospike-core`'s `BatchReadPolicy`:
+/// `read_touch_ttl_percent` (user-facing key) and `filter_expression`.
+pub fn parse_batch_read_policy(
+    policy_dict: Option<&Bound<'_, PyDict>>,
+) -> PyResult<BatchReadPolicy> {
+    trace!("Parsing batch read policy");
+    let mut policy = BatchReadPolicy::default();
+
+    let dict = match policy_dict {
+        Some(d) => d,
+        None => return Ok(policy),
+    };
+
+    if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
+        policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
+    }
+
+    policy.filter_expression = extract_filter_expression(dict)?;
+
+    Ok(policy)
+}
+
+/// Parse the per-record-policy dict into a [`BatchDeletePolicy`].
+///
+/// Covers `gen` (generation_policy), `commit_level`, `key` (send_key),
+/// `durable_delete`, and `filter_expression`. Mirrors the write-side
+/// parser but omits TTL and `exists` (deletes don't write expiration
+/// or care about record-exists semantics).
+pub fn parse_batch_delete_policy(
+    policy_dict: Option<&Bound<'_, PyDict>>,
+) -> PyResult<BatchDeletePolicy> {
+    trace!("Parsing batch delete policy");
+    let mut policy = BatchDeletePolicy::default();
+
+    let dict = match policy_dict {
+        Some(d) => d,
+        None => return Ok(policy),
+    };
+
+    extract_policy_fields!(dict, {
+        "durable_delete" => policy.durable_delete
+    });
+
+    if let Some(val) = dict.get_item("key")? {
+        policy.send_key = val.extract::<i32>()? == 1;
+    }
+    if let Some(val) = dict.get_item("gen")? {
+        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?);
+    }
+    if let Some(val) = dict.get_item("commit_level")? {
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
+    }
+
+    policy.filter_expression = extract_filter_expression(dict)?;
+
+    Ok(policy)
+}
+
+/// Apply per-record meta to a [`BatchDeletePolicy`], overriding the batch-level
+/// default. Per-record settings always win.
+///
+/// Supported meta keys: `gen` (sets `generation` + `GenerationPolicy::
+/// ExpectGenEqual`, mirroring `apply_record_meta` for writes), `key`
+/// (send_key), `commit_level`, `durable_delete`. Unknown keys are
+/// silently ignored, matching the batch_write meta convention.
+pub fn apply_record_meta_for_delete(
+    base: &BatchDeletePolicy,
+    meta: &Bound<'_, PyDict>,
+) -> PyResult<BatchDeletePolicy> {
+    let mut policy = base.clone();
+
+    if let Some(gen) = meta.get_item("gen")? {
+        policy.generation = gen.extract::<u32>()?;
+        policy.generation_policy = GenerationPolicy::ExpectGenEqual;
+    }
+    if let Some(key) = meta.get_item("key")? {
+        policy.send_key = key.extract::<i32>()? == 1;
+    }
+    if let Some(commit_level) = meta.get_item("commit_level")? {
+        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+    }
+    if let Some(durable_delete) = meta.get_item("durable_delete")? {
+        policy.durable_delete = durable_delete.extract::<bool>()?;
+    }
 
     Ok(policy)
 }
@@ -310,6 +403,103 @@ mod tests {
             });
             let overridden = apply_record_meta(&base, &meta).expect("apply ok");
             assert!(overridden.send_key, "per-record key must override base");
+        });
+    }
+
+    // ── BatchReadPolicy ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_batch_read_policy_default_when_dict_is_none() {
+        let p = parse_batch_read_policy(None).expect("parse ok");
+        assert!(matches!(
+            p.read_touch_ttl,
+            aerospike_core::ReadTouchTTL::ServerDefault
+        ));
+        assert!(p.filter_expression.is_none());
+    }
+
+    #[test]
+    fn parse_batch_read_policy_with_read_touch_ttl_percent_80() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("read_touch_ttl_percent", 80i32).unwrap();
+            });
+            let p = parse_batch_read_policy(Some(&d)).expect("parse ok");
+            assert!(matches!(
+                p.read_touch_ttl,
+                aerospike_core::ReadTouchTTL::Percent(80)
+            ));
+        });
+    }
+
+    #[test]
+    fn parse_batch_read_policy_rejects_out_of_range() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("read_touch_ttl_percent", 150i32).unwrap();
+            });
+            assert!(parse_batch_read_policy(Some(&d)).is_err());
+        });
+    }
+
+    // ── BatchDeletePolicy ────────────────────────────────────────────────
+
+    #[test]
+    fn parse_batch_delete_policy_default_when_dict_is_none() {
+        let p = parse_batch_delete_policy(None).expect("parse ok");
+        assert!(!p.send_key);
+        assert!(!p.durable_delete);
+        assert_eq!(p.generation_policy, GenerationPolicy::None);
+        assert_eq!(p.commit_level, aerospike_core::CommitLevel::CommitAll);
+        assert_eq!(p.generation, 0);
+    }
+
+    #[test]
+    fn parse_batch_delete_policy_with_durable_delete_and_send_key() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("durable_delete", true).unwrap();
+                d.set_item("key", 1i32).unwrap();
+            });
+            let p = parse_batch_delete_policy(Some(&d)).expect("parse ok");
+            assert!(p.durable_delete);
+            assert!(p.send_key);
+        });
+    }
+
+    #[test]
+    fn apply_record_meta_for_delete_sets_gen_and_policy() {
+        Python::initialize();
+        Python::attach(|py| {
+            let base = aerospike_core::BatchDeletePolicy::default();
+            let meta = build_dict(py, |d| {
+                d.set_item("gen", 42u32).unwrap();
+            });
+            let overridden = apply_record_meta_for_delete(&base, &meta).expect("apply ok");
+            assert_eq!(overridden.generation, 42);
+            assert_eq!(
+                overridden.generation_policy,
+                GenerationPolicy::ExpectGenEqual
+            );
+        });
+    }
+
+    #[test]
+    fn apply_record_meta_for_delete_per_record_wins_over_base() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut base = aerospike_core::BatchDeletePolicy::default();
+            base.send_key = false;
+            let meta = build_dict(py, |d| {
+                d.set_item("key", 1i32).unwrap();
+                d.set_item("durable_delete", true).unwrap();
+            });
+            let overridden = apply_record_meta_for_delete(&base, &meta).expect("apply ok");
+            assert!(overridden.send_key);
+            assert!(overridden.durable_delete);
         });
     }
 }
