@@ -13,6 +13,7 @@ High-performance Aerospike Python Client built with PyO3 + Rust, powered by the 
 - Sync and Async (`AsyncClient`) API
 - CRUD, Batch, Query, UDF, Admin, Index, Truncate
 - CDT List/Map Operations, Expression Filters
+- NumPy v2 structured-array results for batch reads (zero-copy analytical pipelines)
 - Full type stubs (`.pyi`) for IDE autocompletion
 
 > [Documentation](https://aerospike-ce-ecosystem.github.io/aerospike-py/) — API reference, usage guides, integration examples
