@@ -67,6 +67,9 @@ from aerospike_py._aerospike import (  # noqa: F401
     # Policy Read Mode AP
     POLICY_READ_MODE_AP_ONE,
     POLICY_READ_MODE_AP_ALL,
+    # Read Touch TTL Percent (server v8+)
+    READ_TOUCH_TTL_PERCENT_SERVER_DEFAULT,
+    READ_TOUCH_TTL_PERCENT_DONT_RESET,
     # TTL Constants
     TTL_NAMESPACE_DEFAULT,
     TTL_NEVER_EXPIRE,
@@ -448,6 +451,9 @@ __all__ = [
     # Policy Read Mode AP
     "POLICY_READ_MODE_AP_ONE",
     "POLICY_READ_MODE_AP_ALL",
+    # Read Touch TTL Percent (server v8+)
+    "READ_TOUCH_TTL_PERCENT_SERVER_DEFAULT",
+    "READ_TOUCH_TTL_PERCENT_DONT_RESET",
     # TTL Constants
     "TTL_NAMESPACE_DEFAULT",
     "TTL_NEVER_EXPIRE",

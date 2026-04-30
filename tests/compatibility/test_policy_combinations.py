@@ -342,6 +342,40 @@ class TestPolicySendKey:
         assert o_key[2] is None
 
 
+# ── Replica / Read Mode AP cross-client ─────────────────────────────
+
+
+class TestReplicaCompat:
+    """``replica`` policy maps to the same Replica enum on both clients."""
+
+    @pytest.mark.parametrize(
+        "rust_const,off_const",
+        [
+            (aerospike_py.POLICY_REPLICA_MASTER, aerospike.POLICY_REPLICA_MASTER),
+            (aerospike_py.POLICY_REPLICA_SEQUENCE, aerospike.POLICY_REPLICA_SEQUENCE),
+        ],
+    )
+    def test_replica_get_returns_same_data(self, rust_client, official_client, cleanup, rust_const, off_const):
+        key = (NS, SET, f"compat_replica_{rust_const}")
+        cleanup.append(key)
+        rust_client.put(key, {"v": 1, "name": "x"})
+        _, _, r_bins = rust_client.get(key, policy={"replica": rust_const})
+        _, _, o_bins = official_client.get(key, policy={"replica": off_const})
+        assert r_bins == o_bins
+
+
+class TestReadModeApCompat:
+    """``read_mode_ap`` maps to ConsistencyLevel; both clients should agree."""
+
+    def test_read_mode_ap_all_returns_same_data(self, rust_client, official_client, cleanup):
+        key = (NS, SET, "compat_rmap_all")
+        cleanup.append(key)
+        rust_client.put(key, {"v": 1})
+        _, _, r_bins = rust_client.get(key, policy={"read_mode_ap": aerospike_py.POLICY_READ_MODE_AP_ALL})
+        _, _, o_bins = official_client.get(key, policy={"read_mode_ap": aerospike.POLICY_READ_MODE_AP_ALL})
+        assert r_bins == o_bins
+
+
 # ── CREATE_ONLY Policy ─────────────────────────────────────────────
 
 

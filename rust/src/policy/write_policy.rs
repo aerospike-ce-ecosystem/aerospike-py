@@ -8,8 +8,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use super::{
-    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_generation_policy,
-    parse_record_exists_action,
+    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_consistency_level,
+    parse_generation_policy, parse_read_touch_ttl, parse_record_exists_action,
 };
 
 /// Lazily-initialized default write policy used when no policy dict is provided.
@@ -88,6 +88,15 @@ pub fn parse_write_policy(
     // TTL / expiration
     if let Some(val) = dict.get_item("ttl")? {
         policy.expiration = parse_ttl(val.extract::<i64>()?)?;
+    }
+
+    // Read mode AP (BasePolicy field — operate() with read ops can use this)
+    if let Some(val) = dict.get_item("read_mode_ap")? {
+        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?);
+    }
+    // Read touch TTL percent (BasePolicy field)
+    if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
+        policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
     }
 
     // Filter expression
