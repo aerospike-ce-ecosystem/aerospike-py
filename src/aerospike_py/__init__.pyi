@@ -7,7 +7,7 @@ Claude Code Plugin::
 """
 
 import contextlib
-from typing import Any, Callable, Optional, Union, overload
+from typing import Any, Callable, Literal, Optional, Union, overload
 
 import numpy as np
 
@@ -2505,216 +2505,286 @@ class AdminError(ServerError): ...
 class UDFError(ServerError): ...
 
 # -- Constants -----------------------------------------------------------
+#
+# Policy / enum-style constants are typed as ``Literal[N]`` so type checkers
+# (pyright, mypy) can narrow valid values and reject typos like
+# ``policy={"key": 999}``. The runtime value is unchanged — these are still
+# plain ints exposed by the native module — but the annotation captures the
+# closed enum-like nature of these constants.
+#
+# Stub-only type aliases (``PolicyKey``, ``PolicyExists``, …) are introduced
+# below so downstream callers can type their own helpers as
+# ``policy_key: PolicyKey = aerospike_py.POLICY_KEY_DIGEST`` and benefit from
+# the same narrowing. These aliases are NOT exported at runtime.
 
 # Policy Key
-POLICY_KEY_DIGEST: int
-POLICY_KEY_SEND: int
+POLICY_KEY_DIGEST: Literal[0]
+POLICY_KEY_SEND: Literal[1]
 
 # Policy Exists
-POLICY_EXISTS_IGNORE: int
-POLICY_EXISTS_UPDATE: int
-POLICY_EXISTS_UPDATE_ONLY: int
-POLICY_EXISTS_REPLACE: int
-POLICY_EXISTS_REPLACE_ONLY: int
-POLICY_EXISTS_CREATE_ONLY: int
+POLICY_EXISTS_IGNORE: Literal[0]
+POLICY_EXISTS_UPDATE: Literal[1]
+POLICY_EXISTS_UPDATE_ONLY: Literal[1]
+POLICY_EXISTS_REPLACE: Literal[2]
+POLICY_EXISTS_REPLACE_ONLY: Literal[3]
+POLICY_EXISTS_CREATE_ONLY: Literal[4]
 
 # Policy Generation
-POLICY_GEN_IGNORE: int
-POLICY_GEN_EQ: int
-POLICY_GEN_GT: int
+POLICY_GEN_IGNORE: Literal[0]
+POLICY_GEN_EQ: Literal[1]
+POLICY_GEN_GT: Literal[2]
 
 # Policy Replica
-POLICY_REPLICA_MASTER: int
-POLICY_REPLICA_SEQUENCE: int
-POLICY_REPLICA_PREFER_RACK: int
+POLICY_REPLICA_MASTER: Literal[0]
+POLICY_REPLICA_SEQUENCE: Literal[1]
+POLICY_REPLICA_PREFER_RACK: Literal[2]
 
 # Policy Commit Level
-POLICY_COMMIT_LEVEL_ALL: int
-POLICY_COMMIT_LEVEL_MASTER: int
+POLICY_COMMIT_LEVEL_ALL: Literal[0]
+POLICY_COMMIT_LEVEL_MASTER: Literal[1]
 
 # Policy Read Mode AP
-POLICY_READ_MODE_AP_ONE: int
-POLICY_READ_MODE_AP_ALL: int
+POLICY_READ_MODE_AP_ONE: Literal[0]
+POLICY_READ_MODE_AP_ALL: Literal[1]
+
+# -- Stub-only Policy enum aliases ---------------------------------------
+# These aliases live in the type stub only — they are NOT defined at
+# runtime. They give downstream code a single name for each policy enum:
+#
+#     def my_helper(policy_key: aerospike_py.PolicyKey = aerospike_py.POLICY_KEY_DIGEST) -> None: ...
+#
+# Type checkers will reject any int that is not in the enumerated set.
+
+PolicyKey = Literal[0, 1]
+"""Valid values for ``policy={"key": ...}`` (POLICY_KEY_DIGEST, POLICY_KEY_SEND)."""
+
+PolicyExists = Literal[0, 1, 2, 3, 4]
+"""Valid values for ``policy={"exists": ...}`` (IGNORE, UPDATE/UPDATE_ONLY, REPLACE, REPLACE_ONLY, CREATE_ONLY)."""
+
+PolicyGen = Literal[0, 1, 2]
+"""Valid values for ``policy={"gen": ...}`` (IGNORE, EQ, GT)."""
+
+PolicyReplica = Literal[0, 1, 2]
+"""Valid values for ``policy={"replica": ...}`` (MASTER, SEQUENCE, PREFER_RACK)."""
+
+PolicyCommitLevel = Literal[0, 1]
+"""Valid values for ``policy={"commit_level": ...}`` (ALL, MASTER)."""
+
+PolicyReadModeAP = Literal[0, 1]
+"""Valid values for ``policy={"read_mode_ap": ...}`` (ONE, ALL)."""
 
 # TTL
-TTL_NAMESPACE_DEFAULT: int
-TTL_NEVER_EXPIRE: int
-TTL_DONT_UPDATE: int
-TTL_CLIENT_DEFAULT: int
+TTL_NAMESPACE_DEFAULT: Literal[0]
+TTL_NEVER_EXPIRE: Literal[-1]
+TTL_DONT_UPDATE: Literal[-2]
+TTL_CLIENT_DEFAULT: Literal[-3]
+
+TTL = Literal[0, -1, -2, -3]
+"""Valid TTL sentinel values (any non-negative int representing seconds is also accepted)."""
 
 # Auth Mode
-AUTH_INTERNAL: int
-AUTH_EXTERNAL: int
-AUTH_PKI: int
+AUTH_INTERNAL: Literal[0]
+AUTH_EXTERNAL: Literal[1]
+AUTH_PKI: Literal[2]
+
+AuthMode = Literal[0, 1, 2]
+"""Valid values for ``auth_mode`` (INTERNAL, EXTERNAL, PKI)."""
 
 # Operators
-OPERATOR_READ: int
-OPERATOR_WRITE: int
-OPERATOR_INCR: int
-OPERATOR_APPEND: int
-OPERATOR_PREPEND: int
-OPERATOR_TOUCH: int
-OPERATOR_DELETE: int
+OPERATOR_READ: Literal[1]
+OPERATOR_WRITE: Literal[2]
+OPERATOR_INCR: Literal[5]
+OPERATOR_APPEND: Literal[9]
+OPERATOR_PREPEND: Literal[10]
+OPERATOR_TOUCH: Literal[11]
+OPERATOR_DELETE: Literal[12]
 
 # Index Type
-INDEX_NUMERIC: int
-INDEX_STRING: int
-INDEX_BLOB: int
-INDEX_GEO2DSPHERE: int
+INDEX_NUMERIC: Literal[0]
+INDEX_STRING: Literal[1]
+INDEX_BLOB: Literal[2]
+INDEX_GEO2DSPHERE: Literal[3]
+
+IndexType = Literal[0, 1, 2, 3]
+"""Valid values for the index data-type parameter (NUMERIC, STRING, BLOB, GEO2DSPHERE)."""
 
 # Index Collection Type
-INDEX_TYPE_DEFAULT: int
-INDEX_TYPE_LIST: int
-INDEX_TYPE_MAPKEYS: int
-INDEX_TYPE_MAPVALUES: int
+INDEX_TYPE_DEFAULT: Literal[0]
+INDEX_TYPE_LIST: Literal[1]
+INDEX_TYPE_MAPKEYS: Literal[2]
+INDEX_TYPE_MAPVALUES: Literal[3]
+
+IndexCollectionType = Literal[0, 1, 2, 3]
+"""Valid values for the index collection-type parameter (DEFAULT, LIST, MAPKEYS, MAPVALUES)."""
 
 # Log Level
-LOG_LEVEL_OFF: int
-LOG_LEVEL_ERROR: int
-LOG_LEVEL_WARN: int
-LOG_LEVEL_INFO: int
-LOG_LEVEL_DEBUG: int
-LOG_LEVEL_TRACE: int
+LOG_LEVEL_OFF: Literal[-1]
+LOG_LEVEL_ERROR: Literal[0]
+LOG_LEVEL_WARN: Literal[1]
+LOG_LEVEL_INFO: Literal[2]
+LOG_LEVEL_DEBUG: Literal[3]
+LOG_LEVEL_TRACE: Literal[4]
+
+LogLevel = Literal[-1, 0, 1, 2, 3, 4]
+"""Valid values for ``set_log_level`` (OFF, ERROR, WARN, INFO, DEBUG, TRACE)."""
 
 # Serializer
-SERIALIZER_NONE: int
-SERIALIZER_PYTHON: int
-SERIALIZER_USER: int
+SERIALIZER_NONE: Literal[0]
+SERIALIZER_PYTHON: Literal[1]
+SERIALIZER_USER: Literal[2]
+
+Serializer = Literal[0, 1, 2]
+"""Valid serializer values (NONE, PYTHON, USER)."""
 
 # List Return Type
-LIST_RETURN_NONE: int
-LIST_RETURN_INDEX: int
-LIST_RETURN_REVERSE_INDEX: int
-LIST_RETURN_RANK: int
-LIST_RETURN_REVERSE_RANK: int
-LIST_RETURN_COUNT: int
-LIST_RETURN_VALUE: int
-LIST_RETURN_EXISTS: int
+LIST_RETURN_NONE: Literal[0]
+LIST_RETURN_INDEX: Literal[1]
+LIST_RETURN_REVERSE_INDEX: Literal[2]
+LIST_RETURN_RANK: Literal[3]
+LIST_RETURN_REVERSE_RANK: Literal[4]
+LIST_RETURN_COUNT: Literal[5]
+LIST_RETURN_VALUE: Literal[7]
+LIST_RETURN_EXISTS: Literal[13]
+
+ListReturnType = Literal[0, 1, 2, 3, 4, 5, 7, 13]
+"""Valid ``return_type`` values for list CDT operations."""
 
 # List Order
-LIST_UNORDERED: int
-LIST_ORDERED: int
+LIST_UNORDERED: Literal[0]
+LIST_ORDERED: Literal[1]
+
+ListOrder = Literal[0, 1]
+"""Valid list order values (UNORDERED, ORDERED)."""
 
 # List Sort Flags
-LIST_SORT_DEFAULT: int
-LIST_SORT_DROP_DUPLICATES: int
+LIST_SORT_DEFAULT: Literal[0]
+LIST_SORT_DROP_DUPLICATES: Literal[2]
 
 # List Write Flags
-LIST_WRITE_DEFAULT: int
-LIST_WRITE_ADD_UNIQUE: int
-LIST_WRITE_INSERT_BOUNDED: int
-LIST_WRITE_NO_FAIL: int
-LIST_WRITE_PARTIAL: int
+LIST_WRITE_DEFAULT: Literal[0]
+LIST_WRITE_ADD_UNIQUE: Literal[1]
+LIST_WRITE_INSERT_BOUNDED: Literal[2]
+LIST_WRITE_NO_FAIL: Literal[4]
+LIST_WRITE_PARTIAL: Literal[8]
 
 # Map Return Type
-MAP_RETURN_NONE: int
-MAP_RETURN_INDEX: int
-MAP_RETURN_REVERSE_INDEX: int
-MAP_RETURN_RANK: int
-MAP_RETURN_REVERSE_RANK: int
-MAP_RETURN_COUNT: int
-MAP_RETURN_KEY: int
-MAP_RETURN_VALUE: int
-MAP_RETURN_KEY_VALUE: int
-MAP_RETURN_EXISTS: int
+MAP_RETURN_NONE: Literal[0]
+MAP_RETURN_INDEX: Literal[1]
+MAP_RETURN_REVERSE_INDEX: Literal[2]
+MAP_RETURN_RANK: Literal[3]
+MAP_RETURN_REVERSE_RANK: Literal[4]
+MAP_RETURN_COUNT: Literal[5]
+MAP_RETURN_KEY: Literal[6]
+MAP_RETURN_VALUE: Literal[7]
+MAP_RETURN_KEY_VALUE: Literal[8]
+MAP_RETURN_EXISTS: Literal[13]
+
+MapReturnType = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 13]
+"""Valid ``return_type`` values for map CDT operations."""
 
 # Map Order
-MAP_UNORDERED: int
-MAP_KEY_ORDERED: int
-MAP_KEY_VALUE_ORDERED: int
+MAP_UNORDERED: Literal[0]
+MAP_KEY_ORDERED: Literal[1]
+MAP_KEY_VALUE_ORDERED: Literal[3]
+
+MapOrder = Literal[0, 1, 3]
+"""Valid map order values (UNORDERED, KEY_ORDERED, KEY_VALUE_ORDERED)."""
 
 # Map Write Flags
-MAP_WRITE_FLAGS_DEFAULT: int
-MAP_WRITE_FLAGS_CREATE_ONLY: int
-MAP_WRITE_FLAGS_UPDATE_ONLY: int
-MAP_WRITE_FLAGS_NO_FAIL: int
-MAP_WRITE_FLAGS_PARTIAL: int
-MAP_UPDATE: int
-MAP_UPDATE_ONLY: int
-MAP_CREATE_ONLY: int
+MAP_WRITE_FLAGS_DEFAULT: Literal[0]
+MAP_WRITE_FLAGS_CREATE_ONLY: Literal[1]
+MAP_WRITE_FLAGS_UPDATE_ONLY: Literal[2]
+MAP_WRITE_FLAGS_NO_FAIL: Literal[4]
+MAP_WRITE_FLAGS_PARTIAL: Literal[8]
+MAP_UPDATE: Literal[0]
+MAP_UPDATE_ONLY: Literal[2]
+MAP_CREATE_ONLY: Literal[1]
 
 # Bit Write Flags
-BIT_WRITE_DEFAULT: int
-BIT_WRITE_CREATE_ONLY: int
-BIT_WRITE_UPDATE_ONLY: int
-BIT_WRITE_NO_FAIL: int
-BIT_WRITE_PARTIAL: int
+BIT_WRITE_DEFAULT: Literal[0]
+BIT_WRITE_CREATE_ONLY: Literal[1]
+BIT_WRITE_UPDATE_ONLY: Literal[2]
+BIT_WRITE_NO_FAIL: Literal[4]
+BIT_WRITE_PARTIAL: Literal[8]
 
 # Bit Resize Flags
-BIT_RESIZE_DEFAULT: int
-BIT_RESIZE_FROM_FRONT: int
-BIT_RESIZE_GROW_ONLY: int
-BIT_RESIZE_SHRINK_ONLY: int
+BIT_RESIZE_DEFAULT: Literal[0]
+BIT_RESIZE_FROM_FRONT: Literal[1]
+BIT_RESIZE_GROW_ONLY: Literal[2]
+BIT_RESIZE_SHRINK_ONLY: Literal[4]
 
 # Bit Overflow Action
-BIT_OVERFLOW_FAIL: int
-BIT_OVERFLOW_SATURATE: int
-BIT_OVERFLOW_WRAP: int
+BIT_OVERFLOW_FAIL: Literal[0]
+BIT_OVERFLOW_SATURATE: Literal[2]
+BIT_OVERFLOW_WRAP: Literal[4]
 
 # HLL Write Flags
-HLL_WRITE_DEFAULT: int
-HLL_WRITE_CREATE_ONLY: int
-HLL_WRITE_UPDATE_ONLY: int
-HLL_WRITE_NO_FAIL: int
-HLL_WRITE_ALLOW_FOLD: int
+HLL_WRITE_DEFAULT: Literal[0]
+HLL_WRITE_CREATE_ONLY: Literal[1]
+HLL_WRITE_UPDATE_ONLY: Literal[2]
+HLL_WRITE_NO_FAIL: Literal[4]
+HLL_WRITE_ALLOW_FOLD: Literal[8]
 
 # Privilege Codes
-PRIV_READ: int
-PRIV_WRITE: int
-PRIV_READ_WRITE: int
-PRIV_READ_WRITE_UDF: int
-PRIV_USER_ADMIN: int
-PRIV_SYS_ADMIN: int
-PRIV_DATA_ADMIN: int
-PRIV_UDF_ADMIN: int
-PRIV_SINDEX_ADMIN: int
-PRIV_TRUNCATE: int
+PRIV_READ: Literal[10]
+PRIV_WRITE: Literal[13]
+PRIV_READ_WRITE: Literal[11]
+PRIV_READ_WRITE_UDF: Literal[12]
+PRIV_USER_ADMIN: Literal[0]
+PRIV_SYS_ADMIN: Literal[1]
+PRIV_DATA_ADMIN: Literal[2]
+PRIV_UDF_ADMIN: Literal[3]
+PRIV_SINDEX_ADMIN: Literal[4]
+PRIV_TRUNCATE: Literal[14]
+
+PrivilegeCode = Literal[0, 1, 2, 3, 4, 10, 11, 12, 13, 14]
+"""Valid privilege codes for admin role/grant operations."""
 
 # Status Codes
-AEROSPIKE_OK: int
-AEROSPIKE_ERR_SERVER: int
-AEROSPIKE_ERR_RECORD_NOT_FOUND: int
-AEROSPIKE_ERR_RECORD_GENERATION: int
-AEROSPIKE_ERR_PARAM: int
-AEROSPIKE_ERR_RECORD_EXISTS: int
-AEROSPIKE_ERR_BIN_EXISTS: int
-AEROSPIKE_ERR_CLUSTER_KEY_MISMATCH: int
-AEROSPIKE_ERR_SERVER_MEM: int
-AEROSPIKE_ERR_TIMEOUT: int
-AEROSPIKE_ERR_ALWAYS_FORBIDDEN: int
-AEROSPIKE_ERR_PARTITION_UNAVAILABLE: int
-AEROSPIKE_ERR_BIN_TYPE: int
-AEROSPIKE_ERR_RECORD_TOO_BIG: int
-AEROSPIKE_ERR_KEY_BUSY: int
-AEROSPIKE_ERR_SCAN_ABORT: int
-AEROSPIKE_ERR_UNSUPPORTED_FEATURE: int
-AEROSPIKE_ERR_BIN_NOT_FOUND: int
-AEROSPIKE_ERR_DEVICE_OVERLOAD: int
-AEROSPIKE_ERR_KEY_MISMATCH: int
-AEROSPIKE_ERR_INVALID_NAMESPACE: int
-AEROSPIKE_ERR_BIN_NAME: int
-AEROSPIKE_ERR_FAIL_FORBIDDEN: int
-AEROSPIKE_ERR_ELEMENT_NOT_FOUND: int
-AEROSPIKE_ERR_ELEMENT_EXISTS: int
-AEROSPIKE_ERR_ENTERPRISE_ONLY: int
-AEROSPIKE_ERR_OP_NOT_APPLICABLE: int
-AEROSPIKE_ERR_FILTERED_OUT: int
-AEROSPIKE_ERR_LOST_CONFLICT: int
-AEROSPIKE_QUERY_END: int
-AEROSPIKE_SECURITY_NOT_SUPPORTED: int
-AEROSPIKE_SECURITY_NOT_ENABLED: int
-AEROSPIKE_ERR_INVALID_USER: int
-AEROSPIKE_ERR_NOT_AUTHENTICATED: int
-AEROSPIKE_ERR_ROLE_VIOLATION: int
-AEROSPIKE_ERR_UDF: int
-AEROSPIKE_ERR_BATCH_DISABLED: int
-AEROSPIKE_ERR_INDEX_FOUND: int
-AEROSPIKE_ERR_INDEX_NOT_FOUND: int
-AEROSPIKE_ERR_QUERY_ABORTED: int
+AEROSPIKE_OK: Literal[0]
+AEROSPIKE_ERR_SERVER: Literal[1]
+AEROSPIKE_ERR_RECORD_NOT_FOUND: Literal[2]
+AEROSPIKE_ERR_RECORD_GENERATION: Literal[3]
+AEROSPIKE_ERR_PARAM: Literal[4]
+AEROSPIKE_ERR_RECORD_EXISTS: Literal[5]
+AEROSPIKE_ERR_BIN_EXISTS: Literal[6]
+AEROSPIKE_ERR_CLUSTER_KEY_MISMATCH: Literal[7]
+AEROSPIKE_ERR_SERVER_MEM: Literal[8]
+AEROSPIKE_ERR_TIMEOUT: Literal[9]
+AEROSPIKE_ERR_ALWAYS_FORBIDDEN: Literal[10]
+AEROSPIKE_ERR_PARTITION_UNAVAILABLE: Literal[11]
+AEROSPIKE_ERR_BIN_TYPE: Literal[12]
+AEROSPIKE_ERR_RECORD_TOO_BIG: Literal[13]
+AEROSPIKE_ERR_KEY_BUSY: Literal[14]
+AEROSPIKE_ERR_SCAN_ABORT: Literal[15]
+AEROSPIKE_ERR_UNSUPPORTED_FEATURE: Literal[16]
+AEROSPIKE_ERR_BIN_NOT_FOUND: Literal[17]
+AEROSPIKE_ERR_DEVICE_OVERLOAD: Literal[18]
+AEROSPIKE_ERR_KEY_MISMATCH: Literal[19]
+AEROSPIKE_ERR_INVALID_NAMESPACE: Literal[20]
+AEROSPIKE_ERR_BIN_NAME: Literal[21]
+AEROSPIKE_ERR_FAIL_FORBIDDEN: Literal[22]
+AEROSPIKE_ERR_ELEMENT_NOT_FOUND: Literal[23]
+AEROSPIKE_ERR_ELEMENT_EXISTS: Literal[24]
+AEROSPIKE_ERR_ENTERPRISE_ONLY: Literal[25]
+AEROSPIKE_ERR_OP_NOT_APPLICABLE: Literal[26]
+AEROSPIKE_ERR_FILTERED_OUT: Literal[27]
+AEROSPIKE_ERR_LOST_CONFLICT: Literal[28]
+AEROSPIKE_QUERY_END: Literal[50]
+AEROSPIKE_SECURITY_NOT_SUPPORTED: Literal[51]
+AEROSPIKE_SECURITY_NOT_ENABLED: Literal[52]
+AEROSPIKE_ERR_INVALID_USER: Literal[60]
+AEROSPIKE_ERR_NOT_AUTHENTICATED: Literal[80]
+AEROSPIKE_ERR_ROLE_VIOLATION: Literal[81]
+AEROSPIKE_ERR_UDF: Literal[100]
+AEROSPIKE_ERR_BATCH_DISABLED: Literal[150]
+AEROSPIKE_ERR_INDEX_FOUND: Literal[200]
+AEROSPIKE_ERR_INDEX_NOT_FOUND: Literal[201]
+AEROSPIKE_ERR_QUERY_ABORTED: Literal[210]
 
-# Client Error Codes
-AEROSPIKE_ERR_CLIENT: int
-AEROSPIKE_ERR_CONNECTION: int
-AEROSPIKE_ERR_CLUSTER: int
-AEROSPIKE_ERR_INVALID_HOST: int
-AEROSPIKE_ERR_NO_MORE_CONNECTIONS: int
+# Client Error Codes (negative)
+AEROSPIKE_ERR_CLIENT: Literal[-1]
+AEROSPIKE_ERR_CONNECTION: Literal[-10]
+AEROSPIKE_ERR_CLUSTER: Literal[-11]
+AEROSPIKE_ERR_INVALID_HOST: Literal[-4]
+AEROSPIKE_ERR_NO_MORE_CONNECTIONS: Literal[-7]
