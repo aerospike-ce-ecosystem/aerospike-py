@@ -7,8 +7,8 @@ use pyo3::types::PyDict;
 
 use super::write_policy::parse_ttl;
 use super::{
-    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_generation_policy,
-    parse_record_exists_action,
+    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_consistency_level,
+    parse_generation_policy, parse_read_touch_ttl, parse_record_exists_action, parse_replica,
 };
 
 /// Parse a Python policy dict into a BatchPolicy
@@ -29,6 +29,16 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
         "allow_inline_ssd" => policy.allow_inline_ssd;
         "respond_all_keys" => policy.respond_all_keys
     });
+
+    if let Some(val) = dict.get_item("replica")? {
+        policy.replica = parse_replica(val.extract::<i32>()?);
+    }
+    if let Some(val) = dict.get_item("read_mode_ap")? {
+        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?);
+    }
+    if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
+        policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
+    }
 
     policy.filter_expression = extract_filter_expression(dict)?;
 
@@ -252,6 +262,38 @@ mod tests {
             assert!(overridden.send_key, "send_key must be inherited from base");
             assert_eq!(overridden.commit_level, CommitLevel::CommitMaster);
             assert!(matches!(overridden.expiration, Expiration::Seconds(3600)));
+        });
+    }
+
+    #[test]
+    fn parse_batch_policy_with_replica_master() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("replica", 0i32).unwrap();
+            });
+            let p = parse_batch_policy(Some(&d)).unwrap();
+            assert_eq!(p.replica, aerospike_core::policy::Replica::Master);
+        });
+    }
+
+    #[test]
+    fn parse_batch_policy_with_read_mode_and_ttl() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("read_mode_ap", 1i32).unwrap();
+                d.set_item("read_touch_ttl_percent", 80i64).unwrap();
+            });
+            let p = parse_batch_policy(Some(&d)).unwrap();
+            assert_eq!(
+                p.base_policy.consistency_level,
+                aerospike_core::ConsistencyLevel::ConsistencyAll
+            );
+            assert!(matches!(
+                p.base_policy.read_touch_ttl,
+                aerospike_core::ReadTouchTTL::Percent(80)
+            ));
         });
     }
 

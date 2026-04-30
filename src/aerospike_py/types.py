@@ -106,6 +106,7 @@ class ReadPolicy(TypedDict, total=False):
     filter_expression: Any
     replica: int
     read_mode_ap: int
+    read_touch_ttl_percent: int
 
 
 class WritePolicy(TypedDict, total=False):
@@ -119,6 +120,8 @@ class WritePolicy(TypedDict, total=False):
     commit_level: int
     ttl: int
     filter_expression: Any
+    read_mode_ap: int
+    read_touch_ttl_percent: int
 
 
 class BatchPolicy(TypedDict, total=False):
@@ -129,6 +132,9 @@ class BatchPolicy(TypedDict, total=False):
     allow_inline: bool
     allow_inline_ssd: bool
     respond_all_keys: bool
+    replica: int
+    read_mode_ap: int
+    read_touch_ttl_percent: int
     # Batch-level write defaults — used by ``batch_write``. Per-record
     # ``WriteMeta`` entries override these fields (matching the existing
     # ``ttl``/``gen`` precedence rule).
@@ -151,6 +157,9 @@ class QueryPolicy(TypedDict, total=False):
     max_records: int
     records_per_second: int
     filter_expression: Any
+    replica: int
+    read_mode_ap: int
+    read_touch_ttl_percent: int
 
 
 class WriteMeta(TypedDict, total=False):

@@ -2536,6 +2536,14 @@ POLICY_COMMIT_LEVEL_MASTER: int
 POLICY_READ_MODE_AP_ONE: int
 POLICY_READ_MODE_AP_ALL: int
 
+# Read Touch TTL Percent (server v8+)
+# Special values for ``read_touch_ttl_percent``:
+#   - ``READ_TOUCH_TTL_PERCENT_SERVER_DEFAULT`` (0): use server config
+#   - ``READ_TOUCH_TTL_PERCENT_DONT_RESET`` (-1): never reset TTL on read
+#   - integer 1..100: reset TTL on read when within N% of original write TTL
+READ_TOUCH_TTL_PERCENT_SERVER_DEFAULT: int
+READ_TOUCH_TTL_PERCENT_DONT_RESET: int
+
 # TTL
 TTL_NAMESPACE_DEFAULT: int
 TTL_NEVER_EXPIRE: int
