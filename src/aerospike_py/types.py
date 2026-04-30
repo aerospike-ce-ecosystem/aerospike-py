@@ -160,6 +160,12 @@ class QueryPolicy(TypedDict, total=False):
     replica: int
     read_mode_ap: int
     read_touch_ttl_percent: int
+    max_concurrent_nodes: int
+    record_queue_size: int
+    expected_duration: int
+    include_bin_data: bool
+    # PartitionFilter handle returned by partition_filter_all / _by_id / _by_range
+    partition_filter: Any
 
 
 class WriteMeta(TypedDict, total=False):

@@ -6,7 +6,8 @@ pub mod read_policy;
 pub mod write_policy;
 
 use aerospike_core::expressions::Expression;
-use aerospike_core::policy::Replica;
+use aerospike_core::policy::{QueryDuration, Replica};
+use aerospike_core::query::PartitionFilter;
 use aerospike_core::{
     CommitLevel, ConsistencyLevel, GenerationPolicy, ReadTouchTTL, RecordExistsAction,
 };
@@ -14,6 +15,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::expressions::{is_expression, py_to_expression};
+use crate::types::partition_filter::PyPartitionFilter;
 
 /// Extract simple typed fields from a Python dict into a policy struct.
 ///
@@ -102,6 +104,36 @@ pub(crate) fn parse_consistency_level(val: i32) -> ConsistencyLevel {
         1 => ConsistencyLevel::ConsistencyAll,
         _ => ConsistencyLevel::ConsistencyOne,
     }
+}
+
+/// Map a `QUERY_DURATION_*` integer constant to a [`QueryDuration`].
+///
+/// Unknown values fall back to [`QueryDuration::Long`].
+pub(crate) fn parse_query_duration(val: i32) -> QueryDuration {
+    match val {
+        0 => QueryDuration::Long,
+        1 => QueryDuration::Short,
+        2 => QueryDuration::LongRelaxAP,
+        _ => QueryDuration::Long,
+    }
+}
+
+/// Extract a `PartitionFilter` from a query policy dict.
+///
+/// Returns `Ok(None)` when the key is absent. Returns `Err` when the value is
+/// present but not a `PyPartitionFilter` instance. We clone the inner filter
+/// so the user's handle is not mutated by query execution.
+pub fn parse_partition_filter(dict: &Bound<'_, PyDict>) -> PyResult<Option<PartitionFilter>> {
+    let Some(val) = dict.get_item("partition_filter")? else {
+        return Ok(None);
+    };
+    let pf: PyPartitionFilter = val.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "policy['partition_filter'] must be a PartitionFilter instance \
+             returned by aerospike_py.partition_filter_all/_by_id/_by_range",
+        )
+    })?;
+    Ok(Some(pf.clone_inner()))
 }
 
 /// Convert a `read_touch_ttl_percent` integer to a [`ReadTouchTTL`] enum.

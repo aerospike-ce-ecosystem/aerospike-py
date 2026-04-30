@@ -8,8 +8,7 @@ use std::sync::Arc;
 
 use aerospike_core::query::Filter;
 use aerospike_core::{
-    Bins, Client as AsClient, CollectionIndexType, Error as AsError, PartitionFilter, Statement,
-    Value,
+    Bins, Client as AsClient, CollectionIndexType, Error as AsError, Statement, Value,
 };
 use futures::StreamExt;
 use log::{debug, trace};
@@ -210,7 +209,7 @@ fn execute_query_collect(
     conn_info: &crate::tracing::ConnectionInfo,
 ) -> PyResult<Vec<aerospike_core::Record>> {
     let client = client.clone();
-    let query_policy = parse_query_policy(policy)?;
+    let (query_policy, partition_filter) = parse_query_policy(policy)?;
     debug!("Executing {}", op_name);
 
     let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
@@ -223,7 +222,7 @@ fn execute_query_collect(
         Ok(py.detach(|| {
             RUNTIME.block_on(async {
                 let rs = client
-                    .query(&query_policy, PartitionFilter::all(), statement)
+                    .query(&query_policy, partition_filter, statement)
                     .await?;
                 let mut stream = rs.into_stream();
                 let mut results = Vec::new();

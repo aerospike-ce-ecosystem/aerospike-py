@@ -2098,6 +2098,54 @@ class AsyncClient:
         policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
 
+class PartitionFilter:
+    """Opaque handle representing a subset of partitions for query/scan.
+
+    Construct via :func:`partition_filter_all`, :func:`partition_filter_by_id`,
+    or :func:`partition_filter_by_range`. Pass to
+    ``Query.results(policy={"partition_filter": handle})`` to scope a query
+    to a subset of partitions.
+
+    The underlying ``aerospike_core::PartitionFilter`` holds mutable state
+    (``Arc<Mutex<Vec<PartitionStatus>>>``). Reusing the same handle across
+    two ``results()`` calls would cause the second call to resume from where
+    the first left off; aerospike-py mitigates this by cloning the inner
+    filter at parse time, isolating the user's handle.
+    """
+
+    def __repr__(self) -> str: ...
+
+def partition_filter_all() -> PartitionFilter:
+    """Build a :class:`PartitionFilter` covering all 4096 partitions.
+
+    Equivalent to omitting ``partition_filter`` from the policy entirely.
+    """
+    ...
+
+def partition_filter_by_id(partition_id: int) -> PartitionFilter:
+    """Build a :class:`PartitionFilter` targeting a single partition.
+
+    Args:
+        partition_id: Partition index in ``[0, 4095]``.
+
+    Raises:
+        ValueError: If ``partition_id`` is outside the valid range.
+    """
+    ...
+
+def partition_filter_by_range(begin: int, count: int) -> PartitionFilter:
+    """Build a :class:`PartitionFilter` targeting ``count`` partitions from ``begin``.
+
+    Args:
+        begin: First partition (``[0, 4095]``).
+        count: Number of partitions; ``begin + count <= 4096``. ``0`` is allowed
+            and yields an empty filter.
+
+    Raises:
+        ValueError: If the range overflows 4096.
+    """
+    ...
+
 class Query:
     """Secondary index query object.
 
@@ -2543,6 +2591,15 @@ POLICY_READ_MODE_AP_ALL: int
 #   - integer 1..100: reset TTL on read when within N% of original write TTL
 READ_TOUCH_TTL_PERCENT_SERVER_DEFAULT: int
 READ_TOUCH_TTL_PERCENT_DONT_RESET: int
+
+# Query Duration (hint to the server about expected query duration).
+# Use ``QUERY_DURATION_LONG`` (default) for long-running queries with many
+# records per node, ``QUERY_DURATION_SHORT`` for low-latency queries with
+# few records, and ``QUERY_DURATION_LONG_RELAX_AP`` for long queries that
+# can relax AP consistency.
+QUERY_DURATION_LONG: int
+QUERY_DURATION_SHORT: int
+QUERY_DURATION_LONG_RELAX_AP: int
 
 # TTL
 TTL_NAMESPACE_DEFAULT: int

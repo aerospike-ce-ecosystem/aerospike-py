@@ -94,6 +94,7 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<client::PyClient>()?;
     m.add_class::<async_client::PyAsyncClient>()?;
     m.add_class::<query::PyQuery>()?;
+    m.add_class::<types::partition_filter::PyPartitionFilter>()?;
     m.add_class::<batch_types::PyBatchRecord>()?;
     m.add_class::<batch_types::PyBatchRecords>()?;
     m.add_class::<batch_types::PyBatchReadHandle>()?;
@@ -105,6 +106,18 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_internal_stage_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(is_internal_stage_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(dropped_log_count, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        types::partition_filter::partition_filter_all,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        types::partition_filter::partition_filter_by_id,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        types::partition_filter::partition_filter_by_range,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(tracing::init_tracing, m)?)?;
     m.add_function(wrap_pyfunction!(tracing::shutdown_tracing, m)?)?;
 
