@@ -104,7 +104,6 @@ class ReadPolicy(TypedDict, total=False):
     max_retries: int
     sleep_between_retries: int
     filter_expression: Any
-    expressions: Any
     replica: int
     read_mode_ap: int
 
@@ -120,7 +119,6 @@ class WritePolicy(TypedDict, total=False):
     commit_level: int
     ttl: int
     filter_expression: Any
-    expressions: Any
 
 
 class BatchPolicy(TypedDict, total=False):
@@ -153,7 +151,6 @@ class QueryPolicy(TypedDict, total=False):
     max_records: int
     records_per_second: int
     filter_expression: Any
-    expressions: Any
 
 
 class WriteMeta(TypedDict, total=False):
