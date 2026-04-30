@@ -1061,10 +1061,10 @@ def make_reverse_slice():
             kind: DtypeKind::Float,
         };
         unsafe {
-            write_float_to_buffer(buf.as_mut_ptr(), &field, 3.14)
+            write_float_to_buffer(buf.as_mut_ptr(), &field, std::f64::consts::PI)
                 .expect("write f32 to valid buffer should succeed");
             let val = ptr::read_unaligned(buf.as_ptr() as *const f32);
-            assert!((val - 3.14f32).abs() < 1e-5);
+            assert!((val - std::f32::consts::PI).abs() < 1e-5);
         }
     }
 
@@ -1079,10 +1079,10 @@ def make_reverse_slice():
             kind: DtypeKind::Float,
         };
         unsafe {
-            write_float_to_buffer(buf.as_mut_ptr(), &field, 3.141592653589793)
+            write_float_to_buffer(buf.as_mut_ptr(), &field, std::f64::consts::PI)
                 .expect("write f64 to valid buffer should succeed");
             let val = ptr::read_unaligned(buf.as_ptr() as *const f64);
-            assert!((val - 3.141592653589793f64).abs() < 1e-15);
+            assert!((val - std::f64::consts::PI).abs() < 1e-15);
         }
     }
 
@@ -1482,12 +1482,12 @@ def make_reverse_slice():
             kind: DtypeKind::Float,
         };
         unsafe {
-            ptr::write_unaligned(buf.as_mut_ptr() as *mut f64, 3.14);
+            ptr::write_unaligned(buf.as_mut_ptr() as *mut f64, std::f64::consts::PI);
             let val = read_value_from_buffer(buf.as_ptr(), &field)
                 .expect("read f64 from valid buffer should succeed");
             match val {
                 Value::Float(FloatValue::F64(bits)) => {
-                    assert!((f64::from_bits(bits) - 3.14).abs() < 1e-10);
+                    assert!((f64::from_bits(bits) - std::f64::consts::PI).abs() < 1e-10);
                 }
                 _ => panic!("expected Float(F64) variant, got {:?}", val),
             }

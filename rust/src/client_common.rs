@@ -254,57 +254,6 @@ pub fn prepare_exists_args(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::extract_cluster_name;
-    use pyo3::exceptions::PyTypeError;
-    use pyo3::prelude::*;
-    use pyo3::types::PyDict;
-
-    #[test]
-    fn extract_cluster_name_returns_empty_for_missing_key() {
-        Python::initialize();
-        Python::attach(|py| {
-            let config = PyDict::new(py);
-            let cluster_name = extract_cluster_name(&config).expect("missing key should parse");
-            assert_eq!(cluster_name, "");
-        });
-    }
-
-    #[test]
-    fn extract_cluster_name_returns_empty_for_none() {
-        Python::initialize();
-        Python::attach(|py| {
-            let config = PyDict::new(py);
-            config.set_item("cluster_name", py.None()).unwrap();
-            let cluster_name = extract_cluster_name(&config).expect("None should parse");
-            assert_eq!(cluster_name, "");
-        });
-    }
-
-    #[test]
-    fn extract_cluster_name_accepts_string() {
-        Python::initialize();
-        Python::attach(|py| {
-            let config = PyDict::new(py);
-            config.set_item("cluster_name", "dev-cluster").unwrap();
-            let cluster_name = extract_cluster_name(&config).expect("string should parse");
-            assert_eq!(cluster_name, "dev-cluster");
-        });
-    }
-
-    #[test]
-    fn extract_cluster_name_rejects_non_string_value() {
-        Python::initialize();
-        Python::attach(|py| {
-            let config = PyDict::new(py);
-            config.set_item("cluster_name", 123).unwrap();
-            let err = extract_cluster_name(&config).expect_err("non-string should fail");
-            assert!(err.is_instance_of::<PyTypeError>(py));
-        });
-    }
-}
-
 // ── remove ───────────────────────────────────────────────────────────────────
 
 pub struct RemoveArgs {
@@ -989,4 +938,55 @@ pub fn prepare_create_role_args(
         read_quota,
         write_quota,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_cluster_name;
+    use pyo3::exceptions::PyTypeError;
+    use pyo3::prelude::*;
+    use pyo3::types::PyDict;
+
+    #[test]
+    fn extract_cluster_name_returns_empty_for_missing_key() {
+        Python::initialize();
+        Python::attach(|py| {
+            let config = PyDict::new(py);
+            let cluster_name = extract_cluster_name(&config).expect("missing key should parse");
+            assert_eq!(cluster_name, "");
+        });
+    }
+
+    #[test]
+    fn extract_cluster_name_returns_empty_for_none() {
+        Python::initialize();
+        Python::attach(|py| {
+            let config = PyDict::new(py);
+            config.set_item("cluster_name", py.None()).unwrap();
+            let cluster_name = extract_cluster_name(&config).expect("None should parse");
+            assert_eq!(cluster_name, "");
+        });
+    }
+
+    #[test]
+    fn extract_cluster_name_accepts_string() {
+        Python::initialize();
+        Python::attach(|py| {
+            let config = PyDict::new(py);
+            config.set_item("cluster_name", "dev-cluster").unwrap();
+            let cluster_name = extract_cluster_name(&config).expect("string should parse");
+            assert_eq!(cluster_name, "dev-cluster");
+        });
+    }
+
+    #[test]
+    fn extract_cluster_name_rejects_non_string_value() {
+        Python::initialize();
+        Python::attach(|py| {
+            let config = PyDict::new(py);
+            config.set_item("cluster_name", 123).unwrap();
+            let err = extract_cluster_name(&config).expect_err("non-string should fail");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
+    }
 }

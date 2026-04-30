@@ -343,9 +343,11 @@ mod tests {
     fn apply_record_meta_preserves_unrelated_fields() {
         Python::initialize();
         Python::attach(|py| {
-            let mut base = BatchWritePolicy::default();
-            base.send_key = true;
-            base.commit_level = CommitLevel::CommitMaster;
+            let base = BatchWritePolicy {
+                send_key: true,
+                commit_level: CommitLevel::CommitMaster,
+                ..BatchWritePolicy::default()
+            };
 
             // Meta only sets ttl — other fields must come from base.
             let meta = build_dict(py, |d| {
@@ -394,8 +396,10 @@ mod tests {
     fn apply_record_meta_per_record_wins_over_base() {
         Python::initialize();
         Python::attach(|py| {
-            let mut base = BatchWritePolicy::default();
-            base.send_key = false; // batch policy = DIGEST
+            let base = BatchWritePolicy {
+                send_key: false, // batch policy = DIGEST
+                ..BatchWritePolicy::default()
+            };
 
             // Per-record meta = SEND must override.
             let meta = build_dict(py, |d| {
