@@ -59,6 +59,25 @@ import aerospike_py as aerospike
 | `POLICY_READ_MODE_AP_ONE` | 0 | Read from one node |
 | `POLICY_READ_MODE_AP_ALL` | 1 | Read from all nodes |
 
+### Read Touch TTL Percent
+
+Special values for the ``read_touch_ttl_percent`` policy key (server v8+). Integers 1–100 are interpreted as a percentage; the constants below are the special-meaning sentinels.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `READ_TOUCH_TTL_PERCENT_SERVER_DEFAULT` | 0 | Use the namespace's `default-read-touch-ttl-pct` |
+| `READ_TOUCH_TTL_PERCENT_DONT_RESET` | -1 | Never reset TTL on reads |
+
+### Query Duration
+
+Hint to the server about the expected duration of a query. Used as the ``expected_duration`` key on `QueryPolicy`.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `QUERY_DURATION_LONG` | 0 | Default. Long-running query with many records per node. |
+| `QUERY_DURATION_SHORT` | 1 | Low-latency query with few records per node (server 6.0+). |
+| `QUERY_DURATION_LONG_RELAX_AP` | 2 | Long query with relaxed AP consistency (server 7.1+). |
+
 ## TTL
 
 | Constant | Value | Description |
