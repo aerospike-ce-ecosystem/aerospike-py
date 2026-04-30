@@ -5,10 +5,13 @@
 
 use std::sync::Arc;
 
-use crate::policy::batch_policy::{apply_record_meta, parse_batch_write_policy};
+use crate::policy::batch_policy::{
+    apply_record_meta, apply_record_meta_for_delete, parse_batch_delete_policy,
+    parse_batch_read_policy, parse_batch_write_policy,
+};
 use aerospike_core::{
-    operations::Operation, BatchDeletePolicy, BatchOperation, BatchReadPolicy, BatchWritePolicy,
-    Bin, Bins, Key, ReadPolicy, UDFLang, Value, WritePolicy,
+    operations::Operation, BatchDeletePolicy, BatchOperation, BatchWritePolicy, Bin, Bins, Key,
+    ReadPolicy, UDFLang, Value, WritePolicy,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
@@ -475,6 +478,7 @@ pub fn prepare_operate_args(
 pub struct BatchReadArgs {
     pub rust_keys: Vec<Key>,
     pub batch_policy: aerospike_core::BatchPolicy,
+    pub read_policy: aerospike_core::BatchReadPolicy,
     pub bins_selector: Bins,
     pub batch_ns: String,
     pub batch_set: String,
@@ -489,6 +493,7 @@ pub fn prepare_batch_read_args(
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchReadArgs> {
     let batch_policy = parse_batch_policy(policy)?;
+    let read_policy = parse_batch_read_policy(policy)?;
     let bins_selector = match bins {
         None => Bins::All,
         Some(b) if b.is_empty() => Bins::None,
@@ -508,6 +513,7 @@ pub fn prepare_batch_read_args(
     Ok(BatchReadArgs {
         rust_keys,
         batch_policy,
+        read_policy,
         bins_selector,
         batch_ns,
         batch_set,
@@ -517,10 +523,9 @@ pub fn prepare_batch_read_args(
 
 impl BatchReadArgs {
     pub fn to_batch_ops(&self) -> Vec<BatchOperation> {
-        let read_policy = BatchReadPolicy::default();
         self.rust_keys
             .iter()
-            .map(|k| BatchOperation::read(&read_policy, k.clone(), self.bins_selector.clone()))
+            .map(|k| BatchOperation::read(&self.read_policy, k.clone(), self.bins_selector.clone()))
             .collect()
     }
 }
@@ -575,7 +580,10 @@ impl BatchOperateArgs {
 // ── batch_remove ─────────────────────────────────────────────────────────────
 
 pub struct BatchRemoveArgs {
-    pub rust_keys: Vec<Key>,
+    /// One entry per input key. Each entry pairs the parsed key with the
+    /// `BatchDeletePolicy` that applies to it (either the shared base
+    /// policy via `Arc::clone`, or a per-record override).
+    pub records: Vec<(Key, Arc<BatchDeletePolicy>)>,
     pub batch_policy: aerospike_core::BatchPolicy,
     pub batch_ns: String,
     pub batch_set: String,
@@ -589,15 +597,58 @@ pub fn prepare_batch_remove_args(
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchRemoveArgs> {
     let batch_policy = parse_batch_policy(policy)?;
-    let rust_keys = py_to_keys(keys)?;
+    // Parse the batch-level delete policy once and share it via Arc; the
+    // common "no per-record meta" path bumps refcount instead of cloning.
+    let base_delete_policy = Arc::new(parse_batch_delete_policy(policy)?);
+    let mut records: Vec<(Key, Arc<BatchDeletePolicy>)> = Vec::with_capacity(keys.len());
 
-    let (batch_ns, batch_set) = rust_keys
+    for item in keys.iter() {
+        // Disambiguate Key vs (Key, meta):
+        //   - Key      ::= (str, str, user_key[, digest])  — len in {3, 4}, [0]=str
+        //   - (K,meta) ::= (tuple, dict)                    — len == 2, [0]=tuple, [1]=dict
+        // The `tuple.len() == 2 && [0] is tuple && [1] is dict` test is precise
+        // because a Key is never length-2 (always >= 3).
+        let is_key_meta_pair = if let Ok(tuple) = item.cast::<PyTuple>() {
+            tuple.len() == 2
+                && tuple
+                    .get_item(0)
+                    .map(|x| x.is_instance_of::<PyTuple>())
+                    .unwrap_or(false)
+                && tuple
+                    .get_item(1)
+                    .map(|x| x.is_instance_of::<PyDict>())
+                    .unwrap_or(false)
+        } else {
+            false
+        };
+
+        if is_key_meta_pair {
+            let tuple = item.cast::<PyTuple>().unwrap();
+            let key_obj = tuple.get_item(0)?;
+            let meta_obj = tuple.get_item(1)?;
+            let meta_dict = meta_obj
+                .cast::<PyDict>()
+                .map_err(|_| pyo3::exceptions::PyTypeError::new_err("meta must be a dict"))?;
+            let key = py_to_key(&key_obj)?;
+            let policy = Arc::new(apply_record_meta_for_delete(
+                &base_delete_policy,
+                meta_dict,
+            )?);
+            records.push((key, policy));
+        } else {
+            // Legacy bare Key path: the whole tuple is the key.
+            let key = py_to_key(&item)?;
+            records.push((key, Arc::clone(&base_delete_policy)));
+        }
+    }
+
+    let (batch_ns, batch_set) = records
         .first()
-        .map(|k| (k.namespace.clone(), k.set_name.clone()))
+        .map(|(k, _)| (k.namespace.clone(), k.set_name.clone()))
         .unwrap_or_default();
 
     Ok(BatchRemoveArgs {
-        rust_keys,
+        records,
         batch_policy,
         batch_ns,
         batch_set,
@@ -607,10 +658,9 @@ pub fn prepare_batch_remove_args(
 
 impl BatchRemoveArgs {
     pub fn to_batch_ops(&self) -> Vec<BatchOperation> {
-        let delete_policy = BatchDeletePolicy::default();
-        self.rust_keys
+        self.records
             .iter()
-            .map(|k| BatchOperation::delete(&delete_policy, k.clone()))
+            .map(|(k, p)| BatchOperation::delete(p.as_ref(), k.clone()))
             .collect()
     }
 }

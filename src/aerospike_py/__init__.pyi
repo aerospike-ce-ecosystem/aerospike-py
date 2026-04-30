@@ -7,6 +7,7 @@ Claude Code Plugin::
 """
 
 import contextlib
+from collections.abc import Sequence
 from typing import Any, Callable, Optional, Union, overload
 
 import numpy as np
@@ -21,7 +22,10 @@ from aerospike_py.types import (
     AdminPolicy as AdminPolicy,
     AerospikeKey as AerospikeKey,
     AerospikeRecord as AerospikeRecord,
+    BatchDeleteMeta as BatchDeleteMeta,
+    BatchDeletePolicy as BatchDeletePolicy,
     BatchPolicy as BatchPolicy,
+    BatchReadPolicy as BatchReadPolicy,
     BatchRecord as BatchRecord,
     BatchRecords as BatchRecords,
     BatchWriteResult as BatchWriteResult,
@@ -787,14 +791,22 @@ class Client:
 
     def batch_remove(
         self,
-        keys: list[Key],
+        keys: Sequence[Key | tuple[Key, "BatchDeleteMeta"]],
         policy: Optional[dict[str, Any]] = None,
     ) -> BatchWriteResult:
         """Delete multiple records in a single batch call.
 
         Args:
-            keys: List of ``(namespace, set, primary_key)`` tuples.
-            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+            keys: Either a list of bare ``Key`` tuples (back-compat) or a
+                list mixing bare keys and ``(key, meta)`` pairs where
+                ``meta`` is a [`BatchDeleteMeta`](types.md#batchdeletemeta)
+                dict for per-record overrides (CAS deletes, durable_delete
+                per record, etc.).
+            policy: Optional dict combining a transport-level
+                [`BatchPolicy`](types.md#batchpolicy) with batch-level
+                [`BatchDeletePolicy`](types.md#batchdeletepolicy) defaults:
+                ``gen``, ``key`` (send_key), ``commit_level``,
+                ``durable_delete``, ``filter_expression``.
 
         Returns:
             A ``BatchWriteResult`` with per-record result codes in
@@ -804,9 +816,16 @@ class Client:
 
         Example:
             ```python
+            # Legacy: bare keys.
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
             results = client.batch_remove(keys)
-            failed = [br for br in results.batch_records if br.result != 0]
+
+            # CAS delete: only delete user_1 if generation is still 3.
+            _, meta, _ = client.get(("test", "demo", "user_1"))
+            results = client.batch_remove([
+                (("test", "demo", "user_1"), {"gen": meta.gen}),
+                ("test", "demo", "user_2"),  # bare key, no CAS
+            ])
             ```
         """
         ...
@@ -1787,27 +1806,14 @@ class AsyncClient:
 
     async def batch_remove(
         self,
-        keys: list[Key],
+        keys: Sequence[Key | tuple[Key, "BatchDeleteMeta"]],
         policy: Optional[dict[str, Any]] = None,
     ) -> BatchWriteResult:
-        """Delete multiple records in a single batch call.
+        """Delete multiple records in a single batch call (async).
 
-        Args:
-            keys: List of ``(namespace, set, primary_key)`` tuples.
-            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-
-        Returns:
-            A ``BatchWriteResult`` with per-record result codes in
-            ``batch_records: list[BatchRecord]``.
-            Each ``BatchRecord`` also includes an ``in_doubt`` flag
-            (see :meth:`batch_write` for details).
-
-        Example:
-            ```python
-            keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            results = await client.batch_remove(keys)
-            failed = [br for br in results.batch_records if br.result != 0]
-            ```
+        See :meth:`Client.batch_remove` for full description. Per-record
+        ``BatchDeleteMeta`` overrides are supported via ``(key, meta)``
+        tuples in the keys list.
         """
         ...
 

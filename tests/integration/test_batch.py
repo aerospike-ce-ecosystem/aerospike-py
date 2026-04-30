@@ -733,3 +733,90 @@ class TestBatchRemove:
         for k in keys:
             _, meta = client.exists(k)
             assert meta is None
+
+
+class TestBatchRemoveGen:
+    """batch_remove() generation (CAS) support via per-record meta."""
+
+    def test_batch_remove_gen_check_success(self, client, cleanup):
+        """Per-record gen check succeeds when generation matches."""
+        key = ("test", "demo", "br_gen_ok")
+        cleanup.append(key)
+        client.put(key, {"val": 1})
+        _, meta = client.exists(key)
+        assert meta is not None
+        current_gen = meta.gen
+
+        results = client.batch_remove([(key, {"gen": current_gen})])
+        assert results.batch_records[0].result == 0
+        _, meta_after = client.exists(key)
+        assert meta_after is None
+
+    def test_batch_remove_gen_check_mismatch(self, client, cleanup):
+        """Per-record gen mismatch returns GENERATION_ERROR; record stays."""
+        key = ("test", "demo", "br_gen_mismatch")
+        cleanup.append(key)
+        client.put(key, {"val": 1})
+
+        results = client.batch_remove([(key, {"gen": 999})])
+        assert results.batch_records[0].result != 0  # GENERATION_ERROR
+
+        _, meta_after, bins_after = client.get(key)
+        assert meta_after is not None
+        assert bins_after["val"] == 1
+
+
+class TestBatchRemoveBackwardCompat:
+    """Verify the legacy bare-Key signature is preserved bit-for-bit."""
+
+    def test_batch_remove_legacy_signature(self, client, cleanup):
+        """``batch_remove([(ns, set, k1), (ns, set, k2)])`` still works."""
+        keys = [
+            ("test", "demo", "br_legacy_1"),
+            ("test", "demo", "br_legacy_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+            client.put(k, {"val": 1})
+
+        results = client.batch_remove(keys)
+        assert all(br.result == 0 for br in results.batch_records)
+        for k in keys:
+            _, meta = client.exists(k)
+            assert meta is None
+
+    def test_batch_remove_mixed_legacy_and_meta(self, client, cleanup):
+        """Mixing bare Key and (Key, meta) entries in the same call works."""
+        k_legacy = ("test", "demo", "br_mixed_legacy")
+        k_with_meta = ("test", "demo", "br_mixed_meta")
+        cleanup.append(k_legacy)
+        cleanup.append(k_with_meta)
+
+        client.put(k_legacy, {"val": 1})
+        client.put(k_with_meta, {"val": 1})
+        _, meta = client.exists(k_with_meta)
+        assert meta is not None
+
+        results = client.batch_remove([k_legacy, (k_with_meta, {"gen": meta.gen})])
+        assert results.batch_records[0].result == 0
+        assert results.batch_records[1].result == 0
+
+    def test_batch_remove_empty_list(self, client):
+        """``batch_remove([])`` returns an empty BatchWriteResult."""
+        results = client.batch_remove([])
+        assert results.batch_records == []
+
+
+class TestBatchRemoveSendKey:
+    """batch_remove() POLICY_KEY_SEND flows through."""
+
+    def test_batch_remove_send_key_via_policy(self, client, cleanup):
+        """``key=POLICY_KEY_SEND`` policy is accepted on a batch remove."""
+        key = ("test", "demo", "br_sendkey")
+        cleanup.append(key)
+        client.put(key, {"val": 1})
+
+        results = client.batch_remove([key], policy={"key": aerospike_py.POLICY_KEY_SEND})
+        assert results.batch_records[0].result == 0
+        _, meta_after = client.exists(key)
+        assert meta_after is None
