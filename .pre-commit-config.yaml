@@ -14,3 +14,18 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --manifest-path rust/Cargo.toml --features otel --all-targets -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
