@@ -54,3 +54,10 @@ docs/node_modules/
 docs/build/
 docs/.docusaurus/
 docs/src/pages/releases.mdx
+
+# OS / agent / test caches that should never be committed
+.DS_Store
+**/.DS_Store
+.hypothesis/
+.claude/reviews/
+.claude/scheduled_tasks.lock
