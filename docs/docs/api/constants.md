@@ -240,18 +240,21 @@ Used with `operate()` and `batch_operate()`.
 
 ## Privilege Codes
 
-| Constant | Description |
-|----------|-------------|
-| `PRIV_READ` | Read |
-| `PRIV_WRITE` | Write |
-| `PRIV_READ_WRITE` | Read-write |
-| `PRIV_READ_WRITE_UDF` | Read-write-UDF |
-| `PRIV_SYS_ADMIN` | System admin |
-| `PRIV_USER_ADMIN` | User admin |
-| `PRIV_DATA_ADMIN` | Data admin |
-| `PRIV_UDF_ADMIN` | UDF admin |
-| `PRIV_SINDEX_ADMIN` | Secondary index admin |
-| `PRIV_TRUNCATE` | Truncate |
+`Privilege.code` accepts either the int constant or the canonical string name
+(case-insensitive; `_` is a synonym for `-`).
+
+| Constant | Name | Description |
+|----------|------|-------------|
+| `PRIV_READ` | `"read"` | Read |
+| `PRIV_WRITE` | `"write"` | Write |
+| `PRIV_READ_WRITE` | `"read-write"` | Read-write |
+| `PRIV_READ_WRITE_UDF` | `"read-write-udf"` | Read-write-UDF |
+| `PRIV_SYS_ADMIN` | `"sys-admin"` | System admin |
+| `PRIV_USER_ADMIN` | `"user-admin"` | User admin |
+| `PRIV_DATA_ADMIN` | `"data-admin"` | Data admin |
+| `PRIV_UDF_ADMIN` | `"udf-admin"` | UDF admin |
+| `PRIV_SINDEX_ADMIN` | `"sindex-admin"` | Secondary index admin |
+| `PRIV_TRUNCATE` | `"truncate"` | Truncate |
 
 ## Status Codes
 

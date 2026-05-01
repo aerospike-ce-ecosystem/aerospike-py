@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [Unreleased]: https://github.com/KimSoungRyoul/aerospike-py/compare/v0.0.1.beta2...HEAD
 
+### Changed
+- `Privilege.code` (used by `admin_create_role` / `admin_grant_privileges` / `admin_revoke_privileges`) now accepts the canonical asadm-style string name in addition to the int constant. Both `{"code": aerospike_py.PRIV_READ}` and `{"code": "read"}` are valid; recognised names are `read`, `read-write`, `read-write-udf`, `write`, `truncate`, `user-admin`, `sys-admin`, `data-admin`, `udf-admin`, `sindex-admin`. Names are case-insensitive and `_` is treated as a synonym for `-`. Removes the need for downstream consumers receiving privilege codes from a wire format (HTTP forms, JSON) to maintain a name → int translation table. Closes #326.
+
 ### Fixed
 - Reading a record with a language-specific blob particle type (PYTHON_BLOB=8, JAVA_BLOB=5, CSHARP_BLOB=7, RUBY_BLOB=9, PHP_BLOB=10, ERLANG_BLOB=11, LUA_BLOB=22) no longer aborts the Python process. The native panic from `aerospike-core` is now caught at every read/write entry point and surfaced to Python as `aerospike_py.RustPanicError` (subclass of `ClientError`), so callers can `try/except` around individual operations or per-record in scans/batch reads. The bin data itself is not recovered — the operation reports the failure and aborts; only the Python process survives. Closes #280.
 

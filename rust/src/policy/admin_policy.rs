@@ -41,6 +41,33 @@ fn code_to_privilege_code(code: u8) -> PyResult<PrivilegeCode> {
     }
 }
 
+/// Convert a canonical privilege name (asadm-style) to a Rust PrivilegeCode.
+///
+/// Accepts the same names the server / asadm emits, e.g. `"read"`,
+/// `"read-write"`, `"sys-admin"`. Also accepts the `_` variant
+/// (`"read_write"`, `"sys_admin"`) for ergonomics with Python code that
+/// avoids hyphens.
+fn name_to_privilege_code(name: &str) -> PyResult<PrivilegeCode> {
+    match name.to_ascii_lowercase().replace('_', "-").as_str() {
+        "user-admin" => Ok(PrivilegeCode::UserAdmin),
+        "sys-admin" => Ok(PrivilegeCode::SysAdmin),
+        "data-admin" => Ok(PrivilegeCode::DataAdmin),
+        "udf-admin" => Ok(PrivilegeCode::UDFAdmin),
+        "sindex-admin" => Ok(PrivilegeCode::SIndexAdmin),
+        "read" => Ok(PrivilegeCode::Read),
+        "read-write" => Ok(PrivilegeCode::ReadWrite),
+        "read-write-udf" => Ok(PrivilegeCode::ReadWriteUDF),
+        "write" => Ok(PrivilegeCode::Write),
+        "truncate" => Ok(PrivilegeCode::Truncate),
+        _ => Err(crate::errors::InvalidArgError::new_err(format!(
+            "Unknown privilege name: {:?}. Expected one of: read, read-write, \
+             read-write-udf, write, truncate, user-admin, sys-admin, data-admin, \
+             udf-admin, sindex-admin",
+            name
+        ))),
+    }
+}
+
 /// Convert a Rust PrivilegeCode to a Python integer.
 fn privilege_code_to_int(code: &PrivilegeCode) -> u8 {
     match code {
@@ -59,20 +86,36 @@ fn privilege_code_to_int(code: &PrivilegeCode) -> u8 {
 }
 
 /// Convert a Python list of privilege dicts to Vec<Privilege>.
-/// Each dict: {"code": int, "ns": str (optional), "set": str (optional)}
+///
+/// Each dict: `{"code": int | str, "ns": str (optional), "set": str (optional)}`.
+/// `code` accepts either the int constant (`aerospike_py.PRIV_READ = 10`) or
+/// the canonical string name (`"read"`, `"read-write"`, `"sys-admin"`, …) so
+/// callers receiving privilege names from a wire format (HTTP form, JSON, asadm
+/// output) don't need a translation table.
 pub fn parse_privileges(privileges: &Bound<'_, PyList>) -> PyResult<Vec<Privilege>> {
     let mut result = Vec::new();
     for item in privileges.iter() {
         let dict = item.cast::<PyDict>()?;
-        let code: u8 = dict
-            .get_item("code")?
-            .ok_or_else(|| {
-                crate::errors::InvalidArgError::new_err("Privilege dict must have 'code' key")
-            })?
-            .extract()?;
+        let code_obj = dict.get_item("code")?.ok_or_else(|| {
+            crate::errors::InvalidArgError::new_err("Privilege dict must have 'code' key")
+        })?;
+        let priv_code = if let Ok(code_int) = code_obj.extract::<u8>() {
+            code_to_privilege_code(code_int)?
+        } else if let Ok(code_str) = code_obj.extract::<String>() {
+            name_to_privilege_code(&code_str)?
+        } else {
+            let type_name = code_obj
+                .get_type()
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "privilege 'code' must be int or str, got {type_name}"
+            )));
+        };
         let ns = extract_optional_string(dict, "ns")?;
         let set_name = extract_optional_string(dict, "set")?;
-        result.push(Privilege::new(code_to_privilege_code(code)?, ns, set_name));
+        result.push(Privilege::new(priv_code, ns, set_name));
     }
     Ok(result)
 }
@@ -209,6 +252,92 @@ mod tests {
             privileges.append(dict).unwrap();
 
             let err = parse_privileges(&privileges).expect_err("non-string set must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
+    }
+
+    #[test]
+    fn parse_privileges_accepts_string_code() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            for name in [
+                "read",
+                "read-write",
+                "read-write-udf",
+                "write",
+                "truncate",
+                "user-admin",
+                "sys-admin",
+                "data-admin",
+                "udf-admin",
+                "sindex-admin",
+            ] {
+                let dict = PyDict::new(py);
+                dict.set_item("code", name).unwrap();
+                privileges.append(dict).unwrap();
+            }
+
+            let parsed = parse_privileges(&privileges).expect("string codes should parse");
+            assert_eq!(parsed.len(), 10);
+            assert!(matches!(parsed[0].code, PrivilegeCode::Read));
+            assert!(matches!(parsed[1].code, PrivilegeCode::ReadWrite));
+            assert!(matches!(parsed[2].code, PrivilegeCode::ReadWriteUDF));
+            assert!(matches!(parsed[3].code, PrivilegeCode::Write));
+            assert!(matches!(parsed[4].code, PrivilegeCode::Truncate));
+            assert!(matches!(parsed[5].code, PrivilegeCode::UserAdmin));
+            assert!(matches!(parsed[6].code, PrivilegeCode::SysAdmin));
+            assert!(matches!(parsed[7].code, PrivilegeCode::DataAdmin));
+            assert!(matches!(parsed[8].code, PrivilegeCode::UDFAdmin));
+            assert!(matches!(parsed[9].code, PrivilegeCode::SIndexAdmin));
+        });
+    }
+
+    #[test]
+    fn parse_privileges_string_code_is_case_and_separator_insensitive() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            for name in ["READ", "Read-Write", "sys_admin", "READ_WRITE_UDF"] {
+                let dict = PyDict::new(py);
+                dict.set_item("code", name).unwrap();
+                privileges.append(dict).unwrap();
+            }
+
+            let parsed = parse_privileges(&privileges).expect("normalized names should parse");
+            assert_eq!(parsed.len(), 4);
+            assert!(matches!(parsed[0].code, PrivilegeCode::Read));
+            assert!(matches!(parsed[1].code, PrivilegeCode::ReadWrite));
+            assert!(matches!(parsed[2].code, PrivilegeCode::SysAdmin));
+            assert!(matches!(parsed[3].code, PrivilegeCode::ReadWriteUDF));
+        });
+    }
+
+    #[test]
+    fn parse_privileges_rejects_unknown_string_code() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            let dict = PyDict::new(py);
+            dict.set_item("code", "super-admin").unwrap();
+            privileges.append(dict).unwrap();
+
+            let err = parse_privileges(&privileges).expect_err("unknown name must be rejected");
+            assert!(err.to_string().contains("Unknown privilege name"));
+        });
+    }
+
+    #[test]
+    fn parse_privileges_rejects_non_int_non_str_code() {
+        Python::initialize();
+        Python::attach(|py| {
+            let privileges = PyList::empty(py);
+            let dict = PyDict::new(py);
+            dict.set_item("code", 1.5_f64).unwrap();
+            privileges.append(dict).unwrap();
+
+            let err = parse_privileges(&privileges)
+                .expect_err("float code must be rejected as TypeError");
             assert!(err.is_instance_of::<PyTypeError>(py));
         });
     }

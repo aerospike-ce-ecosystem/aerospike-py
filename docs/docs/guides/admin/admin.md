@@ -65,18 +65,22 @@ client.admin_drop_role("data_reader")
 
 ## Privilege Codes
 
-| Constant | Description |
-|----------|-------------|
-| `PRIV_READ` | Read records |
-| `PRIV_WRITE` | Write records |
-| `PRIV_READ_WRITE` | Read and write |
-| `PRIV_READ_WRITE_UDF` | Read, write, and UDF |
-| `PRIV_SYS_ADMIN` | System admin |
-| `PRIV_USER_ADMIN` | User management |
-| `PRIV_DATA_ADMIN` | Data management (truncate, index) |
-| `PRIV_UDF_ADMIN` | UDF management |
-| `PRIV_SINDEX_ADMIN` | Secondary index management |
-| `PRIV_TRUNCATE` | Truncate operations |
+`code` accepts either the int constant or the canonical string name (asadm-style).
+Names are matched case-insensitively, and `_` is a synonym for `-`
+(`"sys_admin"` == `"sys-admin"`).
+
+| Constant | Name | Description |
+|----------|------|-------------|
+| `PRIV_READ` | `"read"` | Read records |
+| `PRIV_WRITE` | `"write"` | Write records |
+| `PRIV_READ_WRITE` | `"read-write"` | Read and write |
+| `PRIV_READ_WRITE_UDF` | `"read-write-udf"` | Read, write, and UDF |
+| `PRIV_SYS_ADMIN` | `"sys-admin"` | System admin |
+| `PRIV_USER_ADMIN` | `"user-admin"` | User management |
+| `PRIV_DATA_ADMIN` | `"data-admin"` | Data management (truncate, index) |
+| `PRIV_UDF_ADMIN` | `"udf-admin"` | UDF management |
+| `PRIV_SINDEX_ADMIN` | `"sindex-admin"` | Secondary index management |
+| `PRIV_TRUNCATE` | `"truncate"` | Truncate operations |
 
 ## Privilege Scope
 
@@ -84,4 +88,8 @@ client.admin_drop_role("data_reader")
 {"code": aerospike.PRIV_READ}                              # Global
 {"code": aerospike.PRIV_READ, "ns": "test"}                # Namespace
 {"code": aerospike.PRIV_READ, "ns": "test", "set": "demo"} # Namespace + set
+
+# Equivalent string form — useful when codes arrive from a wire format
+# (HTTP form, JSON) so callers don't need a name → int translation table.
+{"code": "read", "ns": "test", "set": "demo"}
 ```

@@ -103,3 +103,47 @@ class TestAdminRole:
         assert isinstance(roles, list)
         # Built-in roles should exist
         assert len(roles) >= 1
+
+    @skip_if_no_security
+    def test_create_role_accepts_string_privilege_code(self, client):
+        """Privilege ``code`` accepts canonical string names (issue #326)."""
+        client.admin_create_role(
+            "test_role_str_code",
+            [{"code": "read", "ns": "test", "set": "demo"}],
+        )
+
+        try:
+            role_info = client.admin_query_role("test_role_str_code")
+            assert role_info["name"] == "test_role_str_code"
+            assert len(role_info["privileges"]) == 1
+            # Server normalises back to int code on read.
+            assert role_info["privileges"][0]["code"] == aerospike_py.PRIV_READ
+        finally:
+            client.admin_drop_role("test_role_str_code")
+
+    @skip_if_no_security
+    def test_grant_revoke_privileges_accept_string_codes(self, client):
+        """grant/revoke accept string privilege names too (issue #326)."""
+        client.admin_create_role(
+            "test_role_str_grant",
+            [{"code": "read"}],
+        )
+
+        try:
+            client.admin_grant_privileges(
+                "test_role_str_grant",
+                [{"code": "write"}],
+            )
+            role_info = client.admin_query_role("test_role_str_grant")
+            codes = [p["code"] for p in role_info["privileges"]]
+            assert aerospike_py.PRIV_WRITE in codes
+
+            client.admin_revoke_privileges(
+                "test_role_str_grant",
+                [{"code": "read"}],
+            )
+            role_info = client.admin_query_role("test_role_str_grant")
+            codes = [p["code"] for p in role_info["privileges"]]
+            assert aerospike_py.PRIV_READ not in codes
+        finally:
+            client.admin_drop_role("test_role_str_grant")

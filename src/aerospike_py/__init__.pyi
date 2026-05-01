@@ -2809,7 +2809,25 @@ PRIV_SINDEX_ADMIN: Literal[4]
 PRIV_TRUNCATE: Literal[14]
 
 PrivilegeCode = Literal[0, 1, 2, 3, 4, 10, 11, 12, 13, 14]
-"""Valid privilege codes for admin role/grant operations."""
+"""Valid privilege codes (int) for admin role/grant operations."""
+
+PrivilegeName = Literal[
+    "read",
+    "read-write",
+    "read-write-udf",
+    "write",
+    "truncate",
+    "user-admin",
+    "sys-admin",
+    "data-admin",
+    "udf-admin",
+    "sindex-admin",
+]
+"""Canonical privilege names accepted in place of ``PrivilegeCode``.
+
+Names are matched case-insensitively and ``_`` is treated as a synonym for
+``-`` (e.g. ``"sys_admin"`` == ``"sys-admin"``).
+"""
 
 # Status Codes
 AEROSPIKE_OK: Literal[0]

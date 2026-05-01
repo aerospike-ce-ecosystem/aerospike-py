@@ -235,7 +235,7 @@ class ClientConfig(TypedDict, total=False):
 
 
 class Privilege(TypedDict, total=False):
-    code: int
+    code: int | str
     ns: str
     set: str
 
