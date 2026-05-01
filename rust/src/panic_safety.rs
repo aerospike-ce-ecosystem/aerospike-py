@@ -16,7 +16,7 @@
 
 use std::any::Any;
 use std::future::Future;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use futures::FutureExt;
 use pyo3::prelude::*;
@@ -140,11 +140,7 @@ mod tests {
                 panic!("{}", detail);
             });
             let err = r.unwrap_err();
-            assert!(
-                err.value(py)
-                    .to_string()
-                    .contains("dynamic detail"),
-            );
+            assert!(err.value(py).to_string().contains("dynamic detail"),);
         });
     }
 }

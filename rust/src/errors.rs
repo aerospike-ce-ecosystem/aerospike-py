@@ -299,6 +299,50 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
     }
 }
 
+/// Register all Aerospike exception types on the native Python module.
+pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let py = m.py();
+    // Base exceptions
+    m.add("AerospikeError", py.get_type::<AerospikeError>())?;
+    m.add("ClientError", py.get_type::<ClientError>())?;
+    m.add("ServerError", py.get_type::<ServerError>())?;
+    m.add("RecordError", py.get_type::<RecordError>())?;
+    m.add("ClusterError", py.get_type::<ClusterError>())?;
+    m.add(
+        "AerospikeTimeoutError",
+        py.get_type::<AerospikeTimeoutError>(),
+    )?;
+    m.add("TimeoutError", py.get_type::<AerospikeTimeoutError>())?; // backward compat
+    m.add("InvalidArgError", py.get_type::<InvalidArgError>())?;
+    m.add("BackpressureError", py.get_type::<BackpressureError>())?;
+    m.add("RustPanicError", py.get_type::<RustPanicError>())?;
+    // Record-level exceptions
+    m.add("RecordNotFound", py.get_type::<RecordNotFound>())?;
+    m.add("RecordExistsError", py.get_type::<RecordExistsError>())?;
+    m.add(
+        "RecordGenerationError",
+        py.get_type::<RecordGenerationError>(),
+    )?;
+    m.add("RecordTooBig", py.get_type::<RecordTooBig>())?;
+    m.add("BinNameError", py.get_type::<BinNameError>())?;
+    m.add("BinExistsError", py.get_type::<BinExistsError>())?;
+    m.add("BinNotFound", py.get_type::<BinNotFound>())?;
+    m.add("BinTypeError", py.get_type::<BinTypeError>())?;
+    m.add("FilteredOut", py.get_type::<FilteredOut>())?;
+    // Index exceptions
+    m.add("AerospikeIndexError", py.get_type::<AerospikeIndexError>())?;
+    m.add("IndexError", py.get_type::<AerospikeIndexError>())?; // backward compat
+    m.add("IndexNotFound", py.get_type::<IndexNotFound>())?;
+    m.add("IndexFoundError", py.get_type::<IndexFoundError>())?;
+    // Query exceptions
+    m.add("QueryError", py.get_type::<QueryError>())?;
+    m.add("QueryAbortedError", py.get_type::<QueryAbortedError>())?;
+    // Admin / UDF exceptions
+    m.add("AdminError", py.get_type::<AdminError>())?;
+    m.add("UDFError", py.get_type::<UDFError>())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,48 +386,4 @@ mod tests {
     fn test_result_code_to_int_unknown() {
         assert_eq!(result_code_to_int(&ResultCode::Unknown(250)), 250);
     }
-}
-
-/// Register all Aerospike exception types on the native Python module.
-pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let py = m.py();
-    // Base exceptions
-    m.add("AerospikeError", py.get_type::<AerospikeError>())?;
-    m.add("ClientError", py.get_type::<ClientError>())?;
-    m.add("ServerError", py.get_type::<ServerError>())?;
-    m.add("RecordError", py.get_type::<RecordError>())?;
-    m.add("ClusterError", py.get_type::<ClusterError>())?;
-    m.add(
-        "AerospikeTimeoutError",
-        py.get_type::<AerospikeTimeoutError>(),
-    )?;
-    m.add("TimeoutError", py.get_type::<AerospikeTimeoutError>())?; // backward compat
-    m.add("InvalidArgError", py.get_type::<InvalidArgError>())?;
-    m.add("BackpressureError", py.get_type::<BackpressureError>())?;
-    m.add("RustPanicError", py.get_type::<RustPanicError>())?;
-    // Record-level exceptions
-    m.add("RecordNotFound", py.get_type::<RecordNotFound>())?;
-    m.add("RecordExistsError", py.get_type::<RecordExistsError>())?;
-    m.add(
-        "RecordGenerationError",
-        py.get_type::<RecordGenerationError>(),
-    )?;
-    m.add("RecordTooBig", py.get_type::<RecordTooBig>())?;
-    m.add("BinNameError", py.get_type::<BinNameError>())?;
-    m.add("BinExistsError", py.get_type::<BinExistsError>())?;
-    m.add("BinNotFound", py.get_type::<BinNotFound>())?;
-    m.add("BinTypeError", py.get_type::<BinTypeError>())?;
-    m.add("FilteredOut", py.get_type::<FilteredOut>())?;
-    // Index exceptions
-    m.add("AerospikeIndexError", py.get_type::<AerospikeIndexError>())?;
-    m.add("IndexError", py.get_type::<AerospikeIndexError>())?; // backward compat
-    m.add("IndexNotFound", py.get_type::<IndexNotFound>())?;
-    m.add("IndexFoundError", py.get_type::<IndexFoundError>())?;
-    // Query exceptions
-    m.add("QueryError", py.get_type::<QueryError>())?;
-    m.add("QueryAbortedError", py.get_type::<QueryAbortedError>())?;
-    // Admin / UDF exceptions
-    m.add("AdminError", py.get_type::<AdminError>())?;
-    m.add("UDFError", py.get_type::<UDFError>())?;
-    Ok(())
 }

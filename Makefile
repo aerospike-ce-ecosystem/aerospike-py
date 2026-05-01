@@ -39,16 +39,17 @@ stop-aerospike-ce: ## Stop and remove Aerospike CE container
 # ---------------------------------------------------------------------------
 
 .PHONY: lint
-lint: ## Run all linters (ruff + clippy)
+lint: ## Run all linters (ruff + clippy) — matches pre-commit strictness
 	uv run ruff check src/ tests/
 	uv run ruff format --check src/ tests/
-	cargo clippy --manifest-path rust/Cargo.toml --features otel -- -D warnings
+	cargo fmt --all -- --check
+	cargo clippy --manifest-path rust/Cargo.toml --features otel --all-targets -- -D warnings
 
 .PHONY: fmt
 fmt: ## Auto-format Python (ruff) and Rust (cargo fmt)
 	uv run ruff format src/ tests/
 	uv run ruff check --fix src/ tests/
-	cargo fmt --manifest-path rust/Cargo.toml
+	cargo fmt --all --manifest-path rust/Cargo.toml
 
 # ---------------------------------------------------------------------------
 # Tests

@@ -94,6 +94,54 @@ fn extract_optional_string(dict: &Bound<'_, PyDict>, field_name: &str) -> PyResu
     }
 }
 
+/// Convert a slice to a Python list.
+fn slice_to_pylist<'py, T>(py: Python<'py>, items: &[T]) -> PyResult<Bound<'py, PyList>>
+where
+    T: IntoPyObject<'py> + Clone,
+{
+    PyList::new(py, items.iter().cloned())
+}
+
+/// Convert a Rust User to a Python dict.
+pub fn user_to_py(py: Python<'_>, user: &aerospike_core::User) -> PyResult<Py<PyAny>> {
+    let dict = PyDict::new(py);
+    dict.set_item("user", &user.user)?;
+    dict.set_item("roles", slice_to_pylist(py, &user.roles)?)?;
+    dict.set_item("conns_in_use", user.conns_in_use)?;
+    if !user.read_info.is_empty() {
+        dict.set_item("read_info", slice_to_pylist(py, &user.read_info)?)?;
+    }
+    if !user.write_info.is_empty() {
+        dict.set_item("write_info", slice_to_pylist(py, &user.write_info)?)?;
+    }
+    Ok(dict.into_any().unbind())
+}
+
+/// Convert a Rust Role to a Python dict.
+pub fn role_to_py(py: Python<'_>, role: &aerospike_core::Role) -> PyResult<Py<PyAny>> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", &role.name)?;
+
+    let privs = PyList::empty(py);
+    for p in &role.privileges {
+        let pd = PyDict::new(py);
+        pd.set_item("code", privilege_code_to_int(&p.code))?;
+        if let Some(ns) = &p.namespace {
+            pd.set_item("ns", ns)?;
+        }
+        if let Some(set) = &p.set_name {
+            pd.set_item("set", set)?;
+        }
+        privs.append(pd)?;
+    }
+    dict.set_item("privileges", privs)?;
+
+    dict.set_item("allowlist", slice_to_pylist(py, &role.allowlist)?)?;
+    dict.set_item("read_quota", role.read_quota)?;
+    dict.set_item("write_quota", role.write_quota)?;
+    Ok(dict.into_any().unbind())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,52 +212,4 @@ mod tests {
             assert!(err.is_instance_of::<PyTypeError>(py));
         });
     }
-}
-
-/// Convert a slice to a Python list.
-fn slice_to_pylist<'py, T>(py: Python<'py>, items: &[T]) -> PyResult<Bound<'py, PyList>>
-where
-    T: IntoPyObject<'py> + Clone,
-{
-    PyList::new(py, items.iter().cloned())
-}
-
-/// Convert a Rust User to a Python dict.
-pub fn user_to_py(py: Python<'_>, user: &aerospike_core::User) -> PyResult<Py<PyAny>> {
-    let dict = PyDict::new(py);
-    dict.set_item("user", &user.user)?;
-    dict.set_item("roles", slice_to_pylist(py, &user.roles)?)?;
-    dict.set_item("conns_in_use", user.conns_in_use)?;
-    if !user.read_info.is_empty() {
-        dict.set_item("read_info", slice_to_pylist(py, &user.read_info)?)?;
-    }
-    if !user.write_info.is_empty() {
-        dict.set_item("write_info", slice_to_pylist(py, &user.write_info)?)?;
-    }
-    Ok(dict.into_any().unbind())
-}
-
-/// Convert a Rust Role to a Python dict.
-pub fn role_to_py(py: Python<'_>, role: &aerospike_core::Role) -> PyResult<Py<PyAny>> {
-    let dict = PyDict::new(py);
-    dict.set_item("name", &role.name)?;
-
-    let privs = PyList::empty(py);
-    for p in &role.privileges {
-        let pd = PyDict::new(py);
-        pd.set_item("code", privilege_code_to_int(&p.code))?;
-        if let Some(ns) = &p.namespace {
-            pd.set_item("ns", ns)?;
-        }
-        if let Some(set) = &p.set_name {
-            pd.set_item("set", set)?;
-        }
-        privs.append(pd)?;
-    }
-    dict.set_item("privileges", privs)?;
-
-    dict.set_item("allowlist", slice_to_pylist(py, &role.allowlist)?)?;
-    dict.set_item("read_quota", role.read_quota)?;
-    dict.set_item("write_quota", role.write_quota)?;
-    Ok(dict.into_any().unbind())
 }
