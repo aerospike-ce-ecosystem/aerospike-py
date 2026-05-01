@@ -103,6 +103,7 @@ class ReadPolicy(TypedDict, total=False):
     total_timeout: int
     max_retries: int
     sleep_between_retries: int
+    timeout_delay: int
     filter_expression: Any
     replica: int
     read_mode_ap: int
@@ -113,6 +114,7 @@ class WritePolicy(TypedDict, total=False):
     socket_timeout: int
     total_timeout: int
     max_retries: int
+    timeout_delay: int
     durable_delete: bool
     key: int
     exists: int
@@ -128,6 +130,7 @@ class BatchPolicy(TypedDict, total=False):
     socket_timeout: int
     total_timeout: int
     max_retries: int
+    timeout_delay: int
     filter_expression: Any
     allow_inline: bool
     allow_inline_ssd: bool
@@ -194,6 +197,7 @@ class QueryPolicy(TypedDict, total=False):
     socket_timeout: int
     total_timeout: int
     max_retries: int
+    timeout_delay: int
     max_records: int
     records_per_second: int
     filter_expression: Any

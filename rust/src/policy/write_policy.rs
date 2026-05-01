@@ -62,6 +62,7 @@ pub fn parse_write_policy(
         "socket_timeout" => policy.base_policy.socket_timeout;
         "total_timeout" => policy.base_policy.total_timeout;
         "max_retries" => policy.base_policy.max_retries;
+        "timeout_delay" => policy.base_policy.timeout_delay;
         "durable_delete" => policy.durable_delete
     });
 
@@ -125,6 +126,17 @@ mod tests {
             let err = parse_ttl(ttl).expect_err("ttl above u32::MAX must fail");
             assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
             assert!(err.to_string().contains("ttl out of range"));
+        });
+    }
+
+    #[test]
+    fn parse_write_policy_with_timeout_delay() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = pyo3::types::PyDict::new(py);
+            d.set_item("timeout_delay", 500u32).unwrap();
+            let p = parse_write_policy(Some(&d), None).unwrap();
+            assert_eq!(p.base_policy.timeout_delay, 500);
         });
     }
 

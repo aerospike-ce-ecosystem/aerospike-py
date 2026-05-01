@@ -27,6 +27,7 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
         "socket_timeout" => policy.base_policy.socket_timeout;
         "total_timeout" => policy.base_policy.total_timeout;
         "max_retries" => policy.base_policy.max_retries;
+        "timeout_delay" => policy.base_policy.timeout_delay;
         "allow_inline" => policy.allow_inline;
         "allow_inline_ssd" => policy.allow_inline_ssd;
         "respond_all_keys" => policy.respond_all_keys
@@ -369,6 +370,18 @@ mod tests {
             });
             let p = parse_batch_policy(Some(&d)).unwrap();
             assert_eq!(p.replica, aerospike_core::policy::Replica::Master);
+        });
+    }
+
+    #[test]
+    fn parse_batch_policy_with_timeout_delay() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("timeout_delay", 500u32).unwrap();
+            });
+            let p = parse_batch_policy(Some(&d)).unwrap();
+            assert_eq!(p.base_policy.timeout_delay, 500);
         });
     }
 

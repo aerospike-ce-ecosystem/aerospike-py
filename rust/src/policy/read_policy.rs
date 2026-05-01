@@ -29,7 +29,8 @@ pub fn parse_read_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<Re
         "socket_timeout" => policy.base_policy.socket_timeout;
         "total_timeout" => policy.base_policy.total_timeout;
         "max_retries" => policy.base_policy.max_retries;
-        "sleep_between_retries" => policy.base_policy.sleep_between_retries
+        "sleep_between_retries" => policy.base_policy.sleep_between_retries;
+        "timeout_delay" => policy.base_policy.timeout_delay
     });
 
     if let Some(val) = dict.get_item("replica")? {
@@ -113,6 +114,18 @@ mod tests {
             });
             let err = parse_read_policy(Some(&d)).expect_err("must error");
             assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
+        });
+    }
+
+    #[test]
+    fn parse_read_policy_with_timeout_delay() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("timeout_delay", 500u32).unwrap();
+            });
+            let p = parse_read_policy(Some(&d)).unwrap();
+            assert_eq!(p.base_policy.timeout_delay, 500);
         });
     }
 
