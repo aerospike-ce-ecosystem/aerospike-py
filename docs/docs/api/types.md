@@ -246,7 +246,7 @@ Used by: `Query.results()`, `Query.foreach()`
 | `max_records` | `int` | `0` | Max records (0 = all) |
 | `records_per_second` | `int` | `0` | Rate limit per node (0 = unlimited). |
 | `max_concurrent_nodes` | `int` | `0` | Limit parallel node queries (0 = unlimited). |
-| `record_queue_size` | `int` | `5000` | Buffer capacity for record results. |
+| `record_queue_size` | `int` | `1024` | Buffer capacity for record results. |
 | `filter_expression` | `Any` | | Expression filter. |
 | `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | Replica selection. |
 | `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP read consistency. |

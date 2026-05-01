@@ -971,6 +971,9 @@ Delete multiple records in a single batch call.
     Each ``BatchRecord`` also includes an ``in_doubt`` flag
     (see :meth:`batch_write` for details).
 
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
 ```python
 # Legacy: bare keys.
 keys = [("test", "demo", f"user_{i}") for i in range(10)]
@@ -983,6 +986,25 @@ results = client.batch_remove([
     ("test", "demo", "user_2"),  # bare key, no CAS
 ])
 ```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+# Legacy: bare keys.
+keys = [("test", "demo", f"user_{i}") for i in range(10)]
+results = await client.batch_remove(keys)
+
+# CAS delete: only delete user_1 if generation is still 3.
+_, meta, _ = await client.get(("test", "demo", "user_1"))
+results = await client.batch_remove([
+    (("test", "demo", "user_1"), {"gen": meta.gen}),
+    ("test", "demo", "user_2"),  # bare key, no CAS
+])
+```
+
+  </TabItem>
+</Tabs>
 
 ## Query & Scan
 
