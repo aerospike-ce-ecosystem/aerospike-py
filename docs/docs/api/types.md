@@ -255,6 +255,25 @@ Used by: `Query.results()`, `Query.foreach()`
 | `include_bin_data` | `bool` | `true` | Include bin payload in results. Set `False` to fetch keys/metadata only. |
 | `partition_filter` | `PartitionFilter` | (all 4096) | Restrict the query/scan to a partition subset. Use `aerospike_py.partition_filter_*()` helpers. |
 
+### `ScanPolicy`
+
+Used by: `client.scan()` and `client.query()` invocations without a `where()` predicate. Mirrors the official Python C client's `ScanPolicy`. Currently the Rust layer routes scan calls through the `QueryPolicy` parser — when `aerospike-core` exposes a separate `ScanPolicy` struct, scan paths will switch to a dedicated parser without changing this user-facing type. See [issue #316](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/316).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | Socket timeout (ms). |
+| `total_timeout` | `int` | `0` | Total timeout (0 = no limit). |
+| `max_retries` | `int` | `2` | Max retries. |
+| `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
+| `filter_expression` | `Any` | | Expression filter. |
+| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | Replica selection. |
+| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP read consistency. |
+| `records_per_second` | `int` | `0` | Rate limit per node (0 = unlimited; server 4.7+). |
+| `max_records` | `int` | `0` | Approx max records returned (0 = all; server 6.0+). |
+| `durable_delete` | `bool` | `false` | Background scan-write durable delete (Enterprise 3.10+). |
+| `ttl` | `int` | `0` | Default TTL for background scan-writes. |
+| `partition_filter` | `PartitionFilter` | (all 4096) | Restrict the scan to a partition subset. |
+
 ### `BatchReadPolicy`
 
 Used by: per-record policy in `batch_read()`.

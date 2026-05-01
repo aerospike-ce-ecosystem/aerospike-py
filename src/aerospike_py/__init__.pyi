@@ -42,6 +42,7 @@ from aerospike_py.types import (
     Record as Record,
     RecordMetadata as RecordMetadata,
     RoleInfo as RoleInfo,
+    ScanPolicy as ScanPolicy,
     UserInfo as UserInfo,
     WriteMeta as WriteMeta,
     WritePolicy as WritePolicy,

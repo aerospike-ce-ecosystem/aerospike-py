@@ -216,6 +216,32 @@ class QueryPolicy(TypedDict, total=False):
     partition_filter: Any
 
 
+class ScanPolicy(TypedDict, total=False):
+    """Policy for scan operations (``client.scan()`` or ``client.query()`` without a predicate).
+
+    Mirrors the official Aerospike Python C client's ``ScanPolicy``. Note: the
+    underlying ``aerospike-core`` 2.0 crate does not yet expose a separate
+    ``ScanPolicy`` struct — scan callers currently route through the
+    ``QueryPolicy`` parser. When/if a dedicated ``ScanPolicy`` lands in
+    ``aerospike-core``, this TypedDict will become the typed input for a
+    new ``parse_scan_policy`` path. See issue #316.
+    """
+
+    socket_timeout: int
+    total_timeout: int
+    max_retries: int
+    timeout_delay: int
+    filter_expression: Any
+    replica: int
+    read_mode_ap: int
+    records_per_second: int
+    max_records: int
+    durable_delete: bool
+    ttl: int
+    # PartitionFilter handle returned by partition_filter_all / _by_id / _by_range
+    partition_filter: Any
+
+
 class WriteMeta(TypedDict, total=False):
     gen: int
     ttl: int
