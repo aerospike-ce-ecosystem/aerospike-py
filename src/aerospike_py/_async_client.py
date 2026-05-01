@@ -330,6 +330,11 @@ class AsyncClient:
     async def apply(self, key, module, function, args=None, policy=None):
         return await self._inner.apply(key, module, function, args, policy)
 
+    @catch_unexpected("AsyncClient.batch_apply")
+    async def batch_apply(self, keys, module, function, args=None, policy=None) -> BatchWriteResult:
+        raw = await self._inner.batch_apply(keys, module, function, args, policy)
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+
     # -- Admin: User --
 
     @catch_unexpected("AsyncClient.admin_create_user")

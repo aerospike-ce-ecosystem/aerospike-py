@@ -41,7 +41,6 @@ use crate::policy::client_policy::{parse_backpressure_config, parse_client_polic
 use crate::record_helpers::{PendingExists, PendingOrderedRecord, PendingRecord};
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
-use crate::types::value::value_to_py;
 
 /// Thread-safe shared state for the async client.
 ///
@@ -693,10 +692,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.apply", async move {
             let result = client_ops::do_apply(&client, &a).await?;
-            Python::attach(|py| match result {
-                Some(val) => value_to_py(py, &val),
-                None => Ok(py.None()),
-            })
+            Python::attach(|py| client_common::batch_udf_value_to_py(py, result.as_ref()))
         })
     }
 
@@ -929,6 +925,42 @@ impl PyAsyncClient {
         future_into_py_panic_safe(py, "AsyncClient.batch_remove", async move {
             let _permit = limiter.acquire_named("batch_remove").await?;
             let results = client_ops::do_batch_remove(&client, &args).await?;
+            Ok(PendingBatchRecords { results })
+        })
+    }
+
+    /// Execute a UDF on multiple records in a single batch call (async).
+    #[pyo3(signature = (keys, module, function, args=None, policy=None))]
+    fn batch_apply<'py>(
+        &self,
+        py: Python<'py>,
+        keys: &Bound<'_, PyList>,
+        module: &str,
+        function: &str,
+        args: Option<&Bound<'_, PyList>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        debug!(
+            "async batch_apply: keys_count={}, module={}, function={}",
+            keys.len(),
+            module,
+            function
+        );
+        let client = self.get_client()?;
+        let limiter = self.limiter.clone();
+        let args = client_common::prepare_batch_apply_args(
+            py,
+            keys,
+            module,
+            function,
+            args,
+            policy,
+            &self.connection_info,
+        )?;
+
+        future_into_py_panic_safe(py, "AsyncClient.batch_apply", async move {
+            let _permit = limiter.acquire_named("batch_apply").await?;
+            let results = client_ops::do_batch_apply(&client, &args).await?;
             Ok(PendingBatchRecords { results })
         })
     }

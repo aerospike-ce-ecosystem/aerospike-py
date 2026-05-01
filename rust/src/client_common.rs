@@ -6,12 +6,13 @@
 use std::sync::Arc;
 
 use crate::policy::batch_policy::{
-    apply_record_meta, apply_record_meta_for_delete, parse_batch_delete_policy,
-    parse_batch_read_policy, parse_batch_write_policy,
+    apply_record_meta, apply_record_meta_for_apply, apply_record_meta_for_delete,
+    parse_batch_delete_policy, parse_batch_read_policy, parse_batch_udf_policy,
+    parse_batch_write_policy,
 };
 use aerospike_core::{
-    operations::Operation, BatchDeletePolicy, BatchOperation, BatchWritePolicy, Bin, Bins, Key,
-    ReadPolicy, UDFLang, Value, WritePolicy,
+    operations::Operation, BatchDeletePolicy, BatchOperation, BatchUDFPolicy, BatchWritePolicy,
+    Bin, Bins, Key, ReadPolicy, UDFLang, Value, WritePolicy,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
@@ -614,6 +615,157 @@ impl BatchRemoveArgs {
     }
 }
 
+// ── batch_apply ──────────────────────────────────────────────────────────────
+
+/// One UDF invocation in a `batch_apply`: `(key, module, function, args, policy)`.
+///
+/// `policy` is `Arc`-shared across records that did not provide a per-record
+/// override, so the no-meta fast path is a refcount bump rather than a clone.
+pub type BatchApplyEntry = (Key, String, String, Option<Vec<Value>>, Arc<BatchUDFPolicy>);
+
+/// Pre-parsed input for `Client.batch_apply` / `AsyncClient.batch_apply`.
+///
+/// Each entry pairs the parsed key with its UDF call shape and the
+/// `BatchUDFPolicy` that applies to it. Per-record `BatchUDFMeta` may
+/// override `module`, `function`, `args`, plus any policy field — the
+/// shared base policy is allocated once and `Arc::clone`d on the no-meta
+/// fast path.
+pub struct BatchApplyArgs {
+    pub records: Vec<BatchApplyEntry>,
+    pub batch_policy: aerospike_core::BatchPolicy,
+    pub batch_ns: String,
+    pub batch_set: String,
+    pub otel: OtelContext,
+}
+
+/// Build [`BatchApplyArgs`] from the Python-level keys, UDF call, and policy.
+///
+/// Accepts `keys` as a list of bare `Key` tuples (default UDF call) or a
+/// list mixing bare keys and `(key, BatchUDFMeta)` pairs where `BatchUDFMeta`
+/// is a flat dict potentially carrying per-record `module`/`function`/`args`
+/// overrides plus policy fields. Mirrors `prepare_batch_remove_args` for
+/// the Key-vs-(Key,meta) disambiguation.
+pub fn prepare_batch_apply_args(
+    py: Python<'_>,
+    keys: &Bound<'_, PyList>,
+    module: &str,
+    function: &str,
+    args: Option<&Bound<'_, PyList>>,
+    policy: Option<&Bound<'_, PyDict>>,
+    conn_info: &Arc<ConnectionInfo>,
+) -> PyResult<BatchApplyArgs> {
+    let batch_policy = parse_batch_policy(policy)?;
+    // Parse the batch-level UDF policy once and share via Arc; the no-meta
+    // fast path bumps refcount instead of cloning.
+    let base_udf_policy = Arc::new(parse_batch_udf_policy(policy)?);
+
+    // Default UDF args list (None = no args). Materialized once outside
+    // the per-record loop and reused via `Vec::clone` only on records
+    // without an `args` override.
+    let base_args: Option<Vec<Value>> = match args {
+        Some(list) => {
+            let mut v = Vec::with_capacity(list.len());
+            for item in list.iter() {
+                v.push(crate::types::value::py_to_value(&item)?);
+            }
+            Some(v)
+        }
+        None => None,
+    };
+
+    let mut records: Vec<BatchApplyEntry> = Vec::with_capacity(keys.len());
+
+    for item in keys.iter() {
+        // Disambiguate Key vs (Key, meta): same rule as prepare_batch_remove_args.
+        // A bare Key tuple is len >= 3; the (Key, meta) pair is exactly len 2 with
+        // [0] = tuple (Key) and [1] = dict (meta).
+        let is_key_meta_pair = if let Ok(tuple) = item.cast::<PyTuple>() {
+            tuple.len() == 2
+                && tuple
+                    .get_item(0)
+                    .map(|x| x.is_instance_of::<PyTuple>())
+                    .unwrap_or(false)
+                && tuple
+                    .get_item(1)
+                    .map(|x| x.is_instance_of::<PyDict>())
+                    .unwrap_or(false)
+        } else {
+            false
+        };
+
+        if is_key_meta_pair {
+            let tuple = item.cast::<PyTuple>().unwrap();
+            let key_obj = tuple.get_item(0)?;
+            let meta_obj = tuple.get_item(1)?;
+            let meta_dict = meta_obj
+                .cast::<PyDict>()
+                .map_err(|_| pyo3::exceptions::PyTypeError::new_err("meta must be a dict"))?;
+            let key = py_to_key(&key_obj)?;
+
+            let policy = Arc::new(apply_record_meta_for_apply(&base_udf_policy, meta_dict)?);
+
+            // Per-record module/function/args overrides.
+            let rec_module = match meta_dict.get_item("module")? {
+                Some(v) => v.extract::<String>()?,
+                None => module.to_string(),
+            };
+            let rec_function = match meta_dict.get_item("function")? {
+                Some(v) => v.extract::<String>()?,
+                None => function.to_string(),
+            };
+            let rec_args: Option<Vec<Value>> = match meta_dict.get_item("args")? {
+                Some(v) if !v.is_none() => {
+                    let list = v.cast::<PyList>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err("meta 'args' must be a list")
+                    })?;
+                    let mut out = Vec::with_capacity(list.len());
+                    for it in list.iter() {
+                        out.push(crate::types::value::py_to_value(&it)?);
+                    }
+                    Some(out)
+                }
+                Some(_) => None,
+                None => base_args.clone(),
+            };
+
+            records.push((key, rec_module, rec_function, rec_args, policy));
+        } else {
+            let key = py_to_key(&item)?;
+            records.push((
+                key,
+                module.to_string(),
+                function.to_string(),
+                base_args.clone(),
+                Arc::clone(&base_udf_policy),
+            ));
+        }
+    }
+
+    let (batch_ns, batch_set) = records
+        .first()
+        .map(|(k, _, _, _, _)| (k.namespace.clone(), k.set_name.clone()))
+        .unwrap_or_default();
+
+    Ok(BatchApplyArgs {
+        records,
+        batch_policy,
+        batch_ns,
+        batch_set,
+        otel: OtelContext::new(py, conn_info),
+    })
+}
+
+impl BatchApplyArgs {
+    pub fn to_batch_ops(&self) -> Vec<BatchOperation> {
+        self.records
+            .iter()
+            .map(|(k, m, f, a, p)| {
+                BatchOperation::udf(p.as_ref(), k.clone(), m.as_str(), f.as_str(), a.clone())
+            })
+            .collect()
+    }
+}
+
 // ── batch_write (generic) ───────────────────────────────────────────────────
 
 pub struct BatchWriteGenericArgs {
@@ -850,6 +1002,22 @@ pub fn prepare_apply_args(
         function: function.to_string(),
         args: rust_args,
     })
+}
+
+/// Convert an Aerospike UDF return [`Value`] to a Python object.
+///
+/// Single entry point shared by `Client.apply` / `AsyncClient.apply`
+/// (single-record) and `Client.batch_apply` / `AsyncClient.batch_apply`
+/// (batch). Both Lua return paths produce the same `Value` shape, and
+/// going through one helper keeps semantics identical and provides a
+/// single hook for future NumPy-vectorized batch results (Goal #4).
+///
+/// `None` (UDF returned no value) maps to Python `None`.
+pub fn batch_udf_value_to_py(py: Python<'_>, val: Option<&Value>) -> PyResult<Py<PyAny>> {
+    match val {
+        Some(v) => crate::types::value::value_to_py(py, v),
+        None => Ok(py.None()),
+    }
 }
 
 // ── Admin: User ──────────────────────────────────────────────────────────────

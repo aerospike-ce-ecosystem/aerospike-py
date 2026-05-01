@@ -193,6 +193,38 @@ class BatchDeleteMeta(TypedDict, total=False):
     durable_delete: bool
 
 
+class BatchUDFPolicy(TypedDict, total=False):
+    """Per-record batch UDF policy.
+
+    Used by ``batch_apply``. Transport-level options live on :class:`BatchPolicy`.
+    Per-record overrides go in :class:`BatchUDFMeta`.
+    """
+
+    commit_level: int  # POLICY_COMMIT_LEVEL_*
+    ttl: int
+    key: int  # POLICY_KEY_DIGEST | POLICY_KEY_SEND
+    durable_delete: bool
+    filter_expression: Any
+
+
+class BatchUDFMeta(TypedDict, total=False):
+    """Per-record meta for a single ``batch_apply`` entry.
+
+    Single flat dict (matching :class:`BatchDeleteMeta`) that can both
+    override the UDF call shape (``module``/``function``/``args``) and
+    the policy fields (``ttl``/``commit_level``/``key``/``durable_delete``)
+    for a specific record.
+    """
+
+    module: str
+    function: str
+    args: list[Any]
+    ttl: int
+    commit_level: int
+    key: int
+    durable_delete: bool
+
+
 class AdminPolicy(TypedDict, total=False):
     timeout: int
 

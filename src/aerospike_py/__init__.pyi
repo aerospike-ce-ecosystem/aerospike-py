@@ -26,6 +26,8 @@ from aerospike_py.types import (
     BatchDeletePolicy as BatchDeletePolicy,
     BatchPolicy as BatchPolicy,
     BatchReadPolicy as BatchReadPolicy,
+    BatchUDFMeta as BatchUDFMeta,
+    BatchUDFPolicy as BatchUDFPolicy,
     BatchRecord as BatchRecord,
     BatchRecords as BatchRecords,
     BatchWriteResult as BatchWriteResult,
@@ -827,6 +829,59 @@ class Client:
                 (("test", "demo", "user_1"), {"gen": meta.gen}),
                 ("test", "demo", "user_2"),  # bare key, no CAS
             ])
+            ```
+        """
+        ...
+
+    def batch_apply(
+        self,
+        keys: Sequence[Key | tuple[Key, "BatchUDFMeta"]],
+        module: str,
+        function: str,
+        args: Optional[list[Any]] = None,
+        policy: Optional[dict[str, Any]] = None,
+    ) -> BatchWriteResult:
+        """Execute a UDF on multiple records in a single batch call.
+
+        Args:
+            keys: Either a list of bare ``Key`` tuples or a list mixing
+                bare keys and ``(key, meta)`` pairs where ``meta`` is a
+                [`BatchUDFMeta`](types.md#batchudfmeta) flat dict that
+                may override the UDF call shape (``module``, ``function``,
+                ``args``) and policy fields (``ttl``, ``commit_level``,
+                ``key``, ``durable_delete``) for that specific record.
+            module: Default UDF module to invoke when a record has no
+                per-record ``module`` override.
+            function: Default UDF function name.
+            args: Optional default arguments. Per-record ``args`` in
+                ``BatchUDFMeta`` (including ``[]`` for no args) overrides
+                this default.
+            policy: Optional dict combining a transport-level
+                [`BatchPolicy`](types.md#batchpolicy) with batch-level
+                [`BatchUDFPolicy`](types.md#batchudfpolicy) defaults:
+                ``commit_level``, ``ttl``, ``key`` (send_key),
+                ``durable_delete``, ``filter_expression``.
+
+        Returns:
+            A ``BatchWriteResult`` with per-record result codes in
+            ``batch_records: list[BatchRecord]``. UDF return values are
+            stored in the per-record bin map under the Lua-convention
+            ``"SUCCESS"`` key when the call succeeded.
+
+        Example:
+            ```python
+            # Apply the same UDF to many keys.
+            keys = [("test", "demo", f"u_{i}") for i in range(10)]
+            results = client.batch_apply(keys, "test_udf", "add", [10, 20])
+
+            # Per-record overrides: different args for one record.
+            results = client.batch_apply(
+                [
+                    ("test", "demo", "u_1"),  # uses default args
+                    (("test", "demo", "u_2"), {"args": [5, 5]}),
+                ],
+                "test_udf", "add", args=[1, 1],
+            )
             ```
         """
         ...
@@ -1815,6 +1870,22 @@ class AsyncClient:
         See :meth:`Client.batch_remove` for full description. Per-record
         ``BatchDeleteMeta`` overrides are supported via ``(key, meta)``
         tuples in the keys list.
+        """
+        ...
+
+    async def batch_apply(
+        self,
+        keys: Sequence[Key | tuple[Key, "BatchUDFMeta"]],
+        module: str,
+        function: str,
+        args: Optional[list[Any]] = None,
+        policy: Optional[dict[str, Any]] = None,
+    ) -> BatchWriteResult:
+        """Execute a UDF on multiple records in a single batch call (async).
+
+        See :meth:`Client.batch_apply` for full description. Per-record
+        ``BatchUDFMeta`` overrides may change the UDF call shape
+        (``module``/``function``/``args``) or policy fields per record.
         """
         ...
 

@@ -783,10 +783,7 @@ impl PyClient {
         let result = catch_panic_sync("Client.apply", || {
             py.detach(|| RUNTIME.block_on(client_ops::do_apply(&client, &a)))
         })?;
-        match result {
-            Some(val) => value_to_py(py, &val),
-            None => Ok(py.None()),
-        }
+        client_common::batch_udf_value_to_py(py, result.as_ref())
     }
 
     // ── Admin operations ──────────────────────────────────────────
@@ -1335,6 +1332,46 @@ impl PyClient {
                 RUNTIME.block_on(async {
                     let _permit = limiter.acquire_named("batch_remove").await?;
                     client_ops::do_batch_remove(&client, &args).await
+                })
+            })
+        })?;
+        let batch = batch_to_batch_records_py(py, results)?;
+        Ok(Py::new(py, batch)?.into_any())
+    }
+
+    /// Execute a UDF on multiple records in a single batch call.
+    #[pyo3(signature = (keys, module, function, args=None, policy=None))]
+    fn batch_apply(
+        &self,
+        py: Python<'_>,
+        keys: &Bound<'_, PyList>,
+        module: &str,
+        function: &str,
+        args: Option<&Bound<'_, PyList>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        debug!(
+            "batch_apply: keys_count={}, module={}, function={}",
+            keys.len(),
+            module,
+            function
+        );
+        let client = self.get_client()?.clone();
+        let args = client_common::prepare_batch_apply_args(
+            py,
+            keys,
+            module,
+            function,
+            args,
+            policy,
+            &self.connection_info,
+        )?;
+        let limiter = self.limiter.clone();
+        let results = catch_panic_sync("Client.batch_apply", || {
+            py.detach(|| {
+                RUNTIME.block_on(async {
+                    let _permit = limiter.acquire_named("batch_apply").await?;
+                    client_ops::do_batch_apply(&client, &args).await
                 })
             })
         })?;

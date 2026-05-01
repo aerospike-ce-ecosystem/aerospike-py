@@ -1,7 +1,7 @@
 //! Batch policy parsing from Python dicts.
 
 use aerospike_core::{
-    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchWritePolicy, Concurrency,
+    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchUDFPolicy, BatchWritePolicy, Concurrency,
     GenerationPolicy,
 };
 use log::trace;
@@ -198,6 +198,71 @@ pub fn apply_record_meta_for_delete(
     if let Some(gen) = meta.get_item("gen")? {
         policy.generation = gen.extract::<u32>()?;
         policy.generation_policy = GenerationPolicy::ExpectGenEqual;
+    }
+    if let Some(key) = meta.get_item("key")? {
+        policy.send_key = key.extract::<i32>()? == 1;
+    }
+    if let Some(commit_level) = meta.get_item("commit_level")? {
+        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+    }
+    if let Some(durable_delete) = meta.get_item("durable_delete")? {
+        policy.durable_delete = durable_delete.extract::<bool>()?;
+    }
+
+    Ok(policy)
+}
+
+/// Parse the per-record-policy dict into a [`BatchUDFPolicy`].
+///
+/// Covers `commit_level`, `expiration` (via the user-facing `ttl` key,
+/// matching the `WritePolicy` parser convention), `key` (send_key),
+/// `durable_delete`, and `filter_expression`. UDFs may write — keeping
+/// the same field surface as `BatchWritePolicy` minus `gen`/`exists`
+/// keeps the parsers consistent for downstream `apply_record_meta_for_apply`.
+pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchUDFPolicy> {
+    trace!("Parsing batch UDF policy");
+    let mut policy = BatchUDFPolicy::default();
+
+    let dict = match policy_dict {
+        Some(d) => d,
+        None => return Ok(policy),
+    };
+
+    extract_policy_fields!(dict, {
+        "durable_delete" => policy.durable_delete
+    });
+
+    if let Some(val) = dict.get_item("key")? {
+        policy.send_key = val.extract::<i32>()? == 1;
+    }
+    if let Some(val) = dict.get_item("commit_level")? {
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
+    }
+    if let Some(val) = dict.get_item("ttl")? {
+        policy.expiration = parse_ttl(val.extract::<i64>()?)?;
+    }
+
+    policy.filter_expression = extract_filter_expression(dict)?;
+
+    Ok(policy)
+}
+
+/// Apply per-record meta to a [`BatchUDFPolicy`], overriding the batch-level
+/// default. Per-record settings always win.
+///
+/// Supported meta keys (single flat `BatchUDFMeta` dict, mirroring
+/// `BatchDeleteMeta`): `ttl`, `key` (send_key), `commit_level`,
+/// `durable_delete`. Note that `module`, `function`, and `args` are
+/// extracted separately by `prepare_batch_apply_args` — they affect
+/// the UDF call shape, not the policy.
+pub fn apply_record_meta_for_apply(
+    base: &BatchUDFPolicy,
+    meta: &Bound<'_, PyDict>,
+) -> PyResult<BatchUDFPolicy> {
+    let mut policy = base.clone();
+
+    if let Some(ttl) = meta.get_item("ttl")? {
+        policy.expiration = parse_ttl(ttl.extract::<i64>()?)?;
     }
     if let Some(key) = meta.get_item("key")? {
         policy.send_key = key.extract::<i32>()? == 1;
@@ -593,6 +658,81 @@ mod tests {
             let overridden = apply_record_meta_for_delete(&base, &meta).expect("apply ok");
             assert!(overridden.send_key);
             assert!(overridden.durable_delete);
+        });
+    }
+
+    // ── BatchUDFPolicy ───────────────────────────────────────────────────
+
+    #[test]
+    fn parse_batch_udf_policy_default_when_dict_is_none() {
+        let p = parse_batch_udf_policy(None).expect("parse ok");
+        assert!(!p.send_key);
+        assert!(!p.durable_delete);
+        assert_eq!(p.commit_level, CommitLevel::CommitAll);
+        assert!(matches!(p.expiration, Expiration::NamespaceDefault));
+        assert!(p.filter_expression.is_none());
+    }
+
+    #[test]
+    fn parse_batch_udf_policy_with_ttl_and_send_key() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("ttl", 60i64).unwrap();
+                d.set_item("key", 1i32).unwrap();
+            });
+            let p = parse_batch_udf_policy(Some(&d)).expect("parse ok");
+            assert!(p.send_key);
+            assert!(matches!(p.expiration, Expiration::Seconds(60)));
+        });
+    }
+
+    #[test]
+    fn parse_batch_udf_policy_with_commit_level_and_durable_delete() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("commit_level", 1i32).unwrap();
+                d.set_item("durable_delete", true).unwrap();
+            });
+            let p = parse_batch_udf_policy(Some(&d)).expect("parse ok");
+            assert_eq!(p.commit_level, CommitLevel::CommitMaster);
+            assert!(p.durable_delete);
+        });
+    }
+
+    #[test]
+    fn apply_record_meta_for_apply_overrides_ttl_and_send_key() {
+        Python::initialize();
+        Python::attach(|py| {
+            let base = BatchUDFPolicy::default();
+            let meta = build_dict(py, |d| {
+                d.set_item("ttl", 3600i64).unwrap();
+                d.set_item("key", 1i32).unwrap();
+            });
+            let overridden = apply_record_meta_for_apply(&base, &meta).expect("apply ok");
+            assert!(overridden.send_key);
+            assert!(matches!(overridden.expiration, Expiration::Seconds(3600)));
+        });
+    }
+
+    #[test]
+    fn apply_record_meta_for_apply_per_record_wins_over_base() {
+        Python::initialize();
+        Python::attach(|py| {
+            let base = BatchUDFPolicy {
+                send_key: false,
+                commit_level: CommitLevel::CommitAll,
+                ..Default::default()
+            };
+            let meta = build_dict(py, |d| {
+                d.set_item("commit_level", 1i32).unwrap();
+                d.set_item("durable_delete", true).unwrap();
+            });
+            let overridden = apply_record_meta_for_apply(&base, &meta).expect("apply ok");
+            assert_eq!(overridden.commit_level, CommitLevel::CommitMaster);
+            assert!(overridden.durable_delete);
+            assert!(!overridden.send_key, "send_key inherited from base");
         });
     }
 }

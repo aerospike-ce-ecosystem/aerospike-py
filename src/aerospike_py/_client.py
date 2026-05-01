@@ -302,6 +302,11 @@ class Client(_NativeClient):
     def apply(self, key, module, function, args=None, policy=None):
         return super().apply(key, module, function, args, policy)
 
+    @catch_unexpected("Client.batch_apply")
+    def batch_apply(self, keys, module, function, args=None, policy=None) -> BatchWriteResult:
+        raw = super().batch_apply(keys, module, function, args, policy)
+        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+
     # -- Admin: User --
 
     @catch_unexpected("Client.admin_create_user")

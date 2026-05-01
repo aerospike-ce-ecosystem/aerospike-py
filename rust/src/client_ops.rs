@@ -15,9 +15,10 @@ use aerospike_core::{
 use pyo3::PyResult;
 
 use crate::client_common::{
-    self, BatchOperateArgs, BatchReadArgs, BatchRemoveArgs, ExistsArgs, GetArgs, IndexCreateArgs,
-    IndexRemoveArgs, InfoArgs, OperateArgs, PutArgs, PutPolicy, RemoveArgs, RemoveBinArgs,
-    SelectArgs, SingleBinWriteArgs, TouchArgs, TruncateArgs, UdfPutArgs, UdfRemoveArgs,
+    self, BatchApplyArgs, BatchOperateArgs, BatchReadArgs, BatchRemoveArgs, ExistsArgs, GetArgs,
+    IndexCreateArgs, IndexRemoveArgs, InfoArgs, OperateArgs, PutArgs, PutPolicy, RemoveArgs,
+    RemoveBinArgs, SelectArgs, SingleBinWriteArgs, TouchArgs, TruncateArgs, UdfPutArgs,
+    UdfRemoveArgs,
 };
 use crate::errors::as_to_pyerr;
 use crate::policy::write_policy::DEFAULT_WRITE_POLICY;
@@ -254,6 +255,22 @@ pub async fn do_batch_remove(
     let ops = args.to_batch_ops();
     traced_op!(
         "batch_remove",
+        &args.batch_ns,
+        &args.batch_set,
+        args.otel.parent_ctx,
+        args.otel.conn_info,
+        client.batch(&args.batch_policy, &ops).await
+    )
+}
+
+/// Execute a UDF on multiple records in a batch.
+pub async fn do_batch_apply(
+    client: &AsClient,
+    args: &BatchApplyArgs,
+) -> PyResult<Vec<BatchRecord>> {
+    let ops = args.to_batch_ops();
+    traced_op!(
+        "batch_apply",
         &args.batch_ns,
         &args.batch_set,
         args.otel.parent_ctx,
