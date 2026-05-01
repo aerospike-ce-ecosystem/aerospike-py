@@ -1,0 +1,72 @@
+# aerospike-py performance hot-path globs.
+#
+# Used by:
+#   - .claude/hooks/pr-perf-gate.sh   (gates `gh pr create` on perf review)
+#   - .claude/agents/perf-impact-reviewer.md
+#   - .claude/skills/project-goals/SKILL.md (Plan Review Checklist)
+#
+# Format: one shell glob per line, paths relative to the repo root.
+# Lines starting with `#` and blank lines are ignored. Globs are matched with
+# bash `case` (so `**` is NOT recursive — list nested dirs explicitly when
+# needed). Use the most specific pattern that still covers the regression
+# surface; admin / observability / error / build-only paths must NOT be added.
+#
+# A change to ANY listed file requires either a `perf-impact:` verdict from
+# the perf-impact-reviewer agent or evidence of a benchmark run before the PR
+# can be opened.
+
+# --- Rust: per-request entry points ----------------------------------------
+rust/src/lib.rs
+rust/src/client.rs
+rust/src/async_client.rs
+rust/src/client_common.rs
+rust/src/client_ops.rs
+rust/src/operations.rs
+rust/src/query.rs
+rust/src/expressions.rs
+
+# --- Rust: per-record / per-call conversion (executed every request) -------
+rust/src/record_helpers.rs
+rust/src/batch_types.rs
+rust/src/numpy_support.rs
+rust/src/types/*.rs
+rust/src/types/**/*.rs
+
+# --- Rust: per-call policy parsing (NOT admin_policy.rs) -------------------
+rust/src/policy/read_policy.rs
+rust/src/policy/write_policy.rs
+rust/src/policy/batch_policy.rs
+rust/src/policy/batch_read_policy.rs
+rust/src/policy/batch_delete_policy.rs
+rust/src/policy/query_policy.rs
+rust/src/policy/scan_policy.rs
+rust/src/policy/client_policy.rs
+
+# --- Rust: runtime / tokio / global state ----------------------------------
+rust/src/runtime.rs
+
+# --- Rust: build / link configuration --------------------------------------
+rust/Cargo.toml
+Cargo.toml
+
+# --- Python: thin wrappers on the request hot path -------------------------
+src/aerospike_py/_client.py
+src/aerospike_py/_async_client.py
+src/aerospike_py/numpy_batch.py
+src/aerospike_py/predicates.py
+src/aerospike_py/list_operations.py
+src/aerospike_py/map_operations.py
+src/aerospike_py/exp.py
+
+# --- Build profile ---------------------------------------------------------
+pyproject.toml
+
+# --- Explicitly OFF hot path (do NOT add): ---------------------------------
+#   rust/src/policy/admin_policy.rs   (admin only, infrequent)
+#   rust/src/errors.rs                (only on error)
+#   rust/src/constants.rs             (load-time only)
+#   rust/src/logging.rs               (observability)
+#   rust/src/tracing.rs               (observability)
+#   rust/src/metrics.rs               (observability)
+#   rust/src/_bug_report.*            (panic recovery)
+#   tests/, docs/, examples/, benchmark/

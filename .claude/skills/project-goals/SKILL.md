@@ -32,4 +32,5 @@ Verify the following after writing a plan:
 - [ ] Is it consistent with existing API patterns? (see `new-api` skill)
 - [ ] **Zero Python deps**: Does the default installation avoid adding external Python dependencies?
 - [ ] Are `.pyi` type stubs updated alongside the implementation?
+- [ ] **Performance gate**: Does the plan touch any file matched by `.claude/perf-hot-paths.txt`? If yes, the implementation must end with a `perf-impact:` verdict from the `perf-impact-reviewer` agent or a `cargo bench` / `make benchmark` run — `gh pr create` is hook-blocked otherwise (Goal #2; see `POSTMORTEM-v0.5.6-batch-regression.md`).
 - [ ] Are there no excessive changes beyond the goal scope?
