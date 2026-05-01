@@ -362,6 +362,7 @@ jobs:
           # does not touch `rand`; thread_rng usage is confined to
           # exponential-backoff jitter in rust/src/client_ops.rs.
           # The unsound trigger cannot be reached through public API.
+          # Full rationale: see SECURITY.md > "RUSTSEC Advisory Ignore List".
           ignore: RUSTSEC-2026-0097
 
   compatibility:
