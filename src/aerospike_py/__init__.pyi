@@ -2601,6 +2601,13 @@ POLICY_COMMIT_LEVEL_MASTER: Literal[1]
 POLICY_READ_MODE_AP_ONE: Literal[0]
 POLICY_READ_MODE_AP_ALL: Literal[1]
 
+# Batch Concurrency — values for ``BatchPolicy["concurrency"]``.
+# Maps to aerospike-core's ``Concurrency`` enum: Sequential issues commands
+# one node at a time; Parallel (default) issues commands concurrently across
+# nodes using the client's thread pool.
+BATCH_CONCURRENCY_SEQUENTIAL: Literal[0]
+BATCH_CONCURRENCY_PARALLEL: Literal[1]
+
 # -- Stub-only Policy enum aliases ---------------------------------------
 # These aliases live in the type stub only — they are NOT defined at
 # runtime. They give downstream code a single name for each policy enum:

@@ -74,6 +74,9 @@ from aerospike_py._aerospike import (  # noqa: F401
     # Policy Read Mode AP
     POLICY_READ_MODE_AP_ONE,
     POLICY_READ_MODE_AP_ALL,
+    # Batch Concurrency
+    BATCH_CONCURRENCY_SEQUENTIAL,
+    BATCH_CONCURRENCY_PARALLEL,
     # Read Touch TTL Percent (server v8+)
     READ_TOUCH_TTL_PERCENT_SERVER_DEFAULT,
     READ_TOUCH_TTL_PERCENT_DONT_RESET,
@@ -468,6 +471,9 @@ __all__ = [
     # Policy Read Mode AP
     "POLICY_READ_MODE_AP_ONE",
     "POLICY_READ_MODE_AP_ALL",
+    # Batch Concurrency
+    "BATCH_CONCURRENCY_SEQUENTIAL",
+    "BATCH_CONCURRENCY_PARALLEL",
     # Read Touch TTL Percent (server v8+)
     "READ_TOUCH_TTL_PERCENT_SERVER_DEFAULT",
     "READ_TOUCH_TTL_PERCENT_DONT_RESET",

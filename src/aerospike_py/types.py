@@ -138,6 +138,10 @@ class BatchPolicy(TypedDict, total=False):
     replica: int
     read_mode_ap: int
     read_touch_ttl_percent: int
+    # Concurrency mode for batch requests. Use the module-level
+    # ``BATCH_CONCURRENCY_SEQUENTIAL`` (0) or ``BATCH_CONCURRENCY_PARALLEL``
+    # (1) constants. Default: parallel.
+    concurrency: int
     # Batch-level write defaults — used by ``batch_write``. Per-record
     # ``WriteMeta`` entries override these fields (matching the existing
     # ``ttl``/``gen`` precedence rule).

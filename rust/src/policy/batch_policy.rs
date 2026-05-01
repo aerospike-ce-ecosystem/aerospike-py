@@ -1,9 +1,11 @@
 //! Batch policy parsing from Python dicts.
 
 use aerospike_core::{
-    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchWritePolicy, GenerationPolicy,
+    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchWritePolicy, Concurrency,
+    GenerationPolicy,
 };
 use log::trace;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -43,9 +45,29 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
         policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
     }
 
+    if let Some(val) = dict.get_item("concurrency")? {
+        policy.concurrency = parse_concurrency(val.extract::<i64>()?)?;
+    }
+
     policy.filter_expression = extract_filter_expression(dict)?;
 
     Ok(policy)
+}
+
+/// Map a Python ``int`` to an [`aerospike_core::Concurrency`] variant.
+///
+/// Mapping: ``0 -> Sequential``, ``1 -> Parallel``. Any other value
+/// (including negatives and ``n >= 2``) is rejected with [`PyValueError`].
+/// Note that aerospike-core 2.0's ``Concurrency`` enum only supports the
+/// two variants — there is no ``MaxThreads(n)`` variant in this version.
+fn parse_concurrency(value: i64) -> PyResult<Concurrency> {
+    match value {
+        0 => Ok(Concurrency::Sequential),
+        1 => Ok(Concurrency::Parallel),
+        _ => Err(PyValueError::new_err(format!(
+            "Invalid concurrency value: {value}. Use BATCH_CONCURRENCY_SEQUENTIAL (0) or BATCH_CONCURRENCY_PARALLEL (1)"
+        ))),
+    }
 }
 
 /// Parse the batch-level policy dict into a [`BatchWritePolicy`].
@@ -382,6 +404,58 @@ mod tests {
             });
             let p = parse_batch_policy(Some(&d)).unwrap();
             assert_eq!(p.base_policy.timeout_delay, 500);
+        });
+    }
+
+    #[test]
+    fn parse_batch_policy_default_concurrency_is_parallel() {
+        let p = parse_batch_policy(None).expect("parse ok");
+        assert!(matches!(p.concurrency, Concurrency::Parallel));
+    }
+
+    #[test]
+    fn parse_batch_policy_concurrency_sequential() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("concurrency", 0i64).unwrap();
+            });
+            let p = parse_batch_policy(Some(&d)).expect("parse ok");
+            assert!(matches!(p.concurrency, Concurrency::Sequential));
+        });
+    }
+
+    #[test]
+    fn parse_batch_policy_concurrency_parallel() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("concurrency", 1i64).unwrap();
+            });
+            let p = parse_batch_policy(Some(&d)).expect("parse ok");
+            assert!(matches!(p.concurrency, Concurrency::Parallel));
+        });
+    }
+
+    #[test]
+    fn parse_batch_policy_concurrency_rejects_negative() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("concurrency", -1i64).unwrap();
+            });
+            assert!(parse_batch_policy(Some(&d)).is_err());
+        });
+    }
+
+    #[test]
+    fn parse_batch_policy_concurrency_rejects_unsupported_max_threads() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("concurrency", 4i64).unwrap();
+            });
+            assert!(parse_batch_policy(Some(&d)).is_err());
         });
     }
 

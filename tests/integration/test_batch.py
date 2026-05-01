@@ -109,6 +109,52 @@ class TestBatchOperate:
             assert counter1 == 25
 
 
+class TestBatchConcurrency:
+    """Smoke tests for ``BatchPolicy["concurrency"]`` (issue #320)."""
+
+    def test_batch_operate_with_sequential_concurrency(self, client, cleanup):
+        keys = [
+            ("test", "demo", "batch_seq_1"),
+            ("test", "demo", "batch_seq_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        client.put(keys[0], {"counter": 1})
+        client.put(keys[1], {"counter": 2})
+
+        ops = [
+            {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 10},
+            {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+        ]
+        policy = {"concurrency": aerospike_py.BATCH_CONCURRENCY_SEQUENTIAL}
+        results = client.batch_operate(keys, ops, policy=policy)
+        assert len(results.batch_records) == 2
+        for br in results.batch_records:
+            assert br.result == 0
+
+    def test_batch_operate_with_parallel_concurrency(self, client, cleanup):
+        keys = [
+            ("test", "demo", "batch_par_1"),
+            ("test", "demo", "batch_par_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        client.put(keys[0], {"counter": 1})
+        client.put(keys[1], {"counter": 2})
+
+        ops = [
+            {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 7},
+            {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+        ]
+        policy = {"concurrency": aerospike_py.BATCH_CONCURRENCY_PARALLEL}
+        results = client.batch_operate(keys, ops, policy=policy)
+        assert len(results.batch_records) == 2
+        for br in results.batch_records:
+            assert br.result == 0
+
+
 class TestBatchWrite:
     """Test batch_operate used as batch write (OPERATOR_WRITE)."""
 
