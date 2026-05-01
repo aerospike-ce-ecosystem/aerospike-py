@@ -1,0 +1,224 @@
+name: ACE Plugins PR Notify
+# Creates / updates a follow-up issue on aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+# whenever a PR touching skill- or docs-relevant files is opened against main.
+# Complements `skill-impact-notify.yml` (which fires on push to main → project-hub).
+run-name: "ACE Plugins PR Notify: PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.title }}"
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    branches: [main]
+    paths:
+      # Python public surface
+      - 'src/aerospike_py/__init__.py'
+      - 'src/aerospike_py/__init__.pyi'
+      - 'src/aerospike_py/types.py'
+      - 'src/aerospike_py/exception.py'
+      - 'src/aerospike_py/exception.pyi'
+      - 'src/aerospike_py/list_operations.py'
+      - 'src/aerospike_py/map_operations.py'
+      - 'src/aerospike_py/exp.py'
+      - 'src/aerospike_py/predicates.py'
+      # Rust surface
+      - 'rust/src/lib.rs'
+      - 'rust/src/errors.rs'
+      - 'rust/src/constants.rs'
+      - 'rust/src/policy/**'
+      - 'rust/src/client.rs'
+      - 'rust/src/async_client.rs'
+      - 'rust/src/client_common.rs'
+      - 'rust/src/client_ops.rs'
+      # Docs
+      - 'docs/docs/api/**'
+      - 'docs/i18n/ko/**'
+
+jobs:
+  ace-plugins-pr-notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ secrets.GH_AW_GITHUB_TOKEN }}
+      PLUGINS_REPO: aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+      SOURCE_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      PR_STATE: ${{ github.event.pull_request.state }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - name: Detect skill-affecting files and upsert ACE plugins follow-up issue
+        run: |
+          set -euo pipefail
+
+          echo "=== Step 1: Get changed files for PR #${PR_NUMBER} ==="
+          # Use GH CLI on the source repo to get the PR file list as plain paths
+          CHANGED_FILES=$(gh pr view "${PR_NUMBER}" \
+            --repo "${SOURCE_REPO}" \
+            --json files \
+            --jq '[.files[].path] | join("\n")')
+          echo "Changed files:"
+          echo "${CHANGED_FILES}"
+
+          echo "=== Step 2: Map files to affected skills ==="
+          AFFECTED_SKILLS=""
+          AFFECTED_FILES=""
+
+          while IFS= read -r file; do
+            [ -z "${file}" ] && continue
+            case "${file}" in
+              src/aerospike_py/__init__.py|src/aerospike_py/__init__.pyi)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (API signatures, return types, constants)\n"
+                ;;
+              src/aerospike_py/exception.py|src/aerospike_py/exception.pyi)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\naerospike-py-fastapi\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api**, **aerospike-py-fastapi** (exception types)\n"
+                ;;
+              src/aerospike_py/types.py)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\naerospike-py-fastapi\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api**, **aerospike-py-fastapi** (return types)\n"
+                ;;
+              src/aerospike_py/list_operations.py)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (List CDT operations)\n"
+                ;;
+              src/aerospike_py/map_operations.py)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (Map CDT operations)\n"
+                ;;
+              src/aerospike_py/exp.py)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (Expression filters)\n"
+                ;;
+              src/aerospike_py/predicates.py)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (Query predicates)\n"
+                ;;
+              rust/src/lib.rs)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (module exports)\n"
+                ;;
+              rust/src/errors.rs)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\naerospike-py-fastapi\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api**, **aerospike-py-fastapi** (exception hierarchy, HTTP mapping)\n"
+                ;;
+              rust/src/constants.rs)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (constants)\n"
+                ;;
+              rust/src/policy/*)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (policy parsing)\n"
+                ;;
+              rust/src/client.rs|rust/src/async_client.rs|rust/src/client_common.rs|rust/src/client_ops.rs)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (client methods)\n"
+                ;;
+              docs/docs/api/*)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (API reference docs)\n"
+                ;;
+              docs/i18n/ko/*)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}aerospike-py-api\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` -> **aerospike-py-api** (Korean i18n mirror)\n"
+                ;;
+            esac
+          done <<< "${CHANGED_FILES}"
+
+          UNIQUE_SKILLS=$(echo -e "${AFFECTED_SKILLS}" | sort -u | grep -v '^$' | paste -sd ',' -)
+
+          if [ -z "${UNIQUE_SKILLS}" ]; then
+            echo "No skill-impacting files in this PR. Skipping."
+            exit 0
+          fi
+          echo "Affected skills: ${UNIQUE_SKILLS}"
+
+          # Per-skill yes/no flags
+          API_HIT="no"; FASTAPI_HIT="no"
+          case ",${UNIQUE_SKILLS}," in *,aerospike-py-api,*) API_HIT="yes" ;; esac
+          case ",${UNIQUE_SKILLS}," in *,aerospike-py-fastapi,*) FASTAPI_HIT="yes" ;; esac
+
+          echo "=== Step 3: Build issue title/body ==="
+          ISSUE_TITLE="[skill-followup] aerospike-py PR #${PR_NUMBER}: ${PR_TITLE}"
+
+          # Truncate PR description to first 1000 chars
+          BODY_TRUNCATED=$(printf "%s" "${PR_BODY:-_(no description)_}" | head -c 1000)
+
+          ISSUE_BODY=$(cat <<ISSUEEOF
+          ## Source PR
+          - **PR**: aerospike-py [#${PR_NUMBER}](${PR_URL})
+          - **Title**: ${PR_TITLE}
+          - **Author**: @${PR_AUTHOR}
+          - **State**: ${PR_STATE}
+
+          ## Affected skills (auto-detected)
+          - aerospike-py-api: ${API_HIT}
+          - aerospike-py-fastapi: ${FASTAPI_HIT}
+
+          ## Changed files relevant to skills/docs
+          $(echo -e "${AFFECTED_FILES}")
+
+          ## Recommended follow-up
+          - [ ] aerospike-py-api skill: SKILL.md trigger keywords / reference docs update
+          - [ ] aerospike-py-fastapi skill: reflect changed signatures / exception mapping
+          - [ ] aerospike-py docs (\`docs/docs/api/*.md\`) update
+          - [ ] Korean i18n mirror (\`docs/i18n/ko/...\`) update
+
+          ## PR description (truncated)
+          ${BODY_TRUNCATED}
+
+          ---
+          Auto-generated by aerospike-py \`.github/workflows/ace-plugins-pr-notify.yml\`
+          ISSUEEOF
+          )
+          # Strip the YAML-block leading indent (10 spaces) so markdown renders correctly
+          ISSUE_BODY=$(echo "${ISSUE_BODY}" | sed 's/^          //')
+
+          echo "=== Step 4: Idempotent upsert (search by PR marker in title) ==="
+          # Search for an existing open issue for this PR. The title-prefix marker
+          # `[skill-followup] aerospike-py PR #<num>:` is the stable idempotency key.
+          MARKER="aerospike-py PR #${PR_NUMBER}:"
+          EXISTING=$(gh search issues "in:title \"${MARKER}\"" \
+            --repo "${PLUGINS_REPO}" \
+            --state open \
+            --json number,title \
+            --limit 10 || echo "[]")
+          EXISTING_NUM=$(echo "${EXISTING}" | jq -r --arg m "${MARKER}" \
+            '.[] | select(.title | contains($m)) | .number' | head -1 || true)
+
+          if [ -n "${EXISTING_NUM}" ]; then
+            echo "Existing issue #${EXISTING_NUM} found on ${PLUGINS_REPO}. Adding update comment."
+            COMMENT_BODY=$(cat <<COMMENTEOF
+          ### Update for aerospike-py PR #${PR_NUMBER}
+
+          Triggered by event \`${{ github.event.action }}\` on ${{ github.event.pull_request.updated_at }}.
+
+          - **State**: ${PR_STATE}
+          - **Affected skills**: ${UNIQUE_SKILLS}
+
+          #### Changed files relevant to skills/docs
+          $(echo -e "${AFFECTED_FILES}")
+
+          ---
+          Auto-generated by aerospike-py \`.github/workflows/ace-plugins-pr-notify.yml\`
+          COMMENTEOF
+          )
+            COMMENT_BODY=$(echo "${COMMENT_BODY}" | sed 's/^          //')
+            gh issue comment "${EXISTING_NUM}" \
+              --repo "${PLUGINS_REPO}" \
+              --body "${COMMENT_BODY}"
+          else
+            echo "No existing issue. Creating new follow-up issue on ${PLUGINS_REPO}."
+            gh issue create \
+              --repo "${PLUGINS_REPO}" \
+              --title "${ISSUE_TITLE}" \
+              --body "${ISSUE_BODY}" \
+              --label "skill-followup" \
+              --label "aerospike-py" \
+              --label "cross-repo"
+          fi
+
+          echo "=== Done ==="
