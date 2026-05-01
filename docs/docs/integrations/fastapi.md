@@ -128,7 +128,7 @@ async def delete_user(user_id: str, request: Request):
 
 ## Full Example
 
-The [`examples/sample-fastapi/`](https://github.com/KimSoungRyoul/aerospike-py/tree/main/examples/sample-fastapi) directory contains a complete application with 11 routers, Pydantic models, Docker Compose setup, and tests.
+The [`examples/sample-fastapi/`](https://github.com/aerospike-ce-ecosystem/aerospike-py/tree/main/examples/sample-fastapi) directory contains a complete application with 11 routers, Pydantic models, Docker Compose setup, and tests.
 
 ```bash
 cd examples/sample-fastapi

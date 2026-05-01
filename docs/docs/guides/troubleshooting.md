@@ -353,13 +353,13 @@ aerospike-py supports Python 3.14t (free-threaded / no-GIL builds). However, kee
 If you encounter issues specific to free-threaded Python, try:
 
 1. Falling back to a standard CPython build to isolate the issue.
-2. Checking the [GitHub issues](https://github.com/KimSoungRyoul/aerospike-py/issues) for known free-threaded compatibility problems.
+2. Checking the [GitHub issues](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues) for known free-threaded compatibility problems.
 
 ## Getting Help
 
 If your issue is not covered here:
 
-1. Check the [GitHub Issues](https://github.com/KimSoungRyoul/aerospike-py/issues) for existing reports.
+1. Check the [GitHub Issues](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues) for existing reports.
 2. Open a new issue with:
    - Python version (`python --version`)
    - aerospike-py version (`python -c "import aerospike_py; print(aerospike_py.__version__)"`)

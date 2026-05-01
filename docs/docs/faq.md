@@ -133,7 +133,7 @@ aerospike-py is tested against **Aerospike Server 6.x and 7.x** (Community and E
 
 Open an issue on the GitHub repository:
 
-- **Bug reports:** [github.com/KimSoungRyoul/aerospike-py/issues/new](https://github.com/KimSoungRyoul/aerospike-py/issues/new)
+- **Bug reports:** [github.com/aerospike-ce-ecosystem/aerospike-py/issues/new](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/new)
 - **Feature requests:** Same link -- use the "Feature Request" template if available.
 
 Please include your Python version, OS, aerospike-py version (`aerospike_py.__version__`), and a minimal reproduction when reporting bugs.

@@ -8,7 +8,7 @@ description: Development setup, build, test, and code style guidelines.
 ## Setup
 
 ```bash
-git clone https://github.com/KimSoungRyoul/aerospike-py.git
+git clone https://github.com/aerospike-ce-ecosystem/aerospike-py.git
 cd aerospike-py
 make install          # uv sync --all-groups
 make build            # uv run maturin develop --release
