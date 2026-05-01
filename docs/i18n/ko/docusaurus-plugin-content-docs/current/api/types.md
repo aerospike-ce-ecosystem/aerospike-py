@@ -225,8 +225,8 @@ client = aerospike_py.client(config).connect()
 | `total_timeout` | `int` | `1000` | 전체 트랜잭션 타임아웃 (ms) |
 | `max_retries` | `int` | `2` | 최대 재시도 횟수 |
 | `sleep_between_retries` | `int` | `0` | 재시도 간 대기 시간 (ms) |
-| `filter_expression` | `Any` | | Expression 필터 (deprecated, `expressions` 사용 권장) |
-| `expressions` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
+| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). 소켓을 비우고 재사용된 연결에서 오래된 응답을 읽지 않도록 합니다. |
+| `filter_expression` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
 | `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | 레플리카 알고리즘 |
 | `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP 읽기 일관성 수준 |
 
@@ -249,14 +249,14 @@ record = client.get(key, policy=policy)
 | `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
 | `total_timeout` | `int` | `1000` | 전체 트랜잭션 타임아웃 (ms) |
 | `max_retries` | `int` | `0` | 최대 재시도 횟수 |
+| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). |
 | `durable_delete` | `bool` | `False` | 영구 삭제 사용 (Enterprise 전용) |
 | `key` | `int` | `POLICY_KEY_DIGEST` | 키 전송 정책 (`POLICY_KEY_DIGEST`, `POLICY_KEY_SEND`) |
 | `exists` | `int` | `POLICY_EXISTS_IGNORE` | 존재 정책 (`POLICY_EXISTS_*`) |
 | `gen` | `int` | `POLICY_GEN_IGNORE` | Generation 정책 (`POLICY_GEN_IGNORE`, `POLICY_GEN_EQ`, `POLICY_GEN_GT`) |
 | `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | 커밋 수준 (`POLICY_COMMIT_LEVEL_ALL`, `POLICY_COMMIT_LEVEL_MASTER`) |
 | `ttl` | `int` | `0` | 레코드 TTL (초) |
-| `filter_expression` | `Any` | | Expression 필터 (deprecated, `expressions` 사용 권장) |
-| `expressions` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
+| `filter_expression` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
 
 ```python
 policy: WritePolicy = {
@@ -277,6 +277,8 @@ client.put(key, bins, policy=policy)
 | `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
 | `total_timeout` | `int` | `1000` | 전체 트랜잭션 타임아웃 (ms) |
 | `max_retries` | `int` | `2` | 최대 재시도 횟수 |
+| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). |
+| `concurrency` | `int` | `BATCH_CONCURRENCY_PARALLEL` | 노드별 분산 모드. `BATCH_CONCURRENCY_SEQUENTIAL`(노드 순차) 또는 `BATCH_CONCURRENCY_PARALLEL`(전체 병렬, 기본값). [Batch Concurrency 상수](constants.md#batch-concurrency) 참조. 다른 값은 `ValueError`를 발생시킵니다. |
 | `filter_expression` | `Any` | | Expression 필터 |
 
 ```python
@@ -295,14 +297,84 @@ batch = client.batch_read(keys, policy=policy)
 | `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
 | `total_timeout` | `int` | `0` | 전체 트랜잭션 타임아웃 (0 = 제한 없음) |
 | `max_retries` | `int` | `2` | 최대 재시도 횟수 |
+| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). |
 | `max_records` | `int` | `0` | 최대 반환 레코드 수 (0 = 전부) |
 | `records_per_second` | `int` | `0` | 속도 제한 (0 = 무제한) |
-| `filter_expression` | `Any` | | Expression 필터 (deprecated, `expressions` 사용 권장) |
-| `expressions` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
+| `filter_expression` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
 
 ```python
 policy: QueryPolicy = {"max_records": 100}
 records = query.results(policy=policy)
+```
+
+### `ScanPolicy`
+
+스캔 작업을 위한 정책입니다. 공식 Aerospike Python C 클라이언트의 `ScanPolicy`를 미러링합니다.
+
+`aerospike-core` 2.0 크레이트는 아직 별도의 `ScanPolicy` 구조체를 노출하지 않으므로, 현재 스캔 호출은 `QueryPolicy` 파서를 경유합니다. 향후 `aerospike-core`에 전용 `ScanPolicy`가 추가되면 사용자 측 타입 변경 없이 내부에서 새 파서로 전환됩니다. [issue #316](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/316) 참조.
+
+**사용하는 메서드**: `client.scan()` 및 predicate 없는 `client.query()`
+
+| 필드 | 타입 | 기본값 | 설명 |
+|------|------|--------|------|
+| `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
+| `total_timeout` | `int` | `0` | 전체 트랜잭션 타임아웃 (0 = 제한 없음) |
+| `max_retries` | `int` | `2` | 최대 재시도 횟수 |
+| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). |
+| `filter_expression` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
+| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | 레플리카 알고리즘 |
+| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP 읽기 일관성 수준 |
+| `records_per_second` | `int` | `0` | 노드당 속도 제한 (0 = 무제한; 서버 4.7+) |
+| `max_records` | `int` | `0` | 최대 반환 레코드 수 근사값 (0 = 전부; 서버 6.0+) |
+| `durable_delete` | `bool` | `False` | 백그라운드 스캔-쓰기에서 영구 삭제 사용 (Enterprise 3.10+) |
+| `ttl` | `int` | `0` | 백그라운드 스캔-쓰기의 기본 TTL |
+| `partition_filter` | `PartitionFilter` | (4096개 전부) | 스캔할 파티션 부분집합. `aerospike_py.partition_filter_*()` 헬퍼로 생성. |
+
+### `BatchUDFPolicy`
+
+`batch_apply()`를 위한 배치-레벨 UDF 정책입니다. 레코드 단위 오버라이드는 [`BatchUDFMeta`](#batchudfmeta)에 둡니다. 전송-레벨 옵션(타임아웃, 재시도, `concurrency` 등)은 [`BatchPolicy`](#batchpolicy)에 위치하며, `batch_apply()`에 전달하는 동일한 정책 딕셔너리에 머지됩니다.
+
+**사용하는 메서드**: `batch_apply()`
+
+| 필드 | 타입 | 기본값 | 설명 |
+|------|------|--------|------|
+| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | 커밋 수준 (`POLICY_COMMIT_LEVEL_ALL` / `_MASTER`) |
+| `ttl` | `int` | `0` | 레코드 TTL (초). `0` = 네임스페이스 기본, `-1` = 만료 안 함, `-2` = 업데이트 안 함 |
+| `key` | `int` | `POLICY_KEY_DIGEST` | 키 전송 정책 (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`) |
+| `durable_delete` | `bool` | `False` | UDF가 레코드를 삭제할 때 영구 삭제 (Enterprise 3.10+) |
+| `filter_expression` | `Any` | | 각 레코드에 적용되는 Expression 필터. 필터에 걸린 레코드는 `BatchRecord.result == FILTERED_OUT`을 반환합니다. |
+
+### `BatchUDFMeta`
+
+`batch_apply()`의 레코드 단위 메타입니다. `keys` 인자에서 `(key, meta)` 튜플의 두 번째 요소로 전달합니다. `BatchDeleteMeta`와 동일한 단일 평면 dict 형태이며, UDF 호출 형태와 정책 필드를 동시에 오버라이드할 수 있습니다.
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `module` | `str` | 이 레코드의 UDF 모듈명 오버라이드. 미지정 시 `batch_apply()`의 `module` 인자 사용. |
+| `function` | `str` | 이 레코드의 UDF 함수명 오버라이드. |
+| `args` | `list[Any]` | 인자 리스트 오버라이드. `[]`을 명시적으로 전달하면 기본 args를 비웁니다. |
+| `ttl` | `int` | 이 레코드의 TTL 오버라이드 (초; `WriteMeta.ttl`과 동일 시맨틱). |
+| `commit_level` | `int` | 커밋 수준 오버라이드. |
+| `key` | `int` | 키 전송 정책 오버라이드 (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
+| `durable_delete` | `bool` | 영구 삭제 오버라이드. |
+
+:::note
+`filter_expression`은 `BatchUDFMeta`에서 받지 않습니다 — 배치-레벨 [`BatchUDFPolicy`](#batchudfpolicy)에서 설정하세요. (aerospike-core 2.0에서 레코드 단위 `filter_expression`은 와이어링되지 않으며, `BatchDeleteMeta`와 같은 형태입니다.)
+:::
+
+```python
+# 모든 키에 동일한 UDF 적용
+keys = [("test", "demo", f"u_{i}") for i in range(10)]
+results = client.batch_apply(keys, "my_udf", "increment_counter", [1])
+
+# 레코드별 오버라이드: 한 레코드만 다른 args/긴 TTL
+results = client.batch_apply(
+    [
+        ("test", "demo", "u_1"),  # 기본 args 사용
+        (("test", "demo", "u_2"), {"args": [5], "ttl": 3600}),
+    ],
+    "my_udf", "increment_counter", args=[1],
+)
 ```
 
 ### `AdminPolicy`

@@ -59,6 +59,15 @@ import aerospike_py as aerospike
 | `POLICY_READ_MODE_AP_ONE` | 0 | Read from one node |
 | `POLICY_READ_MODE_AP_ALL` | 1 | Read from all nodes |
 
+### Batch Concurrency
+
+Controls how a batch request fans out across cluster nodes. Used as the ``concurrency`` key on [`BatchPolicy`](types.md#batchpolicy). Other integer values raise ``ValueError`` at parse time. (aerospike-core 2.0 has no `MaxThreads(n)` variant.)
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `BATCH_CONCURRENCY_SEQUENTIAL` | 0 | Send the per-node sub-requests one at a time. Lower peak load, higher latency. |
+| `BATCH_CONCURRENCY_PARALLEL` | 1 | Default. Send all per-node sub-requests in parallel. |
+
 ### Read Touch TTL Percent
 
 Special values for the ``read_touch_ttl_percent`` policy key (server v8+). Integers 1–100 are interpreted as a percentage; the constants below are the special-meaning sentinels.

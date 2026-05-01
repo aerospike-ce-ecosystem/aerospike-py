@@ -1006,6 +1006,70 @@ results = await client.batch_remove([
   </TabItem>
 </Tabs>
 
+### `batch_apply(keys, module, function, args=None, policy=None)`
+
+Execute a registered Lua UDF against many records in a single batch call. Same wire shape as [`apply()`](#applykey-module-function-argsnone-policynone) but amortised across the keys in one round-trip.
+
+| Parameter | Description |
+|-----------|-------------|
+| `keys` | Either a list of bare ``Key`` tuples or a list mixing bare keys and ``(key, meta)`` pairs where ``meta`` is a [`BatchUDFMeta`](types.md#batchudfmeta) flat dict. The meta may override the UDF call shape (``module`` / ``function`` / ``args``) and policy fields (``ttl`` / ``commit_level`` / ``key`` / ``durable_delete``) for a specific record. |
+| `module` | Default UDF module name to invoke when a record has no per-record ``module`` override. |
+| `function` | Default UDF function name. |
+| `args` | Optional default argument list. Per-record ``args`` in ``BatchUDFMeta`` (including ``[]`` for explicit no-args) overrides this default. |
+| `policy` | Optional dict combining a transport-level [`BatchPolicy`](types.md#batchpolicy) with batch-level [`BatchUDFPolicy`](types.md#batchudfpolicy) defaults: ``commit_level``, ``ttl``, ``key`` (send_key), ``durable_delete``, ``filter_expression``. |
+
+**Returns:** A ``BatchWriteResult`` with per-record result codes in
+    ``batch_records: list[BatchRecord]``. UDF return values are stored
+    in the per-record ``Record.bins`` map under the Lua-convention
+    ``"SUCCESS"`` key when the call succeeded.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+# Apply the same UDF to every key in the batch.
+keys = [("test", "demo", f"u_{i}") for i in range(10)]
+results = client.batch_apply(keys, "my_udf", "increment_counter", [1])
+
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        # UDF return value lives under the "SUCCESS" bin.
+        print(br.record.bins.get("SUCCESS"))
+
+# Per-record overrides: different args + longer TTL on one record.
+results = client.batch_apply(
+    [
+        ("test", "demo", "u_1"),  # uses default args
+        (("test", "demo", "u_2"), {"args": [5], "ttl": 3600}),
+    ],
+    "my_udf", "increment_counter", args=[1],
+)
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+keys = [("test", "demo", f"u_{i}") for i in range(10)]
+results = await client.batch_apply(keys, "my_udf", "increment_counter", [1])
+
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins.get("SUCCESS"))
+
+# Per-record overrides: different args + longer TTL on one record.
+results = await client.batch_apply(
+    [
+        ("test", "demo", "u_1"),
+        (("test", "demo", "u_2"), {"args": [5], "ttl": 3600}),
+    ],
+    "my_udf", "increment_counter", args=[1],
+)
+```
+
+  </TabItem>
+</Tabs>
+
 ## Query & Scan
 
 ### `query(namespace, set_name)`

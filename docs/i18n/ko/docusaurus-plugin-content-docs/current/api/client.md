@@ -557,6 +557,67 @@ await client.batch_remove(keys)
   </TabItem>
 </Tabs>
 
+### `batch_apply(keys, module, function, args=None, policy=None)`
+
+등록된 Lua UDF를 여러 레코드에 한 번의 배치 호출로 실행합니다. [`apply()`](#applykey-module-function-argsnone-policynone)와 동일한 와이어 형태이지만, 라운드 트립 한 번으로 키들에 분산 처리합니다.
+
+| 파라미터 | 설명 |
+|-----------|-------------|
+| `keys` | 일반 ``Key`` 튜플 리스트, 또는 일반 키와 ``(key, meta)`` 페어가 섞인 리스트. ``meta``는 [`BatchUDFMeta`](types.md#batchudfmeta) 평면 dict로, 특정 레코드에 대해 UDF 호출 형태(``module``/``function``/``args``)와 정책 필드(``ttl``/``commit_level``/``key``/``durable_delete``)를 오버라이드할 수 있습니다. |
+| `module` | 레코드 단위 ``module`` 오버라이드가 없을 때 사용할 기본 UDF 모듈명. |
+| `function` | 기본 UDF 함수명. |
+| `args` | 선택적 기본 인자 리스트. ``BatchUDFMeta``의 ``args``(빈 리스트 ``[]`` 포함)가 이 기본값을 오버라이드합니다. |
+| `policy` | 선택적 정책 dict. 전송-레벨 [`BatchPolicy`](types.md#batchpolicy)와 배치-레벨 [`BatchUDFPolicy`](types.md#batchudfpolicy) 기본값(``commit_level``, ``ttl``, ``key``, ``durable_delete``, ``filter_expression``)을 합칠 수 있습니다. |
+
+**반환값:** ``BatchWriteResult``. 레코드별 결과 코드는 ``batch_records: list[BatchRecord]``에 담깁니다. UDF 반환값은 호출이 성공한 경우 레코드의 ``Record.bins`` 맵에 Lua 컨벤션인 ``"SUCCESS"`` 키로 저장됩니다.
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+# 모든 키에 동일한 UDF 적용
+keys = [("test", "demo", f"u_{i}") for i in range(10)]
+results = client.batch_apply(keys, "my_udf", "increment_counter", [1])
+
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        # UDF 반환값은 "SUCCESS" 빈에 저장됨
+        print(br.record.bins.get("SUCCESS"))
+
+# 레코드별 오버라이드: 한 레코드만 다른 args + 긴 TTL
+results = client.batch_apply(
+    [
+        ("test", "demo", "u_1"),  # 기본 args 사용
+        (("test", "demo", "u_2"), {"args": [5], "ttl": 3600}),
+    ],
+    "my_udf", "increment_counter", args=[1],
+)
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+keys = [("test", "demo", f"u_{i}") for i in range(10)]
+results = await client.batch_apply(keys, "my_udf", "increment_counter", [1])
+
+for br in results.batch_records:
+    if br.result == 0 and br.record is not None:
+        print(br.record.bins.get("SUCCESS"))
+
+# 레코드별 오버라이드: 한 레코드만 다른 args + 긴 TTL
+results = await client.batch_apply(
+    [
+        ("test", "demo", "u_1"),
+        (("test", "demo", "u_2"), {"args": [5], "ttl": 3600}),
+    ],
+    "my_udf", "increment_counter", args=[1],
+)
+```
+
+  </TabItem>
+</Tabs>
+
 ## Query
 
 ### `query(namespace, set_name)`

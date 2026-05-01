@@ -178,6 +178,7 @@ Used by: `get()`, `select()`, `exists()`
 | `total_timeout` | `int` | `1000` | Total transaction timeout (ms) |
 | `max_retries` | `int` | `2` | Max retries |
 | `sleep_between_retries` | `int` | `0` | Sleep between retries (ms) |
+| `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. Drains the socket so reused connections do not see stale responses. |
 | `filter_expression` | `Any` | | Expression filter built via `aerospike_py.exp`. |
 | `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | Replica selection algorithm. |
 | `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP namespace read consistency. Maps to `aerospike-core` `ConsistencyLevel`. |
@@ -192,6 +193,7 @@ Used by: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`,
 | `socket_timeout` | `int` | `30000` | Socket timeout (ms) |
 | `total_timeout` | `int` | `1000` | Total transaction timeout (ms) |
 | `max_retries` | `int` | `0` | Max retries |
+| `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
 | `durable_delete` | `bool` | `false` | Durable delete (Enterprise) |
 | `key` | `int` | `POLICY_KEY_DIGEST` | Key send policy |
 | `exists` | `int` | `POLICY_EXISTS_IGNORE` | Existence policy |
@@ -213,6 +215,8 @@ Used by: `batch_read()`, `batch_operate()`, `batch_write()`, `batch_remove()`
 | `socket_timeout` | `int` | `30000` | Socket timeout (ms) |
 | `total_timeout` | `int` | `1000` | Total transaction timeout (ms) |
 | `max_retries` | `int` | `2` | Max retries |
+| `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
+| `concurrency` | `int` | `BATCH_CONCURRENCY_PARALLEL` | Per-node dispatch mode: `BATCH_CONCURRENCY_SEQUENTIAL` (one node at a time) or `BATCH_CONCURRENCY_PARALLEL` (all nodes in parallel — default). See [Batch Concurrency constants](constants.md#batch-concurrency). Other values raise `ValueError`. |
 | `filter_expression` | `Any` | | Expression filter |
 | `allow_inline` | `bool` | `true` | Allow server inline processing in receiving thread |
 | `allow_inline_ssd` | `bool` | `false` | Allow inline processing for SSD namespaces |
@@ -243,6 +247,7 @@ Used by: `Query.results()`, `Query.foreach()`
 | `socket_timeout` | `int` | `30000` | Socket timeout (ms) |
 | `total_timeout` | `int` | `0` | Total timeout (0 = no limit) |
 | `max_retries` | `int` | `2` | Max retries |
+| `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
 | `max_records` | `int` | `0` | Max records (0 = all) |
 | `records_per_second` | `int` | `0` | Rate limit per node (0 = unlimited). |
 | `max_concurrent_nodes` | `int` | `0` | Limit parallel node queries (0 = unlimited). |
@@ -312,6 +317,51 @@ client.batch_remove([
     (("test", "demo", "user_1"), {"gen": 3}),
     ("test", "demo", "user_2"),  # bare key, no CAS
 ])
+```
+
+### `BatchUDFPolicy`
+
+Used by: batch-level UDF policy for [`batch_apply()`](client.md#batch_applykeys-module-function-argsnone-policynone). Per-record overrides go in [`BatchUDFMeta`](#batchudfmeta). Transport-level options (timeouts, retries, `concurrency`, etc.) live on [`BatchPolicy`](#batchpolicy) and are merged into the same policy dict you pass to `batch_apply()`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | Commit level (`POLICY_COMMIT_LEVEL_ALL` / `_MASTER`). |
+| `ttl` | `int` | `0` | Record TTL in seconds (`0` = namespace default, `-1` = never expire, `-2` = don't update). |
+| `key` | `int` | `POLICY_KEY_DIGEST` | Key send policy (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
+| `durable_delete` | `bool` | `false` | Durable delete for UDFs that delete records (Enterprise 3.10+). |
+| `filter_expression` | `Any` | | Expression filter applied to each record. Records that fail the filter return `BatchRecord.result == FILTERED_OUT`. |
+
+### `BatchUDFMeta`
+
+Per-record meta for `batch_apply()`. Pass as the second element of a `(key, meta)` tuple in the `keys` argument. Single flat dict (matching [`BatchDeleteMeta`](#batchdeletemeta)) that may both override the UDF call shape and the policy fields for a specific record.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `module` | `str` | Override the UDF module name for this record. Falls back to the `module` argument of `batch_apply()`. |
+| `function` | `str` | Override the UDF function name for this record. |
+| `args` | `list[Any]` | Override the argument list. Passing `[]` explicitly clears the default args. |
+| `ttl` | `int` | Override TTL in seconds for this record (same semantics as `WriteMeta.ttl`). |
+| `commit_level` | `int` | Override commit level. |
+| `key` | `int` | Override key send policy (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
+| `durable_delete` | `bool` | Override durable_delete. |
+
+:::note
+`filter_expression` is **not** accepted in `BatchUDFMeta` — set it on the batch-level [`BatchUDFPolicy`](#batchudfpolicy) instead. (Per-record `filter_expression` is unwired in aerospike-core 2.0; matches the [`BatchDeleteMeta`](#batchdeletemeta) shape.)
+:::
+
+```python
+# Apply the same UDF to many keys.
+keys = [("test", "demo", f"u_{i}") for i in range(10)]
+results = client.batch_apply(keys, "my_udf", "increment_counter", [1])
+
+# Per-record overrides: different args / longer TTL on one record.
+results = client.batch_apply(
+    [
+        ("test", "demo", "u_1"),  # uses default args
+        (("test", "demo", "u_2"), {"args": [5], "ttl": 3600}),
+    ],
+    "my_udf", "increment_counter", args=[1],
+)
 ```
 
 ### `PartitionFilter`

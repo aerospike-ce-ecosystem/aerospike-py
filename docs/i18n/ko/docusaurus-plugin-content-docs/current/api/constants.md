@@ -72,6 +72,15 @@ AP 모드에서 읽기 일관성을 제어합니다.
 | `POLICY_READ_MODE_AP_ONE` | 0 | 하나의 노드에서 읽기 |
 | `POLICY_READ_MODE_AP_ALL` | 1 | 모든 노드에서 읽기 |
 
+## Batch Concurrency
+
+배치 요청을 클러스터 노드에 분산하는 방식을 제어합니다. [`BatchPolicy`](types.md#batchpolicy)의 ``concurrency`` 키로 사용됩니다. 다른 정수값은 파싱 시점에 ``ValueError``를 발생시킵니다 (aerospike-core 2.0에는 `MaxThreads(n)` 변형이 없습니다).
+
+| Constant | Value | 설명 |
+|----------|-------|-------------|
+| `BATCH_CONCURRENCY_SEQUENTIAL` | 0 | 노드별 서브-요청을 순차적으로 전송. 피크 부하는 낮지만 지연시간이 증가. |
+| `BATCH_CONCURRENCY_PARALLEL` | 1 | 기본값. 노드별 서브-요청을 병렬 전송. |
+
 ## TTL Constants
 
 | Constant | Value | 설명 |
