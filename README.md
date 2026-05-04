@@ -121,6 +121,57 @@ claude plugin list
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and making changes.
 
+## Repository Automation
+
+This repo wires several automations that fire on commit, PR, push, and schedule. Knowing they exist helps you understand why a check ran (or refused to).
+
+### Pre-commit hooks — `.pre-commit-config.yaml`
+
+Run on every `git commit`. Install once with `make pre-commit-install`.
+
+| Hook | Source | Purpose |
+|---|---|---|
+| `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-toml`, `detect-private-key` | `pre-commit/pre-commit-hooks` v5 | basic file hygiene |
+| `ruff` (with `--fix`), `ruff-format` | `astral-sh/ruff-pre-commit` | Python lint + format |
+| `cargo fmt --check` | local | Rust format check |
+| `cargo clippy -D warnings` (`--features otel`) | local | Rust lint, zero-warning gate |
+
+### Claude Code hook — `.claude/hooks/`
+
+Active when developing through [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with the project plugin enabled.
+
+- **`pr-perf-gate.sh`** — `PreToolUse` hook on `gh pr create`. If the PR diff touches any path in [`.claude/perf-hot-paths.txt`](.claude/perf-hot-paths.txt) and the conversation transcript has no `perf-impact:` verdict (from the `perf-impact-reviewer` agent) or benchmark run, the PR creation is blocked. Forces measurement on hot-path changes.
+
+### GitHub Actions — `.github/workflows/`
+
+**Build · release · docs**
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `ci.yaml` | `push` / `pull_request` to `main` | full validate (fmt + lint + typecheck + unit + integration matrix). |
+| `publish.yaml` | `release: published` / manual | build wheels + sdist, publish to PyPI. |
+| `daily-release.yml` | nightly cron / manual | nightly release pipeline. |
+| `docs.yaml` | PR touching `docs/` | Docusaurus build check. |
+| `docs-publish.yaml` | `push` to `main` | publish Docusaurus site to GitHub Pages. |
+| `docs-version.yaml` | manual | freeze a versioned docs snapshot. |
+
+**PR & issue automation (Claude-driven)**
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `pr-reviewer.yml` | PR opened / updated | automatic Claude review comment. |
+| `issue-planner.yml` | issue opened / labeled | generate an implementation plan in the issue. |
+| `agent-implement.yml` | issue labeled `plan-complete` | execute the plan, open a PR. |
+
+**Skill & docs follow-up notifications**
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `skill-impact-notify.yml` | `push` to `main`, on skill-relevant paths | open a routing issue in `aerospike-ce-ecosystem/project-hub`. |
+| `ace-plugins-pr-notify.yml` | `pull_request` opened / reopened / ready_for_review / synchronize, on skill-relevant paths | open (or update) a follow-up issue in `aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins` so skill maintainers can mirror the API/docs change. Idempotent: re-pushes append a comment instead of opening a duplicate. |
+
+> Both notify workflows reuse the `GH_AW_GITHUB_TOKEN` PAT for cross-repo writes — rotate together.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
