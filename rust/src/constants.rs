@@ -282,6 +282,14 @@ pub fn register_constants(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("HLL_WRITE_NO_FAIL", 4)?;
     m.add("HLL_WRITE_ALLOW_FOLD", 8)?;
 
+    // --- Regex Flags (for exp.regex_compare) ---
+    // Mirrors aerospike_core::expressions::regex_flag::RegexFlag (POSIX regex.h values).
+    m.add("REGEX_NONE", 0)?;
+    m.add("REGEX_EXTENDED", 1)?;
+    m.add("REGEX_ICASE", 2)?;
+    m.add("REGEX_NOSUB", 4)?;
+    m.add("REGEX_NEWLINE", 8)?;
+
     // --- Privilege codes ---
     m.add("PRIV_READ", 10)?;
     m.add("PRIV_WRITE", 13)?;

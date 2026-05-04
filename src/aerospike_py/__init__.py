@@ -188,6 +188,12 @@ from aerospike_py._aerospike import (  # noqa: F401
     HLL_WRITE_UPDATE_ONLY,
     HLL_WRITE_NO_FAIL,
     HLL_WRITE_ALLOW_FOLD,
+    # Regex Flags
+    REGEX_NONE,
+    REGEX_EXTENDED,
+    REGEX_ICASE,
+    REGEX_NOSUB,
+    REGEX_NEWLINE,
     # Privilege codes
     PRIV_READ,
     PRIV_WRITE,
@@ -596,6 +602,12 @@ __all__ = [
     "HLL_WRITE_UPDATE_ONLY",
     "HLL_WRITE_NO_FAIL",
     "HLL_WRITE_ALLOW_FOLD",
+    # Regex Flags
+    "REGEX_NONE",
+    "REGEX_EXTENDED",
+    "REGEX_ICASE",
+    "REGEX_NOSUB",
+    "REGEX_NEWLINE",
     # Privilege codes
     "PRIV_READ",
     "PRIV_WRITE",

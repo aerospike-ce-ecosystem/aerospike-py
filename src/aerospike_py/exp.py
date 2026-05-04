@@ -16,6 +16,25 @@ Usage example::
     # Pass to policy
     policy = {"filter_expression": expr}
     client.get(key, policy=policy)
+
+PK regex filter scan (server-side filtering on the user key)::
+
+    from aerospike_py import exp, REGEX_NONE, POLICY_KEY_SEND
+
+    # Write with sendKey=true so the user key is stored on the record.
+    client.put(("test", "users", "aaa001"), {"v": 1},
+               policy={"key": POLICY_KEY_SEND})
+
+    # Match all records whose PK starts with "aaa".
+    expr = exp.regex_compare("^aaa.*", REGEX_NONE,
+                             exp.key(exp.EXP_TYPE_STRING))
+    records = client.query("test", "users").results(
+        policy={"filter_expression": expr})
+
+This is a full set scan with server-side filtering — it does not use a primary
+index (Aerospike's primary index keys on the digest, not the user key string).
+Records written without ``POLICY_KEY_SEND`` will not match. Avoid on hot paths;
+prefer a separate prefix bin with a secondary index for production lookups.
 """
 
 from typing import Any
@@ -517,7 +536,12 @@ def int_rscan(value: Expr, search: Expr) -> Expr:
 
 
 def regex_compare(regex: str, flags: int, bin_expr: Expr) -> Expr:
-    """Create regex string comparison expression."""
+    """Create regex string comparison expression.
+
+    ``flags`` is a bitwise OR of ``REGEX_*`` constants exposed at the package
+    level: ``REGEX_NONE``, ``REGEX_EXTENDED``, ``REGEX_ICASE``, ``REGEX_NOSUB``,
+    ``REGEX_NEWLINE``. The values mirror POSIX ``regex.h`` flags.
+    """
     return _cmd("regex_compare", regex=regex, flags=flags, bin=bin_expr)
 
 

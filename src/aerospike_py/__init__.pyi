@@ -2875,6 +2875,13 @@ HLL_WRITE_UPDATE_ONLY: Literal[2]
 HLL_WRITE_NO_FAIL: Literal[4]
 HLL_WRITE_ALLOW_FOLD: Literal[8]
 
+# Regex Flags (for exp.regex_compare)
+REGEX_NONE: int
+REGEX_EXTENDED: int
+REGEX_ICASE: int
+REGEX_NOSUB: int
+REGEX_NEWLINE: int
+
 # Privilege Codes
 PRIV_READ: Literal[10]
 PRIV_WRITE: Literal[13]
