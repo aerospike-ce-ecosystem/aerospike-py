@@ -541,6 +541,10 @@ def regex_compare(regex: str, flags: int, bin_expr: Expr) -> Expr:
     ``flags`` is a bitwise OR of ``REGEX_*`` constants exposed at the package
     level: ``REGEX_NONE``, ``REGEX_EXTENDED``, ``REGEX_ICASE``, ``REGEX_NOSUB``,
     ``REGEX_NEWLINE``. The values mirror POSIX ``regex.h`` flags.
+
+    ``flags=0`` (equivalent to ``REGEX_NONE``) selects the server's default
+    mode — POSIX basic regular expression syntax, case-sensitive — and
+    matches the Java client's ``RegexFlag.NONE``.
     """
     return _cmd("regex_compare", regex=regex, flags=flags, bin=bin_expr)
 

@@ -329,3 +329,63 @@ class TestPkRegexFilterScan:
 
         matched = sorted(r.key.user_key for r in results if r.key is not None)
         assert matched == ["AAA001", "aaa002"]
+
+    def test_pk_regex_filter_scan_integer_key_excluded(self, client, cleanup):
+        """Integer user keys do not satisfy exp.key(EXP_TYPE_STRING).
+
+        Documents the contract: when records in the same set have heterogeneous
+        user-key types, `exp.key(EXP_TYPE_STRING)` only exposes the string
+        ones. Integer-keyed records are filtered out (the expression evaluates
+        to unknown for them) rather than raising — query continues over the
+        rest of the set.
+        """
+        # Mix string and integer user keys, both written with sendKey.
+        for key in [
+            ("test", self.set_name, "aaa001"),
+            ("test", self.set_name, "aaa002"),
+            ("test", self.set_name, 12345),
+            ("test", self.set_name, 67890),
+        ]:
+            cleanup.append(key)
+            client.put(key, {"v": 1}, policy={"key": aerospike_py.POLICY_KEY_SEND})
+
+        expr = exp.regex_compare(
+            "^aaa.*",
+            aerospike_py.REGEX_NONE,
+            exp.key(exp.EXP_TYPE_STRING),
+        )
+        results = client.query("test", self.set_name).results(policy={"filter_expression": expr})
+
+        matched = sorted(r.key.user_key for r in results if r.key is not None)
+        assert matched == ["aaa001", "aaa002"]
+
+    def test_pk_regex_filter_scan_bitwise_flag_combo(self, client, cleanup):
+        """REGEX_ICASE | REGEX_EXTENDED both apply on a POSIX-extended pattern.
+
+        Locks the bitfield contract: if any constant is changed to a
+        non-orthogonal value the combined behaviour breaks immediately.
+        ``[A-Za-z]{3}001`` requires REGEX_EXTENDED (counted repetition is a
+        POSIX-extended construct); REGEX_ICASE adds case-insensitive matching.
+        """
+        # Sanity-check the bitfield itself.
+        assert aerospike_py.REGEX_ICASE | aerospike_py.REGEX_EXTENDED == 3
+
+        self._seed(
+            client,
+            cleanup,
+            ["AAA001", "aaa002", "BB1001", "x002"],
+            send_key=True,
+        )
+
+        expr = exp.regex_compare(
+            "^[A-Z]{3}001$",
+            aerospike_py.REGEX_ICASE | aerospike_py.REGEX_EXTENDED,
+            exp.key(exp.EXP_TYPE_STRING),
+        )
+        results = client.query("test", self.set_name).results(policy={"filter_expression": expr})
+
+        matched = sorted(r.key.user_key for r in results if r.key is not None)
+        # Only "AAA001" and "aaa001"-style 3-letter+001 keys match. From the
+        # seed, "AAA001" is the lone match (aaa002 fails the literal "001",
+        # BB1001 fails the {3} letter run, x002 fails everything).
+        assert matched == ["AAA001"]
