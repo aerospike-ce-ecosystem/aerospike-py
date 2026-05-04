@@ -114,6 +114,19 @@ jobs:
           ISSUEEOF
           )
 
+          # Idempotently ensure required labels exist on the target repo
+          # before creating the issue. `gh issue create --label X` fails
+          # the whole workflow if a label is missing, so a manual delete
+          # in the target repo would otherwise break this notifier.
+          ensure_label() {
+            gh label create "$1" \
+              --repo "${HUB_REPO}" \
+              --description "$2" \
+              --color "$3" 2>/dev/null || true
+          }
+          ensure_label "skill-impact-review" "Skill impact review — Hub Planner analyzes upstream diff" "D93F0B"
+          ensure_label "cross-repo"          "Tracks impact across multiple repos"                       "5319E7"
+
           gh issue create \
             --repo "${HUB_REPO}" \
             --title "[Skill Impact] ${SOURCE_REPO}: ${COMMIT_TITLE}" \

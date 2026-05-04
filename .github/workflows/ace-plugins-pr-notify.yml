@@ -212,6 +212,20 @@ jobs:
               --body "${COMMENT_BODY}"
           else
             echo "No existing issue. Creating new follow-up issue on ${PLUGINS_REPO}."
+            # Idempotently ensure required labels exist on the target repo
+            # before creating the issue. `gh issue create --label X` fails
+            # the whole workflow if a label is missing, so a manual delete
+            # in the target repo would otherwise break this notifier.
+            ensure_label() {
+              gh label create "$1" \
+                --repo "${PLUGINS_REPO}" \
+                --description "$2" \
+                --color "$3" 2>/dev/null || true
+            }
+            ensure_label "skill-followup" "Skill-affecting follow-up tracking from upstream repo PRs" "FBCA04"
+            ensure_label "aerospike-py"   "Originated from aerospike-py repo"                          "2B67C6"
+            ensure_label "cross-repo"     "Tracks impact across multiple repos"                        "5319E7"
+
             gh issue create \
               --repo "${PLUGINS_REPO}" \
               --title "${ISSUE_TITLE}" \
