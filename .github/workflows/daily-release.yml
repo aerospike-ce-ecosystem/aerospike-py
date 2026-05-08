@@ -24,13 +24,16 @@ jobs:
         id: changes
         run: |
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          # Exclude auto docs-freeze commits (pushed by docs-version.yaml after each
-          # release) so they don't self-trigger an empty release the next day.
+          # Only commits that touch user-facing library code or package metadata count
+          # toward a release. CI workflows, docs, tests, examples, build configs, etc.
+          # don't change what gets shipped to PyPI and so don't warrant a new release —
+          # this also implicitly excludes the auto `docs: freeze version` commits.
+          RELEASE_PATHS=(rust/ src/ pyproject.toml Cargo.toml Cargo.lock uv.lock)
           if [ -z "$LATEST_TAG" ]; then
             echo "No previous release found. Checking all commits."
-            COMMIT_COUNT=$(git log HEAD --pretty=tformat:"%s" | grep -vcE '^docs: freeze version ' || true)
+            COMMIT_COUNT=$(git log HEAD --pretty=tformat:"%H" -- "${RELEASE_PATHS[@]}" | wc -l | tr -d ' ')
           else
-            COMMIT_COUNT=$(git log "${LATEST_TAG}..HEAD" --pretty=tformat:"%s" | grep -vcE '^docs: freeze version ' || true)
+            COMMIT_COUNT=$(git log "${LATEST_TAG}..HEAD" --pretty=tformat:"%H" -- "${RELEASE_PATHS[@]}" | wc -l | tr -d ' ')
           fi
           echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
           echo "commit_count=${COMMIT_COUNT}" >> "$GITHUB_OUTPUT"
@@ -59,8 +62,10 @@ jobs:
           # daily-release auto-bumps minor (feat) or patch only.
           # Major bump is manual: a maintainer tags the new major version themselves.
           # `feat!:` / `BREAKING CHANGE` markers surface in release notes, not in version.
-          COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s")
-          HAS_FEAT=$(echo "$COMMITS" | grep -cE '^feat(\(.+\))?!?:' || true)
+          # Only feat commits that touch release-worthy paths trigger a minor bump —
+          # `feat(ci):` or `feat(docs):` shouldn't bump the public version.
+          RELEASE_PATHS=(rust/ src/ pyproject.toml Cargo.toml Cargo.lock uv.lock)
+          HAS_FEAT=$(git log "${LATEST_TAG}..HEAD" --pretty=tformat:"%s" -- "${RELEASE_PATHS[@]}" | grep -cE '^feat(\(.+\))?!?:' || true)
 
           if [ "$HAS_FEAT" -gt 0 ]; then
             MINOR=$((MINOR + 1))
