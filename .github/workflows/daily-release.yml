@@ -24,20 +24,22 @@ jobs:
         id: changes
         run: |
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          # Exclude auto docs-freeze commits (pushed by docs-version.yaml after each
+          # release) so they don't self-trigger an empty release the next day.
           if [ -z "$LATEST_TAG" ]; then
             echo "No previous release found. Checking all commits."
-            COMMIT_COUNT=$(git rev-list --count HEAD)
+            COMMIT_COUNT=$(git log HEAD --pretty=tformat:"%s" | grep -vcE '^docs: freeze version ' || true)
           else
-            COMMIT_COUNT=$(git rev-list --count "${LATEST_TAG}..HEAD")
+            COMMIT_COUNT=$(git log "${LATEST_TAG}..HEAD" --pretty=tformat:"%s" | grep -vcE '^docs: freeze version ' || true)
           fi
           echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
           echo "commit_count=${COMMIT_COUNT}" >> "$GITHUB_OUTPUT"
           if [ "$COMMIT_COUNT" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No changes since ${LATEST_TAG}. Skipping release."
+            echo "No release-worthy changes since ${LATEST_TAG}. Skipping release."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "${COMMIT_COUNT} commits since ${LATEST_TAG}."
+            echo "${COMMIT_COUNT} release-worthy commits since ${LATEST_TAG}."
           fi
 
       - name: Determine next version
