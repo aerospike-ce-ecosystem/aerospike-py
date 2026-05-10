@@ -1,0 +1,187 @@
+---
+title: Bottleneck Analysis & Optimization
+sidebar_label: Bottleneck Analysis
+sidebar_position: 4
+description: Internal stage profiling, the gather→single recipe (−33% p95), stage profiling toggle overhead, and recommended optimizations for aerospike-py
+---
+
+This page explains **what makes batch_read slow under load**, how aerospike-py exposes per-stage timings to find out, and which optimizations measurably help.
+
+> **Sources**: `benchmark/results/bottleneck-analysis.md`, `benchmark/results/internal-stage-toggle-comparison.md`, `benchmark/results/k6-runtime-client-comparison.md`.
+
+## The Initial Mystery
+
+Production observability showed Rust internal `batch_read` I/O taking **~0.9 ms**, but the Python-level metric for a per-set read was **~51 ms**. **99% of the wall time was happening outside Rust.**
+
+```
+Rust metrics (db_client_operation_duration_seconds):    0.9 ms
+Python metrics (aerospike_batch_read_set_duration):    51.0 ms
+─────────────────────────────────────────────────────────────
+Unaccounted overhead:                                  50.1 ms (98.2%)
+```
+
+To find where the 50 ms went, aerospike-py added per-stage histograms covering both Rust internals and the PyO3 ↔ asyncio boundary.
+
+## Internal Stage Profiling
+
+Each `batch_read` is split into 10 stages. Histograms (`db_client_internal_stage_seconds`) record latency for each stage individually.
+
+| Stage | Where | GIL state |
+|---|---|---|
+| `key_parse` | Python tuples → Rust `Vec<Key>` | held |
+| `limiter_wait` | Backpressure semaphore acquire | released |
+| `tokio_schedule_delay` | Tokio task scheduling | released |
+| `io` | Aerospike network round-trip | released |
+| `into_pyobject` | Rust `BatchRecord` → `Py<...>` (Arc wrap, run on `spawn_blocking`) | held |
+| `spawn_blocking_delay` | Wall time `spawn_blocking` task spent waiting in queue | — |
+| `event_loop_resume_delay` | Event-loop tick from future-ready to coroutine resume | — |
+| `as_dict` | `BatchReadHandle.as_dict()` → `dict[Key, Record]` | held |
+| `merge_as_dict` | Multi-set merge into typed dict | held |
+| `future_into_py_setup` | PyO3 future ↔ asyncio bridge setup | held |
+
+### Activating Stage Profiling
+
+Stage profiling is **off by default** with zero overhead. Activate it three ways:
+
+```python
+# Process-wide via env var (read at process start)
+# AEROSPIKE_PY_INTERNAL_METRICS=1
+
+# Runtime toggle
+import aerospike_py
+aerospike_py.set_internal_stage_metrics_enabled(True)
+
+# Scoped context manager
+with aerospike_py.internal_stage_profiling():
+    await client.batch_read(keys)
+```
+
+When disabled, the `Instant::now()` syscalls and histogram updates are elided — only one `AtomicBool` load (~1 ns) per stage entry remains.
+
+## What the Stages Revealed (Python 3.11 + GIL)
+
+Running with profiling **on** under k6 load:
+
+| Stage | avg | What this means |
+|---|---:|---|
+| `into_pyobject` | 3.96 μs | Arc wrap is essentially free |
+| `limiter_wait` | 3.56 μs | Backpressure not active (no contention) |
+| `future_into_py_setup` | 46.5 μs | PyO3 ↔ asyncio bridge is cheap |
+| `tokio_schedule_delay` | 83.1 μs | Tokio scheduling is fine |
+| `as_dict` | 832 μs | Per-call dict materialization OK |
+| `key_parse` | 967 μs | 200-key tuple parsing OK |
+| `merge_as_dict` | 4.48 ms | 9-set merge is moderate |
+| `io` | 7.51 ms | Network — but inflated by GIL contention during response parsing |
+| **`event_loop_resume_delay`** | **39.7 ms** | 🚨 Coroutines waiting their turn for the GIL |
+| **`spawn_blocking_delay`** | **234 ms** | 🚨 `spawn_blocking` queue waiting for GIL |
+
+**Conclusion**: aerospike-py's Rust code is fast (~5 ms total for the actual batch_read work). The 46 ms of unaccounted overhead is real, but it's caused by **GIL serialization at the PyO3 ↔ asyncio boundary**, not by any fixable hot loop in Rust.
+
+This finding directly motivated the [Free-Threaded Python](./free-threaded-python) experiment, which collapsed both stages to near-zero.
+
+## Optimization 1: `gather(N)` → Single `batch_read(mixed keys)`
+
+The 9-set serving pipeline originally fanned out via `asyncio.gather`:
+
+```python
+# 9 concurrent batch_read calls
+await asyncio.gather(*[
+    client.batch_read(set_i_keys) for i in range(9)
+])
+```
+
+Under GIL, this creates 9 simultaneous PyO3 → asyncio handoffs. Each `key_parse` and `as_dict` stage acquires the GIL, and they serialize:
+
+```
+Timeline (gather mode, 9 sets × 200 keys):
+T=0ms     asyncio.gather starts
+          ├─ task 1: key_parse (1.46 ms, GIL held)
+          ├─ task 2: key_parse waits (GIL)
+          ├─ ...
+          └─ task 9: key_parse waits (GIL)
+T=~13ms   9 key_parse done (sequential, 9 × 1.46 ms)
+          └─ 9 Rust async futures execute in parallel on Tokio
+T=~15ms   9 I/O complete
+T=15-51ms event loop resumes 9 coroutines sequentially:
+          ├─ task 1 → as_dict (0.79 ms) → done
+          ├─ (event loop tick: 3-5 ms)
+          └─ task 9 → as_dict (0.79 ms) → done
+T=~51ms   gather returns
+```
+
+**The fix**: `batch_read` already supports mixed-set keys. Send all 1800 keys (9 × 200) in a single call and demux the result in Python:
+
+```python
+all_keys = []
+for set_name, keys in per_set_keys.items():
+    all_keys.extend(("ns", set_name, k) for k in keys)
+
+result = await client.batch_read(all_keys)
+
+# Demux by set in Python (cheap)
+per_set_results = defaultdict(dict)
+for key, record in result.as_dict().items():
+    per_set_results[key[1]][key[2]] = record
+```
+
+### Measured impact (k6 10 VUs × 60s, FastAPI + DLRM)
+
+| Client | Mode | avg | median | p90 | p95 |
+|---|---|---:|---:|---:|---:|
+| **aerospike-py** | gather (9×) | 189 | 176 | 393 | 434 |
+| **aerospike-py** | single (mixed keys) | **126** | **101** | **284** | **302** |
+| **Improvement** | | **−33%** | **−43%** | **−28%** | **−30%** |
+
+| Client | Mode | avg | p95 |
+|---|---|---:|---:|
+| official | gather | 251 | 502 |
+| official | single | 188 | 396 |
+| **aerospike-py vs official (single mode)** | | **1.49×** | **1.31×** |
+
+The single-call pattern wins for both clients (it's always doing less work), but the gain is **larger for aerospike-py** because removing 8 of the 9 PyO3 ↔ asyncio handoffs eliminates 8× the GIL serialization cost.
+
+After enabling this as the default, a follow-up run (different test conditions, lighter overall load) showed **avg 60.8 ms / p95 154.6 ms** for aerospike-py single mode — a sustained absolute floor.
+
+## Optimization 2: Always-On Stage Profiling
+
+The toggle exists so that stage profiling can be **left on in production** if the overhead is small enough. The measurement:
+
+| Metric (Rust internal `batch_read` op_duration) | OFF (baseline) | ON (debug) | Δ |
+|---|---:|---:|---:|
+| avg | 2.16 ms | 3.22 ms | +1.06 ms (+49%) |
+| p95 | 4.67 ms | 7.61 ms | +2.94 ms (+63%) |
+| p99 | 4.93 ms | 9.51 ms | +4.58 ms (+93%) |
+
+That looks bad in isolation. **But Rust internal time is only 5–10% of E2E latency.** At the FastAPI E2E level (the one users actually feel):
+
+| Config | k6 single p95 |
+|---|---:|
+| 3.11 + GIL, stage OFF | 189 ms |
+| 3.11 + GIL, stage ON | **143 ms** |
+
+Stage ON measured **lower** end-to-end p95 than stage OFF — within noise, the toggle has no measurable E2E impact. The Rust-level overhead disappears into the much larger asyncio + GIL cost outside Rust.
+
+**Recommendation**: keep `AEROSPIKE_PY_INTERNAL_METRICS=1` on in production. You get instant per-stage attribution when an incident happens. When the GIL is removed (3.14t), even the Rust-internal overhead drops to negligible.
+
+## Optimization 3: Switch to Python 3.14t
+
+This is the largest single lever — see the [Free-Threaded Python](./free-threaded-python) page for the full breakdown. Summary:
+
+- Same Rust binary
+- `spawn_blocking_delay`: 234 ms → 0.12 ms
+- `event_loop_resume_delay`: 39.7 ms → ≈ 0
+- `io`: 7.51 ms → 1.27 ms
+- E2E p95: 189 ms → **97 ms** (**−49%**)
+- TPS: 41.6 → **61.2 iter/s** (**+47%**)
+
+For the cumulative effect across all three optimizations and the recommended order to apply them, see the [Overview](./overview).
+
+## Future Optimization Candidates
+
+Identified but not yet implemented at the time of measurement:
+
+| Idea | Estimated effect | Difficulty |
+|---|---|---|
+| `key_parse` interning (`py.intern()` for bin names) | −10–15% | Medium |
+| `future_into_py` improvements | Theoretical max for this stage | High — needs upstream PyO3 PR |
+| Promote module to `#[pymodule(gil_used = false)]` after audit | Removes any latent GIL re-acquisition cost on 3.14t | Medium |

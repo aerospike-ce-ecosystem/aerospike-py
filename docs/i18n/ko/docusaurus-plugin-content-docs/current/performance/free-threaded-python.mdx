@@ -1,0 +1,108 @@
+---
+title: Free-Threaded Python (3.14t)
+sidebar_label: Free-Threaded Python
+sidebar_position: 3
+description: aerospike-py와 공식 C client를 Python 3.14t free-threaded 런타임으로 전환했을 때의 실측 효과 — Rust 코드 변경 없이 GIL 병목 제거
+---
+
+Python 3.14t는 CPython의 **free-threaded** 빌드입니다 — GIL이 비활성화되어 있습니다 (`Py_GIL_DISABLED=1`).
+이 페이지는 **Rust/C 소스 변경 없이** 런타임만 교체했을 때 aerospike-py와 공식 `aerospike` C client에 어떤 변화가 일어나는지 보고합니다.
+
+> **출처**: `benchmark/results/python-3.14t-benchmark.md`, `benchmark/results/k6-runtime-client-comparison.md`.
+
+## TL;DR
+
+| Client | p95 (3.11 + GIL) | p95 (3.14t) | 개선 |
+|---|---:|---:|---:|
+| **aerospike-py** | 189 ms | **97 ms** | **−49%** 🔥 |
+| **공식 aerospike** (C client, 소스 빌드) | 324 ms | **128 ms** | **−60%** 🔥 |
+
+**처리량 (aerospike-py):** 41.6 → **61.2 iter/s** (**+47%**), 10 VUs single mode 기준.
+
+GIL은 두 client 공통 병목이었습니다. aerospike-py 의 효과는 **Rust 코드를 전혀 건드리지 않고** 얻은 것입니다.
+
+## GIL 제거가 aerospike-py에 도움이 되는 이유
+
+3.11 + GIL 환경에서 aerospike-py 내부에서 가장 시간을 많이 쓰는 stage는 네트워크 I/O가 아니라 — **Rust async가 Python 인터프리터를 기다리는 stage** 입니다:
+
+| Stage | 3.11 + GIL avg | 3.14t avg | 변화 |
+|---|---:|---:|---:|
+| `spawn_blocking_delay` | **234 ms** | **0.12 ms** | **−99.95%** 🔥 |
+| `event_loop_resume_delay` | 39.7 ms | ≈ 0 | ≈ −100% |
+| `io` (Aerospike 네트워크) | 7.51 ms | **1.27 ms** | −83% |
+| `merge_as_dict` | 4.48 ms | 3.54 ms | −21% |
+| `key_parse` | 967 μs | 1.06 ms | +10% (노이즈) |
+| `tokio_schedule_delay` | 83.1 μs | 49.5 μs | −40% |
+| `limiter_wait` | 3.56 μs | 0.96 μs | −73% |
+
+**두 stage가 이득을 지배:**
+
+- **`spawn_blocking_delay`** 가 234 ms → 0.12 ms. GIL 환경에서는, Rust async future가 완료된 뒤 결과를 `Py<...>`로 변환할 때 그 작업을 `spawn_blocking` worker에 dispatch. 그 worker는 GIL 획득을 기다려야 하는데 — asyncio event loop와 다른 worker들과 경합하면 큐가 수백 ms로 늘어남. GIL이 없으면 즉시 실행됨.
+- **`event_loop_resume_delay`** 가 사실상 0이 됨. GIL 환경에서는, future가 resolve되고 event loop이 깨워진 뒤에도 coroutine이 GIL을 얻을 차례를 기다려야 함. Free-threaded 모드에서는 여러 coroutine이 병렬로 resume 가능.
+
+`io`가 8배 줄어든 것은 2차 효과: Tokio worker들이 Python 코드와 GIL을 두고 경합하지 않으면서 Aerospike 프로토콜 응답 파싱을 즉시 처리.
+
+## GIL 제거가 공식 C client에 (비율로) 더 도움이 되는 이유
+
+공식 `aerospike` client는 동기식 C extension으로, 애플리케이션이 `loop.run_in_executor(ThreadPoolExecutor, ...)`로 래핑합니다. 매 요청은:
+
+1. Thread-pool worker에 hop
+2. C extension이 인자 파싱을 위해 GIL 획득
+3. 네트워크 호출 (GIL 해제)
+4. Python result 빌드를 위해 GIL 재획득
+
+GIL 경합 환경에서 **2번과 4번이 모든 in-flight 요청에 걸쳐 직렬화**됩니다. GIL을 제거하면 이들이 병렬화 — 그래서 공식 client의 p95가 60% 떨어집니다 (324 → 128 ms). 절대값으로는 aerospike-py의 49% 감소보다 더 큰 폭.
+
+## 같은 부하 조건에서의 비교 (3.14t)
+
+3.14t에서 두 client가 **같은 서버 부하** (같은 pod에서 endpoint 교대 호출, k6 10 VUs)를 받을 때:
+
+| Client | p95 (single mode) | 차이 |
+|---|---:|---|
+| aerospike-py | **126 ms** | baseline |
+| official aerospike | 128 ms | +2 ms (~1.5%, 노이즈) |
+
+**3.11 + GIL에서의 42% 격차가 3.14t에서는 ~2 ms로 압축됩니다.**
+
+이것이 GIL 경합 — 아키텍처 차이가 아니라 — 가 원래 격차의 대부분을 만들었다는 가장 깨끗한 증거입니다.
+
+## 그래도 실제 부하에서는 aerospike-py가 여전히 우위
+
+"126 vs 128 ms" 동률은 각 client가 ~5 effective VUs만 보는 구성 (10 VUs를 두 endpoint에 분할)에서 나온 결과. 한 client에 부하를 집중하면 격차가 다시 벌어집니다.
+
+### Solo 부하 비교 (3.14t, 각 client가 서버 독점)
+
+| 지표 | aerospike-py solo | official solo | aerospike-py 우위 |
+|---|---:|---:|---|
+| k6 single p95 | **97 ms** | 134 ms | **−28%** |
+| k6 gather p95 (9× fan-out) | **107 ms** | 253 ms | **−58%** 🔥 |
+| 서버 `predict_duration_seconds` p95 | **100 ms** | 138 ms | **−28%** |
+| 서버 `batch_read_all` p95 | **64 ms** | 67 ms | −4% |
+| 이론적 capacity (Little's Law: 10 VUs / p95) | **~103 req/s** | ~75 req/s | **+37%** |
+
+:::caution k6 throughput 수치 해석 주의
+두 solo run은 k6 스크립트가 다름. `k6_benchmark_official_only.js`는 iteration 당 정확히 1 request, `k6_benchmark.js` (aerospike-py solo에 사용)는 10 VUs를 4 scenario에 분할. Raw `iterations/s`는 **apples-to-apples가 아님** — 그러나 두 run이 같은 VU 수, 같은 서버를 사용했으므로 **요청 단위 latency는 공정 비교**.
+:::
+
+**3.14t에서도 solo 부하에서 aerospike-py가 여전히 앞서는 이유:**
+
+1. **Native async vs threadpool 래핑.** GIL 경합이 없어도 `run_in_executor`는 요청당 thread pool hop을 추가. aerospike-py는 asyncio loop에서 직접 await.
+2. **Lazy dict 변환.** `batch_read()`는 `BatchReadHandle` (Arc-wrap, ~10 μs)를 반환. Python dict materialization은 호출자가 `.as_dict()`를 호출할 때 lazy하게 수행 — eager 작업 회피. 공식 client는 I/O 완료 즉시 전체 dict를 빌드.
+3. **단일 FFI 경계 횡단.** aerospike-py Rust 코드는 한 번의 PyO3 호출 안에서 전체 `batch_read`를 완료. C extension은 호출당 Python ↔ C 경계를 여러 번 횡단.
+
+이 우위는 동시성이 올라갈수록 누적됨 (gather 수치 — 107 vs 253 ms — 가 가장 분명한 예).
+
+## 권장 마이그레이션 경로
+
+1. **CI matrix에 3.14t row 추가.** `python:3.14.2t-slim`에서 unit + integration 테스트 실행.
+2. **Rust의 `unsafe` 와 공유 가변 상태 감사.** aerospike-py는 대체로 thread-safe지만 `gil_used = false` 선언 전에 감사 필요.
+3. **`#[pymodule(gil_used = false)]`로 승격.** 감사가 깨끗해지면.
+4. **공식 client wheel을 기다리거나 빌드.** PyPI는 아직 공식 `aerospike` 패키지의 `cp314t` wheel을 제공하지 않음. 소스 빌드는 가능 (아래 노트 참조).
+
+## 노트
+
+**부수 효과: 추론도 빨라짐.** DLRM 추론 (PyTorch CPU, 대조군) 이 3.14t에서 **43.5 ms → 20.7 ms (−52%)**. aerospike-py와 무관 — async I/O와 함께 실행되는 GIL-bound 추론 path에 대한 무료 부수 효과.
+
+**GIL 상태 검증.** `Py_GIL_DISABLED=1` 환경에서 `import aerospike_py` 후에도 인터프리터가 GIL을 재활성화하지 않음 — Rust 모듈은 현재 `#[pymodule(gil_used = true)]`로 선언되어 있지만 기반 코드가 이미 대체로 thread-safe (client는 `ArcSwapOption`, batch handle은 `Arc<Vec<BatchRecord>>`, metric registry는 `Mutex`). 전체 감사 후 `gil_used = false`로 승격은 후속 작업.
+
+**빌드 이미지.** `aerospike-benchmark:314t`는 aerospike-py만 포함 (`benchmark/deploy/wheels-314t/`의 `cp314t` wheel 사용). `aerospike-benchmark:314t-with-official`은 공식 C client를 소스 빌드로 추가 — 필수 apt deps: `build-essential libssl-dev libuv1-dev liblua5.1-0-dev libyaml-dev pkg-config zlib1g-dev` (`libyaml-dev`가 빠뜨리기 쉬움). 빌드 시간 ~10분.

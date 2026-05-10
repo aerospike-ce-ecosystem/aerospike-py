@@ -2,125 +2,46 @@
 title: Performance Overview
 sidebar_label: Overview
 sidebar_position: 1
-description: aerospike-py architecture comparison, GIL optimization, concurrency scaling, and benchmark analysis
+description: TL;DR — measured latency, throughput, and Python 3.14t gains for aerospike-py vs official C client
 ---
 
-import BrowserOnly from '@docusaurus/BrowserOnly';
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-import { RequestFlow, GilTimeline, ConcurrencyViz, ThroughputSlider, MemoryViz, ConditionGrid, ThroughputSim, MemorySim, GilChart } from '@site/src/components/ArchitectureComparison';
+Measured benchmarks comparing **aerospike-py** (Rust/PyO3, native async) against the **official `aerospike` Python client** (C extension wrapped with `loop.run_in_executor`). Reproducible from `benchmark/` in this repo.
 
-## Comparison with Official Client
+> `↓` lower is better, `↑` higher is better, 🔥 ≥50% improvement.
+> Default test setup: FastAPI + DLRM + Aerospike CE, k6 10 VUs × 60s.
 
-### How Requests Are Processed
+## How fast — cumulative effect on DLRM-serving p95
 
-What happens behind `client.get(key)` / `await client.get(key)` differs across three patterns.
+| Step | p95 | vs original |
+|---|---:|---:|
+| Original (official client + Python 3.11 + `gather`) | 324 ms | baseline |
+| + Replace with aerospike-py | 189 ms | **−42%** |
+| + `gather(N)` → single `batch_read(mixed keys)` | 126 ms | **−61%** |
+| + Python 3.14t free-threaded | **97 ms** | **−70%** 🔥 (**3.3× faster**) |
 
-<BrowserOnly>
-  {() => <RequestFlow />}
-</BrowserOnly>
+## Recommended actions
 
-:::info Sync is the simplest but most limited
-The calling thread is completely blocked during I/O, so only one request can be processed at a time.
-To handle concurrent requests, you must manage Python threading yourself.
-:::
+| # | Action | Effect |
+|---|---|---|
+| 1 | Replace official client → **aerospike-py** | p95 **−42%** (Python 3.11) |
+| 2 | Move runtime to **Python 3.14t free-threaded** | p95 **−49%** more, TPS **+47%** (no Rust changes) |
+| 3 | `gather(N)` → single `batch_read(mixed keys)` | p95 **−33%** (under GIL) |
+| 4 | Keep `AEROSPIKE_PY_INTERNAL_METRICS=1` always on | E2E overhead ≈ 0, instant per-stage attribution |
 
-<Tabs>
-  <TabItem value="gil" label="GIL Hold Time" default>
+## Environment summary (Python 3.11 + GIL)
 
-The CPython GIL allows only one thread to execute Python code at a time.
-Each pattern handles GIL ownership differently.
+The thinner the surrounding stack, the larger the gap. Tail latency advantage survives even in production-shaped workloads.
 
-<BrowserOnly>
-  {() => <GilTimeline />}
-</BrowserOnly>
+| Environment | aerospike-py vs official | Detail |
+|---|---|---|
+| **A) Pure DB client** (no HTTP/ML) | **avg −80%** (108→22 ms), TPS **+171%** (138→374) 🔥 | [Benchmarks → A](./benchmarks#environment-a--pure-db-client) |
+| **B) uvicorn ASGI** (FastAPI + DB, no ML) | mean **−21%** (290→228 ms), TPS **+17%** | [Benchmarks → B](./benchmarks#environment-b--uvicorn-asgi-only) |
+| **C) uvicorn + DLRM** (real serving) | p95 **−42%** (324→189 ms), avg **−19%** | [Benchmarks → C](./benchmarks#environment-c--uvicorn--dlrm-real-serving) |
 
-:::caution
-**Sync has the fewest GIL transitions**, but the calling thread itself blocks during I/O, making concurrent processing impossible.
-Async executor enables concurrency but adds a GIL contender for each thread.
-Only aerospike-py achieves both minimal GIL usage and concurrent processing.
-:::
+## Read next
 
-  </TabItem>
-  <TabItem value="concurrency" label="Concurrent Request Handling">
+- **[Benchmarks](./benchmarks)** — per-set tables, k6 raw output, server-side Prometheus metrics
+- **[Free-Threaded Python](./free-threaded-python)** — what changes when the GIL is removed (3.14t)
+- **[Bottleneck Analysis](./bottleneck-analysis)** — internal stage profiling, why action #3 works
 
-<BrowserOnly>
-  {() => <ConcurrencyViz />}
-</BrowserOnly>
-
-  </TabItem>
-  <TabItem value="throughput" label="Throughput Scaling">
-
-<BrowserOnly>
-  {() => <ThroughputSlider />}
-</BrowserOnly>
-
-  </TabItem>
-  <TabItem value="memory" label="Memory Usage">
-
-<BrowserOnly>
-  {() => <MemoryViz />}
-</BrowserOnly>
-
-:::caution K8s Environments
-Sync cannot handle concurrent processing at all.
-Async executor is limited to 64 concurrent requests under a 512MB Pod memory limit.
-aerospike-py can handle tens of thousands of concurrent requests.
-:::
-
-  </TabItem>
-</Tabs>
-
-:::tip Key Takeaway
-**Sync** has low single-request latency but cannot handle concurrency, making it unsuitable for server environments.
-**Async executor** adds concurrency but is bottlenecked by thread pool limits and GIL contention.
-**aerospike-py** is fast even for single requests, and is the only pattern where the gap widens as concurrency increases.
-:::
-
-## Benchmark Limitations
-
-The current benchmark represents conditions where aerospike-py's advantage is **smallest**. Here we visualize what differences emerge in real production environments.
-
-<BrowserOnly>
-  {() => <ConditionGrid />}
-</BrowserOnly>
-
-:::caution
-In a localhost environment, I/O wait is nearly zero, so **the cost of thread blocking is effectively 0**. When I/O wait increases on a real network, the gap between thread pool and Tokio models grows dramatically.
-:::
-
-<Tabs>
-  <TabItem value="io-sim" label="I/O x Concurrency" default>
-
-Adjust the sliders to compare throughput changes between Official async (`run_in_executor`) and aerospike-py (Tokio).
-
-<BrowserOnly>
-  {() => <ThroughputSim />}
-</BrowserOnly>
-
-
-  </TabItem>
-  <TabItem value="memory-sim" label="Memory Efficiency">
-
-<BrowserOnly>
-  {() => <MemorySim />}
-</BrowserOnly>
-
-  </TabItem>
-  <TabItem value="gil-chart" label="GIL Contention Patterns">
-
-<BrowserOnly>
-  {() => <GilChart />}
-</BrowserOnly>
-
-:::tip
-At concurrency=50, the difference is minimal, but at **500+**, Official's p99 spikes sharply. The current benchmark measures at 50, so this gap is not captured.
-:::
-
-  </TabItem>
-</Tabs>
-
-:::info Conclusion
-The current benchmark validates "Can we match C extension single-request latency?" The answer is **"slightly faster"**.
-But the real reason aerospike-py exists is **"exceeding the limits of thread-based models under high concurrency + real network conditions"** — an area the current benchmark doesn't measure.
-:::
+To reproduce locally, see `benchmark/README.md`.

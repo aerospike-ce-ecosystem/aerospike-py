@@ -1,0 +1,166 @@
+---
+title: 벤치마크
+sidebar_label: 벤치마크
+sidebar_position: 2
+description: aerospike-py vs 공식 Python client 환경별 상세 벤치마크 — 순수 DB / FastAPI ASGI / DLRM serving (Python 3.11 + GIL)
+---
+
+[개요](./overview)의 요약 표 뒤에 있는 환경별 전체 수치입니다.
+모든 측정은 **Python 3.11 + GIL** (프로덕션 기본) 기준입니다.
+Python 3.14t free-threaded 비교는 [Free-Threaded Python](./free-threaded-python) 참조.
+
+## 환경 A — 순수 DB Client
+
+**무엇을 격리하는가.** FastAPI 없음, 모델 추론 없음, HTTP loadgen 없음. Python 루프가 `batch_read`를 직접 호출 — 주변 스택을 최대한 얇게. aerospike-py 우위가 **가장 크게** 드러나는 조건입니다.
+
+**설정**
+
+| 항목 | 값 |
+|---|---|
+| 출처 | `benchmark/results/20260416_134243/report.md` |
+| Client | `official` (sync C), `official-async` (executor 래핑), `py-async` (aerospike-py) |
+| Set | 9 |
+| Batch size | 50, 200 |
+| 동시성 | 10 |
+| Iteration | 30 |
+
+### 종합 결과
+
+| Client | avg mean (ms) | avg p99 (ms) | avg TPS |
+|---|---:|---:|---:|
+| official | 107.56 | 195.34 | 138.2 |
+| official-async | 110.64 | 211.33 | 125.7 |
+| **py-async (aerospike-py)** | **22.45** | **120.67** | **373.7** |
+| py-async vs official | latency **4.8× 빠름** | 1.6× | TPS **2.7× 높음** |
+| py-async vs official-async | **4.9× 빠름** | 1.8× | 3.0× |
+
+### Set별 비교 (official vs aerospike-py)
+
+| set | batch | official mean (ms) | official p99 | aerospike-py mean | aerospike-py p99 | mean speedup | TPS speedup |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| nccsh_adid | 50 | 110.23 | 200.14 | **19.74** | **105.46** | 5.6× | 4.3× |
+| nccsh_adid | 200 | 127.06 | 206.19 | **30.53** | 194.05 | 4.2× | 3.4× |
+| nccsh_adgroupid | 50 | 121.76 | 210.24 | **15.57** | **34.68** | 7.8× | 5.8× |
+| nccsh_adgroupid | 200 | 110.86 | 194.82 | **24.98** | 124.86 | 4.4× | 3.2× |
+| nccsh_campaignid | 50 | 108.00 | 184.32 | **18.53** | 103.22 | 5.8× | 5.3× |
+| nccsh_campaignid | 200 | 128.85 | 220.15 | **23.35** | 110.90 | 5.5× | 4.0× |
+| nccsh_adid_channelid | 50 | 109.15 | 206.11 | **18.18** | 116.92 | 6.0× | 5.3× |
+| nccsh_adid_channelid | 200 | 118.69 | 195.77 | **23.12** | 109.32 | 5.1× | 3.5× |
+| nccsh_adgroupid_channelid | 50 | 113.21 | 195.27 | **25.57** | 301.28 | 4.4× | 3.0× |
+| nccsh_adgroupid_channelid | 200 | 122.26 | 197.89 | **26.85** | 148.11 | 4.6× | 3.8× |
+| nccsh_campaignid_channelid | 50 | 115.30 | 210.74 | **18.87** | 103.98 | 6.1× | 5.2× |
+| nccsh_campaignid_channelid | 200 | 123.93 | 261.41 | **30.47** | 122.36 | 4.1× | 3.6× |
+| nccsh_nvmid | 50 | 115.34 | 190.68 | **17.83** | **44.86** | 6.5× | 5.0× |
+| nccsh_nvmid | 200 | 126.81 | 215.87 | **41.17** | 133.61 | 3.1× | 2.1× |
+| nccsh_userid | 50 | **13.92** | 96.27 | 15.20 | 97.95 | 0.9× | 0.9× |
+| nccsh_userid | 200 | 19.95 | 102.12 | **16.27** | 116.03 | 1.2× | 1.0× |
+| nccsh_hconvvalue_nvmid | 50 | 111.80 | 217.14 | **16.92** | **95.59** | 6.6× | 5.6× |
+| nccsh_hconvvalue_nvmid | 200 | 139.05 | 210.95 | **20.95** | 108.81 | 6.6× | 4.8× |
+
+:::note `nccsh_userid`는 빈 set
+0% found rate — 공식 client가 success path 보다 not-found 응답을 더 빨리 처리. "fast not-found" 시간을 반영하므로 실제 read latency 비교는 의미 없음. 나머지 모든 set은 4–8× mean speedup.
+:::
+
+**`official-async` (sync C client를 `loop.run_in_executor`로 래핑)는 모든 set에서 bare sync client보다 약간 더 느림** — 매 요청마다 thread pool hop 비용이 추가되기 때문. 따라서 aerospike-py가 `official-async`에 대해 보이는 격차는 `official`에 대한 격차보다 일관되게 *큼* (batch=50 기준 mean speedup 6.0–7.1×, `official` 대비는 4.4–6.6×).
+
+## 환경 B — uvicorn ASGI Only
+
+**무엇을 격리하는가.** `batch_read` 주변에 FastAPI + uvicorn을 추가하되 모델 추론은 없음. "Key-value lookup 앞에 REST API" 형태.
+
+**설정**
+
+| 항목 | 값 |
+|---|---|
+| 출처 | `benchmark/results/asgi_20260416_134730/asgi-report.md` |
+| 동시성 | 5 |
+| Iteration | 50 |
+
+### 파이프라인 분해 (latency, ms)
+
+| Client | total mean | p50 | p90 | p95 | p99 | aerospike step | inference | http step | TPS | errors |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| official | 289.56 | 289.36 | 429.74 | 461.15 | 473.60 | 280.00 | 1.55 | 300.69 | 16.6 | 0 |
+| **aerospike-py** | **228.49** | **189.56** | 457.42 | 468.03 | 497.09 | **221.12** | 1.46 | 258.10 | **19.4** | 1 |
+
+- **Total mean: −21%** (290 → 228 ms)
+- **Aerospike step: −21%** (280 → 221 ms) — wall time 대부분이 DB call이므로 client 이득이 E2E에 그대로 전달
+- **TPS: +17%** (16.6 → 19.4 req/s)
+- p99는 거의 동등 — 동시성 5에서는 Tokio 모델이 GIL을 강하게 stress하지 않아 tail이 벌어지지 않음
+
+### 더 높은 동시성 변형 (concurrency=10, 200 iter)
+
+같은 환경에서 동시성을 올린 두 번째 run (`benchmark/results/asgi_20260416_135234/asgi-report.md`):
+
+| Client | total mean | p95 | TPS | errors |
+|---|---:|---:|---:|---:|
+| official | 465.81 | 885.64 | 20.9 | 0 |
+| aerospike-py | 580.70 | 986.93 | 13.9 | **56** |
+
+:::caution 포화 상태에서의 backpressure
+이 run은 테스트 하네스가 포화 상태 — aerospike-py 측에서 56 errors가 발생 (서버 풀이 흡수할 수 없는 부하를 native async client가 더 많이 발사하면서 reject/timeout). 깨끗한 apples-to-apples 비교가 **아님**. backpressure 튜닝 없이 native async client가 over-issue하면 이런 양상이 가능함을 보여주는 증거. 이를 해결하는 `gather`→`single` recipe는 [Bottleneck Analysis](./bottleneck-analysis) 참조.
+:::
+
+## 환경 C — uvicorn + DLRM (실 serving)
+
+**무엇을 격리하는가.** 프로덕션 형태의 전체 파이프라인: HTTP request → key 추출 → `batch_read(9 set × 200 keys)` → feature build → DLRM 추론 (PyTorch CPU) → response. 실제 recsys serving pod에 가장 가까운 측정.
+
+**설정**
+
+| 항목 | 값 |
+|---|---|
+| 출처 | `benchmark/results/k6-runtime-client-comparison.md` ("3.11 + GIL, stage OFF") |
+| 이미지 | `aerospike-benchmark:latest` (Python 3.11.14) |
+| Loadgen | k6 10 VUs × 60s, scenario 4개 |
+| Pod | 2 replicas, 4 CPU / 4 GiB request, 8 CPU / 8 GiB limit |
+
+두 endpoint (`/predict/official/sample`, `/predict/py-async/sample`)이 **같은 pod**에 있어 k6가 교대 호출 — 서버 상태와 네트워크가 완전히 동일.
+
+### k6 client 측 latency (single mode, 10 VUs × 60s)
+
+| 지표 | aerospike-py | official | aerospike-py 우위 |
+|---|---:|---:|---:|
+| avg | **118 ms** | 146 ms | −19% |
+| median | **134 ms** | 148 ms | −10% |
+| p90 | **173 ms** | 293 ms | **−41%** 🔥 |
+| p95 | **189 ms** | 324 ms | **−42%** 🔥 |
+
+### k6 client 측 latency (gather mode — 9-set fan-out)
+
+| 지표 | aerospike-py | official | 우위 |
+|---|---:|---:|---:|
+| p95 | **234 ms** | 266 ms | −12% |
+
+gather mode는 9개 `batch_read` 호출을 `asyncio.gather(...)`로 묶음. 두 client 모두 result 변환 단계에서 GIL 직렬화에 부딪혀 격차가 줄어듦. 자세한 분석은 [Bottleneck Analysis](./bottleneck-analysis) 참조.
+
+### 서버 측 Prometheus 지표 (같은 run)
+
+`predict_duration_seconds` p95 (FastAPI E2E, pod 내부 측정):
+
+| Client | p95 |
+|---|---:|
+| **aerospike-py** | **202 ms** |
+| official | 274 ms |
+
+`aerospike_batch_read_all_duration_seconds` p95 (앱 레벨 — `batch_read` + `as_dict` + demux):
+
+| Client | p95 |
+|---|---:|
+| **aerospike-py** | **137 ms** |
+| official | 252 ms |
+
+서버 측과 client 측 수치가 같은 방향으로 일치 — 둘 사이의 차이 (~13 ms)는 네트워크 RTT + gateway + connection setup.
+
+### Mode별 요약 (모두 p95, ms)
+
+| Mode | aerospike-py | official | aerospike-py 우위 |
+|---|---:|---:|---:|
+| single | **189** | 324 | **−42%** |
+| gather | **234** | 266 | −12% |
+| merge_gather (aerospike-py 전용) | 202 | — | — |
+| stress (0→20→50 VUs ramp) | 592 | — | — |
+
+## 환경별 패턴
+
+DB call 주변에 layer가 추가될수록 **비율은 압축**되지만 (mean 4.8× → 1.24×), **상위 percentile 우위는 유지**됩니다 — aerospike-py는 I/O 동안 GIL을 해제하는 반면, 공식 client는 `run_in_executor`로 GIL 획득을 직렬화하여 tail이 튀기 때문. 환경 C에서 mean은 **−19%** 에 그치지만 p95는 여전히 **−42%** 인 이유.
+
+추가 조사 거리: GIL 자체가 제거되면 어떻게 되는지는 [Free-Threaded Python](./free-threaded-python), 추가 −33%를 주는 `gather`→`single` recipe는 [Bottleneck Analysis](./bottleneck-analysis) 참조.
