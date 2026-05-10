@@ -72,6 +72,9 @@ const sidebars: SidebarsConfig = {
       label: 'Performance',
       items: [
         'performance/overview',
+        'performance/benchmarks',
+        'performance/free-threaded-python',
+        'performance/bottleneck-analysis',
       ],
     },
     {
