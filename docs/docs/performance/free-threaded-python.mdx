@@ -66,6 +66,34 @@ On 3.14t, when both clients hit the **same server load** (alternating endpoints 
 
 This is the cleanest evidence that GIL contention — not architectural difference — was responsible for the bulk of the original gap.
 
+## Throughput (TPS)
+
+Latency improvements translate directly into throughput. Two TPS views — k6 client iterations/s and server-side `predict_requests_total` rate — agree.
+
+### k6 iterations/s (full 5m 30s run)
+
+| Config | iterations/s | http_reqs/s | vs 3.11 baseline |
+|---|---:|---:|---:|
+| 3.11 + GIL, stage OFF | 41.6 | 50.8 | baseline |
+| 3.11 + GIL, stage ON | 44.1 | 52.9 | +6% (noise) |
+| **3.14t, aerospike-py only** | **61.2** | **80.0** | **+47%** 🔥 |
+| 3.14t, both clients (split load) | 47.3 | 59.8 | +14% |
+
+### Server-side `predict_requests_total` rate (single mode)
+
+| Config | aerospike-py | official aerospike |
+|---|---:|---:|
+| 3.11 + GIL | 40.9 req/s | ~24 req/s¹ |
+| **3.14t, aerospike-py only** | **42.5 req/s** | n/a (503)² |
+| 3.14t, both clients | 32.9 req/s | 34.4 req/s |
+
+¹ 3.11 + GIL warmup window inflates the official client's first sample; steady-state rate is comparable to aerospike-py.
+² The `:314t` image ships only aerospike-py — official endpoints return 503 (no `cp314t` PyPI wheel).
+
+### Why "both clients" drops to 47.3 iter/s
+
+When the two endpoints are loaded simultaneously, the same Aerospike server and FastAPI pod CPU are split between clients. Per-client throughput naturally halves, so combined `iterations/s` reflects shared server capacity rather than per-client ceiling. The **61.2 iter/s peak** is the actual aerospike-py ceiling when it runs solo.
+
 ## But Aerospike-py Still Wins Under Real Load
 
 The "126 vs 128 ms" tie comes from a configuration where each client only sees ~5 effective VUs (10 VUs split across two endpoints). When the load is concentrated on one client, the gap reopens.
