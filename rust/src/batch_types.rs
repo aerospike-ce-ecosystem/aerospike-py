@@ -184,6 +184,50 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
     }
 }
 
+/// Future result of `AsyncClient.batch_read_many`. Carries one
+/// `Vec<BatchRecord>` per input group; gets wrapped into a Python `list` of
+/// `BatchReadHandle` on `into_pyobject`. Single GIL hand-off serves N groups.
+pub struct PendingBatchReadMany {
+    pub groups: Vec<Vec<BatchRecord>>,
+    /// Timestamp when Rust async I/O completed — populated only when
+    /// internal stage profiling is enabled.
+    pub io_complete_at: Option<std::time::Instant>,
+}
+
+impl<'py> IntoPyObject<'py> for PendingBatchReadMany {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        if let Some(t) = self.io_complete_at {
+            crate::metrics::record_internal_stage_unchecked(
+                "spawn_blocking_delay",
+                "batch_read_many",
+                t.elapsed().as_secs_f64(),
+            );
+        }
+        let into_pyobject_at = crate::metrics::maybe_now();
+        crate::stage_timer!("into_pyobject", "batch_read_many", {
+            let handles: Vec<Py<PyBatchReadHandle>> = self
+                .groups
+                .into_iter()
+                .map(|results| {
+                    Py::new(
+                        py,
+                        PyBatchReadHandle {
+                            inner: Arc::new(results),
+                            into_pyobject_at,
+                        },
+                    )
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+            let list = pyo3::types::PyList::new(py, handles)?;
+            Ok(list.into_any())
+        })
+    }
+}
+
 // ── PyBatchReadHandle ────────────────────────────────────────────
 //
 // Zero-conversion handle returned by async `batch_read`. Wraps raw Rust

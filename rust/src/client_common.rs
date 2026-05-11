@@ -480,6 +480,99 @@ impl BatchReadArgs {
     }
 }
 
+// ── batch_read_many ──────────────────────────────────────────────────────────
+
+/// Pre-parsed args for `batch_read_many`. Groups multiple key lists that share
+/// a single `(BatchPolicy, BatchReadPolicy, Bins)`, so the underlying
+/// `client.batch()` call can serve them as one merged request (single network
+/// round-trip via Aerospike's native batch protocol) and we split the
+/// per-group results back out on the way home.
+pub struct BatchReadManyArgs {
+    pub groups: Vec<BatchReadGroup>,
+    pub batch_policy: aerospike_core::BatchPolicy,
+    pub read_policy: aerospike_core::BatchReadPolicy,
+    pub bins_selector: Bins,
+    /// Namespace/set of the first key across all groups (for tracing labels).
+    pub batch_ns: String,
+    pub batch_set: String,
+    pub otel: OtelContext,
+}
+
+pub struct BatchReadGroup {
+    pub rust_keys: Vec<Key>,
+}
+
+pub fn prepare_batch_read_many_args(
+    py: Python<'_>,
+    groups: &Bound<'_, PyList>,
+    bins: &Option<Vec<String>>,
+    policy: Option<&Bound<'_, PyDict>>,
+    conn_info: &Arc<ConnectionInfo>,
+) -> PyResult<BatchReadManyArgs> {
+    let batch_policy = parse_batch_policy(policy)?;
+    let read_policy = parse_batch_read_policy(policy)?;
+    let bins_selector = match bins {
+        None => Bins::All,
+        Some(b) if b.is_empty() => Bins::None,
+        Some(b) => {
+            let refs: Vec<&str> = b.iter().map(|s| s.as_str()).collect();
+            Bins::from(refs.as_slice())
+        }
+    };
+
+    let mut parsed_groups: Vec<BatchReadGroup> = Vec::with_capacity(groups.len());
+    let mut first_ns_set: Option<(String, String)> = None;
+    for item in groups.iter() {
+        let keys_list = item.cast::<PyList>().map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err(
+                "batch_read_many: each request must be a list of key tuples",
+            )
+        })?;
+        let rust_keys = crate::types::key::py_to_keys(&keys_list)?;
+        if first_ns_set.is_none() {
+            if let Some(k) = rust_keys.first() {
+                first_ns_set = Some((k.namespace.clone(), k.set_name.clone()));
+            }
+        }
+        parsed_groups.push(BatchReadGroup { rust_keys });
+    }
+
+    let (batch_ns, batch_set) = first_ns_set.unwrap_or_default();
+
+    Ok(BatchReadManyArgs {
+        groups: parsed_groups,
+        batch_policy,
+        read_policy,
+        bins_selector,
+        batch_ns,
+        batch_set,
+        otel: OtelContext::new(py, conn_info),
+    })
+}
+
+impl BatchReadManyArgs {
+    /// Flatten all groups into a single ``Vec<BatchOperation>`` for one
+    /// `client.batch()` call, plus the per-group boundary offsets used to
+    /// split the result back out.
+    pub fn to_combined_ops(&self) -> (Vec<BatchOperation>, Vec<usize>) {
+        let total: usize = self.groups.iter().map(|g| g.rust_keys.len()).sum();
+        let mut ops = Vec::with_capacity(total);
+        let mut boundaries = Vec::with_capacity(self.groups.len() + 1);
+        boundaries.push(0);
+        for g in &self.groups {
+            for k in &g.rust_keys {
+                ops.push(BatchOperation::read(
+                    &self.read_policy,
+                    k.clone(),
+                    self.bins_selector.clone(),
+                ));
+            }
+            boundaries.push(ops.len());
+        }
+        (ops, boundaries)
+    }
+}
+
 // ── batch_operate ────────────────────────────────────────────────────────────
 
 pub struct BatchOperateArgs {

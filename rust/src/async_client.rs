@@ -33,7 +33,7 @@ enum CloseOutcome {
     },
 }
 
-use crate::batch_types::{PendingBatchRead, PendingBatchRecords};
+use crate::batch_types::{PendingBatchRead, PendingBatchReadMany, PendingBatchRecords};
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::future_into_py_panic_safe;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
@@ -778,6 +778,67 @@ impl PyAsyncClient {
                         io_complete_at,
                     })
                 }
+            })
+        })
+    }
+
+    /// Read multiple groups of records in a single merged batch call (async).
+    ///
+    /// Compared to `asyncio.gather(*[client.batch_read(...) for _ in groups])`,
+    /// this issues exactly one Tokio task, one limiter acquisition, one
+    /// `client.batch()` network round-trip (Aerospike's native batch protocol
+    /// supports mixed-set keys), and one GIL hand-off — regardless of how
+    /// many groups are passed.
+    ///
+    /// Returns a `list[BatchReadHandle]` of the same length as `groups`,
+    /// preserving input order. Each handle behaves identically to the one
+    /// returned by `batch_read` (same `as_dict()` / `batch_records` API).
+    #[pyo3(signature = (groups, bins=None, policy=None))]
+    fn batch_read_many<'py>(
+        &self,
+        py: Python<'py>,
+        groups: &Bound<'_, PyList>,
+        bins: Option<Vec<String>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        debug!("async batch_read_many: groups_count={}", groups.len());
+
+        let client = self.get_client()?;
+        let limiter = self.limiter.clone();
+        let args = crate::stage_timer!("key_parse", "batch_read_many", {
+            client_common::prepare_batch_read_many_args(
+                py,
+                groups,
+                &bins,
+                policy,
+                &self.connection_info,
+            )?
+        });
+
+        let spawned_at = crate::metrics::maybe_now();
+        crate::stage_timer!("future_into_py_setup", "batch_read_many", {
+            future_into_py_panic_safe(py, "AsyncClient.batch_read_many", async move {
+                if let Some(t) = spawned_at {
+                    crate::metrics::record_internal_stage_unchecked(
+                        "tokio_schedule_delay",
+                        "batch_read_many",
+                        t.elapsed().as_secs_f64(),
+                    );
+                }
+
+                let _permit = crate::stage_timer!("limiter_wait", "batch_read_many", {
+                    limiter.acquire_named("batch_read_many").await?
+                });
+
+                let groups = crate::stage_timer!("io", "batch_read_many", {
+                    client_ops::do_batch_read_many(&client, &args).await?
+                });
+
+                let io_complete_at = crate::metrics::maybe_now();
+                Ok(PendingBatchReadMany {
+                    groups,
+                    io_complete_at,
+                })
             })
         })
     }

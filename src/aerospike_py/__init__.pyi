@@ -759,6 +759,33 @@ class Client:
         """
         ...
 
+    def batch_read_many(
+        self,
+        groups: list[list[Key]],
+        bins: Optional[list[str]] = None,
+        policy: Optional[dict[str, Any]] = None,
+    ) -> list[BatchRecords]:
+        """Read multiple groups of records in a single merged batch call.
+
+        Sync counterpart of :meth:`AsyncClient.batch_read_many`. Issues
+        one network round-trip via Aerospike's native multi-key batch
+        protocol regardless of how many groups are passed, and splits
+        the per-group results back out preserving input order.
+
+        Args:
+            groups: List of key-tuple lists. Each inner list maps to its
+                own ``dict`` in the result, preserving input order.
+            bins: Optional list of bin names; ``None`` reads all bins; an
+                empty list performs an existence check. Shared across all groups.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict,
+                shared across all groups.
+
+        Returns:
+            ``list[BatchRecords]`` of the same length as ``groups``, in
+            the same order. Each element is a ``dict[Key, AerospikeRecord]``.
+        """
+        ...
+
     def batch_operate(
         self,
         keys: list[Key],
@@ -1823,6 +1850,45 @@ class AsyncClient:
                 (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
             ]
             results = await client.batch_write(records_with_meta)
+            ```
+        """
+        ...
+
+    async def batch_read_many(
+        self,
+        groups: list[list[Key]],
+        bins: Optional[list[str]] = None,
+        policy: Optional[dict[str, Any]] = None,
+    ) -> list[BatchRecords]:
+        """Read multiple groups of records in a single merged batch call.
+
+        For N input groups, issues one Tokio task, one limiter acquisition,
+        one network round-trip, and one GIL hand-off — regardless of N.
+        Aerospike's native batch protocol carries mixed-set keys in one
+        request, so the merge is free at the wire.
+
+        Args:
+            groups: List of key-tuple lists. Each inner list maps to its
+                own ``dict`` in the result, preserving input order.
+            bins: Optional list of bin names; ``None`` reads all bins; an
+                empty list performs an existence check. Shared across
+                all groups.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict,
+                shared across all groups.
+
+        Returns:
+            ``list[BatchRecords]`` of the same length as ``groups``, in
+            the same order. Each element is a ``dict[Key, AerospikeRecord]``.
+
+        Example:
+            ```python
+            feature_keys = [
+                [("test", f"fv_{fv}", f"u{i}") for i in range(80)]
+                for fv in range(9)
+            ]
+            results = await client.batch_read_many(feature_keys)
+            for fv_idx, records in enumerate(results):
+                ...  # records[user_key] -> bins dict
             ```
         """
         ...

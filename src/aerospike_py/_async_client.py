@@ -190,6 +190,47 @@ class AsyncClient:
             return raw  # NumpyBatchRecords path unchanged
         return raw.as_dict()
 
+    @catch_unexpected("AsyncClient.batch_read_many")
+    async def batch_read_many(
+        self,
+        groups: list[list[tuple[str, str, Any]]],
+        bins: list[str] | None = None,
+        policy: dict[str, Any] | None = None,
+    ) -> list[dict]:
+        """Read multiple groups of records in a single merged batch call.
+
+        For N input groups, issues exactly one Tokio task + one limiter
+        acquisition + one network round-trip + one GIL hand-off — vs the
+        N of each you'd pay calling :meth:`batch_read` N times in a
+        :func:`asyncio.gather`. Aerospike's native batch protocol carries
+        mixed-set keys in one request so the merge is free at the wire.
+
+        Args:
+            groups: List of key-tuple lists. Each inner list maps to its own
+                ``dict`` in the result, preserving input order.
+            bins: Optional list of bin names; ``None`` reads all bins; an
+                empty list performs an existence check. Shared across all
+                groups (per-group overrides intentionally not exposed in
+                this minimal API).
+            policy: Optional batch policy dict, shared across all groups.
+
+        Returns:
+            ``list[dict[Key, AerospikeRecord]]`` of the same length as
+            ``groups``, in the same order.
+
+        Example:
+            ```python
+            feature_keys = [
+                [("test", f"fv_{fv}", f"u{i}") for i in range(80)]
+                for fv in range(9)
+            ]
+            results = await client.batch_read_many(feature_keys)
+            # results[fv][user_key] -> bins dict
+            ```
+        """
+        handles = await self._inner.batch_read_many(groups, bins, policy)
+        return [h.as_dict() for h in handles]
+
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
         self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None, retry: int = 0

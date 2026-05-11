@@ -1167,6 +1167,46 @@ impl PyClient {
         }
     }
 
+    /// Read multiple groups of records in a single merged batch call.
+    ///
+    /// Sync counterpart of `AsyncClient.batch_read_many`. Returns
+    /// `list[BatchRecords]` (one dict per input group, preserving order).
+    #[pyo3(signature = (groups, bins=None, policy=None))]
+    fn batch_read_many(
+        &self,
+        py: Python<'_>,
+        groups: &Bound<'_, PyList>,
+        bins: Option<Vec<String>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        debug!("batch_read_many: groups_count={}", groups.len());
+        let client = self.get_client()?.clone();
+        let args = client_common::prepare_batch_read_many_args(
+            py,
+            groups,
+            &bins,
+            policy,
+            &self.connection_info,
+        )?;
+        let limiter = self.limiter.clone();
+        let split: Vec<Vec<aerospike_core::BatchRecord>> =
+            catch_panic_sync("Client.batch_read_many", || {
+                py.detach(|| {
+                    RUNTIME.block_on(async {
+                        let _permit = limiter.acquire_named("batch_read_many").await?;
+                        client_ops::do_batch_read_many(&client, &args).await
+                    })
+                })
+            })?;
+
+        let result_list = pyo3::types::PyList::empty(py);
+        for group in split {
+            let dict = batch_to_dict_py(py, &group)?;
+            result_list.append(dict)?;
+        }
+        Ok(result_list.unbind().into_any())
+    }
+
     /// Perform operations on multiple records. Returns list of (key, meta, bins) tuples.
     #[pyo3(signature = (keys, ops, policy=None))]
     fn batch_operate(

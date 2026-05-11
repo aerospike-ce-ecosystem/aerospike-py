@@ -231,6 +231,48 @@ pub async fn do_batch_read(client: &AsClient, args: &BatchReadArgs) -> PyResult<
     )
 }
 
+/// Read multiple groups of records in a single merged batch call.
+///
+/// Issues one network round-trip via Aerospike's native multi-key batch
+/// protocol and splits the result back into per-group `Vec<BatchRecord>`
+/// using the boundaries computed during prep. Records inside each group
+/// preserve the order of their input keys.
+pub async fn do_batch_read_many(
+    client: &AsClient,
+    args: &crate::client_common::BatchReadManyArgs,
+) -> PyResult<Vec<Vec<BatchRecord>>> {
+    let (ops, boundaries) = args.to_combined_ops();
+    let combined: Vec<BatchRecord> = traced_op!(
+        "batch_read_many",
+        &args.batch_ns,
+        &args.batch_set,
+        args.otel.parent_ctx,
+        args.otel.conn_info,
+        client.batch(&args.batch_policy, &ops).await
+    )?;
+
+    if combined.len() != *boundaries.last().unwrap_or(&0) {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "batch_read_many: aerospike-core returned {} records for {} ops \
+             (expected equal counts) — refusing to split",
+            combined.len(),
+            boundaries.last().copied().unwrap_or(0),
+        )));
+    }
+
+    let mut split: Vec<Vec<BatchRecord>> = Vec::with_capacity(args.groups.len());
+    let mut iter = combined.into_iter();
+    for w in boundaries.windows(2) {
+        let group_size = w[1] - w[0];
+        let mut group = Vec::with_capacity(group_size);
+        for _ in 0..group_size {
+            group.push(iter.next().expect("boundary mismatch — should be unreachable"));
+        }
+        split.push(group);
+    }
+    Ok(split)
+}
+
 /// Perform operations on multiple records in a batch.
 pub async fn do_batch_operate(
     client: &AsClient,
