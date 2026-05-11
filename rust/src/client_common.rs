@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::policy::batch_policy::{
     apply_record_meta, apply_record_meta_for_apply, apply_record_meta_for_delete,
-    parse_batch_delete_policy, parse_batch_read_policy, parse_batch_udf_policy,
+    parse_batch_delete_policy, parse_batch_udf_policy,
     parse_batch_write_policy,
 };
 use aerospike_core::{
@@ -439,11 +439,11 @@ pub fn prepare_batch_read_args(
     py: Python<'_>,
     keys: &Bound<'_, PyList>,
     bins: &Option<Vec<String>>,
-    policy: Option<&Bound<'_, PyDict>>,
+    policy: Option<&Bound<'_, PyAny>>,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchReadArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
-    let read_policy = parse_batch_read_policy(policy)?;
+    let (batch_policy, read_policy) =
+        crate::policy::batch_policy::parse_batch_policy_arg(policy)?;
     let bins_selector = match bins {
         None => Bins::All,
         Some(b) if b.is_empty() => Bins::None,

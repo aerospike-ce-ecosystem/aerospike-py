@@ -15,6 +15,142 @@ use super::{
     parse_generation_policy, parse_read_touch_ttl, parse_record_exists_action, parse_replica,
 };
 
+/// Python-exposed pre-parsed batch policy.
+///
+/// Holds both the `BatchPolicy` (transport-level) and `BatchReadPolicy`
+/// (per-record-read-level) structures so callers can build a long-lived
+/// instance once (typical at service startup) and reuse it on every
+/// `batch_read` call without paying the dict-extraction cost per request.
+///
+/// Construct via the Python-side ``aerospike_py.BatchPolicy(...)``
+/// constructor. Pass it as the `policy` argument to `batch_read`,
+/// `batch_read_many`, or `batch_read_ordered`.
+#[pyo3::pyclass(name = "BatchPolicyInstance", module = "aerospike_py", frozen)]
+pub struct PyBatchPolicy {
+    pub(crate) batch_policy: BatchPolicy,
+    pub(crate) read_policy: BatchReadPolicy,
+}
+
+#[pyo3::pymethods]
+impl PyBatchPolicy {
+    /// Build a parsed batch policy from typed keyword arguments.
+    ///
+    /// Any field omitted falls back to the same default the underlying
+    /// `aerospike-core` policy would use. Unknown kwargs are rejected at
+    /// construction time so typos surface as `TypeError`, not as
+    /// silently-ignored arguments.
+    #[new]
+    #[pyo3(signature = (
+        *,
+        socket_timeout = None,
+        total_timeout = None,
+        max_retries = None,
+        timeout_delay = None,
+        allow_inline = None,
+        allow_inline_ssd = None,
+        respond_all_keys = None,
+        replica = None,
+        read_mode_ap = None,
+        read_touch_ttl_percent = None,
+        concurrency = None,
+        filter_expression = None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        socket_timeout: Option<u32>,
+        total_timeout: Option<u32>,
+        max_retries: Option<usize>,
+        timeout_delay: Option<u32>,
+        allow_inline: Option<bool>,
+        allow_inline_ssd: Option<bool>,
+        respond_all_keys: Option<bool>,
+        replica: Option<i32>,
+        read_mode_ap: Option<i32>,
+        read_touch_ttl_percent: Option<i64>,
+        concurrency: Option<i64>,
+        filter_expression: Option<Py<PyAny>>,
+    ) -> PyResult<Self> {
+        let mut batch_policy = BatchPolicy::default();
+        if let Some(v) = socket_timeout {
+            batch_policy.base_policy.socket_timeout = v;
+        }
+        if let Some(v) = total_timeout {
+            batch_policy.base_policy.total_timeout = v;
+        }
+        if let Some(v) = max_retries {
+            batch_policy.base_policy.max_retries = v;
+        }
+        if let Some(v) = timeout_delay {
+            batch_policy.base_policy.timeout_delay = v;
+        }
+        if let Some(v) = allow_inline {
+            batch_policy.allow_inline = v;
+        }
+        if let Some(v) = allow_inline_ssd {
+            batch_policy.allow_inline_ssd = v;
+        }
+        if let Some(v) = respond_all_keys {
+            batch_policy.respond_all_keys = v;
+        }
+        if let Some(v) = replica {
+            batch_policy.replica = parse_replica(v);
+        }
+        if let Some(v) = read_mode_ap {
+            batch_policy.base_policy.consistency_level = parse_consistency_level(v);
+        }
+        if let Some(v) = read_touch_ttl_percent {
+            batch_policy.base_policy.read_touch_ttl = parse_read_touch_ttl(v)?;
+        }
+        if let Some(v) = concurrency {
+            batch_policy.concurrency = parse_concurrency(v)?;
+        }
+        let mut read_policy = BatchReadPolicy::default();
+        if let Some(v) = read_touch_ttl_percent {
+            read_policy.read_touch_ttl = parse_read_touch_ttl(v)?;
+        }
+        if let Some(expr_py) = filter_expression {
+            pyo3::Python::attach(|py| -> PyResult<()> {
+                let bound = expr_py.bind(py);
+                if !crate::expressions::is_expression(bound) {
+                    return Err(pyo3::exceptions::PyTypeError::new_err(
+                        "filter_expression must be an aerospike_py expression",
+                    ));
+                }
+                let expr = crate::expressions::py_to_expression(bound)?;
+                batch_policy.filter_expression = Some(expr.clone());
+                read_policy.filter_expression = Some(expr);
+                Ok(())
+            })?;
+        }
+        Ok(Self {
+            batch_policy,
+            read_policy,
+        })
+    }
+}
+
+/// Resolve the `policy` argument for batch reads — supports both the
+/// historical dict shape and the new `PyBatchPolicy` pyclass instance.
+///
+/// Returns the parsed `(BatchPolicy, BatchReadPolicy)` pair. Dict path
+/// runs the existing parser; pyclass path is a single struct clone.
+pub fn parse_batch_policy_arg(
+    policy: Option<&Bound<'_, PyAny>>,
+) -> PyResult<(BatchPolicy, BatchReadPolicy)> {
+    let Some(obj) = policy else {
+        return Ok((BatchPolicy::default(), BatchReadPolicy::default()));
+    };
+    if let Ok(pyclass) = obj.extract::<PyRef<'_, PyBatchPolicy>>() {
+        return Ok((pyclass.batch_policy.clone(), pyclass.read_policy.clone()));
+    }
+    let dict = obj.cast::<PyDict>().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "policy must be a dict or an aerospike_py.BatchPolicy instance",
+        )
+    })?;
+    Ok((parse_batch_policy(Some(dict))?, parse_batch_read_policy(Some(dict))?))
+}
+
 /// Parse a Python policy dict into a BatchPolicy
 pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchPolicy> {
     trace!("Parsing batch policy");

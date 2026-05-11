@@ -711,7 +711,7 @@ impl PyAsyncClient {
         py: Python<'py>,
         keys: &Bound<'_, PyList>,
         bins: Option<Vec<String>>,
-        policy: Option<&Bound<'_, PyDict>>,
+        policy: Option<&Bound<'_, PyAny>>,
         _dtype: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_read: keys_count={}", keys.len());

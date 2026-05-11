@@ -18,6 +18,8 @@ from aerospike_py._aerospike import (  # noqa: F401
     partition_filter_by_range,
 )
 
+from aerospike_py._aerospike import BatchPolicyInstance  # noqa: F401
+
 from aerospike_py._aerospike import (  # noqa: F401
     AerospikeError,
     ClientError,
@@ -406,6 +408,7 @@ __all__ = [
     "ReadPolicy",
     "WritePolicy",
     "BatchPolicy",
+    "BatchPolicyInstance",
     "BatchReadPolicy",
     "BatchDeletePolicy",
     "BatchDeleteMeta",

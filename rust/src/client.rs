@@ -1135,13 +1135,17 @@ impl PyClient {
     // ── Batch operations ──────────────────────────────────────────
 
     /// Read multiple records. Returns BatchRecords, or NumpyBatchRecords when dtype is provided.
+    ///
+    /// `policy` accepts either a dict (back-compat) or an
+    /// `aerospike_py.BatchPolicy` pyclass instance (parsed once, reused
+    /// across calls).
     #[pyo3(signature = (keys, bins=None, policy=None, _dtype=None))]
     fn batch_read(
         &self,
         py: Python<'_>,
         keys: &Bound<'_, PyList>,
         bins: Option<Vec<String>>,
-        policy: Option<&Bound<'_, PyDict>>,
+        policy: Option<&Bound<'_, PyAny>>,
         _dtype: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         debug!("batch_read: keys_count={}", keys.len());

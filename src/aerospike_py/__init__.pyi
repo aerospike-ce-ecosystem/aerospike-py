@@ -2176,6 +2176,47 @@ class AsyncClient:
         policy: Optional[dict[str, Any]] = None,
     ) -> None: ...
 
+class BatchPolicyInstance:
+    """Pre-parsed batch policy reusable across `batch_read*` calls.
+
+    Equivalent to the ``BatchPolicy`` TypedDict but compiled at
+    construction time so the policy is parsed exactly once and reused
+    without dict-extraction overhead on subsequent calls. Pass it as
+    the ``policy`` argument to :meth:`Client.batch_read`,
+    :meth:`AsyncClient.batch_read`, :meth:`batch_read_many`, or
+    :meth:`batch_read_ordered`. Both dict and ``BatchPolicyInstance``
+    arguments are accepted (back-compat).
+
+    Construct with kwargs only — positional args are rejected:
+
+        policy = aerospike_py.BatchPolicyInstance(
+            socket_timeout=2000,
+            total_timeout=5000,
+            max_retries=2,
+            concurrency=1,
+        )
+
+    Recommended pattern for long-lived ML services: build once at
+    startup, store on the service instance, reuse on every request.
+    """
+
+    def __init__(
+        self,
+        *,
+        socket_timeout: Optional[int] = None,
+        total_timeout: Optional[int] = None,
+        max_retries: Optional[int] = None,
+        timeout_delay: Optional[int] = None,
+        allow_inline: Optional[bool] = None,
+        allow_inline_ssd: Optional[bool] = None,
+        respond_all_keys: Optional[bool] = None,
+        replica: Optional[int] = None,
+        read_mode_ap: Optional[int] = None,
+        read_touch_ttl_percent: Optional[int] = None,
+        concurrency: Optional[int] = None,
+        filter_expression: Optional[Any] = None,
+    ) -> None: ...
+
 class PartitionFilter:
     """Opaque handle representing a subset of partitions for query/scan.
 
