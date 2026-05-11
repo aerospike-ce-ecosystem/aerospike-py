@@ -33,7 +33,7 @@ enum CloseOutcome {
     },
 }
 
-use crate::batch_types::{PendingBatchRead, PendingBatchRecords};
+use crate::batch_types::{PendingBatchRead, PendingBatchReadOrdered, PendingBatchRecords};
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::future_into_py_panic_safe;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
@@ -778,6 +778,72 @@ impl PyAsyncClient {
                         io_complete_at,
                     })
                 }
+            })
+        })
+    }
+
+    /// Read multiple records, returning results in caller-supplied key order.
+    ///
+    /// Same single-batch network behavior as `batch_read`, but materializes
+    /// `list[Optional[dict]]` with one entry per input key (preserving order,
+    /// `None` for missing records) instead of the unordered `dict` keyed by
+    /// `user_key`. Saves callers from doing 720-step `.get(user_pk)` lookups
+    /// after every batch read.
+    ///
+    /// Reordering happens in Rust via a 20-byte digest HashMap built from
+    /// the result vector, then a positional walk over the input digests.
+    #[pyo3(signature = (keys, bins=None, policy=None))]
+    fn batch_read_ordered<'py>(
+        &self,
+        py: Python<'py>,
+        keys: &Bound<'_, PyList>,
+        bins: Option<Vec<String>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        debug!("async batch_read_ordered: keys_count={}", keys.len());
+
+        let client = self.get_client()?;
+        let limiter = self.limiter.clone();
+        let args = crate::stage_timer!("key_parse", "batch_read_ordered", {
+            client_common::prepare_batch_read_args(
+                py,
+                keys,
+                &bins,
+                policy,
+                &self.connection_info,
+            )?
+        });
+
+        // Capture input digests now (before the args move into the future) so
+        // we can reorder results by position. `Key.digest` is already computed
+        // during `py_to_keys`, so this is a cheap memcpy.
+        let input_digests: Vec<[u8; 20]> = args.rust_keys.iter().map(|k| k.digest).collect();
+
+        let spawned_at = crate::metrics::maybe_now();
+        crate::stage_timer!("future_into_py_setup", "batch_read_ordered", {
+            future_into_py_panic_safe(py, "AsyncClient.batch_read_ordered", async move {
+                if let Some(t) = spawned_at {
+                    crate::metrics::record_internal_stage_unchecked(
+                        "tokio_schedule_delay",
+                        "batch_read_ordered",
+                        t.elapsed().as_secs_f64(),
+                    );
+                }
+
+                let _permit = crate::stage_timer!("limiter_wait", "batch_read_ordered", {
+                    limiter.acquire_named("batch_read_ordered").await?
+                });
+
+                let results = crate::stage_timer!("io", "batch_read_ordered", {
+                    client_ops::do_batch_read(&client, &args).await?
+                });
+
+                let io_complete_at = crate::metrics::maybe_now();
+                Ok(PendingBatchReadOrdered {
+                    input_digests,
+                    results,
+                    io_complete_at,
+                })
             })
         })
     }

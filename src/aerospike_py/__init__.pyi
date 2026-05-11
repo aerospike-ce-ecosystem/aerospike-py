@@ -759,6 +759,31 @@ class Client:
         """
         ...
 
+    def batch_read_ordered(
+        self,
+        keys: list[Key],
+        bins: Optional[list[str]] = None,
+        policy: Optional[dict[str, Any]] = None,
+    ) -> list[Optional[dict[str, Any]]]:
+        """Read multiple records, returning results in caller-supplied key order.
+
+        Sync counterpart of :meth:`AsyncClient.batch_read_ordered`. Returns
+        ``list[Optional[dict]]`` — one slot per input key, preserving
+        input order, with ``None`` for missing records — instead of the
+        unordered ``dict`` keyed by ``user_key``.
+
+        Reordering happens in Rust via a 20-byte digest HashMap.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            bins: Optional list of bin names; ``None`` reads all bins.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+
+        Returns:
+            ``list[Optional[dict]]`` of the same length as ``keys``.
+        """
+        ...
+
     def batch_operate(
         self,
         keys: list[Key],
@@ -1824,6 +1849,30 @@ class AsyncClient:
             ]
             results = await client.batch_write(records_with_meta)
             ```
+        """
+        ...
+
+    async def batch_read_ordered(
+        self,
+        keys: list[Key],
+        bins: Optional[list[str]] = None,
+        policy: Optional[dict[str, Any]] = None,
+    ) -> list[Optional[dict[str, Any]]]:
+        """Read multiple records, returning results in caller-supplied key order.
+
+        Same network behavior as :meth:`batch_read` but returns
+        ``list[Optional[dict]]`` — one slot per input key, in input
+        order, with ``None`` for missing records — instead of the
+        unordered ``dict`` keyed by ``user_key``.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            bins: Optional list of bin names; ``None`` reads all bins.
+            policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
+
+        Returns:
+            ``list[Optional[dict]]`` of the same length as ``keys``,
+            preserving input order; ``None`` for missing records.
         """
         ...
 

@@ -1167,6 +1167,63 @@ impl PyClient {
         }
     }
 
+    /// Read multiple records, returning results in caller-supplied key order.
+    ///
+    /// Sync counterpart of `AsyncClient.batch_read_ordered`. Returns
+    /// `list[Optional[dict]]` with one slot per input key (`None` for
+    /// missing records).
+    #[pyo3(signature = (keys, bins=None, policy=None))]
+    fn batch_read_ordered(
+        &self,
+        py: Python<'_>,
+        keys: &Bound<'_, PyList>,
+        bins: Option<Vec<String>>,
+        policy: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        use crate::types::value::value_to_py;
+        use std::collections::HashMap;
+
+        debug!("batch_read_ordered: keys_count={}", keys.len());
+        let client = self.get_client()?.clone();
+        let args =
+            client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?;
+        let input_digests: Vec<[u8; 20]> = args.rust_keys.iter().map(|k| k.digest).collect();
+        let limiter = self.limiter.clone();
+        let results = catch_panic_sync("Client.batch_read_ordered", || {
+            py.detach(|| {
+                RUNTIME.block_on(async {
+                    let _permit = limiter.acquire_named("batch_read_ordered").await?;
+                    client_ops::do_batch_read(&client, &args).await
+                })
+            })
+        })?;
+
+        let mut idx_by_digest: HashMap<[u8; 20], usize> =
+            HashMap::with_capacity(results.len());
+        for (i, br) in results.iter().enumerate() {
+            idx_by_digest.insert(br.key.digest, i);
+        }
+
+        let list = pyo3::types::PyList::empty(py);
+        for digest in &input_digests {
+            let py_value: Py<PyAny> = match idx_by_digest.get(digest) {
+                Some(&i) => match &results[i].record {
+                    Some(record) => {
+                        let bins_dict = PyDict::new(py);
+                        for (name, value) in &record.bins {
+                            bins_dict.set_item(name, value_to_py(py, value)?)?;
+                        }
+                        bins_dict.into_any().unbind()
+                    }
+                    None => py.None(),
+                },
+                None => py.None(),
+            };
+            list.append(py_value)?;
+        }
+        Ok(list.unbind().into_any())
+    }
+
     /// Perform operations on multiple records. Returns list of (key, meta, bins) tuples.
     #[pyo3(signature = (keys, ops, policy=None))]
     fn batch_operate(

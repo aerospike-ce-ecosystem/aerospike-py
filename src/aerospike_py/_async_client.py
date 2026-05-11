@@ -190,6 +190,49 @@ class AsyncClient:
             return raw  # NumpyBatchRecords path unchanged
         return raw.as_dict()
 
+    @catch_unexpected("AsyncClient.batch_read_ordered")
+    async def batch_read_ordered(
+        self,
+        keys: list,
+        bins: list[str] | None = None,
+        policy: dict[str, Any] | None = None,
+    ) -> list[dict | None]:
+        """Read multiple records, returning results in caller-supplied key order.
+
+        Same network behavior as :meth:`batch_read` but returns
+        ``list[Optional[dict]]`` — one slot per input key, in input order,
+        with ``None`` for missing records — instead of the unordered
+        ``dict`` keyed by ``user_key``. Saves callers from doing N
+        ``dict.get(user_pk)`` lookups after every batch read.
+
+        Reordering happens in Rust via a 20-byte digest HashMap and a
+        positional walk over the input digests — single GIL acquisition.
+
+        Args:
+            keys: List of ``(namespace, set, primary_key)`` tuples.
+            bins: Optional list of bin names; ``None`` reads all bins;
+                an empty list performs an existence check.
+            policy: Optional batch policy dict.
+
+        Returns:
+            ``list[Optional[dict]]`` of the same length as ``keys``. Each
+            entry is the bins dict for the record at that input position,
+            or ``None`` if the record was not found.
+
+        Example:
+            ```python
+            user_keys = [("test", "users", f"u{i}") for i in range(100)]
+            records = await client.batch_read_ordered(user_keys)
+            # records[0] is for u0, records[1] for u1, …
+            for i, bins in enumerate(records):
+                if bins is None:
+                    print(f"u{i} missing")
+                else:
+                    print(f"u{i}: {bins}")
+            ```
+        """
+        return await self._inner.batch_read_ordered(keys, bins, policy)
+
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
         self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None, retry: int = 0

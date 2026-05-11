@@ -184,6 +184,65 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
     }
 }
 
+/// Future result of `AsyncClient.batch_read_ordered`. Carries the per-key
+/// digests in input order so we can reorder the cluster's `Vec<BatchRecord>`
+/// into a positional `list[Optional[dict]]` inside `into_pyobject`.
+pub struct PendingBatchReadOrdered {
+    /// 20-byte digests of input keys, in caller-supplied order.
+    pub input_digests: Vec<[u8; 20]>,
+    pub results: Vec<BatchRecord>,
+    pub io_complete_at: Option<std::time::Instant>,
+}
+
+impl<'py> IntoPyObject<'py> for PendingBatchReadOrdered {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        use crate::types::value::value_to_py;
+        use std::collections::HashMap;
+
+        if let Some(t) = self.io_complete_at {
+            crate::metrics::record_internal_stage_unchecked(
+                "spawn_blocking_delay",
+                "batch_read_ordered",
+                t.elapsed().as_secs_f64(),
+            );
+        }
+
+        crate::stage_timer!("into_pyobject", "batch_read_ordered", {
+            // Build digest → record index map. We index into `self.results`
+            // (avoiding lifetimes from `self`) so we can materialize
+            // each bins dict inside the loop without borrow gymnastics.
+            let mut idx_by_digest: HashMap<[u8; 20], usize> =
+                HashMap::with_capacity(self.results.len());
+            for (i, br) in self.results.iter().enumerate() {
+                idx_by_digest.insert(br.key.digest, i);
+            }
+
+            let list = PyList::empty(py);
+            for digest in &self.input_digests {
+                let py_value: Py<PyAny> = match idx_by_digest.get(digest) {
+                    Some(&i) => match &self.results[i].record {
+                        Some(record) => {
+                            let bins = PyDict::new(py);
+                            for (name, value) in &record.bins {
+                                bins.set_item(name, value_to_py(py, value)?)?;
+                            }
+                            bins.into_any().unbind()
+                        }
+                        None => py.None(),
+                    },
+                    None => py.None(),
+                };
+                list.append(py_value)?;
+            }
+            Ok(list.into_any())
+        })
+    }
+}
+
 // ── PyBatchReadHandle ────────────────────────────────────────────
 //
 // Zero-conversion handle returned by async `batch_read`. Wraps raw Rust
