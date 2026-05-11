@@ -38,3 +38,12 @@ otel = [
     "dep:opentelemetry_sdk",
     "dep:opentelemetry-otlp",
 ]
+# `production` strips the `db_client_internal_stage_seconds` stage-profiling
+# instrumentation at compile time. The default build keeps the runtime
+# `AEROSPIKE_PY_INTERNAL_METRICS` toggle (atomic load + branch on every hot
+# path), so most users should stick with default. Build with
+# `--features production` only when you've finished diagnosing perf issues
+# and want to reclaim the per-stage overhead (≈11 atomic loads per
+# batch_read call when profiling is OFF, plus an Instant::now() roundtrip
+# per stage when ON).
+production = []

@@ -49,6 +49,18 @@ pub fn set_internal_stage_enabled(enabled: bool) {
 }
 
 /// Check if internal stage profiling is currently enabled. Hot path.
+///
+/// Compile-time short-circuited to `false` when the `production` Cargo
+/// feature is on, allowing LLVM to dead-code-eliminate the entire stage
+/// timer branch from hot paths.
+#[cfg(feature = "production")]
+#[inline(always)]
+pub fn is_internal_stage_enabled() -> bool {
+    false
+}
+
+/// Check if internal stage profiling is currently enabled. Hot path.
+#[cfg(not(feature = "production"))]
 #[inline]
 pub fn is_internal_stage_enabled() -> bool {
     INTERNAL_STAGE_ENABLED.load(Ordering::Relaxed)
@@ -243,6 +255,18 @@ pub fn record_internal_stage_unchecked(stage: &'static str, op_name: &str, durat
 /// the start of a cross-boundary timing window (one that can't be wrapped in
 /// a single `stage_timer!` block, e.g. timestamps that travel through `async`
 /// boundaries or struct fields).
+///
+/// Compile-time short-circuited to `None` when the `production` Cargo feature
+/// is on — call sites that do `if let Some(t) = maybe_now() { ... }` are
+/// then dead-code-eliminated entirely.
+#[cfg(feature = "production")]
+#[inline(always)]
+pub fn maybe_now() -> Option<Instant> {
+    None
+}
+
+/// Capture `Instant::now()` only when internal stage profiling is enabled.
+#[cfg(not(feature = "production"))]
 #[inline]
 pub fn maybe_now() -> Option<Instant> {
     if is_internal_stage_enabled() {
@@ -283,11 +307,25 @@ pub fn get_text() -> String {
 /// Works with both sync and `async` expressions — use inside an `async` block
 /// as `stage_timer!("io", "batch_read", { foo.await? })`.
 ///
+/// Compile-time strip: build with `--features production` and the macro
+/// expands to `$body` directly — no atomic load, no `Instant::now()`, no
+/// histogram observation. Pair with `cargo expand` if you want to verify
+/// the elimination.
+///
 /// ```ignore
 /// stage_timer!("key_parse", "batch_read", {
 ///     parse_keys(py, keys)?
 /// })
 /// ```
+#[cfg(feature = "production")]
+#[macro_export]
+macro_rules! stage_timer {
+    ($stage:expr, $op:expr, $body:expr) => {{
+        $body
+    }};
+}
+
+#[cfg(not(feature = "production"))]
 #[macro_export]
 macro_rules! stage_timer {
     ($stage:expr, $op:expr, $body:expr) => {{
