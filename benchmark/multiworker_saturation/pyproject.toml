@@ -1,0 +1,26 @@
+[project]
+name = "aerospike-py-multiworker-saturation"
+version = "0.1.0"
+description = "Multi-worker saturation reproducer for aerospike-py issue #347"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aerospike>=19.0.0",
+    "aerospike-py",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.0",
+    "numpy>=2.0",
+    "httpx>=0.27.0,<1",
+]
+
+[tool.uv.sources]
+aerospike-py = { path = "../.." }
+
+[project.optional-dependencies]
+profiling = [
+    "py-spy>=0.4.0",
+]
+
+[tool.uv]
+prerelease = "allow"

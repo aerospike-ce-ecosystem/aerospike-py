@@ -1,0 +1,72 @@
+# Podman compose for the saturation reproducer — self-contained.
+#
+# Bundles Aerospike CE so the reproducer doesn't depend on the workspace's
+# `make run-aerospike-ce`. Both services share the compose-managed network so
+# the FastAPI app reaches Aerospike via its service name (no access-address
+# discovery headaches).
+#
+# Aerospike CE's port 3000 is forwarded to host 18710 ONLY so the host-side
+# seed script (`uv run python -m app.seed`) can populate data once before
+# benchmarking — the app itself talks to Aerospike via the internal network.
+#
+# Build & run:
+#   cd <repo-root>
+#   podman build -f benchmark/multiworker_saturation/app/Containerfile \
+#       --build-arg PYTHON_VERSION=3.11 \
+#       -t aerospike-py-saturation:py311 .
+#   CLIENT_KIND=aerospike-py podman compose \
+#       -f benchmark/multiworker_saturation/compose.saturation.yaml up
+
+services:
+  aerospike:
+    image: aerospike:ce-8.1.0.3_1
+    container_name: saturation-aerospike
+    ports:
+      - "127.0.0.1:18710:3000"
+    cpus: 4
+    mem_limit: 4g
+    shm_size: 1g
+    environment:
+      NAMESPACE: test
+      CLUSTER_NAME: docker
+      SERVICE_ADDRESS: any
+      SERVICE_PORT: "3000"
+    volumes:
+      - ./config/aerospike.template.conf:/etc/aerospike/aerospike.template.conf
+    healthcheck:
+      test: ["CMD", "asinfo", "-v", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  saturation-app:
+    image: aerospike-py-saturation:${IMAGE_TAG:-py311}
+    container_name: saturation-app
+    depends_on:
+      aerospike:
+        condition: service_healthy
+    cpus: 8
+    mem_limit: 8g
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      CLIENT_KIND: ${CLIENT_KIND:-aerospike-py}
+      AEROSPIKE_HOST: aerospike
+      AEROSPIKE_PORT: "3000"
+      AEROSPIKE_NAMESPACE: test
+      NUM_FEATURE_VIEWS: "9"
+      KEYS_PER_FV: "80"
+      SEED_KEYS_PER_SET: "1000"
+      CPU_BOUND_ENABLED: "1"
+      CPU_BOUND_MATMUL_N: "${CPU_BOUND_MATMUL_N:-64}"
+      CPU_BOUND_BURN_MS: "${CPU_BOUND_BURN_MS:-0}"
+      CPU_BOUND_TORCH: "${CPU_BOUND_TORCH:-0}"
+      AEROSPIKE_PY_INTERNAL_METRICS: "1"
+      AEROSPIKE_RUNTIME_WORKERS: "1"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 10s

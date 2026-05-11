@@ -1,0 +1,82 @@
+# syntax=docker/dockerfile:1.7
+# Multi-stage Containerfile for the saturation reproducer.
+#
+# Build context must be the aerospike-py repo root so we can compile the
+# Rust extension against the local source under test:
+#
+#   podman build \
+#     -f benchmark/multiworker_saturation/app/Containerfile \
+#     --build-arg PYTHON_VERSION=3.11 \
+#     -t aerospike-py-saturation:py311 .
+#
+# PYTHON_VERSION accepts uv-installable specs, e.g. ``3.11``, ``3.14t``
+# (free-threaded). For 3.14t the build path is identical — uv handles the
+# free-threaded toolchain.
+
+ARG PYTHON_VERSION=3.11
+
+# ─── Stage 1: build the aerospike-py wheel ─────────────────────────────────
+FROM ghcr.io/astral-sh/uv:debian AS wheel-builder
+ARG PYTHON_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates build-essential pkg-config libssl-dev git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH=/root/.cargo/bin:$PATH
+
+WORKDIR /build
+RUN uv python install ${PYTHON_VERSION}
+RUN uv venv --python ${PYTHON_VERSION} /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+
+COPY pyproject.toml Cargo.toml Cargo.lock README.md ./
+COPY rust ./rust
+COPY src ./src
+
+RUN uv pip install "maturin>=1.9,<2.0"
+# Use the active virtualenv's Python (already set via VIRTUAL_ENV) — this
+# handles both 3.11 (python3.11) and 3.14t (python3.14t / freethreaded) without
+# having to special-case the interpreter binary name.
+RUN maturin build --release --out /wheels
+
+# ─── Stage 2: runtime image ────────────────────────────────────────────────
+FROM ghcr.io/astral-sh/uv:debian AS runtime
+ARG PYTHON_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN uv python install ${PYTHON_VERSION}
+RUN uv venv --python ${PYTHON_VERSION} /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+
+COPY --from=wheel-builder /wheels /wheels
+COPY benchmark/multiworker_saturation/pyproject.toml /app/pyproject.toml
+COPY benchmark/multiworker_saturation/README.md /app/README.md
+COPY benchmark/multiworker_saturation/app /app/app
+
+WORKDIR /app
+RUN uv pip install /wheels/aerospike_py-*.whl
+# Install reproducer deps without the local aerospike-py path override
+# (we already installed the wheel built from source above).
+RUN uv pip install \
+        "aerospike>=19.0.0" \
+        "fastapi>=0.115.0" \
+        "uvicorn[standard]>=0.32.0" \
+        "pydantic>=2.0" \
+        "numpy>=2.0" \
+        "httpx>=0.27.0,<1"
+
+ENV PYTHONPATH=/app
+ENV AEROSPIKE_PY_INTERNAL_METRICS=1
+ENV AEROSPIKE_RUNTIME_WORKERS=1
+EXPOSE 8000
+
+# Default — overridden by compose to swap CLIENT_KIND between cells.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8"]

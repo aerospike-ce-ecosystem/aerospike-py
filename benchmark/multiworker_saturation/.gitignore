@@ -1,0 +1,6 @@
+# k6 raw output streams (multi-MB per run) and container stats — local
+# measurement artifacts, not part of the reproducer code.
+results/
+.venv/
+__pycache__/
+*.pyc
