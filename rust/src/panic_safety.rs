@@ -5,7 +5,15 @@
 //! `unreachable!()` for language-specific blob particle types
 //! (PYTHON_BLOB, JAVA_BLOB, ...). Combined with `panic = "abort"` this would
 //! SIGABRT the Python process. We compile release with `panic = "unwind"`
-//! and wrap every read/write chokepoint with the helpers below.
+//! and wrap the paths that decode record particles/bins with the helpers
+//! below.
+//!
+//! Scope: these helpers guard the operations that materialize record
+//! particles (get / select / batch / query / scan / operate, and their
+//! sync counterparts) — the only paths that can hit the upstream
+//! `unreachable!()`. Operations that never decode particles (connect,
+//! close, admin, secondary-index, UDF, truncate) keep plain
+//! `future_into_py` and are intentionally *not* wrapped.
 //!
 //! Two chokepoints, two helpers:
 //! - sync `Client` methods funnel through `py.detach(|| RUNTIME.block_on(...))`

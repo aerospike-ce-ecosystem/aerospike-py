@@ -908,6 +908,12 @@ mod tests {
             has_write: bool,
         }
 
+        // Compile-time guards: if `aerospike_core::BatchRecord`'s layout ever
+        // drifts from `BatchRecordMirror`, the transmute below becomes UB.
+        // These assertions turn that into a build failure instead.
+        static_assertions::assert_eq_size!(BatchRecordMirror, BatchRecord);
+        static_assertions::assert_eq_align!(BatchRecordMirror, BatchRecord);
+
         let mirror = BatchRecordMirror {
             key: aerospike_core::Key::new("test", "demo", Value::from("k1".to_string())).unwrap(),
             record: None,
@@ -916,7 +922,8 @@ mod tests {
             has_write: false,
         };
         // SAFETY: `BatchRecordMirror` has the identical field types and order
-        // as `BatchRecord`. This is only used in unit tests.
+        // as `BatchRecord`. This is only used in unit tests. Size + alignment
+        // are guarded by the `static_assertions` calls above.
         unsafe { std::mem::transmute(mirror) }
     }
 
