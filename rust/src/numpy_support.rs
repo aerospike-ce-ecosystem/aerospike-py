@@ -124,8 +124,24 @@ fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usi
 /// reallocated. Callers must ensure:
 /// - The array outlives all writes through the returned pointer.
 /// - No concurrent Python code resizes or replaces the array's buffer.
+///
+/// Callers index rows as `ptr.add(i * row_stride)`, which assumes packed
+/// C-contiguous storage. This function rejects strided / non-contiguous
+/// arrays up front so that assumption always holds.
 fn get_array_data_ptr(array: &Bound<'_, PyAny>) -> PyResult<*mut u8> {
     let iface = array.getattr("__array_interface__")?;
+
+    // Guardrail: callers assume packed C-contiguous rows. A non-None `strides`
+    // entry means the array is sliced / strided / reversed, so the
+    // `ptr.add(i * row_stride)` arithmetic would read the wrong bytes.
+    let strides_obj = iface.get_item("strides")?;
+    if !strides_obj.is_none() {
+        return Err(PyValueError::new_err(format!(
+            "numpy array must be C-contiguous, got strides {}",
+            strides_obj
+        )));
+    }
+
     let data_tuple = iface.get_item("data")?;
     let ptr_int: usize = data_tuple.get_item(0)?.extract()?;
     let readonly: bool = data_tuple.get_item(1)?.extract()?;

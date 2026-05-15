@@ -27,6 +27,11 @@ opentelemetry = { version = "0.31", optional = true }
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"], optional = true }
 
+[dev-dependencies]
+# Compile-time layout guards for the test-only #[repr(C)] mirror struct
+# used to construct aerospike_core::BatchRecord fixtures (see client_ops.rs).
+static_assertions = "1"
+
 [features]
 # extension-module activates pyo3/extension-module which avoids linking Python.
 # Must be enabled when building the Python extension (maturin handles this).
