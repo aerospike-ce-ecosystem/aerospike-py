@@ -382,7 +382,10 @@ pub fn batch_to_dict_py<'py>(
             None => continue, // skip records without user_key
         };
 
-        // Only process successful reads
+        // Skip per-record errors even if a body was returned (e.g. FilteredOut, RecordTooBig)
+        if !matches!(&br.result_code, None | Some(ResultCode::Ok)) {
+            continue;
+        }
         if let Some(record) = &br.record {
             let bins = PyDict::new(py);
             for (name, value) in &record.bins {
