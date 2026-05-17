@@ -480,7 +480,12 @@ pub async fn do_batch_write(
                 retry_results.len()
             );
         }
-        for (original_idx, retry_record) in retry_indices.iter().copied().zip(retry_results) {
+        let update_count = retry_results.len().min(retry_indices.len());
+        for (original_idx, retry_record) in retry_indices[..update_count]
+            .iter()
+            .copied()
+            .zip(retry_results)
+        {
             results[original_idx] = retry_record;
         }
     }
