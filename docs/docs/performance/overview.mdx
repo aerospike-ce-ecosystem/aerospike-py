@@ -5,43 +5,85 @@ sidebar_position: 1
 description: TL;DR — measured latency, throughput, and Python 3.14t gains for aerospike-py vs official C client
 ---
 
-Measured benchmarks comparing **aerospike-py** (Rust/PyO3, native async) against the **official `aerospike` Python client** (C extension wrapped with `loop.run_in_executor`). Reproducible from `benchmark/` in this repo.
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 
-> `↓` lower is better, `↑` higher is better, 🔥 ≥50% improvement.
-> Default test setup: FastAPI + DLRM + Aerospike CE, k6 10 VUs × 60s.
+Measured benchmarks comparing **aerospike-py** (Rust/PyO3, native async) against the **official `aerospike` Python client** (C extension wrapped with `loop.run_in_executor`).
 
-## How fast — cumulative effect on DLRM-serving p95
+:::tip TL;DR — cumulative effect on DLRM-serving p95
+**324 ms → 97 ms (−70%)** by stacking 3 actions: switch client → batch_read consolidation → Python 3.14t.
+:::
 
-| Step | p95 | vs original |
-|---|---:|---:|
-| Original (official client + Python 3.11 + `gather`) | 324 ms | baseline |
-| + Replace with aerospike-py | 189 ms | **−42%** |
-| + `gather(N)` → single `batch_read(mixed keys)` | 126 ms | **−61%** |
-| + Python 3.14t free-threaded | **97 ms** | **−70%** 🔥 (**3.3× faster**) |
+## How fast — cumulative gain on p95
 
-## Recommended actions
+```text
+Original (official client, 3.11 GIL, gather)    ████████████████████████  324 ms   baseline
++ Replace with aerospike-py                     ██████████████             189 ms   −42%
++ gather(N) → single batch_read(mixed keys)     █████████                  126 ms   −61%
++ Python 3.14t free-threaded                    ███████                     97 ms   −70%  🔥
+                                                                           ↑ 3.3× faster
+```
 
-| # | Action | Effect |
+Setup: FastAPI + DLRM + Aerospike CE, k6 10 VUs × 60s, 2 replicas (4 CPU / 4 GiB request).
+
+## Recommended actions (in order)
+
+| # | Action | Effect on p95 |
 |---|---|---|
-| 1 | Replace official client → **aerospike-py** | p95 **−42%** (Python 3.11) |
-| 2 | Move runtime to **Python 3.14t free-threaded** | p95 **−49%** more, TPS **+47%** (no Rust changes) |
-| 3 | `gather(N)` → single `batch_read(mixed keys)` | p95 **−33%** (under GIL) |
-| 4 | Keep `AEROSPIKE_PY_INTERNAL_METRICS=1` always on | E2E overhead ≈ 0, instant per-stage attribution |
+| 1 | Replace official client → **aerospike-py** | **−42%** (Python 3.11) |
+| 2 | `gather(N)` → single `batch_read(mixed keys)` | **−33%** more (under GIL) |
+| 3 | Move runtime to **Python 3.14t free-threaded** | **−49%** more, TPS **+47%** |
+| 4 | Keep `AEROSPIKE_PY_INTERNAL_METRICS=1` on | E2E overhead ≈ 0 |
 
-## Environment summary (Python 3.11 + GIL)
+## Pick your environment (Python 3.11 + GIL)
 
-The thinner the surrounding stack, the larger the gap. Tail latency advantage survives even in production-shaped workloads.
+The thinner the surrounding stack, the larger the gap. Tail-latency advantage survives even in production-shaped workloads.
 
-| Environment | aerospike-py vs official | Detail |
-|---|---|---|
-| **A) Pure DB client** (no HTTP/ML) | **avg −80%** (108→22 ms), TPS **+171%** (138→374) 🔥 | [Benchmarks → A](./benchmarks#environment-a--pure-db-client) |
-| **B) uvicorn ASGI** (FastAPI + DB, no ML) | mean **−21%** (290→228 ms), TPS **+17%** | [Benchmarks → B](./benchmarks#environment-b--uvicorn-asgi-only) |
-| **C) uvicorn + DLRM** (real serving) | p95 **−42%** (324→189 ms), avg **−19%** | [Benchmarks → C](./benchmarks#environment-c--uvicorn--dlrm-real-serving) |
+<Tabs>
+  <TabItem value="dlrm" label="C — uvicorn + DLRM (real serving)" default>
+
+Full HTTP → batch_read → DLRM CPU inference → response. Closest to a real recsys serving pod.
+
+| Metric | aerospike-py | official | aerospike-py advantage |
+|---|---:|---:|---:|
+| avg | **118 ms** | 146 ms | −19% |
+| p90 | **173 ms** | 293 ms | **−41%** |
+| **p95** | **189 ms** | 324 ms | **−42%** 🔥 |
+
+[→ Full numbers (Benchmarks C)](./benchmarks#environment-c--uvicorn--dlrm-real-serving)
+
+  </TabItem>
+  <TabItem value="asgi" label="B — uvicorn ASGI only">
+
+FastAPI + uvicorn around `batch_read`, no model inference. The "REST API in front of a key-value lookup" shape.
+
+| Metric | aerospike-py | official | advantage |
+|---|---:|---:|---:|
+| total mean | **228 ms** | 290 ms | **−21%** |
+| TPS | **19.4** | 16.6 | **+17%** |
+
+[→ Full numbers (Benchmarks B)](./benchmarks#environment-b--uvicorn-asgi-only)
+
+  </TabItem>
+  <TabItem value="pure" label="A — Pure DB client (no HTTP/ML)">
+
+Python loop drives `batch_read` directly. Largest gap — surrounding stack is as thin as possible.
+
+| Metric | aerospike-py | official | advantage |
+|---|---:|---:|---:|
+| avg mean | **22 ms** | 108 ms | **−80%** 🔥 |
+| avg p99 | **121 ms** | 195 ms | −38% |
+| TPS | **374** | 138 | **+171%** 🔥 |
+
+[→ Full numbers (Benchmarks A)](./benchmarks#environment-a--pure-db-client)
+
+  </TabItem>
+</Tabs>
 
 ## Read next
 
-- **[Benchmarks](./benchmarks)** — per-set tables, k6 raw output, server-side Prometheus metrics
+- **[Benchmarks](./benchmarks)** — per-environment numbers, k6 raw output, server-side Prometheus metrics
 - **[Free-Threaded Python](./free-threaded-python)** — what changes when the GIL is removed (3.14t)
-- **[Bottleneck Analysis](./bottleneck-analysis)** — internal stage profiling, why action #3 works
+- **[Bottleneck Analysis](./bottleneck-analysis)** — internal stage profiling, why action #2 works
 
 To reproduce locally, see `benchmark/README.md`.
