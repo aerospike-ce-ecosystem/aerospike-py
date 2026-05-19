@@ -5,26 +5,43 @@ sidebar_position: 2
 description: Detailed benchmark numbers for aerospike-py vs official Python client across pure DB, FastAPI ASGI, and DLRM-serving workloads (Python 3.11 + GIL)
 ---
 
-This page contains the full per-environment numbers backing the [Overview](./overview).
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+Per-environment numbers backing the [Overview](./overview).
 All measurements use **Python 3.11 with the GIL** (the production default).
 For the free-threaded Python 3.14t comparison, see [Free-Threaded Python](./free-threaded-python).
 
+## Where the gap lives
+
+```text
+Mean latency advantage of aerospike-py vs official (Python 3.11 + GIL)
+
+A) Pure DB client       ████████████████████  −80%  (108 → 22 ms)    🔥
+B) uvicorn ASGI         █████                 −21%  (290 → 228 ms)
+C) uvicorn + DLRM       ███████████           −42% p95 (324→189 ms)  🔥
+
+p95 advantage holds even when mean compresses (C): the GIL serializes
+official-client result conversion at the tail.
+```
+
+<Tabs queryString="env">
+  <TabItem value="A" label="A — Pure DB client" default>
+
 ## Environment A — Pure DB Client
 
-**What this isolates.** No FastAPI, no model inference, no HTTP loadgen. A Python loop drives `batch_read` directly so the surrounding stack is as thin as possible — this is where aerospike-py's advantage is **largest**.
+**What this isolates.** No FastAPI, no model inference, no HTTP loadgen. A Python loop drives `batch_read` directly — the surrounding stack is as thin as possible, so aerospike-py's advantage is **largest** here.
 
-**Setup**
+### Setup
 
 | Item | Value |
 |---|---|
 | Source | `benchmark/results/20260416_134243/report.md` |
 | Clients | `official` (sync C), `official-async` (sync wrapped via executor), `py-async` (aerospike-py) |
-| Sets | 9 |
-| Batch sizes | 50, 200 |
-| Concurrency | 10 |
-| Iterations | 30 |
+| Sets / batch sizes | 9 / 50, 200 |
+| Concurrency / iterations | 10 / 30 |
 
-### Aggregate result
+### Aggregate result (avg over 9 sets × 2 batch sizes)
 
 | Client | avg mean (ms) | avg p99 (ms) | avg TPS |
 |---|---:|---:|---:|
@@ -34,62 +51,76 @@ For the free-threaded Python 3.14t comparison, see [Free-Threaded Python](./free
 | py-async vs official | **4.8× faster** latency | 1.6× | **2.7× higher** TPS |
 | py-async vs official-async | **4.9× faster** | 1.8× | 3.0× |
 
-### Per-set comparison (official vs aerospike-py)
+### Per-set speedup distribution (aerospike-py vs official)
 
-| set | batch | official mean (ms) | official p99 | aerospike-py mean | aerospike-py p99 | mean speedup | TPS speedup |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| set_1 | 50 | 110.23 | 200.14 | **19.74** | **105.46** | 5.6× | 4.3× |
-| set_1 | 200 | 127.06 | 206.19 | **30.53** | 194.05 | 4.2× | 3.4× |
-| set_2 | 50 | 121.76 | 210.24 | **15.57** | **34.68** | 7.8× | 5.8× |
-| set_2 | 200 | 110.86 | 194.82 | **24.98** | 124.86 | 4.4× | 3.2× |
-| set_3 | 50 | 108.00 | 184.32 | **18.53** | 103.22 | 5.8× | 5.3× |
-| set_3 | 200 | 128.85 | 220.15 | **23.35** | 110.90 | 5.5× | 4.0× |
-| set_4 | 50 | 109.15 | 206.11 | **18.18** | 116.92 | 6.0× | 5.3× |
-| set_4 | 200 | 118.69 | 195.77 | **23.12** | 109.32 | 5.1× | 3.5× |
-| set_5 | 50 | 113.21 | 195.27 | **25.57** | 301.28 | 4.4× | 3.0× |
-| set_5 | 200 | 122.26 | 197.89 | **26.85** | 148.11 | 4.6× | 3.8× |
-| set_6 | 50 | 115.30 | 210.74 | **18.87** | 103.98 | 6.1× | 5.2× |
-| set_6 | 200 | 123.93 | 261.41 | **30.47** | 122.36 | 4.1× | 3.6× |
-| set_7 | 50 | 115.34 | 190.68 | **17.83** | **44.86** | 6.5× | 5.0× |
-| set_7 | 200 | 126.81 | 215.87 | **41.17** | 133.61 | 3.1× | 2.1× |
-| set_8 | 50 | **13.92** | 96.27 | 15.20 | 97.95 | 0.9× | 0.9× |
-| set_8 | 200 | 19.95 | 102.12 | **16.27** | 116.03 | 1.2× | 1.0× |
-| set_9 | 50 | 111.80 | 217.14 | **16.92** | **95.59** | 6.6× | 5.6× |
-| set_9 | 200 | 139.05 | 210.95 | **20.95** | 108.81 | 6.6× | 4.8× |
+```text
+Batch 50:   mean speedup across 9 sets   4.4× ──────── 7.8×    (median ~5.8×)
+Batch 200:  mean speedup across 9 sets   3.1× ──────── 6.6×    (median ~4.5×)
 
-:::note `set_8` is empty
-0% found rate — the official client returns errors faster than success paths, so this row reflects "fast not-found" rather than real read latency. All other sets show 4–8× mean speedup.
+Outlier: set_8 (0% found rate) → fast not-found path, not real read latency.
+```
+
+:::note `set_8` is the outlier
+0% found rate — the official client returns errors faster than success paths, so this row reflects "fast not-found" rather than real read latency. **All other sets show 4–8× mean speedup.**
 :::
 
-**`official-async` (the sync C client wrapped with `loop.run_in_executor`) is slightly slower** than the bare sync client across every set — each request pays a thread-pool hop. aerospike-py's gap over `official-async` is therefore consistently *larger* than its gap over `official` (mean speedup 6.0–7.1× at batch=50, vs 4.4–6.6× over `official`).
+**`official-async`** (the sync C client wrapped with `loop.run_in_executor`) is slightly slower than the bare sync client across every set — each request pays a thread-pool hop. aerospike-py's gap over `official-async` is therefore consistently *larger* than its gap over `official`.
+
+<details>
+<summary>Full per-set table (18 rows)</summary>
+
+| set | batch | official mean (ms) | official p99 | aerospike-py mean | aerospike-py p99 | mean speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| set_1 | 50 | 110.23 | 200.14 | **19.74** | **105.46** | 5.6× |
+| set_1 | 200 | 127.06 | 206.19 | **30.53** | 194.05 | 4.2× |
+| set_2 | 50 | 121.76 | 210.24 | **15.57** | **34.68** | 7.8× |
+| set_2 | 200 | 110.86 | 194.82 | **24.98** | 124.86 | 4.4× |
+| set_3 | 50 | 108.00 | 184.32 | **18.53** | 103.22 | 5.8× |
+| set_3 | 200 | 128.85 | 220.15 | **23.35** | 110.90 | 5.5× |
+| set_4 | 50 | 109.15 | 206.11 | **18.18** | 116.92 | 6.0× |
+| set_4 | 200 | 118.69 | 195.77 | **23.12** | 109.32 | 5.1× |
+| set_5 | 50 | 113.21 | 195.27 | **25.57** | 301.28 | 4.4× |
+| set_5 | 200 | 122.26 | 197.89 | **26.85** | 148.11 | 4.6× |
+| set_6 | 50 | 115.30 | 210.74 | **18.87** | 103.98 | 6.1× |
+| set_6 | 200 | 123.93 | 261.41 | **30.47** | 122.36 | 4.1× |
+| set_7 | 50 | 115.34 | 190.68 | **17.83** | **44.86** | 6.5× |
+| set_7 | 200 | 126.81 | 215.87 | **41.17** | 133.61 | 3.1× |
+| set_8 | 50 | **13.92** | 96.27 | 15.20 | 97.95 | 0.9× ⚠ |
+| set_8 | 200 | 19.95 | 102.12 | **16.27** | 116.03 | 1.2× ⚠ |
+| set_9 | 50 | 111.80 | 217.14 | **16.92** | **95.59** | 6.6× |
+| set_9 | 200 | 139.05 | 210.95 | **20.95** | 108.81 | 6.6× |
+
+</details>
+
+  </TabItem>
+  <TabItem value="B" label="B — uvicorn ASGI only">
 
 ## Environment B — uvicorn ASGI Only
 
-**What this isolates.** Add FastAPI and uvicorn around `batch_read` but no model inference. This is the "REST API in front of a key-value lookup" shape.
+**What this isolates.** Add FastAPI and uvicorn around `batch_read` but no model inference. The "REST API in front of a key-value lookup" shape.
 
-**Setup**
+### Setup
 
 | Item | Value |
 |---|---|
 | Source | `benchmark/results/asgi_20260416_134730/asgi-report.md` |
-| Concurrency | 5 |
-| Iterations | 50 |
+| Concurrency / iterations | 5 / 50 |
 
 ### Pipeline breakdown (latency in ms)
 
-| Client | total mean | p50 | p90 | p95 | p99 | aerospike step | inference | http step | TPS | errors |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| official | 289.56 | 289.36 | 429.74 | 461.15 | 473.60 | 280.00 | 1.55 | 300.69 | 16.6 | 0 |
-| **aerospike-py** | **228.49** | **189.56** | 457.42 | 468.03 | 497.09 | **221.12** | 1.46 | 258.10 | **19.4** | 1 |
+| Client | total mean | p50 | p90 | p95 | p99 | aerospike step | inference | TPS |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| official | 289.56 | 289.36 | 429.74 | 461.15 | 473.60 | 280.00 | 1.55 | 16.6 |
+| **aerospike-py** | **228.49** | **189.56** | 457.42 | 468.03 | 497.09 | **221.12** | 1.46 | **19.4** |
 
 - **Total mean: −21%** (290 → 228 ms)
-- **Aerospike step: −21%** (280 → 221 ms) — most of the wall time is the DB call, so the client gain transfers to E2E
+- **Aerospike step: −21%** (280 → 221 ms) — most wall time is the DB call, so the client gain transfers to E2E
 - **TPS: +17%** (16.6 → 19.4 req/s)
-- p99 is roughly equivalent — at concurrency=5, the Tokio model isn't yet stressing the GIL hard enough to widen the tail
+- p99 is roughly equivalent (474 vs 497 ms) — at concurrency=5, the Tokio model isn't yet stressing the GIL hard enough to widen the tail
 
-### Higher-concurrency variant (concurrency=10, 200 iter)
+### Higher concurrency exposes backpressure
 
-A second run at higher concurrency surfaced a different picture (`benchmark/results/asgi_20260416_135234/asgi-report.md`):
+A second run at concurrency=10, 200 iter (`benchmark/results/asgi_20260416_135234/asgi-report.md`):
 
 | Client | total mean | p95 | TPS | errors |
 |---|---:|---:|---:|---:|
@@ -97,14 +128,24 @@ A second run at higher concurrency surfaced a different picture (`benchmark/resu
 | aerospike-py | 580.70 | 986.93 | 13.9 | **56** |
 
 :::caution Backpressure under saturation
-This run saturated the test harness (56 errors on the aerospike-py side from request rejections / timeouts under load that the official client absorbed differently). It's **not** a clean apples-to-apples comparison — it's evidence that without proper backpressure tuning, native async clients can issue more in-flight work than the server pool can absorb. See [Bottleneck Analysis](./bottleneck-analysis) for the `gather`→`single` recipe that resolves this.
+This run saturated the test harness (56 errors from request rejections / timeouts under load that the official client absorbed differently). It's **not** apples-to-apples — it's evidence that without proper backpressure tuning, native async clients can issue more in-flight work than the server pool can absorb. See [Bottleneck Analysis](./bottleneck-analysis) for the `gather`→`single` recipe that resolves this.
 :::
+
+  </TabItem>
+  <TabItem value="C" label="C — uvicorn + DLRM (real serving)">
 
 ## Environment C — uvicorn + DLRM (Real Serving)
 
-**What this isolates.** Full production-style pipeline: HTTP request → key extraction → `batch_read(9 sets × 200 keys)` → feature build → DLRM inference (PyTorch CPU) → response. This is the closest measurement to what a real recsys serving pod looks like.
+**What this isolates.** Full production-style pipeline:
 
-**Setup**
+```
+HTTP request → key extraction → batch_read(9 sets × 200 keys)
+            → feature build → DLRM inference (PyTorch CPU) → response
+```
+
+Closest measurement to a real recsys serving pod.
+
+### Setup
 
 | Item | Value |
 |---|---|
@@ -115,52 +156,55 @@ This run saturated the test harness (56 errors on the aerospike-py side from req
 
 Both endpoints (`/predict/official/sample` and `/predict/py-async/sample`) live in the **same pod**, called alternately by k6 — server state and network are identical.
 
-### k6 client-side latency (single mode, 10 VUs × 60s)
+### k6 client-side latency
 
-| Metric | aerospike-py | official | aerospike-py advantage |
+```text
+single mode (10 VUs × 60s)
+
+p95     aerospike-py  ███████████████              189 ms
+        official      █████████████████████████    324 ms   −42% 🔥
+
+p90     aerospike-py  █████████████                173 ms
+        official      ██████████████████████       293 ms   −41% 🔥
+
+avg     aerospike-py  █████████                    118 ms
+        official      ████████████                 146 ms   −19%
+```
+
+| Mode | aerospike-py p95 | official p95 | aerospike-py advantage |
 |---|---:|---:|---:|
-| avg | **118 ms** | 146 ms | −19% |
-| median | **134 ms** | 148 ms | −10% |
-| p90 | **173 ms** | 293 ms | **−41%** 🔥 |
-| p95 | **189 ms** | 324 ms | **−42%** 🔥 |
-
-### k6 client-side latency (gather mode — 9 set fan-out)
-
-| Metric | aerospike-py | official | advantage |
-|---|---:|---:|---:|
-| p95 | **234 ms** | 266 ms | −12% |
-
-The gather mode runs 9 `batch_read` calls in `asyncio.gather(...)`. The gap shrinks because both clients now hit GIL serialization on the result conversion step — see [Bottleneck Analysis](./bottleneck-analysis).
-
-### Server-side Prometheus metrics (same run)
-
-`predict_duration_seconds` p95 (FastAPI E2E, measured inside the pod):
-
-| Client | p95 |
-|---|---:|
-| **aerospike-py** | **202 ms** |
-| official | 274 ms |
-
-`aerospike_batch_read_all_duration_seconds` p95 (app-level — `batch_read` + `as_dict` + demux):
-
-| Client | p95 |
-|---|---:|
-| **aerospike-py** | **137 ms** |
-| official | 252 ms |
-
-Server-side and client-side numbers move in the same direction — the difference between them (~13 ms) is just network RTT + gateway + connection setup.
-
-### Per-mode summary (all p95 in ms)
-
-| Mode | aerospike-py | official | aerospike-py advantage |
-|---|---:|---:|---:|
-| single | **189** | 324 | **−42%** |
-| gather | **234** | 266 | −12% |
-| merge_gather (aerospike-py only) | 202 | — | — |
+| **single** | **189** | 324 | **−42%** 🔥 |
+| gather (9× fan-out) | **234** | 266 | −12% |
+| merge_gather (aero-py only) | 202 | — | — |
 | stress (0→20→50 VUs ramp) | 592 | — | — |
+
+The **gather** gap shrinks because both clients hit GIL serialization on the result conversion step — see [Bottleneck Analysis](./bottleneck-analysis).
+
+### Server-side Prometheus (same run, single mode)
+
+| Metric | aerospike-py | official |
+|---|---:|---:|
+| `predict_duration_seconds` p95 (FastAPI E2E) | **202 ms** | 274 ms |
+| `aerospike_batch_read_all_duration_seconds` p95 | **137 ms** | 252 ms |
+
+Server- and client-side numbers move in the same direction — the ~13 ms gap between them is network RTT + gateway + connection setup.
+
+  </TabItem>
+</Tabs>
 
 ## Pattern across environments
 
-As layers are added around the DB call, the **ratio compresses** (4.8× → 1.24× mean) but **upper-percentile advantage holds** — aerospike-py keeps the GIL released during I/O, while the official client serializes GIL acquisition through `run_in_executor` and spikes at the tail. That's why p95 still wins **−42%** in environment C even though mean is only **−19%**.
+```text
+   layers added →            ratio compresses,      tail still wins
+   ─────────────             ─────────────────      ───────────────
+A) Pure DB (no HTTP/ML)      mean 4.8×              p99 1.6×
+B) uvicorn ASGI              mean 1.27×             ≈ noise at C=5
+C) uvicorn + DLRM            mean 1.24×             p95 −42%  🔥
+```
 
-What's left to investigate: see [Free-Threaded Python](./free-threaded-python) for what happens when GIL is removed entirely, and [Bottleneck Analysis](./bottleneck-analysis) for the `gather`→`single` recipe that gives another −33%.
+As layers are added around the DB call, the **ratio compresses** (4.8× → 1.24× mean) but **upper-percentile advantage holds** — aerospike-py keeps the GIL released during I/O, while the official client serializes GIL acquisition through `run_in_executor` and spikes at the tail.
+
+What's next:
+
+- [Free-Threaded Python](./free-threaded-python) — what happens when GIL is removed entirely
+- [Bottleneck Analysis](./bottleneck-analysis) — the `gather`→`single` recipe (another −33%)
