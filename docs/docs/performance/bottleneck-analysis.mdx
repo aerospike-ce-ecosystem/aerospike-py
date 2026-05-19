@@ -236,7 +236,7 @@ Local (VU 100, macOS + Podman, 3.11)
 
 **Same direction, very different magnitude.** Both environments show aerospike-py being slightly *less* CPU-efficient than the legacy C extension, but the production gap (+78% CPU/RPS) is ~10× the local gap (+7.4% CPU/RPS, within run-to-run noise). The gate fails because the production magnitude does not reproduce locally.
 
-Useful observation **at low concurrency** (VU 10):
+Useful observation **at low concurrency** (VU 10) — note this comes from the higher-fidelity **cell3/cell4 dataset** (12 CPU + BURN_MS=30, the "most trustworthy" run per the verdict), not the same isolated run used for the VU 100 CPU table above:
 
 | | aerospike-py | legacy C ext |
 |---|---:|---:|

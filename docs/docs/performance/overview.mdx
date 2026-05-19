@@ -50,7 +50,7 @@ Full HTTP → batch_read → DLRM CPU inference → response. Closest to a real 
 | p90 | **173 ms** | 293 ms | **−41%** |
 | **p95** | **189 ms** | 324 ms | **−42%** 🔥 |
 
-[→ Full numbers (Benchmarks C)](./benchmarks#environment-c--uvicorn--dlrm-real-serving)
+[→ Full numbers (Benchmarks C)](./benchmarks?env=C)
 
   </TabItem>
   <TabItem value="asgi" label="B — uvicorn ASGI only">
@@ -62,7 +62,7 @@ FastAPI + uvicorn around `batch_read`, no model inference. The "REST API in fron
 | total mean | **228 ms** | 290 ms | **−21%** |
 | TPS | **19.4** | 16.6 | **+17%** |
 
-[→ Full numbers (Benchmarks B)](./benchmarks#environment-b--uvicorn-asgi-only)
+[→ Full numbers (Benchmarks B)](./benchmarks?env=B)
 
   </TabItem>
   <TabItem value="pure" label="A — Pure DB client (no HTTP/ML)">
@@ -75,7 +75,7 @@ Python loop drives `batch_read` directly. Largest gap — surrounding stack is a
 | avg p99 | **121 ms** | 195 ms | −38% |
 | TPS | **374** | 138 | **+171%** 🔥 |
 
-[→ Full numbers (Benchmarks A)](./benchmarks#environment-a--pure-db-client)
+[→ Full numbers (Benchmarks A)](./benchmarks?env=A)
 
   </TabItem>
 </Tabs>

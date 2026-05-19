@@ -25,7 +25,7 @@ p95 advantage holds even when mean compresses (C): the GIL serializes
 official-client result conversion at the tail.
 ```
 
-<Tabs>
+<Tabs queryString="env">
   <TabItem value="A" label="A — Pure DB client" default>
 
 ## Environment A — Pure DB Client
@@ -108,15 +108,15 @@ Outlier: set_8 (0% found rate) → fast not-found path, not real read latency.
 
 ### Pipeline breakdown (latency in ms)
 
-| Client | total mean | p50 | p95 | aerospike step | inference | http step | TPS |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| official | 289.56 | 289.36 | 461.15 | 280.00 | 1.55 | 300.69 | 16.6 |
-| **aerospike-py** | **228.49** | **189.56** | 468.03 | **221.12** | 1.46 | 258.10 | **19.4** |
+| Client | total mean | p50 | p90 | p95 | p99 | aerospike step | inference | TPS |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| official | 289.56 | 289.36 | 429.74 | 461.15 | 473.60 | 280.00 | 1.55 | 16.6 |
+| **aerospike-py** | **228.49** | **189.56** | 457.42 | 468.03 | 497.09 | **221.12** | 1.46 | **19.4** |
 
 - **Total mean: −21%** (290 → 228 ms)
 - **Aerospike step: −21%** (280 → 221 ms) — most wall time is the DB call, so the client gain transfers to E2E
 - **TPS: +17%** (16.6 → 19.4 req/s)
-- p99 is roughly equivalent — at concurrency=5, the Tokio model isn't yet stressing the GIL hard enough to widen the tail
+- p99 is roughly equivalent (474 vs 497 ms) — at concurrency=5, the Tokio model isn't yet stressing the GIL hard enough to widen the tail
 
 ### Higher concurrency exposes backpressure
 
