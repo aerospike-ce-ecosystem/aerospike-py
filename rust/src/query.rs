@@ -213,6 +213,31 @@ fn execute_query_collect(
     debug!("Executing {}", op_name);
 
     let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
+
+    // Start the OTel span *before* the operation runs so the recorded span
+    // duration reflects actual query latency. Previously the span was created
+    // after `block_on` returned, yielding a near-zero, meaningless duration.
+    #[cfg(feature = "otel")]
+    let otel_span = {
+        use opentelemetry::trace::{SpanKind, Tracer};
+        use opentelemetry::KeyValue;
+        let tracer = crate::tracing::otel_impl::get_tracer();
+        let span_name = format!("{} {}.{}", op_name.to_uppercase(), namespace, set_name);
+        tracer
+            .span_builder(span_name)
+            .with_kind(SpanKind::Client)
+            .with_attributes(vec![
+                KeyValue::new("db.system.name", "aerospike"),
+                KeyValue::new("db.namespace", namespace.to_string()),
+                KeyValue::new("db.collection.name", set_name.to_string()),
+                KeyValue::new("db.operation.name", op_name.to_uppercase()),
+                KeyValue::new("server.address", conn_info.server_address.clone()),
+                KeyValue::new("server.port", conn_info.server_port),
+                KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
+            ])
+            .start(&tracer)
+    };
+
     let panic_op: &'static str = match op_name {
         "scan" => "Query.scan",
         "query" => "Query.query",
@@ -241,25 +266,9 @@ fn execute_query_collect(
 
     #[cfg(feature = "otel")]
     {
-        use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
-        use opentelemetry::KeyValue;
-        let tracer = crate::tracing::otel_impl::get_tracer();
-        let span_name = format!("{} {}.{}", op_name.to_uppercase(), namespace, set_name);
-        let span = tracer
-            .span_builder(span_name)
-            .with_kind(SpanKind::Client)
-            .with_attributes(vec![
-                KeyValue::new("db.system.name", "aerospike"),
-                KeyValue::new("db.namespace", namespace.to_string()),
-                KeyValue::new("db.collection.name", set_name.to_string()),
-                KeyValue::new("db.operation.name", op_name.to_uppercase()),
-                KeyValue::new("server.address", conn_info.server_address.clone()),
-                KeyValue::new("server.port", conn_info.server_port),
-                KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
-            ])
-            .start(&tracer);
-        let cx = opentelemetry::Context::current().with_span(span);
-        let span_ref = opentelemetry::trace::TraceContextExt::span(&cx);
+        use opentelemetry::trace::TraceContextExt;
+        let cx = opentelemetry::Context::current().with_span(otel_span);
+        let span_ref = TraceContextExt::span(&cx);
         if let Err(e) = &result {
             crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
         }

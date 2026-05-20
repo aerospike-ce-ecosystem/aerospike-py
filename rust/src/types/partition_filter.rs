@@ -79,7 +79,7 @@ pub fn partition_filter_by_id(partition_id: usize) -> PyResult<PyPartitionFilter
 /// `count == 0` is permitted (yields an empty filter).
 #[pyfunction]
 pub fn partition_filter_by_range(begin: usize, count: usize) -> PyResult<PyPartitionFilter> {
-    if begin >= PARTITIONS && count > 0 {
+    if begin >= PARTITIONS {
         return Err(PyValueError::new_err(format!(
             "begin must be in [0, {PARTITIONS}), got {begin}"
         )));
@@ -133,6 +133,8 @@ mod tests {
             assert!(partition_filter_by_range(4000, 1000).is_err());
             assert!(partition_filter_by_range(0, 4096).is_ok());
             assert!(partition_filter_by_range(0, 0).is_ok());
+            // begin out of range is rejected even when count is 0.
+            assert!(partition_filter_by_range(PARTITIONS, 0).is_err());
         });
     }
 

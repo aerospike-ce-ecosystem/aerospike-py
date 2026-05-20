@@ -40,10 +40,16 @@ pub fn parse_client_policy(config: &Bound<'_, PyDict>) -> PyResult<ClientPolicy>
 
             let auth_mode = if let Some(mode) = config.get_item("auth_mode")? {
                 let mode_val: i32 = mode.extract()?;
-                if mode_val == 1 {
-                    AuthMode::External(username, password)
-                } else {
-                    AuthMode::Internal(username, password)
+                match mode_val {
+                    0 => AuthMode::Internal(username, password),
+                    1 => AuthMode::External(username, password),
+                    2 => AuthMode::PKI,
+                    other => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "auth_mode must be AUTH_INTERNAL (0), AUTH_EXTERNAL (1), \
+                             or AUTH_PKI (2); got {other}"
+                        )));
+                    }
                 }
             } else {
                 AuthMode::Internal(username, password)
