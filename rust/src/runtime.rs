@@ -104,6 +104,9 @@ pub fn init_async_runtime() {
         workers
     );
     let mut builder = tokio::runtime::Builder::new_multi_thread();
-    builder.worker_threads(workers).enable_all();
+    // Enable only the IO and time drivers, matching the sync `RUNTIME` above:
+    // `enable_all()` additionally arms the signal driver, which can interfere
+    // with Python's own signal handling.
+    builder.worker_threads(workers).enable_io().enable_time();
     pyo3_async_runtimes::tokio::init(builder);
 }

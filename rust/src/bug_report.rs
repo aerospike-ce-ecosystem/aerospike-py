@@ -14,12 +14,16 @@ fn shell_escape(s: &str) -> String {
 }
 
 /// Truncate and sanitize a string for use in a GitHub issue title.
+///
+/// Truncation is performed on character boundaries, not byte indices, so
+/// multi-byte UTF-8 input (e.g. non-ASCII error messages) never panics.
 fn sanitize_for_title(s: &str, max_len: usize) -> String {
     let cleaned: String = s.chars().map(|c| if c == '\n' { ' ' } else { c }).collect();
-    if cleaned.len() <= max_len {
+    if cleaned.chars().count() <= max_len {
         cleaned
     } else {
-        format!("{}...", &cleaned[..max_len - 3])
+        let truncated: String = cleaned.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{truncated}...")
     }
 }
 
@@ -83,6 +87,16 @@ mod tests {
     fn test_sanitize_exact_length() {
         let exact = "a".repeat(80);
         assert_eq!(sanitize_for_title(&exact, 80), exact);
+    }
+
+    #[test]
+    fn test_sanitize_multibyte_does_not_panic() {
+        // Each Korean syllable is 3 bytes in UTF-8; a byte-index slice at
+        // `max_len - 3` would fall mid-character and panic.
+        let long = "한글".repeat(60); // 120 chars, 360 bytes
+        let result = sanitize_for_title(&long, 80);
+        assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 80);
     }
 
     #[test]

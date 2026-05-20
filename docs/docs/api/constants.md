@@ -22,12 +22,12 @@ import aerospike_py as aerospike
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `POLICY_EXISTS_IGNORE` | 0 | Write regardless (default) |
-| `POLICY_EXISTS_UPDATE` | 1 | Update existing |
-| `POLICY_EXISTS_UPDATE_ONLY` | 2 | Fail if not exists |
-| `POLICY_EXISTS_REPLACE` | 3 | Replace all bins |
-| `POLICY_EXISTS_REPLACE_ONLY` | 4 | Replace only if exists |
-| `POLICY_EXISTS_CREATE_ONLY` | 5 | Fail if exists |
+| `POLICY_EXISTS_IGNORE` | 0 | Write regardless; create or update (default) |
+| `POLICY_EXISTS_UPDATE` | 1 | Alias of `POLICY_EXISTS_UPDATE_ONLY` |
+| `POLICY_EXISTS_UPDATE_ONLY` | 1 | Update only; fail if the record does not exist |
+| `POLICY_EXISTS_REPLACE` | 2 | Replace all bins; create or update |
+| `POLICY_EXISTS_REPLACE_ONLY` | 3 | Replace only; fail if the record does not exist |
+| `POLICY_EXISTS_CREATE_ONLY` | 4 | Create only; fail if the record exists |
 
 ### Generation
 
