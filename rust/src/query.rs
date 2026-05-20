@@ -243,7 +243,7 @@ fn execute_query_collect(
         "query" => "Query.query",
         _ => "Query.execute",
     };
-    let result: Result<Vec<_>, AsError> = catch_panic_sync(panic_op, || {
+    let panic_result: PyResult<Result<Vec<_>, AsError>> = catch_panic_sync(panic_op, || {
         Ok(py.detach(|| {
             RUNTIME.block_on(async {
                 let rs = client
@@ -257,11 +257,14 @@ fn execute_query_collect(
                 Ok(results)
             })
         }))
-    })?;
+    });
 
-    match &result {
-        Ok(_) => timer.finish(""),
-        Err(e) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+    // Finish metrics and end the OTel span on every path — including a
+    // caught panic — before propagating any error.
+    match &panic_result {
+        Ok(Ok(_)) => timer.finish(""),
+        Ok(Err(e)) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+        Err(_) => {} // panic caught: timer left unrecorded (no Drop impl)
     }
 
     #[cfg(feature = "otel")]
@@ -269,13 +272,13 @@ fn execute_query_collect(
         use opentelemetry::trace::TraceContextExt;
         let cx = opentelemetry::Context::current().with_span(otel_span);
         let span_ref = TraceContextExt::span(&cx);
-        if let Err(e) = &result {
+        if let Ok(Err(e)) = &panic_result {
             crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
         }
         span_ref.end();
     }
 
-    result.map_err(as_to_pyerr)
+    panic_result?.map_err(as_to_pyerr)
 }
 
 /// Execute a query/scan and collect all results as a Python list.
