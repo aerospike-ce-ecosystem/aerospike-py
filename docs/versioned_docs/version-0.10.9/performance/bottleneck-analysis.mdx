@@ -1,0 +1,260 @@
+---
+title: Bottleneck Analysis & Optimization
+sidebar_label: Bottleneck Analysis
+sidebar_position: 4
+description: Internal stage profiling, the gather→single recipe (−33% p95), stage profiling toggle overhead, and recommended optimizations for aerospike-py
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+What makes `batch_read` slow under load, how aerospike-py exposes per-stage timings to find out, and which optimizations measurably help.
+
+> **Sources**: `benchmark/results/bottleneck-analysis.md`, `benchmark/results/internal-stage-toggle-comparison.md`, `benchmark/results/k6-runtime-client-comparison.md`.
+
+## The initial mystery
+
+```text
+Rust internal batch_read I/O (db_client_operation_duration_seconds):    0.9 ms
+Python-level per-set read (aerospike_batch_read_set_duration):         51.0 ms
+                                                                     ────────
+Unaccounted overhead — 99% of the wall time happens outside Rust:    50.1 ms
+```
+
+To find where the 50 ms went, aerospike-py added per-stage histograms covering both Rust internals and the PyO3 ↔ asyncio boundary.
+
+## Internal stage profiling
+
+Each `batch_read` is split into 10 stages. Histograms (`db_client_internal_stage_seconds`) record latency for each stage individually.
+
+| Stage | Where | GIL state |
+|---|---|---|
+| `key_parse` | Python tuples → Rust `Vec<Key>` | held |
+| `limiter_wait` | Backpressure semaphore acquire | released |
+| `tokio_schedule_delay` | Tokio task scheduling | released |
+| `io` | Aerospike network round-trip | released |
+| `into_pyobject` | Rust `BatchRecord` → `Py<...>` (Arc wrap, `spawn_blocking`) | held |
+| `spawn_blocking_delay` | Wall time `spawn_blocking` task spent waiting in queue | — |
+| `event_loop_resume_delay` | Event-loop tick from future-ready to coroutine resume | — |
+| `as_dict` | `BatchReadHandle.as_dict()` → `dict[Key, Record]` | held |
+| `merge_as_dict` | Multi-set merge into typed dict | held |
+| `future_into_py_setup` | PyO3 future ↔ asyncio bridge setup | held |
+
+### Activating stage profiling
+
+Stage profiling is **off by default** with zero overhead. Activate it three ways:
+
+<Tabs>
+  <TabItem value="env" label="Env var (process-wide)" default>
+
+```bash
+export AEROSPIKE_PY_INTERNAL_METRICS=1
+# read once at process start
+```
+
+  </TabItem>
+  <TabItem value="runtime" label="Runtime toggle">
+
+```python
+import aerospike_py
+aerospike_py.set_internal_stage_metrics_enabled(True)
+```
+
+  </TabItem>
+  <TabItem value="scope" label="Scoped context manager">
+
+```python
+with aerospike_py.internal_stage_profiling():
+    await client.batch_read(keys)
+```
+
+  </TabItem>
+</Tabs>
+
+When disabled, `Instant::now()` syscalls and histogram updates are elided — only one `AtomicBool` load (~1 ns) per stage entry remains.
+
+## What the stages revealed (Python 3.11 + GIL)
+
+```text
+Stage                    avg            Comment
+────────────────────────────────────────────────────────────────────
+into_pyobject            3.96 μs        Arc wrap is essentially free
+limiter_wait             3.56 μs        Backpressure not active
+future_into_py_setup     46.5 μs        PyO3 ↔ asyncio bridge is cheap
+tokio_schedule_delay     83.1 μs        Tokio scheduling fine
+as_dict                  832 μs         Per-call dict materialization OK
+key_parse                967 μs         200-key tuple parsing OK
+merge_as_dict            4.48 ms        9-set merge moderate
+io                       7.51 ms        Network (inflated by GIL during parse)
+event_loop_resume_delay  39.7 ms   🚨   Coroutines waiting their turn for GIL
+spawn_blocking_delay     234 ms    🚨   spawn_blocking queue waiting for GIL
+```
+
+**Conclusion.** aerospike-py's Rust code is fast (~5 ms total). The 46 ms of overhead is real, but caused by **GIL serialization at the PyO3 ↔ asyncio boundary**, not by any fixable hot loop in Rust.
+
+This finding directly motivated the [Free-Threaded Python](./free-threaded-python) experiment, which collapsed both stages to near-zero.
+
+## Optimization 1: `gather(N)` → single `batch_read(mixed keys)`
+
+The 9-set serving pipeline originally fanned out via `asyncio.gather`. Under GIL, this creates 9 simultaneous PyO3 → asyncio handoffs, and `key_parse` + `as_dict` stages serialize against each other.
+
+<Tabs>
+  <TabItem value="before" label="Before (gather, 9 calls)" default>
+
+```python
+# 9 concurrent batch_read calls — GIL serializes key_parse + as_dict
+await asyncio.gather(*[
+    client.batch_read(set_i_keys) for i in range(9)
+])
+```
+
+  </TabItem>
+  <TabItem value="after" label="After (single, 1 call)">
+
+```python
+# 1800 keys in one call; demux by set in Python (cheap)
+all_keys = []
+for set_name, keys in per_set_keys.items():
+    all_keys.extend(("ns", set_name, k) for k in keys)
+
+result = await client.batch_read(all_keys)
+
+per_set_results = defaultdict(dict)
+for key, record in result.as_dict().items():
+    per_set_results[key[1]][key[2]] = record
+```
+
+  </TabItem>
+  <TabItem value="why" label="Why it works (timeline)">
+
+```text
+gather mode (9 sets × 200 keys):
+
+T=0ms     asyncio.gather starts
+          ├─ task 1: key_parse (1.46 ms, GIL held)
+          ├─ task 2: key_parse waits (GIL)
+          └─ task 9: key_parse waits (GIL)
+T=~13ms   9 key_parse done (sequential, 9 × 1.46 ms)
+          └─ 9 Rust async futures execute in parallel on Tokio
+T=~15ms   9 I/O complete
+T=15-51ms event loop resumes 9 coroutines sequentially:
+          ├─ task 1 → as_dict (0.79 ms) → done
+          ├─ (event loop tick: 3-5 ms)
+          └─ task 9 → as_dict (0.79 ms) → done
+T=~51ms   gather returns
+
+single mode: only ONE key_parse, ONE as_dict, ONE future_into_py.
+```
+
+  </TabItem>
+</Tabs>
+
+### Measured impact (k6 10 VUs × 60s, FastAPI + DLRM)
+
+```text
+aerospike-py p95
+   gather        ████████████████████  434 ms
+   single        ██████████████        302 ms   −30%
+
+aerospike-py avg
+   gather        █████████             189 ms
+   single        ██████                126 ms   −33%
+```
+
+| Client | Mode | avg | median | p90 | p95 |
+|---|---|---:|---:|---:|---:|
+| **aerospike-py** | gather (9×) | 189 | 176 | 393 | 434 |
+| **aerospike-py** | single (mixed keys) | **126** | **101** | **284** | **302** |
+| **Improvement** | | **−33%** | **−43%** | **−28%** | **−30%** |
+
+| Client | Mode | avg | p95 |
+|---|---|---:|---:|
+| official | gather | 251 | 502 |
+| official | single | 188 | 396 |
+| **aerospike-py vs official (single)** | | **1.49×** | **1.31×** |
+
+The single-call pattern wins for both clients (always doing less work), but the gain is **larger for aerospike-py** because removing 8 of the 9 PyO3 ↔ asyncio handoffs eliminates 8× the GIL serialization cost.
+
+After enabling this as the default, a follow-up run (different test conditions, lighter overall load) showed **avg 60.8 ms / p95 154.6 ms** for aerospike-py single mode — a sustained absolute floor.
+
+## Optimization 2: Keep stage profiling always on
+
+The toggle exists so that stage profiling can be **left on in production** if the overhead is small enough.
+
+```text
+Rust internal batch_read op_duration (controlled load)
+                          OFF (baseline)  →  ON (debug)
+  avg                     2.16 ms            3.22 ms      +49%
+  p95                     4.67 ms            7.61 ms      +63%
+  p99                     4.93 ms            9.51 ms      +93%
+
+That looks bad in isolation. But Rust internal time is only 5–10% of E2E.
+
+E2E k6 single p95 (the one users feel)
+  3.11 + GIL, stage OFF                       189 ms
+  3.11 + GIL, stage ON                        143 ms ← lower (within noise)
+```
+
+Stage ON measured **lower** end-to-end p95 than stage OFF — within noise, the toggle has no measurable E2E impact. The Rust-level overhead disappears into the much larger asyncio + GIL cost outside Rust.
+
+**Recommendation**: keep `AEROSPIKE_PY_INTERNAL_METRICS=1` on in production. You get instant per-stage attribution when an incident happens. When the GIL is removed (3.14t), even the Rust-internal overhead drops to negligible.
+
+## Optimization 3: Switch to Python 3.14t
+
+This is the largest single lever — see the [Free-Threaded Python](./free-threaded-python) page for the full breakdown. Summary:
+
+| Item | 3.11 + GIL | 3.14t | Δ |
+|---|---:|---:|---:|
+| Same Rust binary | — | — | — |
+| `spawn_blocking_delay` | 234 ms | 0.12 ms | −99.95% 🔥 |
+| `event_loop_resume_delay` | 39.7 ms | ≈ 0 | ≈ −100% |
+| `io` | 7.51 ms | 1.27 ms | −83% |
+| **E2E p95** | 189 ms | **97 ms** | **−49%** |
+| **TPS** | 41.6 | **61.2 iter/s** | **+47%** |
+
+For the cumulative effect across all three optimizations, see the [Overview](./overview).
+
+## Reproducibility note: local saturation testing
+
+A separate saturation reproducer run (`benchmark/multiworker_saturation/results/saturation_20260511/`) attempted to reproduce a production CPU/RPS gap reported in issue #347 on a local macOS + Podman environment.
+
+The right comparison metric across two different hardware envelopes is **CPU per RPS** (efficiency), not raw CPU% or raw RPS in isolation. Different machines have different capacity ceilings, so a flat `RPS / CPU%` ratio normalizes both.
+
+```text
+                            legacy            aerospike-py     aspy vs legacy
+                            ──────────────    ─────────────    ──────────────
+Production (VU 100, prod hardware)
+  raw RPS                   206               187              −9%
+  raw CPU%                  62%               100%             +38%p
+  CPU per RPS               0.301 %/req       0.535 %/req      +78%   ⚠ (large)
+
+Local (VU 100, macOS + Podman, 3.11)
+  raw RPS                   390.6             369.8            −5.3%
+  raw CPU%                  125.9%            127.9%           +2.0%p
+  CPU per RPS               0.322 %/req       0.346 %/req      +7.4%  (noise)
+```
+
+**Same direction, very different magnitude.** Both environments show aerospike-py being slightly *less* CPU-efficient than the legacy C extension, but the production gap (+78% CPU/RPS) is ~10× the local gap (+7.4% CPU/RPS, within run-to-run noise). The gate fails because the production magnitude does not reproduce locally.
+
+Useful observation **at low concurrency** (VU 10) — note this comes from the higher-fidelity **cell3/cell4 dataset** (12 CPU + BURN_MS=30, the "most trustworthy" run per the verdict), not the same isolated run used for the VU 100 CPU table above:
+
+| | aerospike-py | legacy C ext |
+|---|---:|---:|
+| p50 | 67.6 ms | **39.3 ms** |
+| p95 | 71.1 ms | 73.6 ms |
+| RSS max | 696 MB | 516 MB |
+
+At low concurrency, aerospike-py shows a measurable **per-call overhead penalty** (p50 +72%) consistent with the analyzed `future_into_py_setup` + `tokio_schedule_delay` path. The gap disappears under load, but is a known target for further optimization.
+
+Why prod reproduction failed locally (best guesses): **no DLRM PyTorch inference** (our burn was pure-Python loop), **single Aerospike node** (vs prod 5-node cluster — Aerospike-side bottleneck masks client-side differences), and **macOS Podman VM abstraction** of cgroup scheduling.
+
+## Future optimization candidates
+
+Identified but not yet implemented:
+
+| Idea | Estimated effect | Difficulty |
+|---|---|---|
+| `key_parse` interning (`py.intern()` for bin names) | −10–15% | Medium |
+| `future_into_py` improvements | Theoretical max for this stage | High — needs upstream PyO3 PR |
+| Promote module to `#[pymodule(gil_used = false)]` after audit | Removes any latent GIL re-acquisition cost on 3.14t | Medium |
+| `batch_read_ordered` / `batch_read_many` | Drop dedup String overhead | Medium |
