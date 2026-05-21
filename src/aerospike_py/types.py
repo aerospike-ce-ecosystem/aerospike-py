@@ -285,7 +285,7 @@ class WriteMeta(TypedDict, total=False):
 
 class ClientConfig(TypedDict, total=False):
     hosts: list[tuple[str, int]]
-    cluster_name: str
+    cluster_name: str | None
     auth_mode: int
     user: str
     password: str
