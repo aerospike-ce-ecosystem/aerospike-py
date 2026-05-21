@@ -24,13 +24,18 @@ High-performance Aerospike Python Client built with PyO3 + Rust, powered by the 
 pip install aerospike-py
 ```
 
+From a source checkout, start the local Aerospike CE container with
+`make run-aerospike-ce`; it listens on `127.0.0.1:18710`. If you start
+Aerospike manually on the default service port, use `3000` in the examples
+below instead.
+
 ### Sync Client
 
 ```python
 import aerospike_py as aerospike
 
 with aerospike.client({
-    "hosts": [("127.0.0.1", 3000)],
+    "hosts": [("127.0.0.1", 18710)],
     "cluster_name": "docker",
 }).connect() as client:
 
@@ -53,7 +58,7 @@ from aerospike_py import AsyncClient
 
 async def main():
     async with AsyncClient({
-        "hosts": [("127.0.0.1", 3000)],
+        "hosts": [("127.0.0.1", 18710)],
         "cluster_name": "docker",
     }) as client:
         await client.connect()

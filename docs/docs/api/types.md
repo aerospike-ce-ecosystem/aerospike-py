@@ -157,7 +157,7 @@ Used by: `aerospike_py.client(config)`, `AsyncClient(config)`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `hosts` | `list[tuple[str, int]]` | *required* | Seed nodes |
-| `cluster_name` | `str` | | Expected cluster name |
+| `cluster_name` | `str \| None` | | Expected cluster name. `None` is treated the same as omitting the field. |
 | `auth_mode` | `int` | `AUTH_INTERNAL` | `AUTH_INTERNAL`, `AUTH_EXTERNAL`, `AUTH_PKI` |
 | `user` | `str` | | Authentication username |
 | `password` | `str` | | Authentication password |
@@ -421,7 +421,7 @@ Used by: `admin_create_role()`, `admin_grant_privileges()`, `admin_revoke_privil
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `code` | `int` | Privilege code (`PRIV_READ`, `PRIV_WRITE`, etc.) |
+| `code` | `int \| str` | Privilege code constant (`PRIV_READ`, `PRIV_WRITE`, etc.) or canonical name (`"read"`, `"read-write"`, etc.) |
 | `ns` | `str` | Namespace scope (empty = global) |
 | `set` | `str` | Set scope (empty = namespace-wide) |
 

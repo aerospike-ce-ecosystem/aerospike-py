@@ -32,11 +32,11 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/KimSoungRyoul/aerospike-py"
-Documentation = "https://kimsoungryoul.github.io/aerospike-py/"
-Repository = "https://github.com/KimSoungRyoul/aerospike-py"
-Issues = "https://github.com/KimSoungRyoul/aerospike-py/issues"
-Changelog = "https://github.com/KimSoungRyoul/aerospike-py/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/aerospike-ce-ecosystem/aerospike-py"
+Documentation = "https://aerospike-ce-ecosystem.github.io/aerospike-py/"
+Repository = "https://github.com/aerospike-ce-ecosystem/aerospike-py"
+Issues = "https://github.com/aerospike-ce-ecosystem/aerospike-py/issues"
+Changelog = "https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 numpy = ["numpy>=2.0"]

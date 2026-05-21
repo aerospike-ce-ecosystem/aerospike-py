@@ -16,7 +16,7 @@ import aerospike_py as aerospike
 from aerospike_py.types import ClientConfig
 
 config: ClientConfig = {
-    "hosts": [("127.0.0.1", 3000)],
+    "hosts": [("127.0.0.1", 18710)],
     "cluster_name": "docker",
 }
 client = aerospike.client(config).connect()
@@ -27,7 +27,7 @@ client = aerospike.client(config).connect()
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `hosts` | `list[tuple[str, int]]` | *required* | Seed node addresses |
-| `cluster_name` | `str` | `""` | Expected cluster name |
+| `cluster_name` | `str \| None` | `""` | Expected cluster name. `None` is treated the same as omitting the field. |
 | `auth_mode` | `int` | `AUTH_INTERNAL` | Auth mode |
 | `user` / `password` | `str` | `""` | Credentials |
 | `timeout` | `int` | `1000` | Connection timeout (ms) |

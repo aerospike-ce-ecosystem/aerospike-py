@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/KimSoungRyoul/aerospike-py.git
+git clone https://github.com/aerospike-ce-ecosystem/aerospike-py.git
 cd aerospike-py
 
 # Install uv (if not already installed)
@@ -23,6 +23,14 @@ uv run maturin develop --release
 ### Start Aerospike Server
 
 Running integration and feasibility tests requires an Aerospike server (except unit tests).
+The default local path is:
+
+```bash
+make run-aerospike-ce  # starts Aerospike CE on 127.0.0.1:18710
+```
+
+If you start the container manually on Aerospike's default port, set
+`AEROSPIKE_PORT=3000` when running integration-style tests:
 
 ```bash
 podman run -d --name aerospike \
