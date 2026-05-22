@@ -17,6 +17,53 @@ const CONNECTING: u8 = 1;
 const CONNECTED: u8 = 2;
 const CLOSING: u8 = 3;
 
+/// RAII guard that reverts a stuck `CONNECTING` state back to `DISCONNECTED`.
+///
+/// `connect()` transitions the state machine to `CONNECTING` synchronously,
+/// then drives `AsClient::new()` inside the returned Python awaitable. If that
+/// awaitable is dropped before completing — e.g. the coroutine is garbage
+/// collected, cancelled, or wrapped in an `asyncio.wait_for()` that times out —
+/// the success/failure arms that move the state to `CONNECTED`/`DISCONNECTED`
+/// never run. Without this guard the client stays `CONNECTING` forever:
+/// `connect()` and `close()` both refuse to proceed and the client is wedged
+/// with no recovery path.
+///
+/// The guard's `Drop` only ever performs the `CONNECTING -> DISCONNECTED`
+/// transition (via CAS), so it can never clobber a state that the connect
+/// future already advanced. On the normal success/failure paths the future
+/// calls `disarm()` before storing the terminal state.
+struct ConnectStateGuard {
+    state: Arc<AtomicU8>,
+    armed: bool,
+}
+
+impl ConnectStateGuard {
+    fn new(state: Arc<AtomicU8>) -> Self {
+        Self { state, armed: true }
+    }
+
+    /// Disarm the guard once the connect future has reached a terminal arm
+    /// and will itself store the final state.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ConnectStateGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            // Only revert if still CONNECTING; never overwrite a state the
+            // connect future may have already advanced.
+            let _ = self.state.compare_exchange(
+                CONNECTING,
+                DISCONNECTED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+        }
+    }
+}
+
 /// Outcome of preparing a close transition — see [`PyAsyncClient::prepare_close`].
 ///
 /// Computed synchronously while holding `&mut self` so the subsequent async
@@ -144,6 +191,11 @@ impl PyAsyncClient {
         let hosts_str = parsed.connection_string;
         info!("Async connecting to Aerospike cluster: {}", hosts_str);
         future_into_py(py, async move {
+            // Armed guard: if this future is dropped/cancelled before the
+            // match below runs, Drop reverts CONNECTING -> DISCONNECTED so the
+            // client is not permanently wedged.
+            let mut guard = ConnectStateGuard::new(state.clone());
+
             let result = AsClient::new(
                 &client_policy,
                 &hosts_str as &(dyn aerospike_core::ToHosts + Send + Sync),
@@ -153,11 +205,15 @@ impl PyAsyncClient {
             match result {
                 Ok(client) => {
                     inner.store(Some(Arc::new(client)));
+                    // We own the terminal transition now; disarm the guard so
+                    // its Drop cannot revert CONNECTED back to DISCONNECTED.
+                    guard.disarm();
                     state.store(CONNECTED, Ordering::SeqCst);
                     Ok(())
                 }
                 Err(e) => {
                     // Revert to Disconnected so retry is possible.
+                    guard.disarm();
                     state.store(DISCONNECTED, Ordering::SeqCst);
                     Err(as_to_pyerr(e))
                 }
@@ -1466,5 +1522,59 @@ impl PyAsyncClient {
         future_into_py(py, async move {
             client_ops::do_index_create(&client, args).await
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_guard_reverts_stuck_connecting_on_drop() {
+        // Simulates a connect() awaitable that is dropped (cancelled / GC'd)
+        // before reaching its terminal arm: the guard's Drop must revert
+        // CONNECTING -> DISCONNECTED so the client is not wedged.
+        let state = Arc::new(AtomicU8::new(CONNECTING));
+        {
+            let _guard = ConnectStateGuard::new(state.clone());
+            assert_eq!(state.load(Ordering::SeqCst), CONNECTING);
+        }
+        assert_eq!(
+            state.load(Ordering::SeqCst),
+            DISCONNECTED,
+            "dropping an armed guard must revert CONNECTING to DISCONNECTED"
+        );
+    }
+
+    #[test]
+    fn connect_guard_disarm_preserves_connected_state() {
+        // On the success path the future disarms the guard and stores
+        // CONNECTED; the guard's Drop must not revert that.
+        let state = Arc::new(AtomicU8::new(CONNECTING));
+        {
+            let mut guard = ConnectStateGuard::new(state.clone());
+            guard.disarm();
+            state.store(CONNECTED, Ordering::SeqCst);
+        }
+        assert_eq!(
+            state.load(Ordering::SeqCst),
+            CONNECTED,
+            "a disarmed guard must not revert a CONNECTED state"
+        );
+    }
+
+    #[test]
+    fn connect_guard_never_clobbers_non_connecting_state() {
+        // If the state has already advanced past CONNECTING (e.g. a racing
+        // transition), an armed guard's CAS must be a no-op.
+        for terminal in [DISCONNECTED, CONNECTED, CLOSING] {
+            let state = Arc::new(AtomicU8::new(terminal));
+            drop(ConnectStateGuard::new(state.clone()));
+            assert_eq!(
+                state.load(Ordering::SeqCst),
+                terminal,
+                "armed guard must only act on CONNECTING, not state {terminal}"
+            );
+        }
     }
 }

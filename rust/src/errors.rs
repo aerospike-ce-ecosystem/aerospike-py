@@ -182,7 +182,12 @@ pyo3::create_exception!(
 
 /// Map an `aerospike_core::ResultCode` to its integer wire-protocol value.
 ///
-/// Unknown variants are passed through; truly unrecognized variants return `-1`.
+/// Every variant is mapped explicitly to the wire code defined in the server's
+/// `proto.h` (mirroring `ResultCode::from_u8` in aerospike-core), so that
+/// `BatchRecord.result` and error messages always carry the real server code.
+/// `Unknown(code)` carries the raw byte through. The match is exhaustive — a
+/// new aerospike-core variant fails the build instead of silently collapsing
+/// to a meaningless `-1`.
 pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
     match rc {
         ResultCode::Ok => 0,
@@ -218,18 +223,117 @@ pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
         ResultCode::QueryEnd => 50,
         ResultCode::SecurityNotSupported => 51,
         ResultCode::SecurityNotEnabled => 52,
+        ResultCode::SecuritySchemeNotSupported => 53,
+        ResultCode::InvalidCommand => 54,
+        ResultCode::InvalidField => 55,
+        ResultCode::IllegalState => 56,
         ResultCode::InvalidUser => 60,
+        ResultCode::UserAlreadyExists => 61,
+        ResultCode::InvalidPassword => 62,
+        ResultCode::ExpiredPassword => 63,
+        ResultCode::ForbiddenPassword => 64,
+        ResultCode::InvalidCredential => 65,
+        ResultCode::ExpiredSession => 66,
+        ResultCode::InvalidRole => 70,
+        ResultCode::RoleAlreadyExists => 71,
+        ResultCode::InvalidPrivilege => 72,
+        ResultCode::InvalidAllowlist => 73,
+        ResultCode::QuotasNotEnabled => 74,
+        ResultCode::InvalidQuota => 75,
         ResultCode::NotAuthenticated => 80,
         ResultCode::RoleViolation => 81,
+        ResultCode::NotAllowlisted => 82,
+        ResultCode::QuotaExceeded => 83,
         ResultCode::UdfBadResponse => 100,
         ResultCode::BatchDisabled => 150,
+        ResultCode::BatchMaxRequestsExceeded => 151,
+        ResultCode::BatchQueuesFull => 152,
+        ResultCode::InvalidGeojson => 160,
         ResultCode::IndexFound => 200,
         ResultCode::IndexNotFound => 201,
+        ResultCode::IndexOom => 202,
+        ResultCode::IndexNotReadable => 203,
+        ResultCode::IndexGeneric => 204,
+        ResultCode::IndexNameMaxLen => 205,
+        ResultCode::IndexMaxCount => 206,
         ResultCode::QueryAborted => 210,
+        ResultCode::QueryQueueFull => 211,
         ResultCode::QueryTimeout => 212,
-        ResultCode::InvalidGeojson => 160,
+        ResultCode::QueryGeneric => 213,
+        ResultCode::QueryNetioErr => 214,
+        ResultCode::QueryDuplicate => 215,
         ResultCode::Unknown(code) => *code as i32,
-        _ => -1,
+    }
+}
+
+/// Map a server `ResultCode` (plus a pre-rendered message) to the most
+/// specific Python exception subclass.
+///
+/// Shared by every `aerospike_core::Error` variant that carries a
+/// `ResultCode` — `ServerError`, `BatchError`, and `BatchLastError` — so a
+/// batch failure surfaces the same exception type as the equivalent
+/// single-record failure (e.g. a batch server timeout becomes
+/// `AerospikeTimeoutError`, not a generic `ClientError`).
+fn result_code_to_pyerr(rc: &ResultCode, msg: String) -> PyErr {
+    match rc {
+        // Record-level: specific subclasses
+        ResultCode::KeyNotFoundError => RecordNotFound::new_err(msg),
+        ResultCode::KeyExistsError => RecordExistsError::new_err(msg),
+        ResultCode::GenerationError => RecordGenerationError::new_err(msg),
+        ResultCode::RecordTooBig => RecordTooBig::new_err(msg),
+        ResultCode::BinNameTooLong => BinNameError::new_err(msg),
+        ResultCode::BinExistsError => BinExistsError::new_err(msg),
+        ResultCode::BinNotFound => BinNotFound::new_err(msg),
+        ResultCode::BinTypeError => BinTypeError::new_err(msg),
+        ResultCode::FilteredOut => FilteredOut::new_err(msg),
+        ResultCode::ElementNotFound | ResultCode::ElementExists => RecordError::new_err(msg),
+        // Server-side timeout: a server timeout result code must surface
+        // as AerospikeTimeoutError so callers (and HTTP layers mapping
+        // AerospikeTimeoutError -> 504) handle it like a client timeout
+        // instead of an opaque 500-class ServerError.
+        ResultCode::Timeout | ResultCode::QueryTimeout => AerospikeTimeoutError::new_err(msg),
+        // Index
+        ResultCode::IndexFound => IndexFoundError::new_err(msg),
+        ResultCode::IndexNotFound => IndexNotFound::new_err(msg),
+        // Query
+        ResultCode::QueryAborted | ResultCode::ScanAbort => QueryAbortedError::new_err(msg),
+        // UDF
+        ResultCode::UdfBadResponse => UDFError::new_err(msg),
+        // Admin / Security — every security/auth/quota result code
+        // routes to AdminError so callers catching auth failures do
+        // not silently miss password/session/role/quota errors.
+        ResultCode::InvalidUser
+        | ResultCode::NotAuthenticated
+        | ResultCode::RoleViolation
+        | ResultCode::SecurityNotSupported
+        | ResultCode::SecurityNotEnabled
+        | ResultCode::SecuritySchemeNotSupported
+        | ResultCode::InvalidCommand
+        | ResultCode::InvalidField
+        | ResultCode::IllegalState
+        | ResultCode::UserAlreadyExists
+        | ResultCode::InvalidPassword
+        | ResultCode::ExpiredPassword
+        | ResultCode::ForbiddenPassword
+        | ResultCode::InvalidCredential
+        | ResultCode::ExpiredSession
+        | ResultCode::InvalidRole
+        | ResultCode::RoleAlreadyExists
+        | ResultCode::InvalidPrivilege
+        | ResultCode::InvalidAllowlist
+        | ResultCode::QuotasNotEnabled
+        | ResultCode::InvalidQuota
+        | ResultCode::NotAllowlisted
+        | ResultCode::QuotaExceeded => AdminError::new_err(msg),
+        // Default server error
+        _ => {
+            log::warn!(
+                "Unmapped ResultCode encountered in aerospike-py. \
+                 This may indicate aerospike-py needs updating for this server error code. \
+                 Error: {msg}"
+            );
+            ServerError::new_err(msg)
+        }
     }
 }
 
@@ -250,50 +354,18 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
             let code = result_code_to_int(rc);
             let doubt_suffix = if *in_doubt { " [in_doubt]" } else { "" };
             let msg = format!("AEROSPIKE_ERR ({code}): {err}{doubt_suffix}");
-            match rc {
-                // Record-level: specific subclasses
-                ResultCode::KeyNotFoundError => RecordNotFound::new_err(msg),
-                ResultCode::KeyExistsError => RecordExistsError::new_err(msg),
-                ResultCode::GenerationError => RecordGenerationError::new_err(msg),
-                ResultCode::RecordTooBig => RecordTooBig::new_err(msg),
-                ResultCode::BinNameTooLong => BinNameError::new_err(msg),
-                ResultCode::BinExistsError => BinExistsError::new_err(msg),
-                ResultCode::BinNotFound => BinNotFound::new_err(msg),
-                ResultCode::BinTypeError => BinTypeError::new_err(msg),
-                ResultCode::FilteredOut => FilteredOut::new_err(msg),
-                ResultCode::ElementNotFound | ResultCode::ElementExists => {
-                    RecordError::new_err(msg)
-                }
-                // Server-side timeout: a server timeout result code must surface
-                // as AerospikeTimeoutError so callers (and HTTP layers mapping
-                // AerospikeTimeoutError -> 504) handle it like a client timeout
-                // instead of an opaque 500-class ServerError.
-                ResultCode::Timeout | ResultCode::QueryTimeout => {
-                    AerospikeTimeoutError::new_err(msg)
-                }
-                // Index
-                ResultCode::IndexFound => IndexFoundError::new_err(msg),
-                ResultCode::IndexNotFound => IndexNotFound::new_err(msg),
-                // Query
-                ResultCode::QueryAborted | ResultCode::ScanAbort => QueryAbortedError::new_err(msg),
-                // UDF
-                ResultCode::UdfBadResponse => UDFError::new_err(msg),
-                // Admin / Security
-                ResultCode::InvalidUser
-                | ResultCode::NotAuthenticated
-                | ResultCode::RoleViolation
-                | ResultCode::SecurityNotSupported
-                | ResultCode::SecurityNotEnabled => AdminError::new_err(msg),
-                // Default server error
-                _ => {
-                    log::warn!(
-                        "Unmapped ResultCode encountered in aerospike-py. \
-                         This may indicate aerospike-py needs updating for this server error code. \
-                         Error: {msg}"
-                    );
-                    ServerError::new_err(msg)
-                }
-            }
+            result_code_to_pyerr(rc, msg)
+        }
+        // Batch errors carry a real server ResultCode. Route them through the
+        // same mapping as ServerError so a batch KeyNotFoundError / Timeout /
+        // auth failure raises the precise exception type instead of falling
+        // through to a generic ClientError plus a spurious bug-report log.
+        AsError::BatchError(idx, rc, in_doubt, _msg)
+        | AsError::BatchLastError(idx, rc, in_doubt, _msg) => {
+            let code = result_code_to_int(rc);
+            let doubt_suffix = if *in_doubt { " [in_doubt]" } else { "" };
+            let msg = format!("AEROSPIKE_ERR ({code}) [batch_index={idx}]: {err}{doubt_suffix}");
+            result_code_to_pyerr(rc, msg)
         }
         AsError::InvalidNode(msg) => ClusterError::new_err(format!("Invalid node: {msg}")),
         AsError::NoMoreConnections => ClusterError::new_err("No more connections available"),
@@ -402,6 +474,84 @@ mod tests {
     }
 
     #[test]
+    fn test_result_code_to_int_previously_unmapped_codes() {
+        // These variants previously collapsed to the meaningless `-1` catch-all,
+        // so BatchRecord.result and error messages lost the real wire code.
+        // Each must now carry its proto.h wire value.
+        assert_eq!(
+            result_code_to_int(&ResultCode::BatchMaxRequestsExceeded),
+            151
+        );
+        assert_eq!(result_code_to_int(&ResultCode::BatchQueuesFull), 152);
+        assert_eq!(result_code_to_int(&ResultCode::IndexOom), 202);
+        assert_eq!(result_code_to_int(&ResultCode::IndexNotReadable), 203);
+        assert_eq!(result_code_to_int(&ResultCode::IndexGeneric), 204);
+        assert_eq!(result_code_to_int(&ResultCode::IndexNameMaxLen), 205);
+        assert_eq!(result_code_to_int(&ResultCode::IndexMaxCount), 206);
+        assert_eq!(result_code_to_int(&ResultCode::QueryQueueFull), 211);
+        assert_eq!(result_code_to_int(&ResultCode::QueryGeneric), 213);
+        assert_eq!(result_code_to_int(&ResultCode::QueryNetioErr), 214);
+        assert_eq!(result_code_to_int(&ResultCode::QueryDuplicate), 215);
+        assert_eq!(result_code_to_int(&ResultCode::ExpiredSession), 66);
+        assert_eq!(result_code_to_int(&ResultCode::InvalidPassword), 62);
+        assert_eq!(result_code_to_int(&ResultCode::QuotaExceeded), 83);
+        assert_eq!(result_code_to_int(&ResultCode::UserAlreadyExists), 61);
+        assert_eq!(result_code_to_int(&ResultCode::IllegalState), 56);
+    }
+
+    #[test]
+    fn test_result_code_to_int_no_longer_returns_minus_one() {
+        // The `-1` catch-all is gone. Every named variant must map to its real
+        // non-negative wire code; only an `Unknown` byte can still be passed
+        // through verbatim. Spot-check a representative variant from each range.
+        for rc in [
+            ResultCode::Ok,
+            ResultCode::ServerError,
+            ResultCode::Timeout,
+            ResultCode::ElementExists,
+            ResultCode::XDRKeyBusy,
+            ResultCode::QueryEnd,
+            ResultCode::IllegalState,
+            ResultCode::ExpiredSession,
+            ResultCode::QuotaExceeded,
+            ResultCode::UdfBadResponse,
+            ResultCode::BatchQueuesFull,
+            ResultCode::InvalidGeojson,
+            ResultCode::IndexMaxCount,
+            ResultCode::QueryDuplicate,
+        ] {
+            assert!(
+                result_code_to_int(&rc) >= 0,
+                "result_code_to_int must not return -1 for {rc:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_security_result_codes_map_to_admin_error() {
+        // Password/session/role/quota security codes must surface as AdminError
+        // so callers catching auth failures do not silently miss them.
+        Python::initialize();
+        Python::attach(|py| {
+            for rc in [
+                ResultCode::InvalidPassword,
+                ResultCode::ExpiredSession,
+                ResultCode::InvalidCredential,
+                ResultCode::UserAlreadyExists,
+                ResultCode::InvalidRole,
+                ResultCode::QuotaExceeded,
+                ResultCode::NotAllowlisted,
+            ] {
+                let err = as_to_pyerr(AsError::ServerError(rc, false, String::new()));
+                assert!(
+                    err.is_instance_of::<AdminError>(py),
+                    "security result code {rc:?} must map to AdminError"
+                );
+            }
+        });
+    }
+
+    #[test]
     fn test_server_timeout_maps_to_timeout_error() {
         // A server-side Timeout result code must surface as AerospikeTimeoutError,
         // not the generic ServerError it previously fell through to.
@@ -431,6 +581,72 @@ mod tests {
             assert!(
                 err.is_instance_of::<AerospikeTimeoutError>(py),
                 "QueryTimeout result code must map to AerospikeTimeoutError"
+            );
+        });
+    }
+
+    #[test]
+    fn test_batch_error_maps_by_result_code() {
+        // BatchError / BatchLastError carry a real server ResultCode and must
+        // map to the same precise exception type as ServerError, instead of
+        // collapsing to a generic ClientError.
+        Python::initialize();
+        Python::attach(|py| {
+            let not_found = as_to_pyerr(AsError::BatchError(
+                3,
+                ResultCode::KeyNotFoundError,
+                false,
+                "node".into(),
+            ));
+            assert!(
+                not_found.is_instance_of::<RecordNotFound>(py),
+                "batch KeyNotFoundError must map to RecordNotFound"
+            );
+
+            let timeout = as_to_pyerr(AsError::BatchLastError(
+                0,
+                ResultCode::Timeout,
+                true,
+                "node".into(),
+            ));
+            assert!(
+                timeout.is_instance_of::<AerospikeTimeoutError>(py),
+                "batch Timeout must map to AerospikeTimeoutError"
+            );
+
+            let big = as_to_pyerr(AsError::BatchError(
+                7,
+                ResultCode::RecordTooBig,
+                false,
+                "node".into(),
+            ));
+            assert!(
+                big.is_instance_of::<RecordTooBig>(py),
+                "batch RecordTooBig must map to RecordTooBig"
+            );
+        });
+    }
+
+    #[test]
+    fn test_batch_error_message_includes_index_and_in_doubt() {
+        // The rendered message must surface the batch index and the in_doubt
+        // flag so callers can retry/diagnose the failed sub-request.
+        Python::initialize();
+        Python::attach(|py| {
+            let err = as_to_pyerr(AsError::BatchLastError(
+                5,
+                ResultCode::ServerError,
+                true,
+                "node".into(),
+            ));
+            let text = err.value(py).to_string();
+            assert!(
+                text.contains("batch_index=5"),
+                "batch error message must include the batch index: {text}"
+            );
+            assert!(
+                text.contains("in_doubt"),
+                "in_doubt batch error message must be flagged: {text}"
             );
         });
     }

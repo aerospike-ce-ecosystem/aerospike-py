@@ -4,7 +4,10 @@ Covers:
 - Double-connect error for both Client and AsyncClient
 - Close on disconnected client is idempotent
 - Operations on closed client raise ClientError
+- AsyncClient.connect() cancellation does not wedge the state machine
 """
+
+import asyncio
 
 import pytest
 
@@ -76,5 +79,47 @@ class TestAsyncClientLifecycle:
     async def test_is_connected_false_after_close(self):
         """is_connected() should return False after close()."""
         c = aerospike_py.AsyncClient(DUMMY_CONFIG)
+        await c.close()
+        assert c.is_connected() is False
+
+    async def test_cancelled_connect_does_not_wedge_state(self):
+        """A cancelled connect() must revert to Disconnected, not stay stuck.
+
+        Previously, cancelling an in-flight ``connect()`` (e.g. via
+        ``asyncio.wait_for`` timeout) left the client permanently in the
+        ``CONNECTING`` state: both ``connect()`` and ``close()`` then refused
+        to proceed and the client could never be recovered. The native
+        connect future now reverts ``CONNECTING -> DISCONNECTED`` on drop.
+        """
+        c = aerospike_py.AsyncClient(DUMMY_CONFIG)
+
+        # Drive connect() to a dead port and cancel it almost immediately so
+        # the underlying future is dropped while still mid-connect.
+        with pytest.raises((asyncio.TimeoutError, aerospike_py.AerospikeError)):
+            await asyncio.wait_for(c.connect(), timeout=0.001)
+
+        # Give the cancelled future a chance to be dropped and run its guard.
+        await asyncio.sleep(0.05)
+
+        # The client must not be wedged: close() must succeed (idempotent or
+        # real), and a fresh connect() must be allowed to run again rather
+        # than failing with "client is already connecting".
+        await c.close()  # must not raise "client is currently connecting"
+        with pytest.raises(aerospike_py.AerospikeError) as excinfo:
+            await c.connect()
+        assert "already connecting" not in str(excinfo.value), (
+            "connect() after a cancelled connect must not see a wedged CONNECTING state"
+        )
+
+    async def test_close_after_cancelled_connect_is_not_blocked(self):
+        """close() must recover a client whose connect() was cancelled."""
+        c = aerospike_py.AsyncClient(DUMMY_CONFIG)
+        task = asyncio.ensure_future(c.connect())
+        await asyncio.sleep(0)  # let the connect future start
+        task.cancel()
+        with pytest.raises((asyncio.CancelledError, aerospike_py.AerospikeError)):
+            await task
+        await asyncio.sleep(0.05)
+        # close() must not raise "client is currently connecting".
         await c.close()
         assert c.is_connected() is False
