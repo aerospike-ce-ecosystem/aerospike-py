@@ -673,6 +673,23 @@ unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyRes
     }
     // SAFETY: caller guarantees row_ptr + field.offset is valid and within bounds
     let src = unsafe { row_ptr.add(field.offset) };
+
+    // Sub-array numeric field (e.g. ('vec','(4,)f8')): the field spans
+    // `itemsize` bytes across multiple base elements. A scalar read would
+    // capture only `base_itemsize` bytes and silently drop the rest, so
+    // read all `itemsize` bytes into a Blob — mirroring the write path,
+    // which routes such fields through `write_bytes_to_buffer`.
+    if matches!(
+        field.kind,
+        DtypeKind::Int | DtypeKind::Uint | DtypeKind::Float
+    ) && field.itemsize > field.base_itemsize
+    {
+        let mut buf = vec![0u8; field.itemsize];
+        // SAFETY: src points to at least field.itemsize bytes of readable memory
+        unsafe { ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), field.itemsize) };
+        return Ok(Value::Blob(buf));
+    }
+
     match field.kind {
         DtypeKind::Int => {
             let v = match field.base_itemsize {
@@ -1657,5 +1674,95 @@ def make_reverse_slice():
             _ => original.clone(),
         };
         assert_eq!(result, Value::Blob(b"exact".to_vec()));
+    }
+
+    /// Regression test for the sub-array data-loss bug: a structured-dtype
+    /// field that is a numeric sub-array (e.g. ('vec','(4,)f8') →
+    /// kind=Float, base_itemsize=8, itemsize=32) must round-trip ALL
+    /// `itemsize` bytes through write → read. Before the fix, the read path
+    /// matched only on `base_itemsize` and returned a single scalar,
+    /// silently dropping all but the first base element.
+    #[test]
+    fn test_subarray_float_write_read_roundtrip() {
+        // 4-element f64 sub-array: base_itemsize=8, itemsize=32.
+        let field = FieldInfo {
+            name: "vec".to_string(),
+            offset: 0,
+            itemsize: 32,
+            base_itemsize: 8,
+            kind: DtypeKind::Float,
+        };
+        let mut buf = [0u8; 32];
+
+        // Source payload: 4 distinct f64 values laid out contiguously.
+        let values = [1.5_f64, -2.25, 3.125, 4.0e10];
+        let mut payload = Vec::with_capacity(32);
+        for v in values {
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+
+        unsafe {
+            // WRITE path: a Blob whose len equals itemsize routes through
+            // write_bytes_to_buffer for sub-array numeric fields.
+            write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Blob(payload.clone()))
+                .expect("sub-array blob write should succeed");
+
+            // READ path: must return all 32 bytes, not a single 8-byte scalar.
+            let read = read_value_from_buffer(buf.as_ptr(), &field)
+                .expect("sub-array read should succeed");
+
+            match read {
+                Value::Blob(bytes) => {
+                    assert_eq!(
+                        bytes.len(),
+                        32,
+                        "sub-array read must preserve all {} bytes, not just base_itemsize",
+                        field.itemsize
+                    );
+                    assert_eq!(bytes, payload, "sub-array bytes must round-trip exactly");
+                }
+                other => panic!("expected Value::Blob for sub-array field, got {other:?}"),
+            }
+        }
+    }
+
+    /// Same round-trip guarantee for an integer sub-array.
+    #[test]
+    fn test_subarray_int_write_read_roundtrip() {
+        // 3-element i32 sub-array: base_itemsize=4, itemsize=12.
+        let field = FieldInfo {
+            name: "ids".to_string(),
+            offset: 0,
+            itemsize: 12,
+            base_itemsize: 4,
+            kind: DtypeKind::Int,
+        };
+        let mut buf = [0u8; 12];
+
+        let values = [10_i32, -20, 30];
+        let mut payload = Vec::with_capacity(12);
+        for v in values {
+            payload.extend_from_slice(&v.to_le_bytes());
+        }
+
+        unsafe {
+            write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Blob(payload.clone()))
+                .expect("sub-array int blob write should succeed");
+
+            let read = read_value_from_buffer(buf.as_ptr(), &field)
+                .expect("sub-array int read should succeed");
+
+            match read {
+                Value::Blob(bytes) => {
+                    assert_eq!(
+                        bytes.len(),
+                        12,
+                        "int sub-array read must preserve all bytes"
+                    );
+                    assert_eq!(bytes, payload);
+                }
+                other => panic!("expected Value::Blob for int sub-array field, got {other:?}"),
+            }
+        }
     }
 }
