@@ -75,12 +75,23 @@ pub struct PyBatchRecord {
 impl PyBatchRecord {
     /// Lazily convert the record to Python `(key, meta, bins)` tuple.
     /// Returns `None` if the record was not found.
+    ///
+    /// A poisoned `record_cell` mutex means a previous lazy conversion
+    /// panicked mid-flight (e.g. a legacy language-specific blob particle
+    /// type that `aerospike-core` cannot decode — see issue #280). Rather
+    /// than silently recovering and re-running the same conversion that
+    /// already crashed, surface a clear [`RustPanicError`] so callers know
+    /// this batch record's data is unrecoverable.
     #[getter]
     fn record(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        self.record_cell
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .to_python(py)
+        let mut guard = self.record_cell.lock().map_err(|_| {
+            crate::errors::RustPanicError::new_err(
+                "BatchRecord.record conversion previously panicked; this batch \
+                 record's data is unrecoverable (likely a legacy blob particle \
+                 type aerospike-core cannot decode — see issue #280)",
+            )
+        })?;
+        guard.to_python(py)
     }
 }
 
@@ -490,6 +501,45 @@ mod tests {
         // SAFETY: `BatchRecordMirror` mirrors `BatchRecord`'s field types and
         // order exactly; size + alignment are asserted above. Test-only.
         unsafe { std::mem::transmute(mirror) }
+    }
+
+    /// A poisoned `record_cell` mutex (left behind by a panic during a
+    /// previous lazy conversion) must surface as a `RustPanicError` rather
+    /// than being silently recovered. Without the fix the getter calls
+    /// `unwrap_or_else(|e| e.into_inner())` and returns `Ok(...)`.
+    #[test]
+    fn record_getter_rejects_poisoned_cell() {
+        Python::initialize();
+        Python::attach(|py| {
+            let br = Py::new(
+                py,
+                PyBatchRecord {
+                    key: py.None(),
+                    result: 0,
+                    record_cell: Mutex::new(LazyRecordCell::None),
+                    in_doubt: false,
+                },
+            )
+            .expect("construct PyBatchRecord");
+
+            // Poison the mutex by panicking while holding the lock.
+            let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cell = br.borrow(py);
+                let _g = cell.record_cell.lock().unwrap();
+                panic!("synthetic conversion panic");
+            }))
+            .is_err();
+            assert!(poisoned, "panic must unwind to poison the mutex");
+
+            let cell = br.borrow(py);
+            let err = cell
+                .record(py)
+                .expect_err("poisoned cell must surface an error");
+            assert!(
+                err.is_instance_of::<crate::errors::RustPanicError>(py),
+                "poisoned record_cell must raise RustPanicError"
+            );
+        });
     }
 
     /// `collect_user_keys` returns every key for a normal batch, preserving
