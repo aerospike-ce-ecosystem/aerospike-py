@@ -77,7 +77,10 @@ impl PyBatchRecord {
     /// Returns `None` if the record was not found.
     #[getter]
     fn record(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        self.record_cell.lock().unwrap().to_python(py)
+        self.record_cell
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .to_python(py)
     }
 }
 

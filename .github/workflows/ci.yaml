@@ -74,6 +74,12 @@ jobs:
       - name: Run pre-commit
         run: uvx pre-commit run --all-files
 
+      # Mirrors the cargo-clippy pre-commit hook's manifest path / features so
+      # the Rust #[cfg(test)] suites actually execute in CI (previously they
+      # never ran — only pre-commit, clippy, and Python tox did).
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path rust/Cargo.toml --features otel
+
   build:
     name: Build & Unit Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

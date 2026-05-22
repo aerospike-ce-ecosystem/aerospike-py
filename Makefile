@@ -75,6 +75,10 @@ test-compat: build run-aerospike-ce ## Run compatibility tests (vs official C cl
 test-all: build run-aerospike-ce ## Run all tests
 	uvx --with tox-uv tox -e all
 
+.PHONY: test-rust
+test-rust: ## Run Rust unit tests (cargo test, no server needed)
+	cargo test --manifest-path rust/Cargo.toml --features otel
+
 .PHONY: test-matrix
 test-matrix: build ## Run unit tests across all Python versions
 	uvx --with tox-uv tox
