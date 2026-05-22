@@ -293,6 +293,21 @@ fn values_from_list(val: &Value) -> Vec<Value> {
     }
 }
 
+/// Resolve the `val` of a `list_increment` op to the i64 increment amount.
+///
+/// Mirrors the bit-op (`OP_BIT_ADD`/`OP_BIT_SUBTRACT`) handling: a missing or
+/// `Nil` `val` defaults to `+1`; an integer `val` is used as-is; any other type
+/// is a type error rather than being silently collapsed to `1`.
+fn parse_increment_value(val: &Option<Value>) -> PyResult<i64> {
+    match val {
+        None | Some(Value::Nil) => Ok(1),
+        Some(Value::Int(i)) => Ok(*i),
+        Some(other) => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "list_increment requires an integer value, got {other:?}"
+        ))),
+    }
+}
+
 /// Parse an operation flag value that should be a small integer (i32).
 ///
 /// Missing/None values default to `0`.
@@ -556,10 +571,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "list_increment")?;
                 let policy = parse_list_policy(dict)?;
                 let index = get_index(dict)?;
-                let v: i64 = match &val {
-                    Some(Value::Int(i)) => *i,
-                    _ => 1,
-                };
+                let v: i64 = parse_increment_value(&val)?;
                 list_ops::increment(&policy, &name, index, v)
             }
             OP_LIST_SORT => {
@@ -1053,7 +1065,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
 
 #[cfg(test)]
 mod tests {
-    use super::parse_i32_flag;
+    use super::{parse_i32_flag, parse_increment_value};
     use aerospike_core::Value;
     use pyo3::{exceptions::PyTypeError, exceptions::PyValueError, PyErr, Python};
 
@@ -1098,5 +1110,45 @@ mod tests {
         Python::attach(|py| {
             assert!(err.is_instance_of::<PyTypeError>(py));
         });
+    }
+
+    #[test]
+    fn parse_increment_value_defaults_to_one_for_missing_or_nil() {
+        assert_eq!(
+            parse_increment_value(&None).expect("None should default to +1"),
+            1
+        );
+        assert_eq!(
+            parse_increment_value(&Some(Value::Nil)).expect("Nil should default to +1"),
+            1
+        );
+    }
+
+    #[test]
+    fn parse_increment_value_uses_int_as_is() {
+        assert_eq!(
+            parse_increment_value(&Some(Value::Int(5))).expect("int should be used as-is"),
+            5
+        );
+        assert_eq!(
+            parse_increment_value(&Some(Value::Int(-3))).expect("negative int should be used"),
+            -3
+        );
+    }
+
+    #[test]
+    fn parse_increment_value_rejects_non_int() {
+        Python::initialize();
+        for bad in [
+            Value::String("1".to_string()),
+            Value::Float(aerospike_core::FloatValue::from(1.5_f64)),
+            Value::Bool(true),
+        ] {
+            let err: PyErr = parse_increment_value(&Some(bad))
+                .expect_err("non-int value should raise instead of defaulting to +1");
+            Python::attach(|py| {
+                assert!(err.is_instance_of::<PyValueError>(py));
+            });
+        }
     }
 }

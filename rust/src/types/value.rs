@@ -31,8 +31,16 @@ fn py_to_value_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
         return Ok(Value::Bool(b.is_true()));
     }
     if let Ok(i) = obj.cast::<PyInt>() {
-        let val: i64 = i.extract()?;
-        return Ok(Value::Int(val));
+        // Aerospike's integer particle is a 64-bit two's-complement value.
+        // Accept Python ints in [2^63, 2^64-1] (e.g. large unsigned values written
+        // by the official C client) by bit-reinterpreting them as i64.
+        match i.extract::<i64>() {
+            Ok(val) => return Ok(Value::Int(val)),
+            Err(i64_err) => match i.extract::<u64>() {
+                Ok(u) => return Ok(Value::Int(u as i64)),
+                Err(_) => return Err(i64_err),
+            },
+        }
     }
     if let Ok(f) = obj.cast::<PyFloat>() {
         let val: f64 = f.extract()?;
@@ -113,5 +121,60 @@ pub fn value_to_py(py: Python<'_>, val: &Value) -> PyResult<Py<PyAny>> {
         Value::HLL(b) => Ok(PyBytes::new(py, b).into_any().unbind()),
         Value::Infinity => Ok(py.None()),
         Value::Wildcard => Ok(py.None()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `i64`-range ints convert as-is.
+    #[test]
+    fn py_to_value_accepts_i64_range_ints() {
+        Python::initialize();
+        Python::attach(|py| {
+            for n in [0_i64, 1, -1, i64::MAX, i64::MIN] {
+                let obj = n.into_pyobject(py).expect("int");
+                match py_to_value(&obj.into_any()).expect("i64 should convert") {
+                    Value::Int(v) => assert_eq!(v, n),
+                    other => panic!("expected Value::Int, got {other:?}"),
+                }
+            }
+        });
+    }
+
+    /// Python ints in `[2^63, 2^64-1]` (e.g. large unsigned values from the
+    /// official C client) are bit-reinterpreted into the i64 integer particle
+    /// instead of being rejected with OverflowError.
+    #[test]
+    fn py_to_value_accepts_uint64_range_ints() {
+        Python::initialize();
+        Python::attach(|py| {
+            for u in [1_u64 << 63, u64::MAX, (1_u64 << 63) + 12345] {
+                let obj = u.into_pyobject(py).expect("uint");
+                match py_to_value(&obj.into_any()).expect("u64 should convert") {
+                    Value::Int(v) => assert_eq!(v as u64, u, "bit-reinterpretation round-trip"),
+                    other => panic!("expected Value::Int, got {other:?}"),
+                }
+            }
+        });
+    }
+
+    /// Ints that fit neither i64 nor u64 still propagate the original error.
+    #[test]
+    fn py_to_value_rejects_ints_beyond_uint64() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Build `2**64` (one past the u64 ceiling) as a Python int.
+            let max_u64 = u64::MAX.into_pyobject(py).expect("u64::MAX");
+            let one = 1_u64.into_pyobject(py).expect("one");
+            let huge = max_u64
+                .add(one)
+                .expect("u64::MAX + 1 is a valid Python big int");
+            assert!(
+                py_to_value(&huge).is_err(),
+                "values beyond u64 range must still raise"
+            );
+        });
     }
 }
