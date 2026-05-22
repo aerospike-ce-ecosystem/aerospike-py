@@ -193,6 +193,7 @@ Used by: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`,
 | `socket_timeout` | `int` | `30000` | Socket timeout (ms) |
 | `total_timeout` | `int` | `1000` | Total transaction timeout (ms) |
 | `max_retries` | `int` | `0` | Max retries |
+| `sleep_between_retries` | `int` | `0` | Sleep between retries (ms) |
 | `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
 | `durable_delete` | `bool` | `false` | Durable delete (Enterprise) |
 | `key` | `int` | `POLICY_KEY_DIGEST` | Key send policy |
@@ -215,6 +216,7 @@ Used by: `batch_read()`, `batch_operate()`, `batch_write()`, `batch_remove()`
 | `socket_timeout` | `int` | `30000` | Socket timeout (ms) |
 | `total_timeout` | `int` | `1000` | Total transaction timeout (ms) |
 | `max_retries` | `int` | `2` | Max retries |
+| `sleep_between_retries` | `int` | `0` | Sleep between retries (ms) |
 | `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
 | `concurrency` | `int` | `BATCH_CONCURRENCY_PARALLEL` | Per-node dispatch mode: `BATCH_CONCURRENCY_SEQUENTIAL` (one node at a time) or `BATCH_CONCURRENCY_PARALLEL` (all nodes in parallel — default). See [Batch Concurrency constants](constants.md#batch-concurrency). Other values raise `ValueError`. |
 | `filter_expression` | `Any` | | Expression filter |
@@ -247,6 +249,7 @@ Used by: `Query.results()`, `Query.foreach()`
 | `socket_timeout` | `int` | `30000` | Socket timeout (ms) |
 | `total_timeout` | `int` | `0` | Total timeout (0 = no limit) |
 | `max_retries` | `int` | `2` | Max retries |
+| `sleep_between_retries` | `int` | `0` | Sleep between retries (ms) |
 | `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
 | `max_records` | `int` | `0` | Max records (0 = all) |
 | `records_per_second` | `int` | `0` | Rate limit per node (0 = unlimited). |
@@ -269,6 +272,7 @@ Used by: `client.scan()` and `client.query()` invocations without a `where()` pr
 | `socket_timeout` | `int` | `30000` | Socket timeout (ms). |
 | `total_timeout` | `int` | `0` | Total timeout (0 = no limit). |
 | `max_retries` | `int` | `2` | Max retries. |
+| `sleep_between_retries` | `int` | `0` | Sleep between retries (ms). |
 | `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
 | `filter_expression` | `Any` | | Expression filter. |
 | `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | Replica selection. |

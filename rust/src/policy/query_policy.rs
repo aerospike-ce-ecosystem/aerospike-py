@@ -32,6 +32,7 @@ pub fn parse_query_policy(
         "socket_timeout" => policy.base_policy.socket_timeout;
         "total_timeout" => policy.base_policy.total_timeout;
         "max_retries" => policy.base_policy.max_retries;
+        "sleep_between_retries" => policy.base_policy.sleep_between_retries;
         "timeout_delay" => policy.base_policy.timeout_delay;
         "max_records" => policy.max_records;
         "records_per_second" => policy.records_per_second;
@@ -105,6 +106,18 @@ mod tests {
             });
             let (p, _) = parse_query_policy(Some(&d)).unwrap();
             assert_eq!(p.base_policy.timeout_delay, 500);
+        });
+    }
+
+    #[test]
+    fn parse_query_policy_with_sleep_between_retries() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("sleep_between_retries", 250u32).unwrap();
+            });
+            let (p, _) = parse_query_policy(Some(&d)).unwrap();
+            assert_eq!(p.base_policy.sleep_between_retries, 250);
         });
     }
 
