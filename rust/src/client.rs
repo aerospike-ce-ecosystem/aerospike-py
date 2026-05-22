@@ -472,7 +472,9 @@ impl PyClient {
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let client = self.get_client()?;
+        // Validate arguments (key shape, numeric offset) before the connection
+        // check so a malformed call fails the same way whether or not the
+        // client is connected — mirroring `put`.
         let args = client_common::prepare_increment_args(
             py,
             key,
@@ -482,6 +484,7 @@ impl PyClient {
             policy,
             &self.connection_info,
         )?;
+        let client = self.get_client()?;
         debug!(
             "increment: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin

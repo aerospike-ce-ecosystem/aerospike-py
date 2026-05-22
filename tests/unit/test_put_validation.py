@@ -4,6 +4,7 @@ Covers:
 - #118: put(key, None) should raise TypeError, not RecordNotFound
 - put(key, non_dict) should raise TypeError
 - key tuple shape validation (explicit digest length, tuple arity)
+- increment() offset must be numeric (int/float), not silently shipped
 """
 
 import pytest
@@ -73,3 +74,43 @@ def test_put_oversized_key_tuple_raises():
     key = ("test", "demo", "k1", b"\x00" * 20, "extra")
     with pytest.raises(ValueError, match="3 or 4 elements"):
         c.put(key, {"v": 1})
+
+
+@pytest.mark.parametrize(
+    "bad_offset,desc",
+    [
+        ("5", "string"),
+        ([1, 2], "list"),
+        ({"a": 1}, "dict"),
+        (b"\x01", "bytes"),
+        (True, "bool"),
+        (None, "None"),
+    ],
+    ids=["string", "list", "dict", "bytes", "bool", "None"],
+)
+def test_increment_non_numeric_offset_raises_type_error(bad_offset, desc):
+    """increment(key, bin, offset) must reject a non-numeric offset.
+
+    The documented signature is ``offset: Union[int, float]``. A non-numeric
+    offset was previously converted through the generic value path and shipped
+    to the server, which then failed the ``add`` op with an opaque
+    ``BinTypeError`` instead of a clear client-side error. A Python ``bool`` is
+    rejected too: ``increment(key, bin, True)`` is far more likely a mistake
+    than an intentional ``+1``.
+    """
+    c = _make_client()
+    with pytest.raises(TypeError):
+        c.increment(("test", "demo", "k1"), "counter", bad_offset)
+
+
+@pytest.mark.parametrize("good_offset", [1, -3, 0, 2**40, 0.5, -1.25])
+def test_increment_numeric_offset_passes_validation(good_offset):
+    """A numeric offset passes client-side validation.
+
+    No server is connected, so the call fails later with a client/cluster
+    error — but never with a TypeError about the offset type.
+    """
+    c = _make_client()
+    with pytest.raises(aerospike_py.AerospikeError) as exc_info:
+        c.increment(("test", "demo", "k1"), "counter", good_offset)
+    assert not isinstance(exc_info.value, TypeError)

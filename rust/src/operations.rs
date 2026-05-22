@@ -268,12 +268,24 @@ fn get_resize_flags(dict: &Bound<'_, PyDict>) -> PyResult<Option<BitwiseResizeFl
         .get_item("resize_flags")?
         .map(|v| v.extract())
         .transpose()?;
-    Ok(flags.map(|f| match f {
-        1 => BitwiseResizeFlags::FromFront,
-        2 => BitwiseResizeFlags::GrowOnly,
-        4 => BitwiseResizeFlags::ShrinkOnly,
-        _ => BitwiseResizeFlags::Default,
-    }))
+    // `BitwiseResizeFlags` is a plain enum in aerospike-core — it cannot
+    // represent OR-composed flags. An unrecognized value (e.g. the composed
+    // `GROW_ONLY | FROM_FRONT` == 3) previously collapsed to `Default`,
+    // silently dropping every requested flag — a resize meant to grow-only
+    // could then shrink and truncate data. Reject it loudly instead.
+    flags
+        .map(|f| match f {
+            0 => Ok(BitwiseResizeFlags::Default),
+            1 => Ok(BitwiseResizeFlags::FromFront),
+            2 => Ok(BitwiseResizeFlags::GrowOnly),
+            4 => Ok(BitwiseResizeFlags::ShrinkOnly),
+            other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "bit_resize 'resize_flags' must be a single flag \
+                 (0=DEFAULT, 1=FROM_FRONT, 2=GROW_ONLY, 4=SHRINK_ONLY); \
+                 OR-composed values are not supported, got {other}"
+            ))),
+        })
+        .transpose()
 }
 
 fn get_scan_value(dict: &Bound<'_, PyDict>) -> PyResult<bool> {
@@ -1081,9 +1093,58 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_i32_flag, parse_increment_value};
+    use super::{get_resize_flags, parse_i32_flag, parse_increment_value};
+    use aerospike_core::operations::bitwise::BitwiseResizeFlags;
     use aerospike_core::Value;
+    use pyo3::types::PyDict;
     use pyo3::{exceptions::PyTypeError, exceptions::PyValueError, PyErr, Python};
+
+    #[test]
+    fn get_resize_flags_accepts_known_single_flags() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Missing key -> None (no flags requested).
+            let empty = PyDict::new(py);
+            assert!(get_resize_flags(&empty)
+                .expect("missing resize_flags is fine")
+                .is_none());
+
+            for (raw, expected) in [
+                (0, BitwiseResizeFlags::Default),
+                (1, BitwiseResizeFlags::FromFront),
+                (2, BitwiseResizeFlags::GrowOnly),
+                (4, BitwiseResizeFlags::ShrinkOnly),
+            ] {
+                let d = PyDict::new(py);
+                d.set_item("resize_flags", raw).unwrap();
+                let got = get_resize_flags(&d)
+                    .expect("known flag should parse")
+                    .expect("flag is present");
+                // BitwiseResizeFlags is not PartialEq; compare via discriminant.
+                assert_eq!(
+                    std::mem::discriminant(&got),
+                    std::mem::discriminant(&expected),
+                    "resize_flags {raw} should map to the matching flag"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn get_resize_flags_rejects_composed_or_unknown_value() {
+        Python::initialize();
+        Python::attach(|py| {
+            // 3 == GROW_ONLY | FROM_FRONT — must fail loudly, not silently
+            // collapse to Default and risk truncating data on resize.
+            for bad in [3, 5, 6, 7, 99] {
+                let d = PyDict::new(py);
+                d.set_item("resize_flags", bad).unwrap();
+                let err = get_resize_flags(&d)
+                    .expect_err("composed/unknown resize flag must be rejected");
+                assert!(err.is_instance_of::<PyValueError>(py));
+            }
+        });
+    }
 
     #[test]
     fn parse_i32_flag_defaults_to_zero_for_missing_or_nil() {
@@ -1178,7 +1239,7 @@ mod tests {
     // representation of the produced `Operation`.
 
     use pyo3::prelude::*;
-    use pyo3::types::{PyDict, PyList};
+    use pyo3::types::PyList;
 
     /// Build a single-op `PyList` from `(op_code, extra fields)` and convert it.
     fn convert_one_op<'py>(

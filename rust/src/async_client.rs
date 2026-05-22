@@ -438,8 +438,9 @@ impl PyAsyncClient {
         meta: Option<&Bound<'_, PyDict>>,
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let client = self.get_client()?;
-        let limiter = self.limiter.clone();
+        // Validate arguments (key shape, numeric offset) before the connection
+        // check so a malformed call fails the same way whether or not the
+        // client is connected — mirroring `put`.
         let args = client_common::prepare_increment_args(
             py,
             key,
@@ -449,6 +450,8 @@ impl PyAsyncClient {
             policy,
             &self.connection_info,
         )?;
+        let client = self.get_client()?;
+        let limiter = self.limiter.clone();
         debug!(
             "async increment: ns={} set={} bin={}",
             args.key.namespace, args.key.set_name, bin
