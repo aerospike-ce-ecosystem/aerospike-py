@@ -353,7 +353,7 @@ pub fn prepare_increment_args(
 ) -> PyResult<SingleBinWriteArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, meta)?;
-    let value = crate::types::value::py_to_value(offset)?;
+    let value = parse_increment_offset(offset)?;
     let bins = vec![Bin::new(bin.to_string(), value)];
 
     Ok(SingleBinWriteArgs {
@@ -362,6 +362,25 @@ pub fn prepare_increment_args(
         bins,
         otel: OtelContext::new(py, conn_info),
     })
+}
+
+/// Convert an `increment()` offset to a numeric [`Value`].
+///
+/// The documented signature is `offset: Union[int, float]`. Without this guard
+/// the offset went through the generic `py_to_value`, which silently accepts
+/// strings, lists, dicts, etc. — a non-numeric offset would then be shipped to
+/// the server, which fails the `add` operation with an opaque `BinTypeError`
+/// instead of a clear client-side error. A Python `bool` is also rejected:
+/// although `bool` is an `int` subclass, `increment(key, bin, True)` is far
+/// more likely a mistake than an intentional `+1`.
+fn parse_increment_offset(offset: &Bound<'_, PyAny>) -> PyResult<Value> {
+    let value = crate::types::value::py_to_value(offset)?;
+    match value {
+        Value::Int(_) | Value::Float(_) => Ok(value),
+        other => Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "increment offset must be an int or float, got {other:?}"
+        ))),
+    }
 }
 
 // ── remove_bin ───────────────────────────────────────────────────────────────
@@ -1110,10 +1129,55 @@ pub fn prepare_create_role_args(
 
 #[cfg(test)]
 mod tests {
-    use super::extract_cluster_name;
+    use super::{extract_cluster_name, parse_increment_offset};
+    use aerospike_core::Value;
     use pyo3::exceptions::PyTypeError;
     use pyo3::prelude::*;
-    use pyo3::types::PyDict;
+    use pyo3::types::{PyDict, PyList};
+
+    #[test]
+    fn parse_increment_offset_accepts_int_and_float() {
+        Python::initialize();
+        Python::attach(|py| {
+            let int_off = 5_i64.into_pyobject(py).unwrap().into_any();
+            assert!(matches!(
+                parse_increment_offset(&int_off).expect("int offset should parse"),
+                Value::Int(5)
+            ));
+
+            let neg_off = (-3_i64).into_pyobject(py).unwrap().into_any();
+            assert!(matches!(
+                parse_increment_offset(&neg_off).expect("negative int should parse"),
+                Value::Int(-3)
+            ));
+
+            let float_off = 0.5_f64.into_pyobject(py).unwrap().into_any();
+            assert!(matches!(
+                parse_increment_offset(&float_off).expect("float offset should parse"),
+                Value::Float(_)
+            ));
+        });
+    }
+
+    #[test]
+    fn parse_increment_offset_rejects_non_numeric() {
+        Python::initialize();
+        Python::attach(|py| {
+            // String, list, and bool offsets must all raise instead of being
+            // shipped to the server as a non-numeric `add` operand.
+            let str_off = pyo3::types::PyString::new(py, "1").into_any();
+            let err = parse_increment_offset(&str_off).expect_err("string offset must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+
+            let list_off = PyList::new(py, [1, 2, 3]).unwrap().into_any();
+            let err = parse_increment_offset(&list_off).expect_err("list offset must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+
+            let bool_off = true.into_pyobject(py).unwrap().to_owned().into_any();
+            let err = parse_increment_offset(&bool_off).expect_err("bool offset must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
+    }
 
     #[test]
     fn extract_cluster_name_returns_empty_for_missing_key() {
