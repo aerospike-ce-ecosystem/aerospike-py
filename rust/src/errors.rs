@@ -226,6 +226,7 @@ pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
         ResultCode::IndexFound => 200,
         ResultCode::IndexNotFound => 201,
         ResultCode::QueryAborted => 210,
+        ResultCode::QueryTimeout => 212,
         ResultCode::InvalidGeojson => 160,
         ResultCode::Unknown(code) => *code as i32,
         _ => -1,
@@ -262,6 +263,13 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
                 ResultCode::FilteredOut => FilteredOut::new_err(msg),
                 ResultCode::ElementNotFound | ResultCode::ElementExists => {
                     RecordError::new_err(msg)
+                }
+                // Server-side timeout: a server timeout result code must surface
+                // as AerospikeTimeoutError so callers (and HTTP layers mapping
+                // AerospikeTimeoutError -> 504) handle it like a client timeout
+                // instead of an opaque 500-class ServerError.
+                ResultCode::Timeout | ResultCode::QueryTimeout => {
+                    AerospikeTimeoutError::new_err(msg)
                 }
                 // Index
                 ResultCode::IndexFound => IndexFoundError::new_err(msg),
@@ -385,5 +393,45 @@ mod tests {
     #[test]
     fn test_result_code_to_int_unknown() {
         assert_eq!(result_code_to_int(&ResultCode::Unknown(250)), 250);
+    }
+
+    #[test]
+    fn test_result_code_to_int_query_timeout() {
+        // QueryTimeout previously fell through to the catch-all `-1`.
+        assert_eq!(result_code_to_int(&ResultCode::QueryTimeout), 212);
+    }
+
+    #[test]
+    fn test_server_timeout_maps_to_timeout_error() {
+        // A server-side Timeout result code must surface as AerospikeTimeoutError,
+        // not the generic ServerError it previously fell through to.
+        Python::initialize();
+        Python::attach(|py| {
+            let err = as_to_pyerr(AsError::ServerError(
+                ResultCode::Timeout,
+                false,
+                String::new(),
+            ));
+            assert!(
+                err.is_instance_of::<AerospikeTimeoutError>(py),
+                "server Timeout result code must map to AerospikeTimeoutError"
+            );
+        });
+    }
+
+    #[test]
+    fn test_query_timeout_maps_to_timeout_error() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = as_to_pyerr(AsError::ServerError(
+                ResultCode::QueryTimeout,
+                false,
+                String::new(),
+            ));
+            assert!(
+                err.is_instance_of::<AerospikeTimeoutError>(py),
+                "QueryTimeout result code must map to AerospikeTimeoutError"
+            );
+        });
     }
 }
