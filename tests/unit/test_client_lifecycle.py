@@ -88,8 +88,15 @@ class TestAsyncClientLifecycle:
         Previously, cancelling an in-flight ``connect()`` (e.g. via
         ``asyncio.wait_for`` timeout) left the client permanently in the
         ``CONNECTING`` state: both ``connect()`` and ``close()`` then refused
-        to proceed and the client could never be recovered. The native
-        connect future now reverts ``CONNECTING -> DISCONNECTED`` on drop.
+        to proceed and the client could never be recovered.
+
+        Two layers of recovery now cooperate:
+
+        1. ``ConnectStateGuard`` (PR #369) reverts ``CONNECTING -> DISCONNECTED``
+           when the connect future is dropped.
+        2. ``prepare_close()`` accepts ``CONNECTING`` via CAS so ``close()``
+           is the natural recovery path even when called before the guard's
+           Drop has fired — no ``asyncio.sleep`` polling required.
         """
         c = aerospike_py.AsyncClient(DUMMY_CONFIG)
 
@@ -98,12 +105,9 @@ class TestAsyncClientLifecycle:
         with pytest.raises((asyncio.TimeoutError, aerospike_py.AerospikeError)):
             await asyncio.wait_for(c.connect(), timeout=0.001)
 
-        # Give the cancelled future a chance to be dropped and run its guard.
-        await asyncio.sleep(0.05)
-
-        # The client must not be wedged: close() must succeed (idempotent or
-        # real), and a fresh connect() must be allowed to run again rather
-        # than failing with "client is already connecting".
+        # No `asyncio.sleep(0.05)` here: close() must recover immediately,
+        # whether the Drop guard already fired or close() itself claims the
+        # orphaned CONNECTING via its CAS.
         await c.close()  # must not raise "client is currently connecting"
         with pytest.raises(aerospike_py.AerospikeError) as excinfo:
             await c.connect()
@@ -112,14 +116,19 @@ class TestAsyncClientLifecycle:
         )
 
     async def test_close_after_cancelled_connect_is_not_blocked(self):
-        """close() must recover a client whose connect() was cancelled."""
+        """close() must recover a client whose connect() was cancelled.
+
+        Specifically: no ``asyncio.sleep`` between cancel and close — the
+        ``prepare_close()`` CONNECTING-state CAS handles the case where the
+        ``ConnectStateGuard``'s Drop has not yet run.
+        """
         c = aerospike_py.AsyncClient(DUMMY_CONFIG)
         task = asyncio.ensure_future(c.connect())
         await asyncio.sleep(0)  # let the connect future start
         task.cancel()
         with pytest.raises((asyncio.CancelledError, aerospike_py.AerospikeError)):
             await task
-        await asyncio.sleep(0.05)
-        # close() must not raise "client is currently connecting".
+        # close() must not raise "client is currently connecting" even
+        # without polling for the Drop guard to fire.
         await c.close()
         assert c.is_connected() is False

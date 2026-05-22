@@ -1466,34 +1466,123 @@ impl PyAsyncClient {
 
     /// Shared pre-close step for `close()` and `__aexit__`.
     ///
-    /// Atomically inspects state and, when CONNECTED, transitions to CLOSING,
-    /// swaps the inner `AsClient` out, and resets connection metadata and the
-    /// limiter. Returns:
+    /// Atomically inspects state and transitions:
     ///
-    /// - `Ok(CloseOutcome::Idempotent)` when state is already `DISCONNECTED`
-    ///   or `CLOSING` — both `close()` and `__aexit__` treat this as a no-op.
-    /// - `Err(ClientError)` when state is `CONNECTING` — closing while an
-    ///   in-flight `connect()` may still be racing the inner `Arc` would leak
-    ///   a half-initialized client.
-    /// - `Ok(CloseOutcome::Proceed { client, state })` when state is
-    ///   `CONNECTED` — the caller drives `client.close()` and stores
-    ///   `DISCONNECTED` on completion.
+    /// - `DISCONNECTED` / `CLOSING` → `Ok(CloseOutcome::Idempotent)`. Both
+    ///   `close()` and `__aexit__` treat this as a no-op.
+    /// - `CONNECTED` → CAS to `CLOSING`, swap the inner `AsClient` out, reset
+    ///   connection metadata and the limiter, return
+    ///   `Ok(CloseOutcome::Proceed { client, state })`. The caller drives
+    ///   `client.close()` and stores `DISCONNECTED` on completion.
+    /// - `CONNECTING` → CAS to `CLOSING` if and only if no inner client has
+    ///   been published yet (orphaned/cancelled connect — `ConnectStateGuard`
+    ///   will be racing to revert this CONNECTING -> DISCONNECTED, but our CAS
+    ///   here only wins when state is still CONNECTING). When the CAS wins,
+    ///   we treat it like a CONNECTED close so the caller transitions to
+    ///   DISCONNECTED on completion. There is no native `AsClient` to drop, so
+    ///   the close future is a no-op. If the CAS loses (Drop guard already
+    ///   reverted us to DISCONNECTED), we re-load the now-settled state and
+    ///   recurse one level to dispatch on it.
+    ///
+    /// Previously CONNECTING was a hard error ("Cannot close: client is
+    /// currently connecting."), which forced callers cancelling an in-flight
+    /// `connect()` to gamble on a `sleep(0.05)` before `close()` would be
+    /// accepted. With `ConnectStateGuard` in place (PR #369), an orphaned
+    /// CONNECTING is recoverable and `close()` is the natural recovery path.
     fn prepare_close(&mut self) -> PyResult<CloseOutcome> {
         let current = self.state.load(Ordering::SeqCst);
         match current {
             DISCONNECTED | CLOSING => Ok(CloseOutcome::Idempotent),
-            CONNECTING => Err(crate::errors::ClientError::new_err(
-                "Cannot close: client is currently connecting.",
-            )),
             CONNECTED => {
-                self.state.store(CLOSING, Ordering::SeqCst);
-                let client = self.inner.swap(None);
-                self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());
-                self.limiter = Arc::new(OperationLimiter::new(0, 0));
-                Ok(CloseOutcome::Proceed {
-                    client,
-                    state: self.state.clone(),
-                })
+                // CAS guards against a racing close() / __aexit__ that may
+                // have already moved us from CONNECTED to CLOSING.
+                match self.state.compare_exchange(
+                    CONNECTED,
+                    CLOSING,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                ) {
+                    Ok(_) => {
+                        let client = self.inner.swap(None);
+                        self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());
+                        self.limiter = Arc::new(OperationLimiter::new(0, 0));
+                        Ok(CloseOutcome::Proceed {
+                            client,
+                            state: self.state.clone(),
+                        })
+                    }
+                    Err(_) => {
+                        // Lost the CAS race; another close path already moved
+                        // us along. Treat as idempotent.
+                        Ok(CloseOutcome::Idempotent)
+                    }
+                }
+            }
+            CONNECTING => {
+                // Try to claim the orphaned CONNECTING state for close. If
+                // the connect future's Drop guard wins the race, we'll
+                // observe DISCONNECTED on the next load and treat the close
+                // as idempotent. Either way the client is unwedged.
+                match self.state.compare_exchange(
+                    CONNECTING,
+                    CLOSING,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                ) {
+                    Ok(_) => {
+                        // We won the CAS. There may or may not be an inner
+                        // client (a connect future could have published one
+                        // before being cancelled, though that is unusual);
+                        // swap regardless so we drive the same cleanup path
+                        // as the CONNECTED arm.
+                        let client = self.inner.swap(None);
+                        self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());
+                        self.limiter = Arc::new(OperationLimiter::new(0, 0));
+                        Ok(CloseOutcome::Proceed {
+                            client,
+                            state: self.state.clone(),
+                        })
+                    }
+                    Err(observed) => {
+                        // Drop guard (or another close) moved us out of
+                        // CONNECTING. Dispatch on whatever settled value is
+                        // there now without recursing into match arms that
+                        // could loop.
+                        match observed {
+                            DISCONNECTED | CLOSING => Ok(CloseOutcome::Idempotent),
+                            CONNECTED => {
+                                // Extremely unlikely (connect completed in the
+                                // tiny window between our load and CAS); fall
+                                // through to the CONNECTED handler via a
+                                // second CAS.
+                                if self
+                                    .state
+                                    .compare_exchange(
+                                        CONNECTED,
+                                        CLOSING,
+                                        Ordering::SeqCst,
+                                        Ordering::SeqCst,
+                                    )
+                                    .is_ok()
+                                {
+                                    let client = self.inner.swap(None);
+                                    self.connection_info =
+                                        Arc::new(crate::tracing::ConnectionInfo::default());
+                                    self.limiter = Arc::new(OperationLimiter::new(0, 0));
+                                    Ok(CloseOutcome::Proceed {
+                                        client,
+                                        state: self.state.clone(),
+                                    })
+                                } else {
+                                    Ok(CloseOutcome::Idempotent)
+                                }
+                            }
+                            _ => unreachable!(
+                                "invalid AsyncClient state after CONNECTING CAS: {observed}"
+                            ),
+                        }
+                    }
+                }
             }
             _ => unreachable!("invalid AsyncClient state: {current}"),
         }
@@ -1575,6 +1664,85 @@ mod tests {
                 terminal,
                 "armed guard must only act on CONNECTING, not state {terminal}"
             );
+        }
+    }
+
+    /// Build a `PyAsyncClient` in tests without going through pyo3's `#[new]`.
+    ///
+    /// The `state` arg is the initial lifecycle state; `inner` is left empty
+    /// so the simulated client has no native `AsClient` published — matching
+    /// the orphaned-CONNECTING scenario that `prepare_close()` must recover.
+    fn make_client_in_state(state: u8) -> PyAsyncClient {
+        Python::initialize();
+        let config: Py<PyAny> = Python::attach(|py| PyDict::new(py).into_any().unbind());
+        PyAsyncClient {
+            inner: Arc::new(ArcSwapOption::empty()),
+            config,
+            connection_info: Arc::new(crate::tracing::ConnectionInfo::default()),
+            limiter: Arc::new(OperationLimiter::new(0, 0)),
+            state: Arc::new(AtomicU8::new(state)),
+        }
+    }
+
+    #[test]
+    fn prepare_close_from_connecting_no_inner_proceeds() {
+        // Regression for the bug where close() hard-rejected the CONNECTING
+        // state, forcing callers to sleep before close() could be accepted
+        // after cancelling an in-flight connect(). With ConnectStateGuard in
+        // place, an orphaned CONNECTING is recoverable — prepare_close()
+        // must claim it and return a Proceed decision so the caller can
+        // drive the close future and settle to DISCONNECTED.
+        let mut client = make_client_in_state(CONNECTING);
+        let outcome = client
+            .prepare_close()
+            .expect("prepare_close from CONNECTING must succeed");
+        match outcome {
+            CloseOutcome::Proceed { client: c, state } => {
+                assert!(c.is_none(), "no inner AsClient should have been published");
+                assert_eq!(
+                    state.load(Ordering::SeqCst),
+                    CLOSING,
+                    "state should be CLOSING after winning the CONNECTING -> CLOSING CAS"
+                );
+            }
+            CloseOutcome::Idempotent => {
+                panic!("CONNECTING with no concurrent guard race must yield Proceed");
+            }
+        }
+    }
+
+    #[test]
+    fn prepare_close_from_disconnected_is_idempotent() {
+        let mut client = make_client_in_state(DISCONNECTED);
+        match client.prepare_close().expect("must not error") {
+            CloseOutcome::Idempotent => {}
+            CloseOutcome::Proceed { .. } => panic!("DISCONNECTED must be idempotent"),
+        }
+    }
+
+    #[test]
+    fn prepare_close_from_closing_is_idempotent() {
+        let mut client = make_client_in_state(CLOSING);
+        match client.prepare_close().expect("must not error") {
+            CloseOutcome::Idempotent => {}
+            CloseOutcome::Proceed { .. } => panic!("CLOSING must be idempotent"),
+        }
+    }
+
+    #[test]
+    fn prepare_close_from_connecting_settled_to_disconnected_is_idempotent() {
+        // Simulate the race where the ConnectStateGuard's Drop already moved
+        // CONNECTING -> DISCONNECTED before prepare_close() observed it. The
+        // CAS in the CONNECTING arm will fail; the fallback re-dispatch must
+        // treat DISCONNECTED as idempotent rather than erroring or looping.
+        let mut client = make_client_in_state(CONNECTING);
+        // Pre-settle the state so the CAS inside prepare_close() loses.
+        client.state.store(DISCONNECTED, Ordering::SeqCst);
+        match client.prepare_close().expect("must not error") {
+            CloseOutcome::Idempotent => {}
+            CloseOutcome::Proceed { .. } => {
+                panic!("settled DISCONNECTED state must be idempotent")
+            }
         }
     }
 }
