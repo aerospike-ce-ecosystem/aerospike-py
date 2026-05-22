@@ -293,9 +293,6 @@ fn values_from_list(val: &Value) -> Vec<Value> {
     }
 }
 
-/// Parse an operation flag value that should be a small integer (i32).
-///
-/// Missing/None values default to `0`.
 /// Resolve the `val` of a `list_increment` op to the i64 increment amount.
 ///
 /// Mirrors the bit-op (`OP_BIT_ADD`/`OP_BIT_SUBTRACT`) handling: a missing or
@@ -311,6 +308,9 @@ fn parse_increment_value(val: &Option<Value>) -> PyResult<i64> {
     }
 }
 
+/// Parse an operation flag value that should be a small integer (i32).
+///
+/// Missing/None values default to `0`.
 fn parse_i32_flag(val: &Option<Value>, op_name: &str, field_name: &str) -> PyResult<i32> {
     match val {
         None | Some(Value::Nil) => Ok(0),
