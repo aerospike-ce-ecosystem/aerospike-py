@@ -91,6 +91,25 @@ class TestListOperations:
         assert op["op"] == 1030
         assert op["val"] == 2
 
+    def test_list_trim_facade_always_emits_count(self):
+        """Regression: `list_trim` op dict must always include `count`.
+
+        At the Rust dispatch layer (operations.rs OP_LIST_TRIM arm), a missing
+        `count` raises ValueError rather than silently defaulting to 0 (which
+        would destructively truncate the list to empty). The Python facade
+        signature already requires count, but assert the emitted op carries it
+        through so direct dict callers and facade callers agree.
+        """
+        op = list_trim("mybin", 1, 3)
+        assert op["op"] == 1010
+        assert op["bin"] == "mybin"
+        assert op["index"] == 1
+        assert op["count"] == 3
+        # The facade has no default that would let a caller produce a
+        # list_trim without supplying count.
+        with pytest.raises(TypeError):
+            list_trim("mybin", 1)  # type: ignore[call-arg]
+
     def test_list_append_with_policy(self):
         op = list_append("mybin", "val", policy={"order": 1, "flags": 0})
         assert op["list_policy"]["order"] == 1
