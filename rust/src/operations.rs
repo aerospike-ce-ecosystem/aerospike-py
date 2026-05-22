@@ -691,8 +691,12 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "map_remove_by_index_range")?;
                 let index = get_index(dict)?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
-                let count = get_count(dict)?.unwrap_or(1);
-                map_ops::remove_by_index_range(&name, index, count, rt)
+                // An omitted `count` means "to the end of the map" — use the
+                // open-ended variant rather than silently collapsing to count=1.
+                match get_count(dict)? {
+                    Some(count) => map_ops::remove_by_index_range(&name, index, count, rt),
+                    None => map_ops::remove_by_index_range_from(&name, index, rt),
+                }
             }
             OP_MAP_REMOVE_BY_RANK => {
                 let name = require_bin(&bin_name, "map_remove_by_rank")?;
@@ -704,8 +708,12 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "map_remove_by_rank_range")?;
                 let rank = get_rank(dict)?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
-                let count = get_count(dict)?.unwrap_or(1);
-                map_ops::remove_by_rank_range(&name, rank, count, rt)
+                // An omitted `count` means "to the last ranked item" — use the
+                // open-ended variant rather than silently collapsing to count=1.
+                match get_count(dict)? {
+                    Some(count) => map_ops::remove_by_rank_range(&name, rank, count, rt),
+                    None => map_ops::remove_by_rank_range_from(&name, rank, rt),
+                }
             }
             OP_MAP_SIZE => {
                 let name = require_bin(&bin_name, "map_size")?;
@@ -747,8 +755,12 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "map_get_by_index_range")?;
                 let index = get_index(dict)?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
-                let count = get_count(dict)?.unwrap_or(1);
-                map_ops::get_by_index_range(&name, index, count, rt)
+                // An omitted `count` means "to the end of the map" — use the
+                // open-ended variant rather than silently collapsing to count=1.
+                match get_count(dict)? {
+                    Some(count) => map_ops::get_by_index_range(&name, index, count, rt),
+                    None => map_ops::get_by_index_range_from(&name, index, rt),
+                }
             }
             OP_MAP_GET_BY_RANK => {
                 let name = require_bin(&bin_name, "map_get_by_rank")?;
@@ -760,8 +772,12 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "map_get_by_rank_range")?;
                 let rank = get_rank(dict)?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
-                let count = get_count(dict)?.unwrap_or(1);
-                map_ops::get_by_rank_range(&name, rank, count, rt)
+                // An omitted `count` means "to the last ranked item" — use the
+                // open-ended variant rather than silently collapsing to count=1.
+                match get_count(dict)? {
+                    Some(count) => map_ops::get_by_rank_range(&name, rank, count, rt),
+                    None => map_ops::get_by_rank_range_from(&name, rank, rt),
+                }
             }
             OP_MAP_GET_BY_KEY_LIST => {
                 let name = require_bin(&bin_name, "map_get_by_key_list")?;
@@ -1150,5 +1166,106 @@ mod tests {
                 assert!(err.is_instance_of::<PyValueError>(py));
             });
         }
+    }
+
+    // ── Map index/rank range: omitted `count` must be open-ended ──────────
+    //
+    // Regression for the bug where `map_get_by_index_range` / `_rank_range`
+    // (and the remove variants) with no `count` silently collapsed to
+    // `count = 1`, returning a single element instead of "to the end of the
+    // map". The open-ended `aerospike-core` variants emit one fewer wire
+    // argument (no trailing count `Int`), which we assert via the debug
+    // representation of the produced `Operation`.
+
+    use pyo3::prelude::*;
+    use pyo3::types::{PyDict, PyList};
+
+    /// Build a single-op `PyList` from `(op_code, extra fields)` and convert it.
+    fn convert_one_op<'py>(
+        py: Python<'py>,
+        op_code: i32,
+        with: impl FnOnce(&Bound<'py, PyDict>),
+    ) -> aerospike_core::operations::Operation {
+        let dict = PyDict::new(py);
+        dict.set_item("op", op_code).unwrap();
+        dict.set_item("bin", "mybin").unwrap();
+        with(&dict);
+        let ops = PyList::new(py, [dict]).unwrap();
+        let mut converted = super::py_ops_to_rust(&ops).expect("conversion should succeed");
+        assert_eq!(converted.len(), 1);
+        converted.pop().unwrap()
+    }
+
+    /// Count the `CdtArgument::Int(...)` entries in an operation's debug output.
+    fn int_arg_count(op: &aerospike_core::operations::Operation) -> usize {
+        format!("{op:?}").matches("Int(").count()
+    }
+
+    #[test]
+    fn map_index_range_omitted_count_is_open_ended() {
+        Python::initialize();
+        Python::attach(|py| {
+            for &op_code in &[
+                super::OP_MAP_GET_BY_INDEX_RANGE,
+                super::OP_MAP_REMOVE_BY_INDEX_RANGE,
+            ] {
+                // With an explicit count: return_type, index, count -> 3 Ints.
+                let with_count = convert_one_op(py, op_code, |d| {
+                    d.set_item("index", 0i64).unwrap();
+                    d.set_item("return_type", 7i32).unwrap();
+                    d.set_item("count", 3i64).unwrap();
+                });
+                assert_eq!(
+                    int_arg_count(&with_count),
+                    3,
+                    "op {op_code}: explicit count must keep the count argument"
+                );
+
+                // Without count: return_type, index -> 2 Ints (open-ended).
+                let no_count = convert_one_op(py, op_code, |d| {
+                    d.set_item("index", 0i64).unwrap();
+                    d.set_item("return_type", 7i32).unwrap();
+                });
+                assert_eq!(
+                    int_arg_count(&no_count),
+                    2,
+                    "op {op_code}: omitted count must select to the end of the map, \
+                     not collapse to count=1"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn map_rank_range_omitted_count_is_open_ended() {
+        Python::initialize();
+        Python::attach(|py| {
+            for &op_code in &[
+                super::OP_MAP_GET_BY_RANK_RANGE,
+                super::OP_MAP_REMOVE_BY_RANK_RANGE,
+            ] {
+                let with_count = convert_one_op(py, op_code, |d| {
+                    d.set_item("rank", 1i64).unwrap();
+                    d.set_item("return_type", 7i32).unwrap();
+                    d.set_item("count", 2i64).unwrap();
+                });
+                assert_eq!(
+                    int_arg_count(&with_count),
+                    3,
+                    "op {op_code}: explicit count must keep the count argument"
+                );
+
+                let no_count = convert_one_op(py, op_code, |d| {
+                    d.set_item("rank", 1i64).unwrap();
+                    d.set_item("return_type", 7i32).unwrap();
+                });
+                assert_eq!(
+                    int_arg_count(&no_count),
+                    2,
+                    "op {op_code}: omitted count must select to the last ranked item, \
+                     not collapse to count=1"
+                );
+            }
+        });
     }
 }
