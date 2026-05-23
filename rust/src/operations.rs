@@ -847,7 +847,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_MAP_GET_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "map_get_by_value_list")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "map_get_by_value_list")?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 map_ops::get_by_value_list(&name, values_from_list(&v), rt)
             }
@@ -1831,5 +1831,14 @@ mod tests {
             "map_remove_by_value_list",
         );
         assert_by_value_list_op_with_val_succeeds(super::OP_MAP_REMOVE_BY_VALUE_LIST);
+    }
+
+    #[test]
+    fn map_get_by_value_list_missing_val_raises_value_error() {
+        assert_by_value_list_op_missing_val_errors(
+            super::OP_MAP_GET_BY_VALUE_LIST,
+            "map_get_by_value_list",
+        );
+        assert_by_value_list_op_with_val_succeeds(super::OP_MAP_GET_BY_VALUE_LIST);
     }
 }

@@ -37,6 +37,7 @@ from aerospike_py.map_operations import (
     map_get_by_rank,
     map_get_by_rank_range,
     map_get_by_value,
+    map_get_by_value_list,
     map_increment,
     map_put,
     map_put_items,
@@ -434,11 +435,13 @@ class TestListMapByValueFacadeRequiresVal:
             (list_get_by_value_list, 1020, [1, 2, 3]),
             (list_remove_by_value_list, 1023, [1, 2, 3]),
             (map_remove_by_value_list, 2011, [1, 2, 3]),
+            (map_get_by_value_list, 2027, [1, 2, 3]),
         ],
         ids=[
             "list_get_by_value_list",
             "list_remove_by_value_list",
             "map_remove_by_value_list",
+            "map_get_by_value_list",
         ],
     )
     def test_by_value_list_facade_emits_val(self, func, expected_op, sample_values):
