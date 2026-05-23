@@ -72,13 +72,13 @@ add multi-worker evidence.
    the GIL.
 
 2. **API unification.** Sync `Client.batch_read` and async
-   `AsyncClient.batch_read` both return a `LazyBatchRecords` handle. The
+   `AsyncClient.batch_read` both return a `LazyBatchRecords`. The
    `_dtype=` kwarg is gone; materialisation is explicit:
 
    ```python
-   handle = client.batch_read(keys)        # IO only, no PyObject loop
-   d      = handle.to_dict()               # dict[user_key, bins_dict]
-   arr    = handle.to_numpy(dtype)         # NumpyBatchRecords (GIL released during fill)
+   lazy_records = client.batch_read(keys)        # IO only, no PyObject loop
+   d            = lazy_records.to_dict()         # dict[user_key, bins_dict]
+   arr          = lazy_records.to_numpy(dtype)   # NumpyBatchRecords (GIL released during fill)
    ```
 
    `LazyBatchRecords` implements the dict-like Mapping protocol
@@ -115,7 +115,7 @@ add multi-worker evidence.
 
   ```python
   # /bench/dict — standard idiom
-  result_dict = handle.to_dict()
+  result_dict = lazy_records.to_dict()
   rows = []
   for i in range(batch_size):
       bins = result_dict.get(f"row_{i}") or {}
@@ -123,7 +123,7 @@ add multi-worker evidence.
   matrix = torch.tensor(rows, dtype=torch.float32)
 
   # /bench/numpy
-  np_batch = handle.to_numpy(DTYPE)
+  np_batch = lazy_records.to_numpy(DTYPE)
   matrix_np = np.column_stack([np_batch.batch_records[n] for n in FEATURE_NAMES]) \
                 .astype(np.float32, copy=False)
   matrix = torch.from_numpy(matrix_np)
@@ -271,7 +271,7 @@ batch-read materialisation differs.
 
 - `rust/src/numpy_support.rs` — `py.detach` around the fill loop, `BufferAddr` wrapper
 - `rust/src/batch_types.rs` — `PyLazyBatchRecords` rename, dict-like dunders, `to_numpy(dtype)` method
-- `rust/src/client.rs`, `rust/src/async_client.rs` — `batch_read` returns the handle, `_dtype` kwarg removed
+- `rust/src/client.rs`, `rust/src/async_client.rs` — `batch_read` returns `LazyBatchRecords`, `_dtype` kwarg removed
 - `src/aerospike_py/_client.py`, `src/aerospike_py/_async_client.py`, `src/aerospike_py/__init__.pyi` — wrapper + stub updates
 - `benchmark/src/serving/bench_app.py` — standalone FastAPI app for this benchmark
 - `benchmark/src/serving/endpoints/bench.py` — `/bench/dict` and `/bench/numpy`

@@ -150,7 +150,7 @@ The two solo runs used different k6 scripts. `k6_benchmark_official_only.js` sen
 **Why aerospike-py still leads under solo load on 3.14t:**
 
 1. **Native async vs threadpool wrapping.** Even without GIL contention, `run_in_executor` adds a thread-pool hop per request. aerospike-py awaits directly on the asyncio loop.
-2. **Lazy dict conversion.** `batch_read()` returns a `LazyBatchRecords` handle (Arc-wrapped, ~10 μs). The Python-dict materialization happens lazily when the caller invokes `.to_dict()`; `.to_numpy(dtype)` provides the GIL-released structured-array path. The official client builds the full dict on I/O completion.
+2. **Lazy dict conversion.** `batch_read()` returns a `LazyBatchRecords` (Arc-wrapped, ~10 μs). The Python-dict materialization happens lazily when the caller invokes `.to_dict()`; `.to_numpy(dtype)` provides the GIL-released structured-array path. The official client builds the full dict on I/O completion.
 3. **Single FFI boundary crossing.** The aerospike-py Rust code completes a full `batch_read` inside one PyO3 call. The C extension crosses the Python ↔ C boundary multiple times per call.
 
 These advantages compound as concurrency rises (the gather number — 107 vs 253 ms — is the clearest example).

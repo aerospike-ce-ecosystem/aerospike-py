@@ -112,8 +112,8 @@ def set_internal_stage_metrics_enabled(enabled: bool) -> None:
     Controls the ``db_client_internal_stage_seconds`` histogram, which
     captures fine-grained timing for ``batch_read`` stages (``key_parse``,
     ``tokio_schedule_delay``, ``limiter_wait``, ``io``, ``spawn_blocking_delay``,
-    ``into_pyobject``, ``event_loop_resume_delay``, ``as_dict``, ``merge_as_dict``,
-    ``future_into_py_setup``).
+    ``into_pyobject``, ``event_loop_resume_delay``, ``to_dict``, ``to_numpy``,
+    ``merge_to_dict``, ``future_into_py_setup``).
 
     Disabled by default — enable only for debug/profiling sessions. When
     disabled, every stage timer call site elides its ``Instant::now()`` call

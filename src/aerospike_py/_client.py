@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
+
+if TYPE_CHECKING:
+    from aerospike_py._aerospike import LazyBatchRecords
 from aerospike_py.types import (
     AerospikeKey,
     BatchRecord as BatchRecordTuple,
@@ -155,11 +159,11 @@ class Client(_NativeClient):
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
     @catch_unexpected("Client.batch_read")
-    def batch_read(self, keys, bins=None, policy=None):
+    def batch_read(self, keys, bins=None, policy=None) -> "LazyBatchRecords":
         """Read multiple records in a single batch call.
 
-        Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around the
-        raw Rust results. Convert lazily with one of the handle methods:
+        Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around
+        the raw Rust results. Convert lazily with one of its methods:
 
         * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
         * ``lazy_records.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released

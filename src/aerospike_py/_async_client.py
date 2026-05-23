@@ -6,6 +6,8 @@ import asyncio
 import logging
 from typing import Any
 
+from typing import TYPE_CHECKING
+
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
@@ -17,6 +19,9 @@ from aerospike_py.types import (
     OperateOrderedResult,
     Record,
 )
+
+if TYPE_CHECKING:
+    from aerospike_py._aerospike import LazyBatchRecords
 
 logger = logging.getLogger("aerospike_py")
 
@@ -147,11 +152,16 @@ class AsyncClient:
         return [InfoNodeResult(*t) for t in await self._inner.info_all(command, policy)]
 
     @catch_unexpected("AsyncClient.batch_read")
-    async def batch_read(self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None) -> Any:
+    async def batch_read(
+        self,
+        keys: list,
+        bins: list[str] | None = None,
+        policy: dict[str, Any] | None = None,
+    ) -> "LazyBatchRecords":
         """Read multiple records in a single batch call.
 
-        Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around the
-        raw Rust results. Call one of the handle methods to materialise:
+        Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around
+        the raw Rust results. Call one of its methods to materialise:
 
         * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
         * ``lazy_records.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released

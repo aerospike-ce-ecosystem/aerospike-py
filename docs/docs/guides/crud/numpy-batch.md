@@ -116,7 +116,7 @@ asyncio.run(main())
 
 ## NumpyBatchRecords
 
-Call `.to_numpy(dtype)` on the `LazyBatchRecords` handle that `batch_read()` returns to get a `NumpyBatchRecords` object. The structured-array fill runs with the GIL released so the result hands directly to `torch.from_numpy(...)` zero-copy:
+Call `.to_numpy(dtype)` on the `LazyBatchRecords` that `batch_read()` returns to get a `NumpyBatchRecords` object. The structured-array fill runs with the GIL released so the result hands directly to `torch.from_numpy(...)` zero-copy:
 
 | Attribute | Type | Description |
 |-----------|------|-------------|

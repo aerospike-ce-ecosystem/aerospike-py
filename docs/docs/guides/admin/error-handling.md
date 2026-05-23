@@ -90,11 +90,15 @@ Batch operations do not raise exceptions for individual record failures. Instead
 ```python
 keys = [("test", "demo", f"id-{i}") for i in range(100)]
 
-# batch_read returns dict[user_key, bins_dict]
-# Only successful reads with a user key are included
+# batch_read returns a `LazyBatchRecords`. Successful reads with
+# a `user_key` populate the dict view; missing keys and per-record
+# failures are filtered out (use `batch.batch_records` or
+# `batch.iter_records()` if you need every entry, including failures).
 batch = client.batch_read(keys)
 
-# Succeeded records are in the dict; missing keys are absent
+# Succeeded records are in the dict view; missing keys are absent.
+# The dict-like `.values()` / `.keys()` accessors are backed by a
+# cached `to_dict()` materialisation, so no extra conversion is needed.
 succeeded = list(batch.values())
 all_user_keys = {k[2] for k in keys}
 present_keys = set(batch.keys())
@@ -164,12 +168,12 @@ Use the built-in `retry` parameter for automatic transient-failure retries with 
 
 ### Async Batch Read
 
-`AsyncClient.batch_read()` returns the same `dict[UserKey, dict]` as the sync version. Missing or failed records are excluded from the dict:
+`AsyncClient.batch_read()` returns the same `LazyBatchRecords` as the sync version. The dict view excludes missing or failed records; call `lazy_records.batch_records` / `lazy_records.iter_records()` if you need every entry:
 
 ```python
 batch = await client.batch_read(keys)
 
-# Same dict API as sync
+# Dict-style iteration via the cached Mapping view
 for user_key, bins in batch.items():
     print(user_key, bins)
 

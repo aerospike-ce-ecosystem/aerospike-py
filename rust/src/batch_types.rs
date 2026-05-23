@@ -140,7 +140,7 @@ impl<'py> IntoPyObject<'py> for PendingBatchRecords {
 ///   → total serialized time = N × 1-5ms (blocks Tokio from initiating new I/O).
 /// - With `Handle` (Arc wrap only): each thread holds GIL for < 0.01ms
 ///   → threads release almost instantly, Tokio workers are freed for new I/O.
-///   The heavier dict conversion runs later via `handle.as_dict()` in the
+///   The heavier dict conversion runs later via `lazy_records.to_dict()` in the
 ///   Python coroutine on the event loop, where there is no contention.
 pub enum PendingBatchRead {
     /// Zero-conversion handle: GIL hold < 0.01ms (Arc wrap only).
@@ -268,11 +268,22 @@ impl PyLazyBatchRecords {
 
 #[pymethods]
 impl PyLazyBatchRecords {
-    fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
-        Ok(self.cached_dict(py)?.len())
+    /// Total count of batch records returned by the server, including
+    /// missing reads and per-record failures.
+    ///
+    /// This matches the length of [`Self::batch_records`] / [`Self::iter_records`]
+    /// and is **not** the size of the dict view (`len(lazy_records.to_dict())`),
+    /// which excludes records without a `user_key` and records whose
+    /// `result_code` is not `Ok`. Use `len(lazy_records.to_dict())` (or
+    /// [`Self::found_count`]) when you specifically want the dict-view
+    /// cardinality.
+    ///
+    /// O(1): just reads the underlying `Vec` length, no dict materialisation.
+    fn __len__(&self) -> usize {
+        self.inner.len()
     }
 
-    /// Dict-style item access: `handle[user_key]` returns the bins dict.
+    /// Dict-style item access: `lazy_records[user_key]` returns the bins dict.
     ///
     /// Records without a `user_key` (digest-only) or with a failed result
     /// are not present in the dict view — use `batch_records[i]` for raw
@@ -296,18 +307,40 @@ impl PyLazyBatchRecords {
         d.contains(key)
     }
 
+    /// Dict-style ``lazy_records.get(key, default=None)`` — returns the
+    /// bins dict for ``key``, or ``default`` if ``key`` is not in the
+    /// dict view (digest-only / failed records are excluded). Mirrors
+    /// ``dict.get`` semantics so code written against the pre-
+    /// ``LazyBatchRecords`` ``dict`` return type keeps working unchanged.
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &Bound<'py, PyAny>,
+        default: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        match d.get_item(key)? {
+            Some(v) => Ok(v),
+            None => Ok(match default {
+                Some(d) => d.clone(),
+                None => py.None().into_bound(py),
+            }),
+        }
+    }
+
     fn __iter__<'py>(slf: PyRef<'py, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = slf.cached_dict(py)?;
         d.call_method0("__iter__")
     }
 
-    /// Dict-style ``handle.items()`` view.
+    /// Dict-style ``lazy_records.items()`` view.
     fn items<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = self.cached_dict(py)?;
         d.call_method0("items")
     }
 
-    /// Dict-style ``handle.values()`` view.
+    /// Dict-style ``lazy_records.values()`` view.
     fn values<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = self.cached_dict(py)?;
         d.call_method0("values")
@@ -325,7 +358,7 @@ impl PyLazyBatchRecords {
         }
     }
 
-    /// Fastest dict access: returns `dict[user_key, bins_dict]` directly.
+    /// Fastest dict access: returns `dict[user_key, bins_dict]`.
     ///
     /// Skips all intermediate objects (BatchRecord wrapper, key tuple, meta
     /// dict). Records without a `user_key` (digest-only) or with a failed
@@ -334,6 +367,14 @@ impl PyLazyBatchRecords {
     ///
     /// This is the canonical conversion entry point. `as_dict()` remains
     /// available as a deprecated alias that forwards here unchanged.
+    ///
+    /// **Returned dict is a fresh shallow copy of the cached materialisation.**
+    /// Mutating it will not affect future `to_dict()` calls nor the dict
+    /// view used by `__getitem__`/`__contains__`/`__iter__`/`items`/`keys`/
+    /// `values`. This preserves the original "callers can mutate freely"
+    /// guarantee while sharing the underlying record→Python conversion
+    /// cost between `to_dict()` and the Mapping-protocol dunders (was
+    /// double-materialised before).
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         // ── (D) event loop resume delay: into_pyobject → to_dict call ──
         if let Some(t) = self.into_pyobject_at {
@@ -345,7 +386,10 @@ impl PyLazyBatchRecords {
         }
 
         // ── Stage: to_dict (GIL held in event loop coroutine) ──
-        crate::stage_timer!("to_dict", "batch_read", batch_to_dict_py(py, &self.inner))
+        crate::stage_timer!("to_dict", "batch_read", {
+            let cached = self.cached_dict(py)?;
+            cached.copy()
+        })
     }
 
     /// Backwards-compatible alias for [`Self::to_dict`].
@@ -414,10 +458,11 @@ impl PyLazyBatchRecords {
             .count()
     }
 
-    /// Dict-style ``handle.keys()`` view — user keys of records that
-    /// actually appear in the dict view (successful reads with a
+    /// Dict-style ``lazy_records.keys()`` view — user keys of records
+    /// that actually appear in the dict view (successful reads with a
     /// ``user_key``). Missing / failed records are excluded so that
-    /// ``set(handle.keys())`` matches ``set(handle.to_dict().keys())``.
+    /// ``set(lazy_records.keys())`` matches
+    /// ``set(lazy_records.to_dict().keys())``.
     fn keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = self.cached_dict(py)?;
         d.call_method0("keys")
@@ -661,6 +706,37 @@ mod tests {
             assert!(
                 err.is_instance_of::<crate::errors::RustPanicError>(py),
                 "poisoned record_cell must raise RustPanicError"
+            );
+        });
+    }
+
+    /// A poisoned `cached_dict` mutex on a `PyLazyBatchRecords` (left behind
+    /// by a panic during a previous materialisation) must surface as a
+    /// `RustPanicError` from every dict-view dunder, not be silently
+    /// recovered. Mirrors the `PyBatchRecord.record_cell` poison contract.
+    #[test]
+    fn lazy_batch_records_rejects_poisoned_dict_cache() {
+        Python::initialize();
+        Python::attach(|py| {
+            let handle =
+                Py::new(py, PyLazyBatchRecords::from_results(Vec::new())).expect("construct");
+
+            // Poison the cached_dict mutex by panicking while holding the lock.
+            let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cell = handle.borrow(py);
+                let _g = cell.cached_dict.lock().unwrap();
+                panic!("synthetic cache materialisation panic");
+            }))
+            .is_err();
+            assert!(poisoned, "panic must unwind to poison the mutex");
+
+            let cell = handle.borrow(py);
+            let err = cell
+                .cached_dict(py)
+                .expect_err("poisoned cache must surface an error");
+            assert!(
+                err.is_instance_of::<crate::errors::RustPanicError>(py),
+                "poisoned cached_dict must raise RustPanicError"
             );
         });
     }

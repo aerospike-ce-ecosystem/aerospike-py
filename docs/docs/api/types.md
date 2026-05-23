@@ -76,7 +76,7 @@ Returned by: sync `batch_read()`, `batch_write()`, `batch_operate()`, `batch_rem
 ### `LazyBatchRecords`
 
 Returned by: sync **and** async `batch_read()` — a zero-conversion
-handle wrapping raw Rust results. Materialisation is deferred to
+wrapper around raw Rust results. Materialisation is deferred to
 explicit method calls (or the dict-like Mapping dunders, which proxy
 through a lazy + cached `to_dict()`).
 
@@ -90,9 +90,10 @@ through a lazy + cached `to_dict()`).
 | `raw_user_keys()` | `list[UserKey]` | Every batch record's `user_key`, including missing and failed reads — useful for positional alignment with `batch_records` or a `NumpyBatchRecords`. |
 | `iter_records()` | `Iterator[BatchRecord]` | Iterate every record (including digest-only and failed) in insertion order. |
 | `items()` / `values()` / `__iter__` | dict views | Dict-like backward-compat — same semantics as the cached `to_dict()`. |
-| `handle[user_key]` | `dict[str, Any]` | Dict-style item access (`__getitem__`). |
-| `user_key in handle` | `bool` | Dict-style membership (`__contains__`). |
-| `len(handle)` | `int` | Number of records visible to the dict view (i.e. successful reads with a `user_key`). |
+| `lazy_records[user_key]` | `dict[str, Any]` | Dict-style item access (`__getitem__`). |
+| `user_key in lazy_records` | `bool` | Dict-style membership (`__contains__`). |
+| `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | Dict-style `get` with optional default; mirrors `dict.get` semantics. |
+| `len(lazy_records)` | `int` | Total record count (matches `batch_records` / `iter_records`, **not** the dict-view cardinality — call `len(lazy_records.to_dict())` or `found_count()` for the latter). |
 
 Legacy aliases for code written against earlier releases:
 

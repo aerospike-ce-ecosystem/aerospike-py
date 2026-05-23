@@ -4,9 +4,9 @@ Two routes that share the same pipeline shape (batch_read N keys →
 materialise → cheap torch op → return JSON) but differ in **only one
 step**: how the batch result is materialised.
 
-* ``/bench/dict``  — ``handle.to_dict()`` then build a torch tensor from
+* ``/bench/dict``  — ``lazy_records.to_dict()`` then build a torch tensor from
   Python dicts. GIL held for the entire per-record loop in Rust.
-* ``/bench/numpy`` — ``handle.to_numpy(dtype)`` then ``torch.from_numpy``
+* ``/bench/numpy`` — ``lazy_records.to_numpy(dtype)`` then ``torch.from_numpy``
   the contiguous float32 column. GIL released during the buffer fill
   (see ``rust/src/numpy_support.rs::batch_to_numpy_py``).
 
@@ -74,7 +74,7 @@ async def bench_dict(
     request: Request,
     batch_size: int = Query(200, ge=1, le=5000),
 ) -> dict:
-    """`to_dict()` path: handle → Python dict → ``torch.tensor`` (bulk build).
+    """`to_dict()` path: LazyBatchRecords → Python dict → ``torch.tensor`` (bulk build).
 
     Uses the common Python-stack idiom — collect rows into a nested list and
     hand the whole thing to ``torch.tensor`` once. This is roughly what a
@@ -86,11 +86,11 @@ async def bench_dict(
     keys = _keys(batch_size)
 
     t_io_start = time.perf_counter()
-    handle = await request.app.state.py_client.batch_read(keys)
+    lazy_records = await request.app.state.py_client.batch_read(keys)
     t_io = time.perf_counter() - t_io_start
 
     t_conv_start = time.perf_counter()
-    result_dict = handle.to_dict()
+    result_dict = lazy_records.to_dict()
     # Build a list-of-lists, then a single tensor allocation. This is the
     # standard "dict → tensor" pattern in Python services.
     rows: list[list[float]] = []
@@ -121,16 +121,16 @@ async def bench_numpy(
     request: Request,
     batch_size: int = Query(200, ge=1, le=5000),
 ) -> dict:
-    """`to_numpy(dtype)` path: handle → numpy → torch.from_numpy."""
+    """`to_numpy(dtype)` path: LazyBatchRecords → numpy → torch.from_numpy."""
     t0 = time.perf_counter()
     keys = _keys(batch_size)
 
     t_io_start = time.perf_counter()
-    handle = await request.app.state.py_client.batch_read(keys)
+    lazy_records = await request.app.state.py_client.batch_read(keys)
     t_io = time.perf_counter() - t_io_start
 
     t_conv_start = time.perf_counter()
-    np_batch = handle.to_numpy(DTYPE)
+    np_batch = lazy_records.to_numpy(DTYPE)
     # Lift structured array to a contiguous float32 matrix the model can eat.
     # `np.column_stack` produces fresh contiguous memory; `torch.from_numpy`
     # then shares that buffer (no copy).

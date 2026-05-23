@@ -42,16 +42,16 @@ class TestNumericBatchRead:
 
         np.testing.assert_array_equal(result.result_codes, [0, 0, 0])
 
-    def test_without_dtype_returns_handle(self, client, cleanup):
+    def test_without_dtype_returns_lazy_records(self, client, cleanup):
         """batch_read now returns a LazyBatchRecords; .to_dict() materialises."""
         key = (NS, SET, "nodtype_1")
         cleanup.append(key)
         client.put(key, {"x": 1})
 
-        handle = client.batch_read([key])
-        assert not isinstance(handle, dict), "batch_read returns a handle, not dict"
-        assert isinstance(handle.to_dict(), dict)
-        assert handle.to_dict()["nodtype_1"] == {"x": 1}
+        lazy_records = client.batch_read([key])
+        assert not isinstance(lazy_records, dict), "batch_read returns a LazyBatchRecords, not dict"
+        assert isinstance(lazy_records.to_dict(), dict)
+        assert lazy_records.to_dict()["nodtype_1"] == {"x": 1}
 
 
 # ── meta (gen, ttl) verification ───────────────────────────────

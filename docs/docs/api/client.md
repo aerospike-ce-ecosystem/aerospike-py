@@ -720,7 +720,7 @@ result = await client.operate_ordered(
 Read multiple records in a single batch call.
 
 Returns a [`LazyBatchRecords`](types.md#lazybatchrecords) — a zero-conversion
-wrapper around the raw Rust results. Call one of the handle methods
+wrapper around the raw Rust results. Call one of its methods
 to materialise the result:
 
 * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``

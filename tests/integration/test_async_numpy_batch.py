@@ -60,10 +60,10 @@ class TestAsyncNumericBatchRead:
         cleanup.append(key)
         await async_client.put(key, {"x": 1})
 
-        handle = await async_client.batch_read([key])
-        assert not isinstance(handle, dict), "batch_read returns a handle, not dict"
-        assert isinstance(handle.to_dict(), dict)
-        assert handle.to_dict()["nodtype_1"] == {"x": 1}
+        lazy_records = await async_client.batch_read([key])
+        assert not isinstance(lazy_records, dict), "batch_read returns a LazyBatchRecords, not dict"
+        assert isinstance(lazy_records.to_dict(), dict)
+        assert lazy_records.to_dict()["nodtype_1"] == {"x": 1}
 
 
 # ── meta (gen, ttl) verification ───────────────────────────────
