@@ -165,6 +165,51 @@ class TestHLLOperations:
         op = hll_set_union("mybin", [b"\x00"])
         assert "hll_policy" not in op
 
+    def test_hll_ops_facade_always_emits_val(self):
+        """Regression: hll_add / hll_get_union / hll_get_union_count /
+        hll_get_intersect_count / hll_get_similarity / hll_set_union op dicts
+        must always include `val`.
+
+        At the Rust dispatch layer (operations.rs OP_HLL_{ADD,GET_UNION,
+        GET_UNION_COUNT,GET_INTERSECT_COUNT,GET_SIMILARITY,SET_UNION} arms), a
+        missing `val` raises ValueError rather than silently defaulting to
+        `Value::Nil` (which `values_from_list` would coerce into an empty list,
+        producing a no-op `hll_add` or "compared against zero HLL bins" result
+        the caller could not distinguish from a genuinely empty input). The
+        Python facade signatures already require `values` as a positional
+        argument; this test asserts both that the emitted op carries the value
+        through and that the facade has no default that would let a caller omit
+        it.
+        """
+        emitting = [
+            (hll_add, ("mybin", ["a", "b"]), 3002),
+            (hll_get_union, ("mybin", [b"\x00"]), 3004),
+            (hll_get_union_count, ("mybin", [b"\x00"]), 3005),
+            (hll_get_intersect_count, ("mybin", [b"\x00"]), 3006),
+            (hll_get_similarity, ("mybin", [b"\x00"]), 3007),
+            (hll_set_union, ("mybin", [b"\x00"]), 3010),
+        ]
+        for func, args, expected_op in emitting:
+            op = func(*args)
+            assert op["op"] == expected_op
+            assert "val" in op, f"{func.__name__} must emit 'val' in op dict"
+            assert op["val"] == args[-1]
+
+        # The facade has no default that would let a caller produce a
+        # value-less op dict for any of these ops.
+        with pytest.raises(TypeError):
+            hll_add("mybin")  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            hll_get_union("mybin")  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            hll_get_union_count("mybin")  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            hll_get_intersect_count("mybin")  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            hll_get_similarity("mybin")  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            hll_set_union("mybin")  # type: ignore[call-arg]
+
 
 class TestHLLModuleAccess:
     """Test that the module is accessible from the package."""
