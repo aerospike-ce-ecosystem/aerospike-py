@@ -202,6 +202,43 @@ class TestBitOperations:
         op = bit_subtract("mybin", 0, 8, 1, policy=4)
         assert op["bit_policy"] == 4
 
+    def test_bit_ops_facade_always_emits_val(self):
+        """Regression: bit_insert/set/or/xor/and op dicts must always include `val`.
+
+        At the Rust dispatch layer (operations.rs OP_BIT_{INSERT,SET,OR,XOR,AND}
+        arms), a missing `val` raises ValueError rather than silently defaulting
+        to `Value::Nil` (which the wire layer would encode as an empty/Nil
+        payload, producing a no-op or wrong-result bit operation). The Python
+        facade signatures already require `value` as a positional argument; this
+        test asserts both that the emitted op carries the value through and that
+        the facade has no default that would let a caller omit it.
+        """
+        emitting = [
+            (bit_insert, ("mybin", 0, b"\xff"), 4002),
+            (bit_set, ("mybin", 0, 8, b"\xff"), 4004),
+            (bit_or, ("mybin", 0, 8, b"\xa8"), 4005),
+            (bit_xor, ("mybin", 0, 8, b"\xac"), 4006),
+            (bit_and, ("mybin", 0, 8, b"\x3c"), 4007),
+        ]
+        for func, args, expected_op in emitting:
+            op = func(*args)
+            assert op["op"] == expected_op
+            assert "val" in op, f"{func.__name__} must emit 'val' in op dict"
+            assert op["val"] == args[-1]
+
+        # The facade has no default that would let a caller produce a
+        # value-less op dict for any of these ops.
+        with pytest.raises(TypeError):
+            bit_insert("mybin", 0)  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            bit_set("mybin", 0, 8)  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            bit_or("mybin", 0, 8)  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            bit_xor("mybin", 0, 8)  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            bit_and("mybin", 0, 8)  # type: ignore[call-arg]
+
 
 class TestModuleAccess:
     """Test that the module is accessible from the package."""
