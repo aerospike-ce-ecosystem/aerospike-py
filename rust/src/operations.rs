@@ -459,7 +459,15 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_LIST_TRIM => {
                 let name = require_bin(&bin_name, "list_trim")?;
                 let index = get_index(dict)?;
-                let count = get_count(dict)?.unwrap_or(0);
+                // `count` is mandatory for list_trim: a missing key defaulting to
+                // 0 would silently truncate the bin to an empty list, which is
+                // almost never what a caller constructing the op dict directly
+                // intends. Sibling range ops (pop_range/remove_range/get_range)
+                // default to 1 for convenience; `list_trim` errors instead so
+                // the destructive shape of the call is always explicit.
+                let count = get_count(dict)?.ok_or_else(|| {
+                    pyo3::exceptions::PyValueError::new_err("list_trim requires 'count'")
+                })?;
                 list_ops::trim(&name, index, count)
             }
             OP_LIST_CLEAR => {
@@ -1327,6 +1335,52 @@ mod tests {
                      not collapse to count=1"
                 );
             }
+        });
+    }
+
+    // ── list_trim: missing `count` must error, not silently empty the bin ──
+    //
+    // Regression for the bug where omitting `count` from a `list_trim` op dict
+    // defaulted to `0`, which Aerospike interprets as "keep zero elements" —
+    // i.e. it destructively empties the list. The fix raises ValueError
+    // instead so the destructive shape is always explicit.
+
+    #[test]
+    fn list_trim_missing_count_raises_value_error() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("op", super::OP_LIST_TRIM).unwrap();
+            dict.set_item("bin", "mybin").unwrap();
+            dict.set_item("index", 0i64).unwrap();
+            // intentionally omit "count"
+            let ops = PyList::new(py, [dict]).unwrap();
+
+            let err = super::py_ops_to_rust(&ops)
+                .expect_err("list_trim without 'count' must raise ValueError");
+            assert!(err.is_instance_of::<PyValueError>(py));
+            let msg = err.to_string();
+            assert!(
+                msg.contains("count"),
+                "error message should mention 'count', got: {msg}"
+            );
+        });
+    }
+
+    #[test]
+    fn list_trim_with_count_succeeds() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("op", super::OP_LIST_TRIM).unwrap();
+            dict.set_item("bin", "mybin").unwrap();
+            dict.set_item("index", 1i64).unwrap();
+            dict.set_item("count", 3i64).unwrap();
+            let ops = PyList::new(py, [dict]).unwrap();
+
+            let converted =
+                super::py_ops_to_rust(&ops).expect("list_trim with explicit count must succeed");
+            assert_eq!(converted.len(), 1);
         });
     }
 }
