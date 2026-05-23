@@ -155,30 +155,37 @@ class Client(_NativeClient):
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
     @catch_unexpected("Client.batch_read")
-    def batch_read(self, keys, bins=None, policy=None, _dtype=None):
+    def batch_read(self, keys, bins=None, policy=None):
         """Read multiple records in a single batch call.
+
+        Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around the
+        raw Rust results. Convert lazily with one of the handle methods:
+
+        * ``handle.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``handle.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+          during the structured-array fill — ideal for FastAPI/PyTorch
+          inference workers)
+        * ``handle.batch_records`` → ``list[BatchRecord]`` (compat)
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            bins: Optional list of bin names to read. ``None`` reads all bins;
-                an empty list performs an existence check only.
+            bins: Optional list of bin names to read. ``None`` reads all
+                bins; an empty list performs an existence check only.
             policy: Optional batch policy dict.
-            _dtype: Optional NumPy dtype. When provided, returns
-                ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (``dict[Key, AerospikeRecord]``) or
-            ``NumpyBatchRecords`` when ``_dtype`` is set.
+            ``LazyBatchRecords`` — call ``.to_dict()`` / ``.to_numpy(dtype)``
+            to materialise the result.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            result = client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in result.items():
+            handle = client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in handle.to_dict().items():
                 print(user_key, bins_dict)
             ```
         """
-        return super().batch_read(keys, bins, policy, _dtype)
+        return super().batch_read(keys, bins, policy)
 
     @catch_unexpected("Client.batch_write_numpy")
     def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0):

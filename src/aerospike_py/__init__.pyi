@@ -564,53 +564,43 @@ class Client:
 
     # -- Batch --
 
-    @overload
     def batch_read(
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
         policy: Optional[dict[str, Any]] = None,
-        _dtype: None = None,
-    ) -> BatchRecords: ...
-    @overload
-    def batch_read(
-        self,
-        keys: list[Key],
-        bins: Optional[list[str]] = None,
-        policy: Optional[dict[str, Any]] = None,
-        *,
-        _dtype: np.dtype,
-    ) -> NumpyBatchRecords: ...
-    def batch_read(
-        self,
-        keys: list[Key],
-        bins: Optional[list[str]] = None,
-        policy: Optional[dict[str, Any]] = None,
-        _dtype: Optional[np.dtype] = None,
-    ) -> Union[BatchRecords, NumpyBatchRecords]:
+    ) -> "LazyBatchRecords":
         """Read multiple records in a single batch call.
 
-        Returns ``dict[UserKey, AerospikeRecord]`` mapping each user key to
-        its bins dict. Only successful reads with a user key are included.
+        Returns a [`LazyBatchRecords`](#batchreadhandle) — a zero-conversion
+        wrapper around the raw Rust results. Call one of the handle methods
+        to materialise the result:
+
+        * ``handle.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``handle.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+          during the structured-array fill — ideal for FastAPI/PyTorch
+          inference workers)
+        * ``handle.batch_records`` → ``list[BatchRecord]`` (compat)
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            bins: Optional list of bin names to read. ``None`` reads all bins;
-                an empty list performs an existence check only.
+            bins: Optional list of bin names to read. ``None`` reads all
+                bins; an empty list performs an existence check only.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-            _dtype: Optional NumPy dtype. When provided, returns
-                ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (``dict[UserKey, AerospikeRecord]``) or
-            ``NumpyBatchRecords`` when ``_dtype`` is set.
+            ``LazyBatchRecords``.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            result = client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in result.items():
+            handle = client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in handle.to_dict().items():
                 print(user_key, bins_dict)
+
+            # numpy/torch path
+            np_batch = handle.to_numpy(dtype)
+            tensor = torch.from_numpy(np_batch.batch_records["score"])
             ```
         """
         ...
@@ -1665,55 +1655,44 @@ class AsyncClient:
 
     # -- Batch --
 
-    @overload
     async def batch_read(
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
         policy: Optional[dict[str, Any]] = None,
-        _dtype: None = None,
-    ) -> BatchRecords: ...
-    @overload
-    async def batch_read(
-        self,
-        keys: list[Key],
-        bins: Optional[list[str]] = None,
-        policy: Optional[dict[str, Any]] = None,
-        *,
-        _dtype: np.dtype,
-    ) -> NumpyBatchRecords: ...
-    async def batch_read(
-        self,
-        keys: list[Key],
-        bins: Optional[list[str]] = None,
-        policy: Optional[dict[str, Any]] = None,
-        _dtype: Optional[np.dtype] = None,
-    ) -> Union[BatchRecords, NumpyBatchRecords]:
+    ) -> "LazyBatchRecords":
         """Read multiple records in a single batch call.
 
-        Returns ``dict[UserKey, AerospikeRecord]`` mapping each user key to
-        its bins dict. Only successful reads with a user key are included.
+        Returns a [`LazyBatchRecords`](#batchreadhandle) — a zero-conversion
+        wrapper around the raw Rust results. The async future itself
+        completes with near-zero GIL cost (``Arc::new`` + ``Py::new``), so
+        concurrent ``batch_read`` futures release their ``spawn_blocking``
+        threads almost immediately. The heavier dict / numpy conversion
+        runs on the calling coroutine, where there is no GIL contention
+        between concurrent callers.
 
-        The async future completes with near-zero GIL cost (< 0.01ms);
-        dict conversion runs in the event loop coroutine context.
+        Materialise via:
+
+        * ``handle.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``handle.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+          during the structured-array fill — ideal for FastAPI/PyTorch
+          inference workers)
+        * ``handle.batch_records`` → ``list[BatchRecord]`` (compat)
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            bins: Optional list of bin names to read. ``None`` reads all bins;
-                an empty list performs an existence check only.
+            bins: Optional list of bin names to read. ``None`` reads all
+                bins; an empty list performs an existence check only.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-            _dtype: Optional NumPy dtype. When provided, returns
-                ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (``dict[UserKey, AerospikeRecord]``) or
-            ``NumpyBatchRecords`` when ``_dtype`` is set.
+            ``LazyBatchRecords``.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            result = await client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in result.items():
+            handle = await client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in handle.to_dict().items():
                 print(user_key, bins_dict)
             ```
         """

@@ -1,7 +1,9 @@
-"""Integration tests for async batch_read dict return type.
+"""Integration tests for `batch_read()` returning a `LazyBatchRecords`.
 
-Tests that AsyncClient.batch_read() returns dict[UserKey, AerospikeRecord]
-with zero-GIL-contention async pattern preserved internally.
+The async path completes with near-zero GIL hold (Arc::new + Py::new);
+materialisation is via ``handle.to_dict()`` / ``handle.to_numpy(dtype)``
+in the calling coroutine, so concurrent ``batch_read`` futures release
+their ``spawn_blocking`` threads almost immediately.
 """
 
 import asyncio
@@ -22,19 +24,22 @@ async def _seed_records(async_client, async_cleanup):
     yield keys
 
 
-class TestBatchReadDict:
-    """Tests for batch_read() returning dict[UserKey, AerospikeRecord]."""
+class TestLazyBatchRecordsDict:
+    """Tests for ``batch_read().to_dict()`` returning dict[UserKey, AerospikeRecord]."""
 
-    async def test_returns_dict(self, async_client, _seed_records):
+    async def test_returns_handle(self, async_client, _seed_records):
         keys = _seed_records
-        result = await async_client.batch_read(keys)
+        handle = await async_client.batch_read(keys)
+        # batch_read no longer eagerly materialises; .to_dict() does.
+        assert not isinstance(handle, dict)
+        result = handle.to_dict()
         assert isinstance(result, dict)
         assert len(result) == 5
 
     async def test_dict_values(self, async_client, _seed_records):
         """Dict maps user_key to bins dict."""
         keys = _seed_records
-        result = await async_client.batch_read(keys)
+        result = (await async_client.batch_read(keys)).to_dict()
 
         for i in range(5):
             key_val = f"h_{i}"
@@ -45,7 +50,7 @@ class TestBatchReadDict:
     async def test_specific_bins(self, async_client, _seed_records):
         """bins parameter filters returned bins."""
         keys = _seed_records
-        result = await async_client.batch_read(keys, bins=["name"])
+        result = (await async_client.batch_read(keys, bins=["name"])).to_dict()
 
         for i in range(5):
             bins = result[f"h_{i}"]
@@ -56,21 +61,21 @@ class TestBatchReadDict:
         """Missing records are excluded from the dict."""
         keys = _seed_records
         missing = [(NS, SET, "missing_1"), (NS, SET, "missing_2")]
-        result = await async_client.batch_read(keys + missing)
+        result = (await async_client.batch_read(keys + missing)).to_dict()
 
         assert len(result) == 5  # Only found records
         assert "missing_1" not in result
         assert "missing_2" not in result
 
     async def test_empty_keys(self, async_client):
-        """Empty keys list returns empty dict."""
-        result = await async_client.batch_read([])
+        """Empty keys list yields an empty dict via .to_dict()."""
+        result = (await async_client.batch_read([])).to_dict()
         assert result == {}
 
     async def test_dict_iteration(self, async_client, _seed_records):
-        """Standard dict iteration patterns work."""
+        """Standard dict iteration patterns work on .to_dict()."""
         keys = _seed_records
-        result = await async_client.batch_read(keys)
+        result = (await async_client.batch_read(keys)).to_dict()
 
         # items()
         for user_key, bins_dict in result.items():
@@ -88,7 +93,7 @@ class TestBatchReadDict:
             async_cleanup.append(k)
             await async_client.put(k, {"val": k[2] * 10})
 
-        result = await async_client.batch_read(keys)
+        result = (await async_client.batch_read(keys)).to_dict()
         assert len(result) == 3
         for i in range(3):
             assert result[i]["val"] == i * 10
@@ -102,7 +107,8 @@ class TestBatchReadConcurrency:
         keys = _seed_records
 
         async def read_task():
-            result = await async_client.batch_read(keys)
+            handle = await async_client.batch_read(keys)
+            result = handle.to_dict()
             assert len(result) == 5
             return result
 

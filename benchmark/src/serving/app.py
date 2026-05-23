@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from serving.aerospike_clients import create_official_client, create_py_async_client
 from serving.config import MAX_CONCURRENT_OPS
-from serving.endpoints import health, predict
+from serving.endpoints import bench, health, predict
 from serving.model import create_model
 from serving.observability import configure_observability, shutdown_observability
 
@@ -57,3 +57,4 @@ app = FastAPI(
 
 app.include_router(predict.router)
 app.include_router(health.router)
+app.include_router(bench.router)

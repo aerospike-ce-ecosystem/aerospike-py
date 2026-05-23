@@ -62,7 +62,7 @@ async def numpy_batch_read(
     bin_names = body.bins or [f.name for f in body.dtype]
 
     try:
-        result = await client.batch_read(keys, bins=bin_names, _dtype=dtype)
+        result = (await client.batch_read(keys, bins=bin_names)).to_numpy(dtype)
     except TypeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -166,7 +166,7 @@ async def vector_search(
 
     keys = [k.to_tuple() for k in body.keys]
     bin_names = [body.embedding_bin] + (body.extra_bins or [])
-    result = await client.batch_read(keys, bins=bin_names, _dtype=dtype)
+    result = (await client.batch_read(keys, bins=bin_names)).to_numpy(dtype)
 
     ok_mask = result.result_codes == 0
 

@@ -148,47 +148,45 @@ class AsyncClient:
 
     @catch_unexpected("AsyncClient.batch_read")
     async def batch_read(
-        self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None, _dtype: Any = None
+        self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None
     ) -> Any:
         """Read multiple records in a single batch call.
 
-        Returns ``dict[Key, AerospikeRecord]`` mapping each user key to its
-        bins dict. Only successful reads with a user key are included.
+        Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around the
+        raw Rust results. Call one of the handle methods to materialise:
 
-        The async future completes with near-zero GIL cost (< 0.01ms);
-        dict conversion runs in the event loop coroutine context.
+        * ``handle.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``handle.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+          during the structured-array fill — ideal for FastAPI/PyTorch
+          inference workers)
+        * ``handle.batch_records`` → ``list[BatchRecord]`` (compat)
+
+        The async future itself completes with near-zero GIL cost
+        (``Arc::new`` + ``Py::new``), so concurrent ``batch_read`` futures
+        release their ``spawn_blocking`` threads almost immediately. The
+        heavier dict / numpy conversion happens here in the coroutine on
+        the event loop, where there is no GIL contention between
+        concurrent callers.
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            bins: Optional list of bin names to read. ``None`` reads all bins;
-                an empty list performs an existence check only.
+            bins: Optional list of bin names to read. ``None`` reads all
+                bins; an empty list performs an existence check only.
             policy: Optional batch policy dict.
-            _dtype: Optional NumPy dtype. When provided, returns
-                ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (``dict[Key, AerospikeRecord]``) or
-            ``NumpyBatchRecords`` when ``_dtype`` is set.
+            ``LazyBatchRecords`` — call ``.to_dict()`` / ``.to_numpy(dtype)``
+            to materialise the result.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            result = await client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in result.items():
+            handle = await client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in handle.to_dict().items():
                 print(user_key, bins_dict)
             ```
         """
-        # The Rust future returns a PyBatchReadHandle (Arc-wrapped raw results)
-        # instead of converting to a dict inside the future_into_py callback.
-        # This keeps the GIL hold in the spawn_blocking callback under 0.01ms
-        # (just Arc::new + Py::new), so concurrent batch_read futures release
-        # their spawn_blocking threads almost immediately. The heavier dict
-        # conversion (1-5ms) runs here in the coroutine on the event loop,
-        # where there is no GIL contention between concurrent callers.
-        raw = await self._inner.batch_read(keys, bins, policy, _dtype)
-        if _dtype is not None:
-            return raw  # NumpyBatchRecords path unchanged
-        return raw.as_dict()
+        return await self._inner.batch_read(keys, bins, policy)
 
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(

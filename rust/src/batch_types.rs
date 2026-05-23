@@ -152,11 +152,6 @@ pub enum PendingBatchRead {
         /// per batch_read on the hot path.
         io_complete_at: Option<std::time::Instant>,
     },
-    /// Numpy: returns structured NumPy array (eager, already fast).
-    Numpy {
-        results: Vec<BatchRecord>,
-        dtype: Py<PyAny>,
-    },
 }
 
 impl<'py> IntoPyObject<'py> for PendingBatchRead {
@@ -182,23 +177,19 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
                 // Capture into_pyobject_at only when profiling is ON.
                 let into_pyobject_at = crate::metrics::maybe_now();
                 crate::stage_timer!("into_pyobject", "batch_read", {
-                    let handle = PyBatchReadHandle {
-                        inner: Arc::new(results),
+                    let handle = PyLazyBatchRecords::from_arc_with_timestamp(
+                        Arc::new(results),
                         into_pyobject_at,
-                    };
+                    );
                     let result = Py::new(py, handle)?.into_bound(py).into_any();
                     Ok(result)
                 })
-            }
-            PendingBatchRead::Numpy { results, dtype } => {
-                crate::numpy_support::batch_to_numpy_py(py, &results, &dtype.into_bound(py))
-                    .map(|obj| obj.into_bound(py))
             }
         }
     }
 }
 
-// ── PyBatchReadHandle ────────────────────────────────────────────
+// ── PyLazyBatchRecords ────────────────────────────────────────────
 //
 // Zero-conversion handle returned by async `batch_read`. Wraps raw Rust
 // batch results in an `Arc`; actual Python conversion is deferred to
@@ -212,45 +203,137 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
 ///
 /// - [`as_dict()`](Self::as_dict) — fastest path, returns `dict[key, bins_dict]`
 /// - [`batch_records`](Self::batch_records) — compatibility path, returns `list[BatchRecord]`
-#[pyclass(name = "BatchReadHandle")]
-pub struct PyBatchReadHandle {
+#[pyclass(name = "LazyBatchRecords", mapping)]
+pub struct PyLazyBatchRecords {
     inner: Arc<Vec<BatchRecord>>,
     /// Timestamp when `into_pyobject` completed — populated only when internal
     /// stage profiling is enabled (for `event_loop_resume_delay` measurement).
     into_pyobject_at: Option<std::time::Instant>,
+    /// Lazily-materialised `dict[user_key, bins_dict]` view shared by all the
+    /// dict-like dunder methods (`__contains__`, `__getitem__`, `__iter__`,
+    /// `__len__`, `items`, `values`, `keys`). The first call that needs a
+    /// dict pays the conversion cost; subsequent calls reuse the same
+    /// `PyDict`. `to_dict()` always returns a *new* dict so that callers can
+    /// mutate freely without poisoning the cache.
+    ///
+    /// `Mutex` is required because `#[pyclass]` types must be `Send + Sync`.
+    /// Under the GIL it's effectively uncontended; under free-threaded
+    /// CPython it provides real mutual exclusion during first materialisation.
+    cached_dict: Mutex<Option<Py<PyDict>>>,
+}
+
+impl PyLazyBatchRecords {
+    /// Build a handle directly from owned Rust batch results.
+    ///
+    /// Used by the sync `Client.batch_read` path, which has the GIL when
+    /// constructing the handle (no `IntoPyObject` plumbing required).
+    pub fn from_results(results: Vec<BatchRecord>) -> Self {
+        Self {
+            inner: Arc::new(results),
+            into_pyobject_at: None,
+            cached_dict: Mutex::new(None),
+        }
+    }
+
+    /// Build a handle from already-shared `Arc` results plus a profiling
+    /// timestamp. Used by the async `IntoPyObject` path.
+    fn from_arc_with_timestamp(
+        inner: Arc<Vec<BatchRecord>>,
+        into_pyobject_at: Option<std::time::Instant>,
+    ) -> Self {
+        Self {
+            inner,
+            into_pyobject_at,
+            cached_dict: Mutex::new(None),
+        }
+    }
+
+    /// Return the cached `dict[user_key, bins_dict]`, building it on first
+    /// access. Owned `Py<PyDict>` is cloned out so the caller can bind to
+    /// the current GIL token without holding the mutex lock.
+    fn cached_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let mut guard = self.cached_dict.lock().map_err(|_| {
+            crate::errors::RustPanicError::new_err(
+                "LazyBatchRecords dict cache mutex was poisoned by a previous \
+                 panic during conversion; this handle's data is unrecoverable",
+            )
+        })?;
+        if guard.is_none() {
+            let d = batch_to_dict_py(py, &self.inner)?;
+            *guard = Some(d.unbind());
+        }
+        Ok(guard.as_ref().unwrap().clone_ref(py).into_bound(py))
+    }
 }
 
 #[pymethods]
-impl PyBatchReadHandle {
-    fn __len__(&self) -> usize {
-        self.inner.len()
+impl PyLazyBatchRecords {
+    fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
+        Ok(self.cached_dict(py)?.len())
     }
 
-    fn __getitem__(&self, py: Python<'_>, index: isize) -> PyResult<Py<PyBatchRecord>> {
-        let len = self.inner.len() as isize;
-        let idx = if index < 0 { len + index } else { index };
-        if idx < 0 || idx >= len {
-            return Err(pyo3::exceptions::PyIndexError::new_err(
-                "BatchReadHandle index out of range",
-            ));
+    /// Dict-style item access: `handle[user_key]` returns the bins dict.
+    ///
+    /// Records without a `user_key` (digest-only) or with a failed result
+    /// are not present in the dict view — use `batch_records[i]` for raw
+    /// index-based access (including digest-only and failed records).
+    fn __getitem__<'py>(
+        &self,
+        py: Python<'py>,
+        key: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        match d.get_item(key)? {
+            Some(v) => Ok(v),
+            None => Err(pyo3::exceptions::PyKeyError::new_err(key.repr()?.to_string())),
         }
-        single_batch_record_to_py(py, &self.inner[idx as usize])
     }
 
-    fn __iter__(slf: PyRef<'_, Self>) -> PyBatchReadIter {
+    fn __contains__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let d = self.cached_dict(py)?;
+        d.contains(key)
+    }
+
+    fn __iter__<'py>(slf: PyRef<'py, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let d = slf.cached_dict(py)?;
+        d.call_method0("__iter__")
+    }
+
+    /// Dict-style ``handle.items()`` view.
+    fn items<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        d.call_method0("items")
+    }
+
+    /// Dict-style ``handle.values()`` view.
+    fn values<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        d.call_method0("values")
+    }
+
+    /// Iterate records (BatchRecord wrappers) in insertion order.
+    ///
+    /// Preserves the pre-dict-like iteration semantics for callers that
+    /// need every record — including digest-only entries and failed reads
+    /// that the dict view skips.
+    fn iter_records(slf: PyRef<'_, Self>) -> PyBatchReadIter {
         PyBatchReadIter {
             inner: Arc::clone(&slf.inner),
             index: 0,
         }
     }
 
-    /// Fastest access path: returns `dict[key_str, bins_dict]` directly.
+    /// Fastest dict access: returns `dict[user_key, bins_dict]` directly.
     ///
-    /// Skips all intermediate objects (BatchRecord wrapper, key tuple, meta dict).
-    /// Records without a `user_key` (digest-only) or with a failed result are
-    /// excluded from the dict. Use `batch_records` to access all records.
-    fn as_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        // ── (D) event loop resume delay: into_pyobject → as_dict call ──
+    /// Skips all intermediate objects (BatchRecord wrapper, key tuple, meta
+    /// dict). Records without a `user_key` (digest-only) or with a failed
+    /// result are excluded from the dict — use `batch_records` to access
+    /// all records.
+    ///
+    /// This is the canonical conversion entry point. `as_dict()` remains
+    /// available as a deprecated alias that forwards here unchanged.
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        // ── (D) event loop resume delay: into_pyobject → to_dict call ──
         if let Some(t) = self.into_pyobject_at {
             crate::metrics::record_internal_stage_unchecked(
                 "event_loop_resume_delay",
@@ -259,27 +342,55 @@ impl PyBatchReadHandle {
             );
         }
 
-        // ── Stage: as_dict (GIL held in event loop coroutine) ──
-        crate::stage_timer!("as_dict", "batch_read", batch_to_dict_py(py, &self.inner))
+        // ── Stage: to_dict (GIL held in event loop coroutine) ──
+        crate::stage_timer!("to_dict", "batch_read", batch_to_dict_py(py, &self.inner))
+    }
+
+    /// Backwards-compatible alias for [`Self::to_dict`].
+    ///
+    /// Kept for code written against earlier releases that exposed only the
+    /// async path. New code should call `to_dict()` so that sync and async
+    /// clients line up symmetrically with `to_numpy(dtype)`.
+    fn as_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        self.to_dict(py)
+    }
+
+    /// Convert the batch read result into a `NumpyBatchRecords` structured
+    /// array. The fill loop runs under `Python::detach`, so the GIL is
+    /// released while raw Aerospike values are written into the NumPy
+    /// buffer — see `numpy_support::batch_to_numpy_py` for details.
+    fn to_numpy(&self, py: Python<'_>, dtype: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        crate::stage_timer!("to_numpy", "batch_read", {
+            crate::numpy_support::batch_to_numpy_py(py, &self.inner, dtype)
+        })
     }
 
     /// Merge multiple handles into a list of dicts in a single GIL acquisition.
     ///
     /// Avoids 9 separate event-loop coroutine resumes when using `asyncio.gather`.
-    /// Instead of `[h.as_dict() for h in handles]`, call
-    /// `BatchReadHandle.merge_as_dict(handles)` once.
+    /// Instead of `[h.to_dict() for h in handles]`, call
+    /// `LazyBatchRecords.merge_to_dict(handles)` once.
     #[staticmethod]
-    fn merge_as_dict<'py>(
+    fn merge_to_dict<'py>(
         handles: Vec<PyRef<'py, Self>>,
         py: Python<'py>,
     ) -> PyResult<Vec<Bound<'py, PyDict>>> {
-        crate::stage_timer!("merge_as_dict", "batch_read", {
+        crate::stage_timer!("merge_to_dict", "batch_read", {
             let result: PyResult<Vec<_>> = handles
                 .iter()
                 .map(|h| batch_to_dict_py(py, &h.inner))
                 .collect();
             result
         })
+    }
+
+    /// Backwards-compatible alias for [`Self::merge_to_dict`].
+    #[staticmethod]
+    fn merge_as_dict<'py>(
+        handles: Vec<PyRef<'py, Self>>,
+        py: Python<'py>,
+    ) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        Self::merge_to_dict(handles, py)
     }
 
     /// Compatibility path: returns `list[BatchRecord]` with lazy per-record conversion.
@@ -301,17 +412,27 @@ impl PyBatchReadHandle {
             .count()
     }
 
-    /// Extract just the user keys without converting record data.
+    /// Dict-style ``handle.keys()`` view — user keys of records that
+    /// actually appear in the dict view (successful reads with a
+    /// ``user_key``). Missing / failed records are excluded so that
+    /// ``set(handle.keys())`` matches ``set(handle.to_dict().keys())``.
+    fn keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        d.call_method0("keys")
+    }
+
+    /// Return *every* batch record's ``user_key``, including missing and
+    /// failed reads (i.e. records that ``to_dict()`` filters out).
     ///
-    /// Conversion errors are propagated (not silently dropped) so the returned
-    /// list length always matches the records that carry a `user_key`.
-    fn keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+    /// Useful when you need positional alignment with the raw
+    /// ``batch_records`` list or with a ``NumpyBatchRecords`` result.
+    fn raw_user_keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let keys = collect_user_keys(py, &self.inner)?;
         PyList::new(py, &keys)
     }
 }
 
-/// Iterator for [`PyBatchReadHandle`], yielding [`PyBatchRecord`] one at a time.
+/// Iterator for [`PyLazyBatchRecords`], yielding [`PyBatchRecord`] one at a time.
 #[pyclass]
 pub struct PyBatchReadIter {
     inner: Arc<Vec<BatchRecord>>,

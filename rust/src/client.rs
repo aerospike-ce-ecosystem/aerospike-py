@@ -14,7 +14,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::backpressure::OperationLimiter;
-use crate::batch_types::{batch_to_batch_records_py, batch_to_dict_py};
+use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::catch_panic_sync;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
@@ -1137,16 +1137,17 @@ impl PyClient {
 
     // ── Batch operations ──────────────────────────────────────────
 
-    /// Read multiple records. Returns BatchRecords, or NumpyBatchRecords when dtype is provided.
-    #[pyo3(signature = (keys, bins=None, policy=None, _dtype=None))]
+    /// Read multiple records. Returns a `LazyBatchRecords` — call
+    /// `.to_dict()` for the legacy dict result or `.to_numpy(dtype)` for a
+    /// NumPy structured array.
+    #[pyo3(signature = (keys, bins=None, policy=None))]
     fn batch_read(
         &self,
         py: Python<'_>,
         keys: &Bound<'_, PyList>,
         bins: Option<Vec<String>>,
         policy: Option<&Bound<'_, PyDict>>,
-        _dtype: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<Py<PyAny>> {
+    ) -> PyResult<Py<crate::batch_types::PyLazyBatchRecords>> {
         debug!("batch_read: keys_count={}", keys.len());
         let client = self.get_client()?.clone();
         let args =
@@ -1161,13 +1162,7 @@ impl PyClient {
             })
         })?;
 
-        match _dtype {
-            Some(d) => crate::numpy_support::batch_to_numpy_py(py, &results, d),
-            None => {
-                let dict = batch_to_dict_py(py, &results)?;
-                Ok(dict.unbind().into_any())
-            }
-        }
+        Py::new(py, crate::batch_types::PyLazyBatchRecords::from_results(results))
     }
 
     /// Perform operations on multiple records. Returns list of (key, meta, bins) tuples.

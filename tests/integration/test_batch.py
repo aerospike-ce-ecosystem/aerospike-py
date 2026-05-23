@@ -17,7 +17,7 @@ class TestBatchRead:
         client.put(keys[1], {"a": 2})
         client.put(keys[2], {"a": 3})
 
-        result = client.batch_read(keys)
+        result = client.batch_read(keys).to_dict()
         assert isinstance(result, dict)
         assert len(result) == 3
         assert result["batch_get_1"]["a"] == 1
@@ -35,7 +35,7 @@ class TestBatchRead:
         client.put(keys[0], {"a": 1, "b": 2, "c": 3})
         client.put(keys[1], {"a": 10, "b": 20, "c": 30})
 
-        result = client.batch_read(keys, bins=["a", "c"])
+        result = client.batch_read(keys, bins=["a", "c"]).to_dict()
         assert len(result) == 2
         for user_key, bins in result.items():
             assert "a" in bins
@@ -55,7 +55,7 @@ class TestBatchRead:
         client.put(keys[0], {"val": 1})
         client.put(keys[1], {"val": 2})
 
-        result = client.batch_read(keys, bins=[])
+        result = client.batch_read(keys, bins=[]).to_dict()
         # Only found records appear in dict (missing excluded)
         assert "batch_exists_1" in result
         assert "batch_exists_2" in result
@@ -70,7 +70,7 @@ class TestBatchRead:
 
         client.put(keys[0], {"val": 1})
 
-        result = client.batch_read(keys)
+        result = client.batch_read(keys).to_dict()
         assert len(result) == 1
         assert result["batch_get_exists"]["val"] == 1
         assert "batch_get_missing" not in result
@@ -290,7 +290,7 @@ class TestBatchWrite:
             assert br.result == 0
 
         # Verify all written
-        read_result = client.batch_read(keys)
+        read_result = client.batch_read(keys).to_dict()
         assert len(read_result) == n
 
 
