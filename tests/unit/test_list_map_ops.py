@@ -11,6 +11,8 @@ from aerospike_py.list_operations import (
     list_get_by_index,
     list_get_by_rank,
     list_get_by_rank_range,
+    list_get_by_value,
+    list_get_by_value_list,
     list_get_range,
     list_increment,
     list_insert,
@@ -19,6 +21,8 @@ from aerospike_py.list_operations import (
     list_remove,
     list_remove_by_rank,
     list_remove_by_rank_range,
+    list_remove_by_value,
+    list_remove_by_value_list,
     list_remove_range,
     list_set,
     list_size,
@@ -33,12 +37,15 @@ from aerospike_py.map_operations import (
     map_get_by_rank,
     map_get_by_rank_range,
     map_get_by_value,
+    map_get_by_value_list,
     map_increment,
     map_put,
     map_put_items,
     map_remove_by_key,
     map_remove_by_rank,
     map_remove_by_rank_range,
+    map_remove_by_value,
+    map_remove_by_value_list,
     map_size,
 )
 
@@ -383,6 +390,68 @@ class TestMapOperations:
         # map_put_items op without supplying items.
         with pytest.raises(TypeError):
             map_put_items("mybin")  # type: ignore[call-arg]
+
+
+class TestListMapByValueFacadeRequiresVal:
+    """Regression: facade helpers for list/map BY_VALUE ops always emit `val`.
+
+    At the Rust dispatch layer (operations.rs) the OP_LIST_GET_BY_VALUE,
+    OP_LIST_GET_BY_VALUE_LIST, OP_LIST_REMOVE_BY_VALUE,
+    OP_LIST_REMOVE_BY_VALUE_LIST, OP_MAP_GET_BY_VALUE, OP_MAP_REMOVE_BY_VALUE,
+    and OP_MAP_REMOVE_BY_VALUE_LIST arms now raise ValueError("<op> requires
+    'val'") for a missing `val` key instead of silently substituting
+    `Value::Nil`. These tests assert the facade always supplies `val` and
+    rejects a missing positional value (TypeError), so callers using the
+    facade never hit the dispatch-level error in normal use.
+    """
+
+    @pytest.mark.parametrize(
+        "func,expected_op,sample_val",
+        [
+            (list_get_by_value, 1015, 42),
+            (list_remove_by_value, 1022, 42),
+            (map_get_by_value, 2020, 42),
+            (map_remove_by_value, 2010, 42),
+        ],
+        ids=[
+            "list_get_by_value",
+            "list_remove_by_value",
+            "map_get_by_value",
+            "map_remove_by_value",
+        ],
+    )
+    def test_by_value_facade_emits_val(self, func, expected_op, sample_val):
+        op = func("mybin", sample_val, return_type=0)
+        assert op["op"] == expected_op
+        assert op["bin"] == "mybin"
+        assert "val" in op
+        assert op["val"] == sample_val
+        with pytest.raises(TypeError):
+            func("mybin", return_type=0)  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize(
+        "func,expected_op,sample_values",
+        [
+            (list_get_by_value_list, 1020, [1, 2, 3]),
+            (list_remove_by_value_list, 1023, [1, 2, 3]),
+            (map_remove_by_value_list, 2011, [1, 2, 3]),
+            (map_get_by_value_list, 2027, [1, 2, 3]),
+        ],
+        ids=[
+            "list_get_by_value_list",
+            "list_remove_by_value_list",
+            "map_remove_by_value_list",
+            "map_get_by_value_list",
+        ],
+    )
+    def test_by_value_list_facade_emits_val(self, func, expected_op, sample_values):
+        op = func("mybin", sample_values, return_type=0)
+        assert op["op"] == expected_op
+        assert op["bin"] == "mybin"
+        assert "val" in op
+        assert op["val"] == sample_values
+        with pytest.raises(TypeError):
+            func("mybin", return_type=0)  # type: ignore[call-arg]
 
 
 class TestModuleAccess:

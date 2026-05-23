@@ -44,20 +44,24 @@ fn require_bitwise_value(val: Option<Value>, op_name: &str) -> PyResult<Value> {
     val.ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("{op_name} requires 'val'")))
 }
 
-/// Require a `val` for an HLL or map op-dispatch arm.
+/// Require a `val` for an HLL, list-by-value, or map-by-value op-dispatch arm.
 ///
 /// Same failure mode as the bitwise variant: a missing `val` used to default
 /// to `Value::Nil`, which downstream helpers like `values_from_list` happily
-/// coerce into an empty list. For `hll_add` that silently means "add zero
-/// values" (the HLL bin is created on first use but no elements register);
-/// for `hll_get_union` / `_union_count` / `_intersect_count` / `_similarity`
-/// / `_set_union` it means "compare against zero HLL bins", quietly producing
-/// a 0/1.0 result that the caller cannot distinguish from an empty input. For
-/// `map_put_items` it bypassed the `Value::HashMap` arm and fell through to
-/// the ambiguous "map_put_items requires a dict value" error even though the
-/// real bug was a missing `val` key. All the corresponding Python facade
-/// helpers already require their values/items as positional arguments, so this
-/// only fires for callers who construct op dicts directly.
+/// coerce into a single-element `[Nil]` list. For `hll_add` that silently
+/// means "add zero values" (the HLL bin is created on first use but no
+/// elements register); for `hll_get_union` / `_union_count` / `_intersect_count`
+/// / `_similarity` / `_set_union` it means "compare against zero HLL bins",
+/// quietly producing a 0/1.0 result that the caller cannot distinguish from
+/// an empty input. For `map_put_items` it bypassed the `Value::HashMap` arm
+/// and fell through to the ambiguous "map_put_items requires a dict value"
+/// error even though the real bug was a missing `val` key. For
+/// `list_get_by_value` / `list_remove_by_value` / `map_get_by_value` /
+/// `map_remove_by_value` (and their `_list` variants), the dispatch happily
+/// queries the bin for `Nil` matches, silently returning an empty result
+/// instead of the records the caller actually expected. All the corresponding
+/// Python facade helpers already require their values/items as positional
+/// arguments, so this only fires for callers who construct op dicts directly.
 fn require_hll_value(val: Option<Value>, op_name: &str) -> PyResult<Value> {
     val.ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("{op_name} requires 'val'")))
 }
@@ -522,7 +526,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_LIST_GET_BY_VALUE => {
                 let name = require_bin(&bin_name, "list_get_by_value")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "list_get_by_value")?;
                 let rt = int_to_list_return_type(get_return_type(dict)?);
                 list_ops::get_by_value(&name, v, rt)
             }
@@ -558,7 +562,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_LIST_GET_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "list_get_by_value_list")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "list_get_by_value_list")?;
                 let rt = int_to_list_return_type(get_return_type(dict)?);
                 list_ops::get_by_value_list(&name, values_from_list(&v), rt)
             }
@@ -571,13 +575,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_LIST_REMOVE_BY_VALUE => {
                 let name = require_bin(&bin_name, "list_remove_by_value")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "list_remove_by_value")?;
                 let rt = int_to_list_return_type(get_return_type(dict)?);
                 list_ops::remove_by_value(&name, v, rt)
             }
             OP_LIST_REMOVE_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "list_remove_by_value_list")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "list_remove_by_value_list")?;
                 let rt = int_to_list_return_type(get_return_type(dict)?);
                 list_ops::remove_by_value_list(&name, values_from_list(&v), rt)
             }
@@ -720,13 +724,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_MAP_REMOVE_BY_VALUE => {
                 let name = require_bin(&bin_name, "map_remove_by_value")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "map_remove_by_value")?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 map_ops::remove_by_value(&name, v, rt)
             }
             OP_MAP_REMOVE_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "map_remove_by_value_list")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "map_remove_by_value_list")?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 map_ops::remove_by_value_list(&name, values_from_list(&v), rt)
             }
@@ -790,7 +794,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_MAP_GET_BY_VALUE => {
                 let name = require_bin(&bin_name, "map_get_by_value")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "map_get_by_value")?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 map_ops::get_by_value(&name, v, rt)
             }
@@ -843,7 +847,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_MAP_GET_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "map_get_by_value_list")?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_hll_value(val, "map_get_by_value_list")?;
                 let rt = int_to_map_return_type(get_return_type(dict)?);
                 map_ops::get_by_value_list(&name, values_from_list(&v), rt)
             }
@@ -1665,5 +1669,176 @@ mod tests {
                 .expect("map_put_items with explicit dict val must succeed");
             assert_eq!(converted.len(), 1);
         });
+    }
+
+    // ── list/map BY_VALUE ops: missing `val` must error, not silently Nil ──
+    //
+    // Regression for the bug where the OP_LIST_GET_BY_VALUE,
+    // OP_LIST_GET_BY_VALUE_LIST, OP_LIST_REMOVE_BY_VALUE,
+    // OP_LIST_REMOVE_BY_VALUE_LIST, OP_MAP_GET_BY_VALUE, OP_MAP_REMOVE_BY_VALUE
+    // and OP_MAP_REMOVE_BY_VALUE_LIST arms defaulted a missing `val` key to
+    // `Value::Nil`. For the singular-value variants the dispatch quietly
+    // queried the bin for `Nil` matches; for the `_list` variants
+    // `values_from_list(&Nil)` collapsed to `[Nil]`, so the op also matched
+    // against a single nonsense value. In both cases the call returned an
+    // empty result the caller could not distinguish from a genuinely missing
+    // record. The fix raises ValueError("<op> requires 'val'") instead, so
+    // callers building op dicts directly get a clear failure.
+    //
+    // The `*_BY_VALUE_RANGE` and `*_BY_KEY_RANGE` arms are intentionally NOT
+    // covered here — distinguishing a missing key from `val=None` (unbounded
+    // begin) needs a separate `val` extractor and is deferred.
+
+    /// Build a single list/map BY_VALUE op dict with the given op code,
+    /// optionally setting `val` to an arbitrary Python int. The `return_type`
+    /// key is always set so the arm's `get_return_type` call succeeds.
+    fn build_by_value_op_dict<'py>(
+        py: Python<'py>,
+        op_code: i32,
+        with_val: Option<i64>,
+    ) -> Bound<'py, PyDict> {
+        let dict = PyDict::new(py);
+        dict.set_item("op", op_code).unwrap();
+        dict.set_item("bin", "mybin").unwrap();
+        dict.set_item("return_type", 0i32).unwrap();
+        if let Some(v) = with_val {
+            dict.set_item("val", v).unwrap();
+        }
+        dict
+    }
+
+    /// Build a single list/map BY_VALUE_LIST op dict, optionally setting `val`
+    /// to a Python list of ints.
+    fn build_by_value_list_op_dict<'py>(
+        py: Python<'py>,
+        op_code: i32,
+        with_val: Option<Vec<i64>>,
+    ) -> Bound<'py, PyDict> {
+        let dict = PyDict::new(py);
+        dict.set_item("op", op_code).unwrap();
+        dict.set_item("bin", "mybin").unwrap();
+        dict.set_item("return_type", 0i32).unwrap();
+        if let Some(items) = with_val {
+            let list = PyList::new(py, items).unwrap();
+            dict.set_item("val", list).unwrap();
+        }
+        dict
+    }
+
+    fn assert_by_value_op_missing_val_errors(op_code: i32, op_name: &str) {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = build_by_value_op_dict(py, op_code, None);
+            let ops = PyList::new(py, [dict]).unwrap();
+            let err = super::py_ops_to_rust(&ops)
+                .expect_err("missing 'val' must raise ValueError, not silently become Nil");
+            assert!(err.is_instance_of::<PyValueError>(py));
+            let msg = err.to_string();
+            assert!(
+                msg.contains(op_name) && msg.contains("val"),
+                "error message should mention '{op_name}' and 'val', got: {msg}"
+            );
+        });
+    }
+
+    fn assert_by_value_op_with_val_succeeds(op_code: i32) {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = build_by_value_op_dict(py, op_code, Some(42));
+            let ops = PyList::new(py, [dict]).unwrap();
+            let converted =
+                super::py_ops_to_rust(&ops).expect("BY_VALUE op with explicit val must succeed");
+            assert_eq!(converted.len(), 1);
+        });
+    }
+
+    fn assert_by_value_list_op_missing_val_errors(op_code: i32, op_name: &str) {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = build_by_value_list_op_dict(py, op_code, None);
+            let ops = PyList::new(py, [dict]).unwrap();
+            let err = super::py_ops_to_rust(&ops)
+                .expect_err("missing 'val' must raise ValueError, not silently become Nil");
+            assert!(err.is_instance_of::<PyValueError>(py));
+            let msg = err.to_string();
+            assert!(
+                msg.contains(op_name) && msg.contains("val"),
+                "error message should mention '{op_name}' and 'val', got: {msg}"
+            );
+        });
+    }
+
+    fn assert_by_value_list_op_with_val_succeeds(op_code: i32) {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = build_by_value_list_op_dict(py, op_code, Some(vec![1, 2, 3]));
+            let ops = PyList::new(py, [dict]).unwrap();
+            let converted = super::py_ops_to_rust(&ops)
+                .expect("BY_VALUE_LIST op with explicit val must succeed");
+            assert_eq!(converted.len(), 1);
+        });
+    }
+
+    #[test]
+    fn list_get_by_value_missing_val_raises_value_error() {
+        assert_by_value_op_missing_val_errors(super::OP_LIST_GET_BY_VALUE, "list_get_by_value");
+        assert_by_value_op_with_val_succeeds(super::OP_LIST_GET_BY_VALUE);
+    }
+
+    #[test]
+    fn list_get_by_value_list_missing_val_raises_value_error() {
+        assert_by_value_list_op_missing_val_errors(
+            super::OP_LIST_GET_BY_VALUE_LIST,
+            "list_get_by_value_list",
+        );
+        assert_by_value_list_op_with_val_succeeds(super::OP_LIST_GET_BY_VALUE_LIST);
+    }
+
+    #[test]
+    fn list_remove_by_value_missing_val_raises_value_error() {
+        assert_by_value_op_missing_val_errors(
+            super::OP_LIST_REMOVE_BY_VALUE,
+            "list_remove_by_value",
+        );
+        assert_by_value_op_with_val_succeeds(super::OP_LIST_REMOVE_BY_VALUE);
+    }
+
+    #[test]
+    fn list_remove_by_value_list_missing_val_raises_value_error() {
+        assert_by_value_list_op_missing_val_errors(
+            super::OP_LIST_REMOVE_BY_VALUE_LIST,
+            "list_remove_by_value_list",
+        );
+        assert_by_value_list_op_with_val_succeeds(super::OP_LIST_REMOVE_BY_VALUE_LIST);
+    }
+
+    #[test]
+    fn map_get_by_value_missing_val_raises_value_error() {
+        assert_by_value_op_missing_val_errors(super::OP_MAP_GET_BY_VALUE, "map_get_by_value");
+        assert_by_value_op_with_val_succeeds(super::OP_MAP_GET_BY_VALUE);
+    }
+
+    #[test]
+    fn map_remove_by_value_missing_val_raises_value_error() {
+        assert_by_value_op_missing_val_errors(super::OP_MAP_REMOVE_BY_VALUE, "map_remove_by_value");
+        assert_by_value_op_with_val_succeeds(super::OP_MAP_REMOVE_BY_VALUE);
+    }
+
+    #[test]
+    fn map_remove_by_value_list_missing_val_raises_value_error() {
+        assert_by_value_list_op_missing_val_errors(
+            super::OP_MAP_REMOVE_BY_VALUE_LIST,
+            "map_remove_by_value_list",
+        );
+        assert_by_value_list_op_with_val_succeeds(super::OP_MAP_REMOVE_BY_VALUE_LIST);
+    }
+
+    #[test]
+    fn map_get_by_value_list_missing_val_raises_value_error() {
+        assert_by_value_list_op_missing_val_errors(
+            super::OP_MAP_GET_BY_VALUE_LIST,
+            "map_get_by_value_list",
+        );
+        assert_by_value_list_op_with_val_succeeds(super::OP_MAP_GET_BY_VALUE_LIST);
     }
 }
