@@ -53,7 +53,7 @@ def _keys(batch_size: int) -> list[tuple[str, str, str]]:
 
 # A small two-layer MLP so the inference step does real work (not a single
 # matmul) — closer to a production DLRM "top tower" than the previous
-# 16×1 linear placeholder. Dimensions kept modest so torch doesn't drown
+# 16x1 linear placeholder. Dimensions kept modest so torch doesn't drown
 # out the conversion difference, but big enough that the call holds the
 # GIL for a measurable slice of the request.
 _HIDDEN = 256
@@ -135,9 +135,7 @@ async def bench_numpy(
     # `np.column_stack` produces fresh contiguous memory; `torch.from_numpy`
     # then shares that buffer (no copy).
     structured = np_batch.batch_records
-    matrix_np = np.column_stack([structured[name] for name in FEATURE_NAMES]).astype(
-        np.float32, copy=False
-    )
+    matrix_np = np.column_stack([structured[name] for name in FEATURE_NAMES]).astype(np.float32, copy=False)
     matrix = torch.from_numpy(matrix_np)
     t_conv = time.perf_counter() - t_conv_start
 
