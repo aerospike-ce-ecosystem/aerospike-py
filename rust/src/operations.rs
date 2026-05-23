@@ -31,6 +31,19 @@ fn require_bin(bin_name: &Option<String>, op_name: &str) -> PyResult<String> {
     })
 }
 
+/// Require a `val` for a bitwise op-dispatch arm.
+///
+/// The raw op-dict path used to default a missing `val` to `Value::Nil`,
+/// which the C-protocol layer happily encoded as an empty/Nil payload —
+/// silently producing a no-op or wrong-result bit operation instead of a
+/// clear error. The Python facade in `aerospike_py.bit_operations` already
+/// requires `value` as a positional argument, so this guards callers who
+/// build op dicts directly (or bypass the facade) and mirrors the explicit
+/// `require_bin` style used for the bin name.
+fn require_bitwise_value(val: Option<Value>, op_name: &str) -> PyResult<Value> {
+    val.ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("{op_name} requires 'val'")))
+}
+
 fn get_index(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
     dict.get_item("index")?
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Operation requires 'index'"))?
@@ -912,7 +925,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_BIT_INSERT => {
                 let name = require_bin(&bin_name, "bit_insert")?;
                 let byte_offset = get_byte_offset(dict)?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_bitwise_value(val, "bit_insert")?;
                 let policy = parse_bit_policy(dict)?;
                 bit_ops::insert(&name, byte_offset, v, &policy)
             }
@@ -927,7 +940,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "bit_set")?;
                 let bit_offset = get_bit_offset(dict)?;
                 let bit_size = get_bit_size(dict)?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_bitwise_value(val, "bit_set")?;
                 let policy = parse_bit_policy(dict)?;
                 bit_ops::set(&name, bit_offset, bit_size, v, &policy)
             }
@@ -935,7 +948,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "bit_or")?;
                 let bit_offset = get_bit_offset(dict)?;
                 let bit_size = get_bit_size(dict)?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_bitwise_value(val, "bit_or")?;
                 let policy = parse_bit_policy(dict)?;
                 bit_ops::or(&name, bit_offset, bit_size, v, &policy)
             }
@@ -943,7 +956,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "bit_xor")?;
                 let bit_offset = get_bit_offset(dict)?;
                 let bit_size = get_bit_size(dict)?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_bitwise_value(val, "bit_xor")?;
                 let policy = parse_bit_policy(dict)?;
                 bit_ops::xor(&name, bit_offset, bit_size, v, &policy)
             }
@@ -951,7 +964,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
                 let name = require_bin(&bin_name, "bit_and")?;
                 let bit_offset = get_bit_offset(dict)?;
                 let bit_size = get_bit_size(dict)?;
-                let v = val.unwrap_or(Value::Nil);
+                let v = require_bitwise_value(val, "bit_and")?;
                 let policy = parse_bit_policy(dict)?;
                 bit_ops::and(&name, bit_offset, bit_size, v, &policy)
             }
@@ -1382,5 +1395,96 @@ mod tests {
                 super::py_ops_to_rust(&ops).expect("list_trim with explicit count must succeed");
             assert_eq!(converted.len(), 1);
         });
+    }
+
+    // ── Bitwise ops: missing `val` must error, not silently become Nil ─────
+    //
+    // Regression for the bug where the OP_BIT_INSERT / OP_BIT_SET /
+    // OP_BIT_OR / OP_BIT_XOR / OP_BIT_AND dispatch arms defaulted a missing
+    // `val` key to `Value::Nil`. The C-protocol layer happily encoded that
+    // as an empty/Nil payload, silently producing a no-op or wrong-result
+    // bit operation. The fix raises ValueError("<op> requires 'val'") so a
+    // caller building op dicts directly gets a clear failure instead.
+    //
+    // Each test exercises both the missing-val and explicit-val paths so a
+    // future regression in either direction is caught.
+
+    /// Build a single bit-op dict with the given op code and offset/size
+    /// keys, optionally setting `val`.
+    fn build_bit_op_dict<'py>(
+        py: Python<'py>,
+        op_code: i32,
+        with_val: Option<&[u8]>,
+    ) -> Bound<'py, PyDict> {
+        let dict = PyDict::new(py);
+        dict.set_item("op", op_code).unwrap();
+        dict.set_item("bin", "mybin").unwrap();
+        // OP_BIT_INSERT uses byte_offset; the other four use bit_offset+bit_size.
+        // Setting all three keys is harmless because each arm reads only the
+        // ones it needs.
+        dict.set_item("byte_offset", 0i64).unwrap();
+        dict.set_item("bit_offset", 0i64).unwrap();
+        dict.set_item("bit_size", 8i64).unwrap();
+        if let Some(bytes) = with_val {
+            dict.set_item("val", bytes).unwrap();
+        }
+        dict
+    }
+
+    fn assert_bit_op_missing_val_errors(op_code: i32, op_name: &str) {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = build_bit_op_dict(py, op_code, None);
+            let ops = PyList::new(py, [dict]).unwrap();
+            let err = super::py_ops_to_rust(&ops)
+                .expect_err("missing 'val' must raise ValueError, not silently become Nil");
+            assert!(err.is_instance_of::<PyValueError>(py));
+            let msg = err.to_string();
+            assert!(
+                msg.contains(op_name) && msg.contains("val"),
+                "error message should mention '{op_name}' and 'val', got: {msg}"
+            );
+        });
+    }
+
+    fn assert_bit_op_with_val_succeeds(op_code: i32) {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = build_bit_op_dict(py, op_code, Some(b"\xff"));
+            let ops = PyList::new(py, [dict]).unwrap();
+            let converted =
+                super::py_ops_to_rust(&ops).expect("bit op with explicit val must succeed");
+            assert_eq!(converted.len(), 1);
+        });
+    }
+
+    #[test]
+    fn bit_insert_missing_val_raises_value_error() {
+        assert_bit_op_missing_val_errors(super::OP_BIT_INSERT, "bit_insert");
+        assert_bit_op_with_val_succeeds(super::OP_BIT_INSERT);
+    }
+
+    #[test]
+    fn bit_set_missing_val_raises_value_error() {
+        assert_bit_op_missing_val_errors(super::OP_BIT_SET, "bit_set");
+        assert_bit_op_with_val_succeeds(super::OP_BIT_SET);
+    }
+
+    #[test]
+    fn bit_or_missing_val_raises_value_error() {
+        assert_bit_op_missing_val_errors(super::OP_BIT_OR, "bit_or");
+        assert_bit_op_with_val_succeeds(super::OP_BIT_OR);
+    }
+
+    #[test]
+    fn bit_xor_missing_val_raises_value_error() {
+        assert_bit_op_missing_val_errors(super::OP_BIT_XOR, "bit_xor");
+        assert_bit_op_with_val_succeeds(super::OP_BIT_XOR);
+    }
+
+    #[test]
+    fn bit_and_missing_val_raises_value_error() {
+        assert_bit_op_missing_val_errors(super::OP_BIT_AND, "bit_and");
+        assert_bit_op_with_val_succeeds(super::OP_BIT_AND);
     }
 }
