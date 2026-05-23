@@ -161,11 +161,11 @@ class Client(_NativeClient):
         Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around the
         raw Rust results. Convert lazily with one of the handle methods:
 
-        * ``handle.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
-        * ``handle.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+        * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``lazy_records.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
           during the structured-array fill — ideal for FastAPI/PyTorch
           inference workers)
-        * ``handle.batch_records`` → ``list[BatchRecord]`` (compat)
+        * ``lazy_records.batch_records`` → ``list[BatchRecord]`` (compat)
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
@@ -180,8 +180,8 @@ class Client(_NativeClient):
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            handle = client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in handle.to_dict().items():
+            lazy_records = client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in lazy_records.to_dict().items():
                 print(user_key, bins_dict)
             ```
         """

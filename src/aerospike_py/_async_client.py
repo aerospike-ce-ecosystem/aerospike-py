@@ -155,11 +155,11 @@ class AsyncClient:
         Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around the
         raw Rust results. Call one of the handle methods to materialise:
 
-        * ``handle.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
-        * ``handle.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+        * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``lazy_records.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
           during the structured-array fill — ideal for FastAPI/PyTorch
           inference workers)
-        * ``handle.batch_records`` → ``list[BatchRecord]`` (compat)
+        * ``lazy_records.batch_records`` → ``list[BatchRecord]`` (compat)
 
         The async future itself completes with near-zero GIL cost
         (``Arc::new`` + ``Py::new``), so concurrent ``batch_read`` futures
@@ -181,8 +181,8 @@ class AsyncClient:
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            handle = await client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in handle.to_dict().items():
+            lazy_records = await client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in lazy_records.to_dict().items():
                 print(user_key, bins_dict)
             ```
         """

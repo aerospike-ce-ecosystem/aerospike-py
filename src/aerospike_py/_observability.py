@@ -128,7 +128,7 @@ def set_internal_stage_metrics_enabled(enabled: bool) -> None:
     Example:
         ```python
         aerospike_py.set_internal_stage_metrics_enabled(True)
-        handle = await client.batch_read(keys)
+        lazy_records = await client.batch_read(keys)
         # ... inspect metrics ...
         aerospike_py.set_internal_stage_metrics_enabled(False)
         ```
@@ -154,7 +154,7 @@ def internal_stage_profiling() -> Iterator[None]:
 
     ```python
     with aerospike_py.internal_stage_profiling():
-        handle = await client.batch_read(keys)
+        lazy_records = await client.batch_read(keys)
         dump = aerospike_py.get_metrics()
     # profiling is back to its previous state here
     ```

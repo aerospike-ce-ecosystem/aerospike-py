@@ -369,7 +369,7 @@ print(hot_sensors.describe())
 
 ```python
 # Sync
-handle: LazyBatchRecords = client.batch_read(
+lazy_records: LazyBatchRecords = client.batch_read(
     keys: list[tuple[str, str, str | int | bytes]],
     bins: list[str] | None = None,
     policy: dict | None = None,
@@ -377,7 +377,7 @@ handle: LazyBatchRecords = client.batch_read(
 batch: NumpyBatchRecords = lazy_records.to_numpy(dtype)
 
 # Async
-handle: LazyBatchRecords = await client.batch_read(
+lazy_records: LazyBatchRecords = await client.batch_read(
     keys: list[tuple[str, str, str | int | bytes]],
     bins: list[str] | None = None,
     policy: dict | None = None,
