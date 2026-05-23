@@ -364,6 +364,26 @@ class TestMapOperations:
         assert op["rank"] == expected_rank
         assert "count" not in op
 
+    def test_map_put_items_facade_always_emits_val(self):
+        """Regression: `map_put_items` op dict must always include `val`.
+
+        At the Rust dispatch layer (operations.rs OP_MAP_PUT_ITEMS arm), a
+        missing `val` raises ValueError("map_put_items requires 'val'") rather
+        than falling through to the catch-all `Value::Nil` arm and producing
+        the misleading "map_put_items requires a dict value" error. The Python
+        facade signature already requires `items`, but assert the emitted op
+        carries it through so direct dict callers and facade callers agree.
+        """
+        op = map_put_items("mybin", {"a": 1, "b": 2})
+        assert op["op"] == 2003
+        assert op["bin"] == "mybin"
+        assert "val" in op
+        assert op["val"] == {"a": 1, "b": 2}
+        # The facade has no default that would let a caller produce a
+        # map_put_items op without supplying items.
+        with pytest.raises(TypeError):
+            map_put_items("mybin")  # type: ignore[call-arg]
+
 
 class TestModuleAccess:
     """Test that modules are accessible from the package."""
