@@ -47,7 +47,7 @@ For numeric workloads, skip Python dict overhead entirely:
 import numpy as np
 
 dtype = np.dtype([("score", "i8"), ("rating", "f8")])
-batch = client.batch_read(keys, bins=["score", "rating"], _dtype=dtype)
+batch = client.batch_read(keys, bins=["score", "rating"]).to_numpy(dtype)
 # batch.batch_records is a numpy structured array
 ```
 

@@ -36,8 +36,9 @@ Each `batch_read` is split into 10 stages. Histograms (`db_client_internal_stage
 | `into_pyobject` | Rust `BatchRecord` → `Py<...>` (Arc wrap, `spawn_blocking`) | held |
 | `spawn_blocking_delay` | Wall time `spawn_blocking` task spent waiting in queue | — |
 | `event_loop_resume_delay` | Event-loop tick from future-ready to coroutine resume | — |
-| `as_dict` | `BatchReadHandle.as_dict()` → `dict[Key, Record]` | held |
-| `merge_as_dict` | Multi-set merge into typed dict | held |
+| `to_dict` | `LazyBatchRecords.to_dict()` → `dict[Key, Record]` (legacy name: `as_dict`) | held |
+| `to_numpy` | `LazyBatchRecords.to_numpy(dtype)` → `NumpyBatchRecords` framing — the per-record buffer fill itself runs with the GIL **released** via `py.detach` | held (framing only) |
+| `merge_to_dict` | Multi-set merge into typed dict (legacy name: `merge_as_dict`) | held |
 | `future_into_py_setup` | PyO3 future ↔ asyncio bridge setup | held |
 
 ### Activating stage profiling
@@ -96,13 +97,13 @@ This finding directly motivated the [Free-Threaded Python](./free-threaded-pytho
 
 ## Optimization 1: `gather(N)` → single `batch_read(mixed keys)`
 
-The 9-set serving pipeline originally fanned out via `asyncio.gather`. Under GIL, this creates 9 simultaneous PyO3 → asyncio handoffs, and `key_parse` + `as_dict` stages serialize against each other.
+The 9-set serving pipeline originally fanned out via `asyncio.gather`. Under GIL, this creates 9 simultaneous PyO3 → asyncio handoffs, and `key_parse` + `to_dict` stages serialize against each other.
 
 <Tabs>
   <TabItem value="before" label="Before (gather, 9 calls)" default>
 
 ```python
-# 9 concurrent batch_read calls — GIL serializes key_parse + as_dict
+# 9 concurrent batch_read calls — GIL serializes key_parse + to_dict
 await asyncio.gather(*[
     client.batch_read(set_i_keys) for i in range(9)
 ])
@@ -120,7 +121,7 @@ for set_name, keys in per_set_keys.items():
 result = await client.batch_read(all_keys)
 
 per_set_results = defaultdict(dict)
-for key, record in result.as_dict().items():
+for key, record in result.to_dict().items():
     per_set_results[key[1]][key[2]] = record
 ```
 

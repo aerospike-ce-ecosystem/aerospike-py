@@ -66,7 +66,7 @@ pip install aerospike-py
 pip install aerospike-py[numpy]
 ```
 
-When NumPy is installed, you gain access to `batch_read(..., _dtype=...)` which returns a `NumpyBatchRecords` object containing results as a NumPy structured array, and `batch_write_numpy()` for bulk writes from structured arrays. All other functionality works identically without NumPy.
+When NumPy is installed, you gain access to `LazyBatchRecords.to_numpy(dtype)` (the `batch_read()` return value), which produces a `NumpyBatchRecords` backed by a NumPy structured array — the buffer fill runs with the GIL released, so the result hands straight to `torch.from_numpy(...)` zero-copy. `batch_write_numpy()` performs the inverse direction for bulk writes from structured arrays. All other functionality works identically without NumPy.
 
 ## Can I migrate from the official C client?
 

@@ -73,19 +73,32 @@ Returned by: sync `batch_read()`, `batch_write()`, `batch_operate()`, `batch_rem
 |-------|------|-------------|
 | `batch_records` | `list[BatchRecord]` | Per-record results |
 
-### `BatchReadHandle`
+### `LazyBatchRecords`
 
-Returned by: async `batch_read()` (zero-conversion handle wrapping raw Rust results)
+Returned by: sync **and** async `batch_read()` — a zero-conversion
+handle wrapping raw Rust results. Materialisation is deferred to
+explicit method calls (or the dict-like Mapping dunders, which proxy
+through a lazy + cached `to_dict()`).
 
 | Method / Property | Type | Description |
 |-------------------|------|-------------|
-| `as_dict()` | `dict[str \| int, dict[str, Any]]` | Fastest path: returns `dict[key, bins_dict]` directly. Excludes digest-only and failed records. |
-| `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion, cached after first access. |
+| `to_dict()` | `dict[UserKey, dict[str, Any]]` | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. |
+| `to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a `np.dtype` object** (e.g. `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). Each field name in the structured dtype maps to the bin of the same name; list-of-tuples shorthand and single-field strings are not auto-promoted — wrap them in `np.dtype(...)` first. The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. |
+| `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. |
 | `found_count()` | `int` | Count of successful records (no conversion needed). |
-| `keys()` | `list[str \| int]` | Extract user keys without converting record data. |
-| `len(handle)` | `int` | Total number of records (including failures). |
-| `handle[i]` | `BatchRecord` | Index access with negative index support. |
-| `for br in handle` | `BatchRecord` | Iteration (via `batch_records`). |
+| `keys()` | `dict_keys` | Dict-style keys view, mirrors `to_dict().keys()` (missing / failed records excluded). |
+| `raw_user_keys()` | `list[UserKey]` | Every batch record's `user_key`, including missing and failed reads — useful for positional alignment with `batch_records` or a `NumpyBatchRecords`. |
+| `iter_records()` | `Iterator[BatchRecord]` | Iterate every record (including digest-only and failed) in insertion order. |
+| `items()` / `values()` / `__iter__` | dict views | Dict-like backward-compat — same semantics as the cached `to_dict()`. |
+| `handle[user_key]` | `dict[str, Any]` | Dict-style item access (`__getitem__`). |
+| `user_key in handle` | `bool` | Dict-style membership (`__contains__`). |
+| `len(handle)` | `int` | Number of records visible to the dict view (i.e. successful reads with a `user_key`). |
+
+Legacy aliases for code written against earlier releases:
+
+- `as_dict()` → forwards to `to_dict()`.
+- `LazyBatchRecords.merge_as_dict(...)` → forwards to
+  `LazyBatchRecords.merge_to_dict(...)`.
 
 ### `ExistsResult`
 
@@ -138,8 +151,7 @@ Returned by: `operate_ordered()`
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` (sync) | `BatchRecords` \| `NumpyBatchRecords` |
-| `batch_read()` (async) | `BatchReadHandle` \| `NumpyBatchRecords` |
+| `batch_read()` (sync and async) | `LazyBatchRecords` — call `.to_dict()` or `.to_numpy(dtype)` to materialise |
 | `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchRecords` |
 | `batch_write_numpy()` | `BatchRecords` |
 | `Query.results()` | `list[Record]` |

@@ -41,12 +41,12 @@ A comprehensive comparison between the **official C-based client** (`aerospike` 
 
 | Operation | Official C Client | aerospike-py | Notes |
 |-----------|------------------|--------------|-------|
-| Batch get | `client.get_many(keys)` | `client.batch_read(keys)` | **Method renamed**; sync returns `BatchRecords`, async returns `BatchReadHandle` |
+| Batch get | `client.get_many(keys)` | `client.batch_read(keys)` | **Method renamed**; both sync and async return `LazyBatchRecords` — call `.to_dict()` or `.to_numpy(dtype)` to materialise |
 | Batch exists | `client.exists_many(keys)` | `client.batch_read(keys, bins=[])` | Use empty `bins` list for existence check |
 | Batch select | `client.select_many(keys, bins)` | `client.batch_read(keys, bins=bins)` | Unified under `batch_read` |
 | Batch operate | `client.batch_operate(keys, ops)` | `client.batch_operate(keys, ops)` | Same; official client uses `aerospike_helpers` |
 | Batch remove | `client.batch_remove(keys)` | `client.batch_remove(keys)` | Same; official client uses `aerospike_helpers` |
-| Batch read (NumPy) | N/A | `client.batch_read(keys, _dtype=dt)` | **New in aerospike-py** |
+| Batch read (NumPy) | N/A | `client.batch_read(keys).to_numpy(dt)` | **New in aerospike-py** |
 | Batch write (NumPy) | N/A | `client.batch_write_numpy(data, ...)` | **New in aerospike-py** |
 
 ## Query and Scan
