@@ -1162,7 +1162,10 @@ impl PyClient {
             })
         })?;
 
-        Py::new(py, crate::batch_types::PyLazyBatchRecords::from_results(results))
+        Py::new(
+            py,
+            crate::batch_types::PyLazyBatchRecords::from_results(results),
+        )
     }
 
     /// Perform operations on multiple records. Returns list of (key, meta, bins) tuples.

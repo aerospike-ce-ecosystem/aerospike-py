@@ -147,9 +147,7 @@ class AsyncClient:
         return [InfoNodeResult(*t) for t in await self._inner.info_all(command, policy)]
 
     @catch_unexpected("AsyncClient.batch_read")
-    async def batch_read(
-        self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None
-    ) -> Any:
+    async def batch_read(self, keys: list, bins: list[str] | None = None, policy: dict[str, Any] | None = None) -> Any:
         """Read multiple records in a single batch call.
 
         Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around the

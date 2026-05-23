@@ -285,7 +285,9 @@ impl PyLazyBatchRecords {
         let d = self.cached_dict(py)?;
         match d.get_item(key)? {
             Some(v) => Ok(v),
-            None => Err(pyo3::exceptions::PyKeyError::new_err(key.repr()?.to_string())),
+            None => Err(pyo3::exceptions::PyKeyError::new_err(
+                key.repr()?.to_string(),
+            )),
         }
     }
 

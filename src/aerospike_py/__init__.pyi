@@ -8,7 +8,7 @@ Claude Code Plugin::
 
 import contextlib
 from collections.abc import Sequence
-from typing import Any, Callable, Literal, Optional, Union, overload
+from typing import Any, Callable, Literal, Optional, Union
 
 import numpy as np
 
@@ -63,6 +63,74 @@ __version__: str
 
 Key = tuple[str, str, Union[str, int, bytes]]
 """Aerospike key: (namespace, set, primary_key). Input type for all key parameters."""
+
+# -- LazyBatchRecords (handle returned by batch_read) --------------------
+
+class LazyBatchRecords:
+    """Zero-conversion handle wrapping raw Rust batch_read results.
+
+    Returned by both sync ``Client.batch_read`` and async
+    ``AsyncClient.batch_read``. Materialisation is deferred to explicit
+    method calls; the handle also exposes a dict-like Mapping interface
+    backed by a lazy + cached ``to_dict()`` view, so legacy dict-style
+    code keeps working without changes.
+    """
+
+    def to_dict(self) -> dict[Any, dict[str, Any]]:
+        """Materialise as ``dict[user_key, bins_dict]`` (cached)."""
+        ...
+
+    def to_numpy(self, dtype: "np.dtype") -> NumpyBatchRecords:
+        """Materialise as a NumPy structured array.
+
+        ``dtype`` must be a real ``numpy.dtype`` object — list-of-tuples
+        and dtype strings are not auto-promoted. The per-record buffer
+        fill runs with the GIL released (``py.detach``), so sibling work
+        (other asyncio tasks, torch inference) can hold the GIL during
+        the fill — ideal for FastAPI/PyTorch CPU-inference workers.
+        """
+        ...
+
+    @property
+    def batch_records(self) -> list["BatchRecord"]:
+        """Lazy ``BatchRecord`` list including digest-only / failed records."""
+        ...
+
+    def iter_records(self) -> "Any":
+        """Iterate every record (including digest-only and failed) in order."""
+        ...
+
+    def raw_user_keys(self) -> list[Any]:
+        """Every record's ``user_key`` including missing / failed reads."""
+        ...
+
+    def found_count(self) -> int:
+        """Count of successful records (no conversion needed)."""
+        ...
+
+    # Dict-like Mapping backward-compat — backed by cached `to_dict()`.
+    def items(self) -> Any: ...
+    def keys(self) -> Any: ...
+    def values(self) -> Any: ...
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Any: ...
+    def __contains__(self, key: Any) -> bool: ...
+    def __getitem__(self, key: Any) -> dict[str, Any]: ...
+
+    # Legacy aliases (kept for code written against earlier releases).
+    def as_dict(self) -> dict[Any, dict[str, Any]]:
+        """Deprecated alias for :meth:`to_dict`."""
+        ...
+
+    @staticmethod
+    def merge_to_dict(handles: list["LazyBatchRecords"]) -> list[dict[Any, dict[str, Any]]]:
+        """Single-GIL merge of multiple handles into a list of dicts."""
+        ...
+
+    @staticmethod
+    def merge_as_dict(handles: list["LazyBatchRecords"]) -> list[dict[Any, dict[str, Any]]]:
+        """Deprecated alias for :meth:`merge_to_dict`."""
+        ...
 
 # -- Client --------------------------------------------------------------
 
