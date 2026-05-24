@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use aerospike_core::{BatchRecord, Record, ResultCode};
-use log::trace;
+use log::{debug, trace};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -500,6 +500,7 @@ impl PyLazyBatchRecords {
     /// Inspect ``iter_records()`` / ``batch_records`` to isolate the
     /// offending record before re-reading.
     fn release_cache(&self) {
+        let was_poisoned = self.cached_dict.is_poisoned();
         let mut guard = self
             .cached_dict
             .lock()
@@ -511,6 +512,17 @@ impl PyLazyBatchRecords {
         // without it, the handle would stay in a "len()/found_count()
         // works but `.to_dict()` raises" inconsistent state.
         self.cached_dict.clear_poison();
+        // Log the recovery path so callers running release_cache from
+        // a retry loop can correlate repeated "panic → release →
+        // panic" against the underlying record. Plain `release_cache`
+        // calls (cache present but no poison) stay quiet.
+        if was_poisoned {
+            debug!(
+                "LazyBatchRecords::release_cache: recovered poisoned cache mutex \
+                 (records={}); next read will rebuild from raw records",
+                self.inner.len()
+            );
+        }
     }
 
     /// Count of records with successful result code (no conversion needed).

@@ -269,12 +269,34 @@ class TestLazyBatchRecordsAllRecordsViews:
         # (positional view, includes them as ``None``). Locks in the
         # documented contract that the two methods *intentionally*
         # return different lengths so a future refactor merging them
-        # cannot land silently.
+        # cannot land silently. The assert messages spell out the
+        # contract so a regression PR sees the *why* in the failure
+        # log, not just the mismatched numbers.
         keys_view = list(lazy_records.keys())
-        assert len(keys_view) == 4, "dict-view excludes the digest-only slot"
-        assert len(raw) == 5, "positional view keeps the digest-only slot as None"
-        assert None not in keys_view, "dict-view must never expose None"
-        assert None in raw, "positional view must surface the digest-only slot as None"
+        assert len(keys_view) == 4, (
+            "keys() is the Mapping-protocol dict-view (excludes digest-only / "
+            "failed slots, matches to_dict().keys()) — if you intentionally "
+            "want to include digest-only slots use all_user_keys() instead"
+        )
+        assert len(raw) == 5, (
+            "all_user_keys() is the positional view (length matches "
+            "batch_records, digest-only slots surface as None) — if you "
+            "intentionally want only dict-view keys use keys() instead"
+        )
+        assert None not in keys_view, "Mapping-protocol keys() must never expose None"
+        assert None in raw, "positional all_user_keys() must surface the digest-only slot as None"
+
+        # Pin the CHANGELOG migration snippet for the None-hashable
+        # hazard. The doc shows:
+        #     {k for k in handle.all_user_keys() if k is not None}
+        # as the safe form; verify it actually evaluates to the
+        # user-keyed subset (no None leaking into a downstream set).
+        safe_set = {k for k in raw if k is not None}
+        assert safe_set == {"h_0", "h_1", "h_3", "h_4"}
+        # And confirm the unsafe form silently keeps None (the trap
+        # the CHANGELOG warns about) so a future change that makes
+        # all_user_keys filter-by-default fails this test.
+        assert None in set(raw)
 
 
 class TestLazyBatchRecordsReleaseCacheAsync:

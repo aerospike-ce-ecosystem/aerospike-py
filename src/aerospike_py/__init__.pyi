@@ -169,6 +169,18 @@ class LazyBatchRecords:
         ``__getitem__``, etc.) succeed instead of raising
         ``RustPanicError``. ``release_cache`` never masks an
         in-flight exception.
+
+        **Recovery limit.** If the original panic was caused by an
+        undecodable record in the batch (e.g. a legacy blob particle
+        the Rust client cannot decode), the next ``to_dict()`` will
+        rebuild over the same raw data and panic on the same record,
+        re-poisoning the mutex. ``release_cache`` cannot undo that —
+        it only clears the previous state so the next attempt has a
+        clean baseline. Inspect ``iter_records()`` /
+        ``batch_records`` to isolate the offending record before
+        re-reading; when called from a retry loop after a real
+        poisoning, the native side emits a ``debug!`` log line
+        identifying the recovery.
         """
         ...
 

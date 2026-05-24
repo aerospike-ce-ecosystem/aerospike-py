@@ -92,11 +92,31 @@ for br in results.batch_records:
 
 배치 작업의 전체 결과를 담는 컨테이너입니다.
 
-**반환하는 메서드**: sync `batch_read()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
+**반환하는 메서드**: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **및** async). sync 및 async `batch_read()`는 이제 [`LazyBatchRecords`](#lazybatchrecords)를 반환합니다.
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `batch_records` | `list[BatchRecord]` | 개별 레코드 결과 리스트 |
+
+### `LazyBatchRecords`
+
+**반환하는 메서드**: sync 및 async `batch_read()` — raw Rust 결과를 zero-conversion으로 감싼 핸들. Materialise는 명시적 메서드 호출(또는 dict-style Mapping dunder — lazy + cached `to_dict()` view 위에서 동작)로 지연됩니다.
+
+| 메서드 / 속성 | 타입 | 설명 |
+|---------------|------|------|
+| `to_dict()` | `dict[UserKey, dict[str, Any]]` | `dict[user_key, bins_dict]`로 materialise. digest-only 및 실패한 record는 제외됨. |
+| `to_numpy(dtype)` | `NumpyBatchRecords` | 구조화 배열로 materialise. `dtype`은 **`np.dtype` 객체여야** 합니다 (예: `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). 각 dtype field 이름은 동일 이름의 bin에 매핑됩니다 — list-of-tuples shorthand나 단일 field string은 auto-promote 되지 않으니 `np.dtype(...)`으로 감싸세요. per-record fill loop은 `py.detach`로 GIL을 release하므로 sibling 작업(torch 추론, 다른 asyncio task)이 fill 중에도 GIL을 잡을 수 있습니다. **실패/missing reads (`result_code != 0`)는 dtype의 zero value로 남으므로, downstream 연산 전 `result_codes`로 마스킹하세요.** |
+| `batch_records` | `list[BatchRecord]` | Compat 경로: lazy NamedTuple 변환. |
+| `found_count()` | `int` | 성공 record 수 (변환 없음). |
+| `keys()` | `dict_keys` | dict-style keys view — `to_dict().keys()`와 동일 (missing/실패 제외). |
+| `all_user_keys()` | `list[UserKey \| None]` | 모든 batch record의 `user_key`를 request 순서대로 — `batch_records` / `NumpyBatchRecords` data array와 positional 정렬됨. digest-only 요청 슬롯은 `None`이 들어가 `zip(handle.all_user_keys(), handle.batch_records)`가 모든 record를 그 요청 키 (또는 `None`)와 짝지을 수 있습니다. |
+| `iter_records()` | `Iterator[BatchRecord]` | 모든 record (digest-only 및 실패 포함)를 삽입 순서로 순회. |
+| `items()` / `values()` / `__iter__` | dict views | dict-like 하위 호환 — cached `to_dict()`와 동일 시맨틱. |
+| `lazy_records[user_key]` | `dict[str, Any]` | dict-style item 접근 (`__getitem__`). |
+| `user_key in lazy_records` | `bool` | dict-style 멤버십 (`__contains__`). |
+| `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | dict-style `get` — `dict.get` 시맨틱 동일. |
+| `len(lazy_records)` | `int` | Dict-view cardinality — `len(lazy_records.to_dict())` 일치 (user_key + record body 있는 성공 read만). 빠름: 순수 Rust filter+count로 PyDict 할당 없음. raw record 수 (missing/실패 포함)는 `len(lazy_records.batch_records)` 사용. |
+| `release_cache()` | `None` | 첫 Mapping 접근 / `to_dict()`에서 build된 cached `PyDict`를 drop. raw Rust records(따라서 `batch_records`, `iter_records()`, `all_user_keys()`, `found_count()`, `to_numpy(dtype)`)는 유지. 후속 Mapping 접근은 lazy하게 cache를 재build. 큰 배치 materialise 후 더이상 dict가 필요하지 않을 때 유용. |
 
 ### `ExistsResult`
 
