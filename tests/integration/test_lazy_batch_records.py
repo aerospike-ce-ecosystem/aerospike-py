@@ -234,7 +234,7 @@ class TestLazyBatchRecordsMerge:
     """``merge_to_dict`` / ``merge_as_dict`` (single-GIL merge of multiple `LazyBatchRecords`)."""
 
     async def test_merge_to_dict_combines_lazy_records(self, async_client, async_cleanup):
-        from aerospike_py._aerospike import LazyBatchRecords
+        from aerospike_py import LazyBatchRecords
 
         keys_a = [(NS, SET, f"merge_a_{i}") for i in range(3)]
         keys_b = [(NS, SET, f"merge_b_{i}") for i in range(2)]
@@ -251,7 +251,7 @@ class TestLazyBatchRecordsMerge:
         assert set(merged[1].keys()) == {f"merge_b_{i}" for i in range(2)}
 
     async def test_merge_as_dict_alias_matches_merge_to_dict(self, async_client, async_cleanup):
-        from aerospike_py._aerospike import LazyBatchRecords
+        from aerospike_py import LazyBatchRecords
 
         keys = [(NS, SET, f"merge_alias_{i}") for i in range(2)]
         for k in keys:
@@ -264,6 +264,6 @@ class TestLazyBatchRecordsMerge:
         assert LazyBatchRecords.merge_as_dict([r1, r2]) == LazyBatchRecords.merge_to_dict([r1, r2])
 
     async def test_merge_to_dict_empty_list(self):
-        from aerospike_py._aerospike import LazyBatchRecords
+        from aerospike_py import LazyBatchRecords
 
         assert LazyBatchRecords.merge_to_dict([]) == []

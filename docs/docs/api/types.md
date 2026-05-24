@@ -67,7 +67,7 @@ for br in results.batch_records:
 
 ### `BatchRecords`
 
-Returned by: sync `batch_read()`, `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
+Returned by: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **and** async). Sync and async `batch_read()` now return [`LazyBatchRecords`](#lazybatchrecords) instead.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -83,7 +83,7 @@ through a lazy + cached `to_dict()`).
 | Method / Property | Type | Description |
 |-------------------|------|-------------|
 | `to_dict()` | `dict[UserKey, dict[str, Any]]` | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. |
-| `to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a `np.dtype` object** (e.g. `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). Each field name in the structured dtype maps to the bin of the same name; list-of-tuples shorthand and single-field strings are not auto-promoted — wrap them in `np.dtype(...)` first. The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. |
+| `to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a `np.dtype` object** (e.g. `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). Each field name in the structured dtype maps to the bin of the same name; list-of-tuples shorthand and single-field strings are not auto-promoted — wrap them in `np.dtype(...)` first. The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. **Failed / missing reads (`result_code != 0`) leave their row at the dtype's zero value — always mask with `result_codes` before downstream math.** |
 | `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. |
 | `found_count()` | `int` | Count of successful records (no conversion needed). |
 | `keys()` | `dict_keys` | Dict-style keys view, mirrors `to_dict().keys()` (missing / failed records excluded). |
@@ -93,7 +93,7 @@ through a lazy + cached `to_dict()`).
 | `lazy_records[user_key]` | `dict[str, Any]` | Dict-style item access (`__getitem__`). |
 | `user_key in lazy_records` | `bool` | Dict-style membership (`__contains__`). |
 | `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | Dict-style `get` with optional default; mirrors `dict.get` semantics. |
-| `len(lazy_records)` | `int` | Total record count (matches `batch_records` / `iter_records`, **not** the dict-view cardinality — call `len(lazy_records.to_dict())` or `found_count()` for the latter). |
+| `len(lazy_records)` | `int` | Dict-view cardinality — matches `len(lazy_records.to_dict())` (successful reads with a `user_key` and a `record` body). Fast: a pure-Rust filter+count, no PyDict allocation. For the raw record count (including missing reads / per-record failures) use `len(lazy_records.batch_records)`. |
 
 Legacy aliases for code written against earlier releases:
 

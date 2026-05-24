@@ -133,7 +133,7 @@ A comprehensive comparison between the **official C-based client** (`aerospike` 
 | **Runtime** | C extension (CPython only) | Rust + PyO3 (CPython only) |
 | **Return values** | Plain tuples | `NamedTuple` (tuple unpacking still works) |
 | **Async support** | None | `AsyncClient` with full API parity |
-| **NumPy integration** | None | `batch_read` with `_dtype`, `batch_write_numpy` |
+| **NumPy integration** | None | `batch_read(...).to_numpy(dtype)`, `batch_write_numpy` |
 | **Observability** | None | OpenTelemetry tracing + Prometheus metrics |
 | **Context manager** | None | `with client:` / `async with client:` |
 | **Scan** | `client.scan()` | Deprecated; use `query()` without `where()` |

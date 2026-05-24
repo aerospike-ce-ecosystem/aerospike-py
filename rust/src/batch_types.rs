@@ -197,12 +197,23 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
 
 /// Handle wrapping raw Rust batch read results.
 ///
-/// Returned by `AsyncClient.batch_read()`. The async future completes
-/// with near-zero GIL cost (just an `Arc` wrap). Call methods on this
+/// Returned by both sync `Client.batch_read()` and async
+/// `AsyncClient.batch_read()`. The async future completes with
+/// near-zero GIL cost (just an `Arc` wrap). Call methods on this
 /// handle to access the data:
 ///
-/// - [`as_dict()`](Self::as_dict) — fastest path, returns `dict[key, bins_dict]`
+/// - [`to_dict()`](Self::to_dict) — fastest path, returns `dict[key, bins_dict]`
+/// - [`to_numpy(dtype)`](Self::to_numpy) — NumPy structured array, GIL released during fill
 /// - [`batch_records`](Self::batch_records) — compatibility path, returns `list[BatchRecord]`
+///
+/// **Cost shape of the Mapping protocol.** The dict-style dunders
+/// (`__getitem__`, `__contains__`, `__iter__`, `items()`, `keys()`,
+/// `values()`, `get()`) and `__len__`-less iteration are all backed by
+/// a single cached `to_dict()`. The first such call pays the full
+/// Rust→Python dict materialisation; subsequent calls hit the cache.
+/// `__len__` itself is a pure-Rust filter+count and does not trigger
+/// the dict build. If you only need cardinality, prefer `len(handle)`
+/// or `found_count()` over `len(handle.to_dict())`.
 #[pyclass(name = "LazyBatchRecords", mapping)]
 pub struct PyLazyBatchRecords {
     inner: Arc<Vec<BatchRecord>>,
@@ -302,9 +313,13 @@ impl PyLazyBatchRecords {
         let d = self.cached_dict(py)?;
         match d.get_item(key)? {
             Some(v) => Ok(v),
-            None => Err(pyo3::exceptions::PyKeyError::new_err(
-                key.repr()?.to_string(),
-            )),
+            None => Err(pyo3::exceptions::PyKeyError::new_err(format!(
+                "{} not present in LazyBatchRecords dict view \
+                 (key is digest-only, missing from the batch response, or its read failed — \
+                 inspect lazy_records.batch_records[i].result for the per-record code, \
+                 or iterate raw_user_keys() for every requested user_key)",
+                key.repr()?
+            ))),
         }
     }
 
@@ -411,6 +426,14 @@ impl PyLazyBatchRecords {
     /// array. The fill loop runs under `Python::detach`, so the GIL is
     /// released while raw Aerospike values are written into the NumPy
     /// buffer — see `numpy_support::batch_to_numpy_py` for details.
+    ///
+    /// **Missing / failed reads silently zero-fill.** Rows whose
+    /// `result_code != 0` (including `RecordNotFound`) leave both the
+    /// data and meta arrays at the dtype's zero value — callers MUST
+    /// inspect `result.result_codes` (or `found_count()` on this
+    /// handle) before treating any row as a successful read. Aerospike
+    /// `Nil` bin values are also written as zero, so a genuinely-zero
+    /// bin and a missing bin are indistinguishable in the buffer alone.
     fn to_numpy(&self, py: Python<'_>, dtype: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         crate::stage_timer!("to_numpy", "batch_read", {
             crate::numpy_support::batch_to_numpy_py(py, &self.inner, dtype)

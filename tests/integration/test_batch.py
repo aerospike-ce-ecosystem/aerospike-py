@@ -1,5 +1,7 @@
 """Integration tests for batch operations (requires Aerospike server)."""
 
+import pytest
+
 import aerospike_py
 
 
@@ -74,6 +76,124 @@ class TestBatchRead:
         assert len(result) == 1
         assert result["batch_get_exists"]["val"] == 1
         assert "batch_get_missing" not in result
+
+
+class TestSyncLazyBatchRecordsMapping:
+    """Mirror of ``TestLazyBatchRecordsMapping`` on the sync client so a
+    sync-only regression (e.g. a missed wiring on
+    ``PyLazyBatchRecords::from_results``) is caught here instead of slipping
+    through the async-only coverage in ``test_lazy_batch_records.py``.
+    """
+
+    NS = "test"
+    SET = "sync_lazy_batch_records"
+
+    @pytest.fixture
+    def _seed(self, client, cleanup):
+        keys = [(self.NS, self.SET, f"sh_{i}") for i in range(5)]
+        for i, k in enumerate(keys):
+            cleanup.append(k)
+            client.put(k, {"name": f"user_{i}", "score": i * 10})
+        return keys
+
+    def test_returns_lazy_records_not_dict(self, client, _seed):
+        lazy_records = client.batch_read(_seed)
+        # Same construction path as async, but built via from_results
+        assert not isinstance(lazy_records, dict)
+        assert lazy_records.to_dict() == client.batch_read(_seed).to_dict()
+
+    def test_len_matches_dict_view(self, client, _seed):
+        missing = [(self.NS, self.SET, "sh_missing_X"), (self.NS, self.SET, "sh_missing_Y")]
+        lazy_records = client.batch_read([*_seed, *missing])
+
+        assert len(lazy_records) == len(_seed)
+        assert len(lazy_records) == len(lazy_records.to_dict())
+        assert len(lazy_records.batch_records) == len(_seed) + len(missing)
+
+    def test_contains_iter_keys_values_items_get(self, client, _seed):
+        lazy_records = client.batch_read(_seed)
+
+        assert "sh_0" in lazy_records
+        assert "not_present" not in lazy_records
+        assert sorted(iter(lazy_records)) == sorted(f"sh_{i}" for i in range(5))
+        assert set(lazy_records.keys()) == {f"sh_{i}" for i in range(5)}
+        assert all(isinstance(v, dict) and "name" in v for v in lazy_records.values())
+        assert {k: v["name"] for k, v in lazy_records.items()} == {f"sh_{i}": f"user_{i}" for i in range(5)}
+        assert lazy_records.get("missing") is None
+        sentinel = object()
+        assert lazy_records.get("missing", sentinel) is sentinel
+        assert lazy_records.get("sh_2")["name"] == "user_2"
+
+    def test_getitem_missing_raises_keyerror_with_hint(self, client, _seed):
+        lazy_records = client.batch_read(_seed)
+        with pytest.raises(KeyError, match="not present in LazyBatchRecords dict view"):
+            _ = lazy_records["definitely_missing"]
+
+    def test_to_numpy_then_to_dict_same_handle(self, client, _seed):
+        """``to_numpy(dtype)`` must not corrupt the cached PyDict materialisation."""
+        import numpy as np
+
+        lazy_records = client.batch_read(_seed)
+        np_batch = lazy_records.to_numpy(np.dtype([("score", "<i8")]))
+        # numpy buffer is populated for the 5 successful reads
+        assert int((np_batch.result_codes == 0).sum()) == 5
+
+        # dict view must still be intact and complete after to_numpy
+        d = lazy_records.to_dict()
+        assert len(d) == 5
+        assert d["sh_2"]["score"] == 20
+
+    def test_all_missing_batch(self, client):
+        """Batch of only missing keys: dict view empty, raw view preserves cardinality."""
+        missing = [(self.NS, self.SET, f"all_missing_{i}") for i in range(3)]
+        lazy_records = client.batch_read(missing)
+
+        assert len(lazy_records) == 0
+        assert lazy_records.to_dict() == {}
+        assert lazy_records.found_count() == 0
+        # raw_user_keys preserves the request order
+        assert list(lazy_records.raw_user_keys()) == [f"all_missing_{i}" for i in range(3)]
+        # iter_records yields one entry per missing key
+        assert len(list(lazy_records.iter_records())) == 3
+
+
+class TestLazyBatchRecordsPublicImport:
+    """``aerospike_py.LazyBatchRecords`` must be importable from the public
+    package so that ``isinstance(handle, aerospike_py.LazyBatchRecords)``
+    works for downstream typing / introspection without reaching into the
+    private ``aerospike_py._aerospike`` module.
+    """
+
+    def test_lazy_batch_records_re_exported(self, client, cleanup):
+        # Public import path
+        assert hasattr(aerospike_py, "LazyBatchRecords")
+
+        key = ("test", "demo", "lazy_public_import")
+        cleanup.append(key)
+        client.put(key, {"v": 1})
+
+        handle = client.batch_read([key])
+        assert isinstance(handle, aerospike_py.LazyBatchRecords)
+
+
+class TestLazyBatchRecordsMergeDuplicateHandle:
+    """``merge_to_dict([h, h])`` with the *same* handle passed twice must
+    not panic on the Rust side (each ``PyRef`` would alias). This test
+    locks in the safety contract referenced by the comment in
+    ``test_lazy_batch_records.py::test_merge_as_dict_alias_matches_merge_to_dict``.
+    """
+
+    def test_merge_with_same_handle_twice(self, client, cleanup):
+        keys = [("test", "demo", f"merge_dup_{i}") for i in range(2)]
+        for k in keys:
+            cleanup.append(k)
+            client.put(k, {"v": k[2]})
+
+        handle = client.batch_read(keys)
+        merged = aerospike_py.LazyBatchRecords.merge_to_dict([handle, handle])
+        assert len(merged) == 2
+        assert merged[0] == merged[1]
+        assert set(merged[0].keys()) == {f"merge_dup_{i}" for i in range(2)}
 
 
 class TestBatchOperate:

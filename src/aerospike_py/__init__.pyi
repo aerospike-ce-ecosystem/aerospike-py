@@ -74,6 +74,16 @@ class LazyBatchRecords:
     method calls; the handle also exposes a dict-like Mapping interface
     backed by a lazy + cached ``to_dict()`` view, so legacy dict-style
     code keeps working without changes.
+
+    Cost shape of the Mapping protocol: the first dict-style access
+    (``__getitem__``, ``__contains__``, ``items``, ``keys``, ``values``,
+    ``get``, ``__iter__``) materialises a single cached ``PyDict`` for
+    the full batch; subsequent accesses hit the cache. ``__len__`` is a
+    pure-Rust filter+count and does *not* trigger the dict build —
+    prefer ``len(handle)`` or ``found_count()`` over
+    ``len(handle.to_dict())`` when you only need cardinality. After a
+    Mapping access, the handle retains both the raw Rust records and
+    the cached ``PyDict`` until it is dropped.
     """
 
     def to_dict(self) -> dict[Any, dict[str, Any]]:
@@ -88,6 +98,17 @@ class LazyBatchRecords:
         fill runs with the GIL released (``py.detach``), so sibling work
         (other asyncio tasks, torch inference) can hold the GIL during
         the fill — ideal for FastAPI/PyTorch CPU-inference workers.
+
+        **Missing / failed reads** (``result_code != 0``, including
+        ``RecordNotFound``) leave their row at the dtype's zero value —
+        the data and meta arrays cannot distinguish them from a record
+        whose bins are genuinely zero. Always mask downstream math with
+        ``result.result_codes == 0`` (or check ``found_count()``) before
+        averaging, summing, or feeding into inference.
+
+        Bins present on the record but absent from ``dtype`` are silently
+        ignored; bins listed in ``dtype`` that are missing from the
+        record stay at the dtype zero value.
         """
         ...
 

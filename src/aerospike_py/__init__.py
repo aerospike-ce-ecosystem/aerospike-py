@@ -257,6 +257,7 @@ from aerospike_py._aerospike import (  # noqa: F401
 from aerospike_py import exception  # noqa: F401
 from aerospike_py import predicates  # noqa: F401
 from aerospike_py.numpy_batch import NumpyBatchRecords  # noqa: F401
+from aerospike_py._aerospike import LazyBatchRecords  # noqa: F401
 from aerospike_py import list_operations  # noqa: F401
 from aerospike_py import map_operations  # noqa: F401
 from aerospike_py import hll_operations  # noqa: F401
@@ -379,6 +380,7 @@ __all__ = [
     "UserKey",
     "AerospikeRecord",
     "NumpyBatchRecords",
+    "LazyBatchRecords",
     "client",
     "async_client",
     "set_log_level",

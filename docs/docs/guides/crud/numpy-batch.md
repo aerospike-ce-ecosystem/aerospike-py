@@ -118,6 +118,12 @@ asyncio.run(main())
 
 Call `.to_numpy(dtype)` on the `LazyBatchRecords` that `batch_read()` returns to get a `NumpyBatchRecords` object. The structured-array fill runs with the GIL released so the result hands directly to `torch.from_numpy(...)` zero-copy:
 
+:::warning[Missing reads silently zero-fill]
+
+Rows whose `result_codes[i] != 0` (including `RecordNotFound`) leave their data and meta entries at the dtype's zero value — the buffer alone cannot tell them apart from a record whose bins are genuinely zero. Always mask downstream math with `batch.result_codes == 0` (or check `lazy_records.found_count()`) before averaging, summing, or feeding into inference.
+
+:::
+
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `batch_records` | `np.ndarray` | Structured array with the user-specified dtype |
