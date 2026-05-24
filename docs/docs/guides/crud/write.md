@@ -254,7 +254,9 @@ When `br.in_doubt` is `True`, the write may have completed on the server despite
 ## Batch Operate / Remove
 
 ```python
-# Batch operate — returns BatchRecords (same as batch_read)
+# Batch operate — returns BatchWriteResult (.batch_records: list[BatchRecord]).
+#   Note: batch_read returns LazyBatchRecords instead; only the per-record
+#   `BatchRecord` rows are shared with batch_write / batch_operate / batch_remove.
 ops = [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}]
 results = client.batch_operate(keys, ops)
 for br in results.batch_records:

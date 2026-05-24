@@ -80,6 +80,56 @@ jobs:
       - name: Run Rust unit tests
         run: cargo test --manifest-path rust/Cargo.toml --features otel
 
+  msrv-check:
+    name: MSRV cargo check (Rust ${{ env.MSRV }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Mirrors `rust-version` in rust/Cargo.toml. Keep in sync when bumping;
+      # the "MSRV ↔ Cargo.toml drift gate" step below hard-fails the build if
+      # the two values get out of step.
+      MSRV: "1.80"
+    steps:
+      - uses: actions/checkout@v6
+
+      # Drift gate: refuse to run cargo check on a fictitious MSRV.
+      # If a future PR bumps `rust-version = "1.85"` in rust/Cargo.toml
+      # but forgets to update `MSRV: "..."` above (or vice versa), this
+      # step fails *before* the check job runs, surfacing the drift
+      # rather than silently pinning a stale toolchain.
+      - name: Verify MSRV matches rust/Cargo.toml
+        run: |
+          declared=$(awk -F\" '/^rust-version *=/ {print $2; exit}' rust/Cargo.toml)
+          if [ -z "$declared" ]; then
+            echo "::error file=rust/Cargo.toml::rust-version is missing from [package] — required to back the msrv-check job"
+            exit 1
+          fi
+          if [ "$declared" != "${{ env.MSRV }}" ]; then
+            echo "::error::MSRV drift: workflow declares ${{ env.MSRV }} but rust/Cargo.toml declares $declared. Update both in the same PR."
+            exit 1
+          fi
+          echo "MSRV in workflow (${{ env.MSRV }}) matches rust/Cargo.toml ($declared)."
+
+      - name: Install Rust ${{ env.MSRV }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.MSRV }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: "rust-msrv"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # `cargo check` (not `cargo build` / `cargo test`) is enough to surface
+      # an MSRV regression: any item stabilised after 1.80 used by either the
+      # crate code or its `#[cfg(test)]` modules will fail to resolve here
+      # while the @stable jobs still build, mirroring what a downstream
+      # `pip install --no-binary` / `cargo install` user would hit.
+      - name: cargo check on MSRV toolchain
+        run: cargo check --manifest-path rust/Cargo.toml --features otel --all-targets
+
   build:
     name: Build & Unit Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

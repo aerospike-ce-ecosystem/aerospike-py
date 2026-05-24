@@ -278,7 +278,7 @@ TypeError: numpy dtype mismatch
        ("score", "f8"),    # float bin
        ("count", "i4"),    # integer bin
    ])
-   results = client.batch_read(keys, bins=["score", "count"], _dtype=dtype)
+   results = client.batch_read(keys, bins=["score", "count"]).to_numpy(dtype)
    ```
 
 ### OpenTelemetry Tracing Not Working

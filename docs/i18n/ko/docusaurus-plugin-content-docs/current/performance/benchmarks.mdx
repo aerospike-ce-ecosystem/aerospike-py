@@ -141,7 +141,7 @@ gather mode는 9개 `batch_read` 호출을 `asyncio.gather(...)`로 묶음. 두 
 | **aerospike-py** | **202 ms** |
 | official | 274 ms |
 
-`aerospike_batch_read_all_duration_seconds` p95 (앱 레벨 — `batch_read` + `as_dict` + demux):
+`aerospike_batch_read_all_duration_seconds` p95 (앱 레벨 — `batch_read` + `to_dict` + demux):
 
 | Client | p95 |
 |---|---:|

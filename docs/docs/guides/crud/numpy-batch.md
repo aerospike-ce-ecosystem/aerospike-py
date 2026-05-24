@@ -9,14 +9,15 @@ description: Use batch_read with numpy structured arrays for high-performance co
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-`batch_read()` with `_dtype` returns a **numpy structured array** instead of Python objects:
+`batch_read(...).to_numpy(dtype)` returns a **numpy structured array** instead of Python objects:
 
-- **Zero-copy columnar access** -- `batch.batch_records["temperature"]` returns a numpy array
+- **Zero-copy columnar access** -- `batch.batch_records["temperature"]` returns a numpy array; pair with `torch.from_numpy(...)` for an O(1) tensor hand-off
+- **GIL released during fill** -- the per-record `Value → buffer` writes happen with the GIL dropped, so other asyncio tasks / threads can run concurrently
 - **Vectorized computation** -- use numpy/pandas directly on results
 - **Memory efficiency** -- Rust writes directly into numpy buffer, bypassing Python objects
 
 :::tip[Performance]
-For 10K records with 5 bins, this eliminates ~60K intermediate Python objects compared to the standard `BatchRecords` path.
+For 10K records with 5 bins, this eliminates ~60K intermediate Python objects compared to materialising via `lazy_records.to_dict()`.
 :::
 
 ## Installation
@@ -55,9 +56,9 @@ dtype = np.dtype([
     ("status", "u1"),       # uint8
 ])
 
-# 3. Batch read with _dtype
+# 3. Batch read + to_numpy(dtype)
 keys = [("test", "sensors", f"sensor_{i}") for i in range(100)]
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 
 # 4. Access as numpy arrays
 print(batch.batch_records["temperature"].mean())  # columnar access
@@ -95,9 +96,10 @@ async def main():
         ("status", "u1"),
     ])
 
-    # 3. Batch read with _dtype
+    # 3. Batch read + to_numpy(dtype)
     keys = [("test", "sensors", f"sensor_{i}") for i in range(100)]
-    batch = await client.batch_read(keys, _dtype=dtype)
+    lazy_records = await client.batch_read(keys)
+    batch = lazy_records.to_numpy(dtype)
 
     # 4. Access as numpy arrays
     print(batch.batch_records["temperature"].mean())
@@ -114,7 +116,13 @@ asyncio.run(main())
 
 ## NumpyBatchRecords
 
-When `_dtype` is provided, `batch_read()` returns a `NumpyBatchRecords` object:
+Call `.to_numpy(dtype)` on the `LazyBatchRecords` that `batch_read()` returns to get a `NumpyBatchRecords` object. The structured-array fill runs with the GIL released so the result hands directly to `torch.from_numpy(...)` zero-copy:
+
+:::warning[Missing reads silently zero-fill]
+
+Rows whose `result_codes[i] != 0` (including `RecordNotFound`) leave their data and meta entries at the dtype's zero value — the buffer alone cannot tell them apart from a record whose bins are genuinely zero. Always mask downstream math with `batch.result_codes == 0` (or check `lazy_records.found_count()`) before averaging, summing, or feeding into inference.
+
+:::
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -236,7 +244,7 @@ client.put(
 
 # Read: sub-array automatically reconstructed from bytes
 keys = [("test", "vectors", "vec_1")]
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 
 recovered = batch.batch_records[0]["embedding"]  # float32[128]
 np.testing.assert_array_almost_equal(recovered, embedding)
@@ -269,7 +277,8 @@ async def main():
     )
 
     keys = [("test", "vectors", "vec_1")]
-    batch = await client.batch_read(keys, _dtype=dtype)
+    lazy_records = await client.batch_read(keys)
+    batch = lazy_records.to_numpy(dtype)
 
     recovered = batch.batch_records[0]["embedding"]
     np.testing.assert_array_almost_equal(recovered, embedding)
@@ -284,11 +293,11 @@ asyncio.run(main())
 
 ## Bin Filtering
 
-Combine `bins` and `_dtype` to read only specific bins from the server:
+Combine `bins` and `.to_numpy(dtype)` to read only specific bins from the server:
 
 ```python
 dtype = np.dtype([("temperature", "f8")])
-batch = client.batch_read(keys, bins=["temperature"], _dtype=dtype)
+batch = client.batch_read(keys, bins=["temperature"]).to_numpy(dtype)
 ```
 
 Only the `temperature` bin is transferred from the server, reducing network I/O.
@@ -300,7 +309,7 @@ Only the `temperature` bin is transferred from the server, reducing network I/O.
 Records not found (result code 2) are filled with zeros in the structured array:
 
 ```python
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 
 # Check result codes
 for i, rc in enumerate(batch.result_codes):
@@ -319,7 +328,7 @@ If a record exists but a bin is missing, the field defaults to zero (the numpy z
 ```python
 # Record has "temperature" but not "humidity"
 dtype = np.dtype([("temperature", "f8"), ("humidity", "i4")])
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 # humidity will be 0 for records missing that bin
 ```
 
@@ -328,11 +337,11 @@ batch = client.batch_read(keys, _dtype=dtype)
 ```python
 # TypeError: unicode strings not supported
 dtype = np.dtype([("name", "U10")])
-batch = client.batch_read(keys, _dtype=dtype)  # raises TypeError
+batch = client.batch_read(keys).to_numpy(dtype)  # raises TypeError
 
 # TypeError: Python objects not supported
 dtype = np.dtype([("data", "O")])
-batch = client.batch_read(keys, _dtype=dtype)  # raises TypeError
+batch = client.batch_read(keys).to_numpy(dtype)  # raises TypeError
 ```
 
 ## Pandas Integration
@@ -342,7 +351,7 @@ Convert `NumpyBatchRecords` to a pandas DataFrame:
 ```python
 import pandas as pd
 
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 
 df = pd.DataFrame(batch.batch_records)
 df["gen"] = batch.meta["gen"]
@@ -356,7 +365,7 @@ print(hot_sensors.describe())
 ## Best Practices
 
 - **Match dtype to your bins** — field names in the dtype must match bin names in Aerospike
-- **Use `bins` parameter** — combine with `_dtype` to reduce network transfer
+- **Use `bins` parameter** — combine with `.to_numpy(dtype)` to reduce network transfer
 - **Check `result_codes`** — filter out failed records before analysis
 - **Use smallest sufficient dtype** — `"f4"` instead of `"f8"`, `"i2"` instead of `"i8"` to reduce memory
 - **Batch size** — keep batches at 100-5,000 keys for optimal performance
@@ -366,25 +375,31 @@ print(hot_sensors.describe())
 
 ```python
 # Sync
-batch: NumpyBatchRecords = client.batch_read(
+lazy_records: LazyBatchRecords = client.batch_read(
     keys: list[tuple[str, str, str | int | bytes]],
     bins: list[str] | None = None,
     policy: dict | None = None,
-    _dtype: np.dtype = ...,
 )
+batch: NumpyBatchRecords = lazy_records.to_numpy(dtype)
 
 # Async
-batch: NumpyBatchRecords = await client.batch_read(
+lazy_records: LazyBatchRecords = await client.batch_read(
     keys: list[tuple[str, str, str | int | bytes]],
     bins: list[str] | None = None,
     policy: dict | None = None,
-    _dtype: np.dtype = ...,
 )
+batch: NumpyBatchRecords = lazy_records.to_numpy(dtype)
 ```
+
+The `LazyBatchRecords.to_numpy(dtype)` call performs the structured-array
+materialisation with the GIL released — the per-record fill loop is a
+sequence of raw `ptr::write_unaligned` writes, so sibling Python work
+(other asyncio tasks, torch inference threads) can hold the GIL while
+the buffer fills.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `keys` | `list[Key]` | required | List of `(namespace, set, primary_key)` tuples |
-| `bins` | `list[str] \| None` | `None` | Bin names to read (`None` = all) |
-| `policy` | `dict \| None` | `None` | Batch policy overrides |
-| `_dtype` | `np.dtype` | required | Structured dtype defining output schema |
+| `keys` | `list[Key]` | required | List of `(namespace, set, primary_key)` tuples (`batch_read` argument) |
+| `bins` | `list[str] \| None` | `None` | Bin names to read (`None` = all) (`batch_read` argument) |
+| `policy` | `dict \| None` | `None` | Batch policy overrides (`batch_read` argument) |
+| `dtype` | `np.dtype` | required | Structured dtype defining output schema (`LazyBatchRecords.to_numpy` argument) |

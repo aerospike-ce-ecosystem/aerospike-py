@@ -2,6 +2,22 @@
 
 > **대상 버전**: 0.4.0
 > **이전 버전**: 0.3.0 (`BatchRecords` NamedTuple 반환)
+>
+> **이 문서는 historical design note 입니다 (PR #264 시점).** 현재
+> `batch_read()`는 `LazyBatchRecords` 핸들을 반환하며, dict 변환은
+> 명시적으로 `.to_dict()`(또는 dict-style Mapping 접근)을 호출해야
+> 합니다. `BatchReadHandle` / `as_dict()` 같은 옛 이름은 PR #374에서
+> `LazyBatchRecords` / `to_dict()`로 통일되며 제거되었습니다.
+> 최신 API 레퍼런스는 `docs/docs/api/types.md`와
+> `docs/docs/guides/crud/numpy-batch.md`를 참조하세요.
+>
+> **`all_user_keys()` 시맨틱 변경 (PR #374)**: 이제 digest-only
+> 요청도 `None`으로 슬롯이 보존되어 반환값이 `list[UserKey | None]`이
+> 되며 `len()`이 항상 `len(batch_records)`와 일치합니다.
+> `set(handle.all_user_keys())` 또는
+> `for k in handle.all_user_keys(): k.startswith(...)`처럼 모든
+> 원소가 비-None이라고 가정했던 코드는 `None` 가드를 추가해야 합니다.
+> Dict-view cardinality (None 제외)가 필요하면 `keys()`를 사용하세요.
 
 ---
 

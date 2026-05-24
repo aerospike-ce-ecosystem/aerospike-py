@@ -127,7 +127,7 @@ static METRICS: LazyLock<MetricsState> = LazyLock::new(|| {
     });
     registry.register(
         "db_client_internal_stage_seconds",
-        "Internal stage durations within a database operation (key_parse, limiter_wait, io, into_pyobject, as_dict)",
+        "Internal stage durations within a database operation (key_parse, limiter_wait, io, into_pyobject, to_dict, to_numpy, merge_to_dict, …)",
         internal_stage.clone(),
     );
     MetricsState {
@@ -212,7 +212,8 @@ pub fn error_type_from_aerospike_error(err: &AsError) -> Cow<'static, str> {
 ///
 /// Stages include (non-exhaustive): `key_parse`, `tokio_schedule_delay`,
 /// `limiter_wait`, `io`, `spawn_blocking_delay`, `into_pyobject`,
-/// `event_loop_resume_delay`, `as_dict`, `merge_as_dict`, `future_into_py_setup`.
+/// `event_loop_resume_delay`, `to_dict`, `to_numpy`, `merge_to_dict`,
+/// `future_into_py_setup`.
 pub fn record_internal_stage(stage: &'static str, op_name: &str, duration_secs: f64) {
     if !is_internal_stage_enabled() {
         return;

@@ -43,7 +43,7 @@ class TestWriteReadRoundtrip:
             cleanup.append(k)
 
         read_dtype = np.dtype([("score", "f8"), ("count", "i4")])
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         assert isinstance(read, NumpyBatchRecords)
         np.testing.assert_array_equal(read.result_codes, [0, 0, 0])
         np.testing.assert_almost_equal(read.batch_records["score"], [0.95, 0.87, 0.42])
@@ -72,7 +72,7 @@ class TestWriteReadRoundtrip:
 
         # batch_read with unpadded keys must find the records
         read_dtype = np.dtype([("val", "i8")])
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         np.testing.assert_array_equal(read.batch_records["val"], [100, 200, 300])
 
         # Regular get with unpadded key must also work
@@ -95,7 +95,7 @@ class TestWriteReadRoundtrip:
         assert len(failed) == 0, f"{len(failed)} writes failed out of {n}"
 
         read_dtype = np.dtype([("x", "f8"), ("y", "i4")])
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         ok = read.result_codes == 0
         assert ok.sum() == n
         np.testing.assert_array_equal(read.batch_records["y"], np.arange(n))
@@ -117,7 +117,7 @@ class TestWriteReadRoundtrip:
             assert br.result == 0
 
         read_dtype = np.dtype([("val", "i4")])
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         np.testing.assert_array_equal(read.batch_records["val"], [999, 888])
 
 
@@ -141,7 +141,7 @@ class TestDtypeBoundaryValues:
             assert br.result == 0
 
         read_dtype = np.dtype([("val", "i8")])  # read as i8 to avoid truncation
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         assert read.batch_records[0]["val"] == np.iinfo(np.int32).max
         assert read.batch_records[1]["val"] == np.iinfo(np.int32).min
         assert read.batch_records[2]["val"] == 0
@@ -158,7 +158,7 @@ class TestDtypeBoundaryValues:
             assert br.result == 0
 
         read_dtype = np.dtype([("big", "i8")])
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         assert read.batch_records[0]["big"] == big_val
         assert read.batch_records[1]["big"] == -big_val
 
@@ -176,7 +176,7 @@ class TestDtypeBoundaryValues:
             assert br.result == 0
 
         read_dtype = np.dtype([("f", "f8")])
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         np.testing.assert_almost_equal(read.batch_records[0]["f"], 1e308)
         np.testing.assert_almost_equal(read.batch_records[1]["f"], -1e308)
         assert read.batch_records[2]["f"] != 0.0  # very small but nonzero
@@ -233,7 +233,7 @@ class TestMultipleBinTypes:
         assert results.batch_records[0].result == 0
 
         dtype_r = np.dtype([("count", "i4"), ("score", "f8"), ("embedding", f"S{dim * 4}")])
-        read = client.batch_read([(NS, SET, 6001)], _dtype=dtype_r)
+        read = client.batch_read([(NS, SET, 6001)]).to_numpy(dtype_r)
         assert read.batch_records[0]["count"] == 42
         np.testing.assert_almost_equal(read.batch_records[0]["score"], 0.99)
         recovered = np.frombuffer(read.batch_records[0]["embedding"], dtype=np.float32)
@@ -251,7 +251,7 @@ class TestMultipleBinTypes:
 
         read_fields = [(f"b{i}", "f8") for i in range(10)]
         read_dtype = np.dtype(read_fields)
-        read = client.batch_read([(NS, SET, 5001)], _dtype=read_dtype)
+        read = client.batch_read([(NS, SET, 5001)]).to_numpy(read_dtype)
         for i in range(10):
             np.testing.assert_almost_equal(read.batch_records[0][f"b{i}"], float(i) * 1.1)
 
@@ -271,7 +271,7 @@ class TestCustomKeyField:
             assert br.result == 0
 
         read_dtype = np.dtype([("val", "f8")])
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         np.testing.assert_almost_equal(read.batch_records[0]["val"], 3.14)
         np.testing.assert_almost_equal(read.batch_records[1]["val"], 2.72)
 
@@ -301,7 +301,7 @@ class TestVectorWriteRead:
         assert len(failed) == 0
 
         dtype_r = np.dtype([("embedding", f"S{blob_size}"), ("label", "i4")])
-        read = client.batch_read(keys, _dtype=dtype_r)
+        read = client.batch_read(keys).to_numpy(dtype_r)
         assert (read.result_codes == 0).all()
         for i in range(n):
             recovered = np.frombuffer(read.batch_records[i]["embedding"], dtype=np.float32)
@@ -322,7 +322,7 @@ class TestWriteThenPartialRead:
 
         all_keys = [(NS, SET, 2001), (NS, SET, 2002), (NS, SET, 2099)]
         read_dtype = np.dtype([("val", "i4")])
-        read = client.batch_read(all_keys, _dtype=read_dtype)
+        read = client.batch_read(all_keys).to_numpy(read_dtype)
 
         assert read.result_codes[0] == 0
         assert read.result_codes[1] == 0
@@ -347,7 +347,7 @@ class TestAsyncWriteReadRoundtrip:
             assert br.result == 0
 
         read_dtype = np.dtype([("val", "f8")])
-        read = await async_client.batch_read(keys, _dtype=read_dtype)
+        read = (await async_client.batch_read(keys)).to_numpy(read_dtype)
         np.testing.assert_almost_equal(read.batch_records["val"], [1.11, 2.22, 3.33])
 
     async def test_async_large_batch_500(self, async_client, async_cleanup):
@@ -365,7 +365,7 @@ class TestAsyncWriteReadRoundtrip:
         assert len(failed) == 0
 
         read_dtype = np.dtype([("x", "f8")])
-        read = await async_client.batch_read(keys, _dtype=read_dtype)
+        read = (await async_client.batch_read(keys)).to_numpy(read_dtype)
         assert (read.result_codes == 0).all()
         np.testing.assert_array_almost_equal(read.batch_records["x"], np.arange(n, dtype=np.float64))
 
@@ -396,7 +396,7 @@ class TestSingleRecord:
         assert results.batch_records[0].result == 0
 
         read_dtype = np.dtype([("val", "i8")])
-        read = client.batch_read([(NS, SET, 99)], _dtype=read_dtype)
+        read = client.batch_read([(NS, SET, 99)]).to_numpy(read_dtype)
         assert read.batch_records[0]["val"] == 42
 
 
@@ -416,7 +416,7 @@ class TestIntegerKeyLookup:
             assert br.result == 0
 
         read_dtype = np.dtype([("val", "i4")])
-        read = client.batch_read(keys, _dtype=read_dtype)
+        read = client.batch_read(keys).to_numpy(read_dtype)
         assert read.get(0)["val"] == 100
         assert read.get(1)["val"] == 200
         assert read.get(2)["val"] == 300
@@ -427,7 +427,7 @@ class TestIntegerKeyLookup:
         client.put(key, {"val": 777})
 
         read_dtype = np.dtype([("val", "i4")])
-        read = client.batch_read([key], _dtype=read_dtype)
+        read = client.batch_read([key]).to_numpy(read_dtype)
         assert read.result_codes[0] == 0
         assert read.batch_records[0]["val"] == 777
 
@@ -443,7 +443,7 @@ class TestMetaAfterWrite:
         cleanup.append((NS, SET, 8100))
 
         read_dtype = np.dtype([("val", "i4")])
-        read = client.batch_read([(NS, SET, 8100)], _dtype=read_dtype)
+        read = client.batch_read([(NS, SET, 8100)]).to_numpy(read_dtype)
         assert read.meta[0]["gen"] >= 1
 
     def test_gen_increments_on_overwrite(self, client, cleanup):
@@ -457,7 +457,7 @@ class TestMetaAfterWrite:
         client.batch_write_numpy(data2, NS, SET, dtype)
 
         read_dtype = np.dtype([("val", "i4")])
-        read = client.batch_read([(NS, SET, 8101)], _dtype=read_dtype)
+        read = client.batch_read([(NS, SET, 8101)]).to_numpy(read_dtype)
         assert read.meta[0]["gen"] >= 2
         assert read.batch_records[0]["val"] == 2
 

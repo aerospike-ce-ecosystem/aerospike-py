@@ -8,7 +8,7 @@ Claude Code Plugin::
 
 import contextlib
 from collections.abc import Sequence
-from typing import Any, Callable, Literal, Optional, Union, overload
+from typing import Any, Callable, Literal, Optional, Union
 
 import numpy as np
 
@@ -63,6 +63,152 @@ __version__: str
 
 Key = tuple[str, str, Union[str, int, bytes]]
 """Aerospike key: (namespace, set, primary_key). Input type for all key parameters."""
+
+# -- LazyBatchRecords (handle returned by batch_read) --------------------
+
+class LazyBatchRecords:
+    """Zero-conversion handle wrapping raw Rust batch_read results.
+
+    Returned by both sync ``Client.batch_read`` and async
+    ``AsyncClient.batch_read``. Materialisation is deferred to explicit
+    method calls; the handle also exposes a dict-like Mapping interface
+    backed by a lazy + cached ``to_dict()`` view, so legacy dict-style
+    code keeps working without changes.
+
+    Cost shape of the Mapping protocol: the first dict-style access
+    (``__getitem__``, ``__contains__``, ``items``, ``keys``, ``values``,
+    ``get``, ``__iter__``) materialises a single cached ``PyDict`` for
+    the full batch; subsequent accesses hit the cache. ``__len__`` is a
+    pure-Rust filter+count and does *not* trigger the dict build —
+    prefer ``len(handle)`` or ``found_count()`` over
+    ``len(handle.to_dict())`` when you only need cardinality. After a
+    Mapping access, the handle retains both the raw Rust records and
+    the cached ``PyDict`` until it is dropped.
+    """
+
+    def to_dict(self) -> dict[Any, dict[str, Any]]:
+        """Materialise as ``dict[user_key, bins_dict]`` (cached)."""
+        ...
+
+    def to_numpy(self, dtype: "np.dtype") -> NumpyBatchRecords:
+        """Materialise as a NumPy structured array.
+
+        ``dtype`` must be a real ``numpy.dtype`` object — list-of-tuples
+        and dtype strings are not auto-promoted. The per-record buffer
+        fill runs with the GIL released (``py.detach``), so sibling work
+        (other asyncio tasks, torch inference) can hold the GIL during
+        the fill — ideal for FastAPI/PyTorch CPU-inference workers.
+
+        **Missing / failed reads** (``result_code != 0``, including
+        ``RecordNotFound``) leave their row at the dtype's zero value —
+        the data and meta arrays cannot distinguish them from a record
+        whose bins are genuinely zero. Always mask downstream math with
+        ``result.result_codes == 0`` (or check ``found_count()``) before
+        averaging, summing, or feeding into inference.
+
+        Bins present on the record but absent from ``dtype`` are silently
+        ignored; bins listed in ``dtype`` that are missing from the
+        record stay at the dtype zero value.
+        """
+        ...
+
+    @property
+    def batch_records(self) -> list["BatchRecord"]:
+        """Lazy ``BatchRecord`` list including digest-only / failed records."""
+        ...
+
+    def iter_records(self) -> "Any":
+        """Iterate every record (including digest-only and failed) in order."""
+        ...
+
+    def all_user_keys(self) -> list[Any]:
+        """Every record's ``user_key`` in request order.
+
+        The returned list has the same length as ``batch_records`` and
+        is positionally aligned with a ``NumpyBatchRecords`` data
+        array. Per-slot contents:
+
+        - **User-keyed requests** (``(ns, set, user_key)`` or
+          ``(ns, set, user_key, digest)``): the slot carries the
+          ``user_key`` the caller supplied, *verbatim* — not echoed by
+          the server. This holds regardless of whether the read
+          succeeded, returned ``RecordNotFound``, or failed otherwise.
+        - **Digest-only requests** (``(ns, set, None, digest)``): the
+          slot is ``None`` (the server never carries a user_key for
+          these requests).
+
+        Pair this with :meth:`keys` consciously: ``keys()`` is the
+        Mapping-protocol view (dict-view cardinality, never contains
+        ``None``); ``all_user_keys()`` is the positional view (length
+        always equals ``len(batch_records)``, may contain ``None``).
+        """
+        ...
+
+    def found_count(self) -> int:
+        """Count of successful records (no conversion needed)."""
+        ...
+
+    def release_cache(self) -> None:
+        """Drop the cached ``PyDict`` materialisation, keeping the raw
+        Rust records intact.
+
+        The first Mapping-protocol access (``__getitem__``, ``items``,
+        ``keys``, ``values``, ``get``, ``__contains__``, ``__iter__``)
+        or call to ``to_dict()`` builds a single cached ``PyDict`` that
+        is reused on subsequent accesses. After a large-batch
+        materialisation that you no longer need, call ``release_cache()``
+        to drop the ``PyDict`` without dropping the entire handle —
+        ``batch_records``, ``iter_records()``, ``all_user_keys()``,
+        ``found_count()``, ``__len__``, and ``to_numpy(dtype)`` continue
+        to work, and a later Mapping access or ``to_dict()`` rebuilds
+        the cache lazily.
+
+        Safe to call from ``finally:`` cleanup blocks: a previously
+        poisoned cache mutex is recovered, cleared, and its poison
+        flag is reset so that subsequent reads (``to_dict``,
+        ``__getitem__``, etc.) succeed instead of raising
+        ``RustPanicError``. ``release_cache`` never masks an
+        in-flight exception.
+
+        **Recovery limit.** If the original panic was caused by an
+        undecodable record in the batch (e.g. a legacy blob particle
+        the Rust client cannot decode), the next ``to_dict()`` will
+        rebuild over the same raw data and panic on the same record,
+        re-poisoning the mutex. ``release_cache`` cannot undo that —
+        it only clears the previous state so the next attempt has a
+        clean baseline. Inspect ``iter_records()`` /
+        ``batch_records`` to isolate the offending record before
+        re-reading; when called from a retry loop after a real
+        poisoning, the native side emits a ``debug!`` log line
+        identifying the recovery.
+        """
+        ...
+
+    # Dict-like Mapping backward-compat — backed by cached `to_dict()`.
+    # `__len__` is the *dict-view cardinality* (matches
+    # ``len(lazy_records.to_dict())``: successful reads with a `user_key`
+    # and a `record` body). Computed via a pure-Rust filter+count, so it
+    # does NOT trigger PyDict materialisation. For the raw record count
+    # (including missing reads / failures) use
+    # ``len(lazy_records.batch_records)``.
+    def items(self) -> Any: ...
+    def keys(self) -> Any:  # Dict-view; never None. See `all_user_keys` for positional view.
+        ...
+    def values(self) -> Any: ...
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Any: ...
+    def __contains__(self, key: Any) -> bool: ...
+    def __getitem__(self, key: Any) -> dict[str, Any]: ...
+    def get(self, key: Any, default: Any = None) -> Any:
+        """Mapping-style ``handle.get(key, default)`` — returns the bins
+        dict for ``key``, or ``default`` if ``key`` is missing from the
+        dict view (digest-only or failed reads are excluded)."""
+        ...
+
+    @staticmethod
+    def merge_to_dict(handles: list["LazyBatchRecords"]) -> list[dict[Any, dict[str, Any]]]:
+        """Single-GIL merge of multiple handles into a list of dicts."""
+        ...
 
 # -- Client --------------------------------------------------------------
 
@@ -564,53 +710,43 @@ class Client:
 
     # -- Batch --
 
-    @overload
     def batch_read(
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
         policy: Optional[dict[str, Any]] = None,
-        _dtype: None = None,
-    ) -> BatchRecords: ...
-    @overload
-    def batch_read(
-        self,
-        keys: list[Key],
-        bins: Optional[list[str]] = None,
-        policy: Optional[dict[str, Any]] = None,
-        *,
-        _dtype: np.dtype,
-    ) -> NumpyBatchRecords: ...
-    def batch_read(
-        self,
-        keys: list[Key],
-        bins: Optional[list[str]] = None,
-        policy: Optional[dict[str, Any]] = None,
-        _dtype: Optional[np.dtype] = None,
-    ) -> Union[BatchRecords, NumpyBatchRecords]:
+    ) -> "LazyBatchRecords":
         """Read multiple records in a single batch call.
 
-        Returns ``dict[UserKey, AerospikeRecord]`` mapping each user key to
-        its bins dict. Only successful reads with a user key are included.
+        Returns a [`LazyBatchRecords`](types.md#lazybatchrecords) — a zero-conversion
+        wrapper around the raw Rust results. Call one of the handle methods
+        to materialise the result:
+
+        * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``lazy_records.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+          during the structured-array fill — ideal for FastAPI/PyTorch
+          inference workers)
+        * ``lazy_records.batch_records`` → ``list[BatchRecord]`` (compat)
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            bins: Optional list of bin names to read. ``None`` reads all bins;
-                an empty list performs an existence check only.
+            bins: Optional list of bin names to read. ``None`` reads all
+                bins; an empty list performs an existence check only.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-            _dtype: Optional NumPy dtype. When provided, returns
-                ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (``dict[UserKey, AerospikeRecord]``) or
-            ``NumpyBatchRecords`` when ``_dtype`` is set.
+            ``LazyBatchRecords``.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            result = client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in result.items():
+            lazy_records = client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in lazy_records.to_dict().items():
                 print(user_key, bins_dict)
+
+            # numpy/torch path
+            np_batch = lazy_records.to_numpy(dtype)
+            tensor = torch.from_numpy(np_batch.batch_records["score"])
             ```
         """
         ...
@@ -1665,55 +1801,44 @@ class AsyncClient:
 
     # -- Batch --
 
-    @overload
     async def batch_read(
         self,
         keys: list[Key],
         bins: Optional[list[str]] = None,
         policy: Optional[dict[str, Any]] = None,
-        _dtype: None = None,
-    ) -> BatchRecords: ...
-    @overload
-    async def batch_read(
-        self,
-        keys: list[Key],
-        bins: Optional[list[str]] = None,
-        policy: Optional[dict[str, Any]] = None,
-        *,
-        _dtype: np.dtype,
-    ) -> NumpyBatchRecords: ...
-    async def batch_read(
-        self,
-        keys: list[Key],
-        bins: Optional[list[str]] = None,
-        policy: Optional[dict[str, Any]] = None,
-        _dtype: Optional[np.dtype] = None,
-    ) -> Union[BatchRecords, NumpyBatchRecords]:
+    ) -> "LazyBatchRecords":
         """Read multiple records in a single batch call.
 
-        Returns ``dict[UserKey, AerospikeRecord]`` mapping each user key to
-        its bins dict. Only successful reads with a user key are included.
+        Returns a [`LazyBatchRecords`](types.md#lazybatchrecords) — a zero-conversion
+        wrapper around the raw Rust results. The async future itself
+        completes with near-zero GIL cost (``Arc::new`` + ``Py::new``), so
+        concurrent ``batch_read`` futures release their ``spawn_blocking``
+        threads almost immediately. The heavier dict / numpy conversion
+        runs on the calling coroutine, where there is no GIL contention
+        between concurrent callers.
 
-        The async future completes with near-zero GIL cost (< 0.01ms);
-        dict conversion runs in the event loop coroutine context.
+        Materialise via:
+
+        * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``lazy_records.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+          during the structured-array fill — ideal for FastAPI/PyTorch
+          inference workers)
+        * ``lazy_records.batch_records`` → ``list[BatchRecord]`` (compat)
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            bins: Optional list of bin names to read. ``None`` reads all bins;
-                an empty list performs an existence check only.
+            bins: Optional list of bin names to read. ``None`` reads all
+                bins; an empty list performs an existence check only.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-            _dtype: Optional NumPy dtype. When provided, returns
-                ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (``dict[UserKey, AerospikeRecord]``) or
-            ``NumpyBatchRecords`` when ``_dtype`` is set.
+            ``LazyBatchRecords``.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            result = await client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in result.items():
+            lazy_records = await client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in lazy_records.to_dict().items():
                 print(user_key, bins_dict)
             ```
         """
@@ -2533,7 +2658,7 @@ def internal_stage_profiling() -> contextlib.AbstractContextManager[None]:
     Example:
         ```python
         with aerospike_py.internal_stage_profiling():
-            handle = await client.batch_read(keys)
+            lazy_records = await client.batch_read(keys)
         ```
     """
     ...

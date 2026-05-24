@@ -72,7 +72,11 @@ Read multiple records in a single network call.
 ```python
 keys: list[tuple] = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# All bins — returns dict[user_key, bins_dict]
+# All bins — returns a `LazyBatchRecords`. The dict-style Mapping
+# protocol (`items`, `keys`, `values`, `get`, `__getitem__`, `__iter__`,
+# `__contains__`, `__len__`) is backed by a single cached `to_dict()`
+# materialisation, so iteration works without an explicit conversion. Call
+# `batch.to_dict()` when you specifically need a plain mutable dict.
 batch = client.batch_read(keys)
 for user_key, bins in batch.items():
     print(user_key, bins)
@@ -88,7 +92,8 @@ batch = client.batch_read(keys, bins=[])
   <TabItem value="async" label="Async">
 
 ```python
-# Same dict return type as sync
+# Same `LazyBatchRecords` as the sync path; dict-style iteration
+# is backed by a cached `to_dict()` materialisation.
 batch = await client.batch_read(keys, bins=["name", "age"])
 for user_key, bins in batch.items():
     print(user_key, bins)

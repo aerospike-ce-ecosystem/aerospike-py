@@ -460,7 +460,7 @@ _, meta, results = await client.operate_ordered(key, ops)
 
 ### `batch_read(keys, bins=None, policy=None)`
 
-여러 레코드를 읽습니다. `BatchRecords`를 반환합니다.
+여러 레코드를 읽습니다. `LazyBatchRecords` 핸들을 반환하며, `.to_dict()` / `.to_numpy(dtype)` 또는 dict-style Mapping 접근으로 materialise 합니다.
 
 - `bins=None` - 모든 bin 읽기
 - `bins=["a", "b"]` - 특정 bin만 읽기

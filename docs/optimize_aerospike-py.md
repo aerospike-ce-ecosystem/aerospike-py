@@ -1,5 +1,12 @@
 # aerospike-py: Zero-Conversion Handle 아키텍처로 성능 개선
 
+> **Historical design note (PR #264 시점).** 이 문서는 zero-conversion
+> 핸들(`BatchReadHandle`) 도입 배경을 남기기 위한 디자인 기록입니다.
+> 현재 API에서 핸들의 이름은 `LazyBatchRecords`이고, 변환 메서드는
+> `to_dict()` / `to_numpy(dtype)` 입니다(`as_dict()` / `merge_as_dict()`
+> 별칭은 PR #374에서 제거됨). 최신 API 레퍼런스는
+> `docs/docs/api/types.md`를 참조하세요.
+
 ## Context
 
 aerospike-py(Rust/PyO3)의 `batch_read`가 `asyncio.gather` 환경에서 official C client보다 느린 근본 원인:

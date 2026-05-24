@@ -7,7 +7,7 @@ description: Fine-grained per-stage timing for debugging aerospike-py latency, w
 
 aerospike-py exposes a second, more granular histogram alongside `db_client_operation_duration_seconds`:
 
-**`db_client_internal_stage_seconds`** — a histogram that breaks a single `batch_read` down into its internal stages (key parsing, Tokio scheduling, I/O, `as_dict` conversion, event-loop resume, etc.).
+**`db_client_internal_stage_seconds`** — a histogram that breaks a single `batch_read` down into its internal stages (key parsing, Tokio scheduling, I/O, `to_dict` / `to_numpy` conversion, event-loop resume, etc.).
 
 Unlike operational metrics which are always on, internal stage profiling is **off by default**. When disabled, every stage timer call site skips `Instant::now()` entirely — the disabled path costs a single atomic load (~1ns per batch).
 
@@ -21,12 +21,12 @@ assert aerospike_py.is_internal_stage_metrics_enabled() is False
 
 # Turn it on for a debug session
 aerospike_py.set_internal_stage_metrics_enabled(True)
-handle = await client.batch_read(keys)
+lazy_records = await client.batch_read(keys)
 print(aerospike_py.get_metrics())   # db_client_internal_stage_seconds now populated
 
 # Or scope it to a single block
 with aerospike_py.internal_stage_profiling():
-    handle = await client.batch_read(keys)
+    lazy_records = await client.batch_read(keys)
 # Flag automatically restored on exit, even if the block raised
 ```
 
@@ -48,7 +48,7 @@ A **histogram** tracking per-stage durations inside a single database operation.
 
 | Label | Examples |
 |---|---|
-| `stage` | `key_parse`, `tokio_schedule_delay`, `limiter_wait`, `io`, `spawn_blocking_delay`, `into_pyobject`, `event_loop_resume_delay`, `as_dict`, `merge_as_dict`, `future_into_py_setup` |
+| `stage` | `key_parse`, `tokio_schedule_delay`, `limiter_wait`, `io`, `spawn_blocking_delay`, `into_pyobject`, `event_loop_resume_delay`, `to_dict`, `to_numpy`, `merge_to_dict`, `future_into_py_setup` |
 | `db_operation_name` | `batch_read` (more ops may be instrumented later) |
 
 **Buckets (sub-microsecond precision):**
@@ -64,10 +64,11 @@ A **histogram** tracking per-stage durations inside a single database operation.
 | `limiter_wait` | Time waiting for the backpressure semaphore |
 | `io` | Aerospike network round-trip |
 | `spawn_blocking_delay` | Gap between I/O completion and `IntoPyObject::into_pyobject` starting on a spawn-blocking thread (GIL-bound) |
-| `into_pyobject` | `Arc` wrap + `BatchReadHandle` construction |
+| `into_pyobject` | `Arc` wrap + `LazyBatchRecords` construction |
 | `event_loop_resume_delay` | Gap between `into_pyobject` returning and the Python coroutine actually resuming in the event loop |
-| `as_dict` | `batch_to_dict_py` conversion (GIL held) |
-| `merge_as_dict` | Static `BatchReadHandle.merge_as_dict` — single-GIL merge of multiple handles |
+| `to_dict` | `batch_to_dict_py` conversion (GIL held). |
+| `to_numpy` | `batch_to_numpy_py` structured-array fill. The hot `Value → buffer` loop runs under `Python::detach`, so the **timer wraps only the GIL-held framing** (allocation, dtype parse, `key_map` build) — not the GIL-released fill itself. |
+| `merge_to_dict` | Static `LazyBatchRecords.merge_to_dict` — single-GIL merge of multiple handles. |
 
 ## Why This Is Opt-In
 
@@ -83,13 +84,13 @@ Leave it **off in production**, and flip it on only when you are actively huntin
 
 ## Scraping and Visualization
 
-The histogram is exposed via the same `get_metrics()` / `start_metrics_server()` surface as the operational histogram — no separate endpoint. A Grafana panel can query, for example, the p95 of `as_dict`:
+The histogram is exposed via the same `get_metrics()` / `start_metrics_server()` surface as the operational histogram — no separate endpoint. A Grafana panel can query, for example, the p95 of `to_dict`:
 
 ```promql
 histogram_quantile(
   0.95,
   sum by (le) (rate(
-    db_client_internal_stage_seconds_bucket{stage="as_dict"}[5m]
+    db_client_internal_stage_seconds_bucket{stage="to_dict"}[5m]
   ))
 )
 ```

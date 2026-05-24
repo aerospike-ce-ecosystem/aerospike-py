@@ -35,8 +35,9 @@ Python metrics (aerospike_batch_read_set_duration):    51.0 ms
 | `into_pyobject` | Rust `BatchRecord` → `Py<...>` (Arc wrap, `spawn_blocking`에서 실행) | held |
 | `spawn_blocking_delay` | `spawn_blocking` task가 큐에서 대기한 wall time | — |
 | `event_loop_resume_delay` | future-ready부터 coroutine resume까지 event-loop tick | — |
-| `as_dict` | `BatchReadHandle.as_dict()` → `dict[Key, Record]` | held |
-| `merge_as_dict` | 다중 set을 typed dict로 merge | held |
+| `to_dict` | `LazyBatchRecords.to_dict()` → `dict[Key, Record]` | held |
+| `to_numpy` | `LazyBatchRecords.to_numpy(dtype)` → `NumpyBatchRecords` framing — per-record fill loop은 `py.detach`로 GIL **release** | held (framing only) |
+| `merge_to_dict` | 다중 set을 typed dict로 merge | held |
 | `future_into_py_setup` | PyO3 future ↔ asyncio bridge setup | held |
 
 ### Stage Profiling 활성화
@@ -68,9 +69,9 @@ Profiling **on** 상태에서 k6 부하를 받았을 때:
 | `limiter_wait` | 3.56 μs | Backpressure 미작동 (경합 없음) |
 | `future_into_py_setup` | 46.5 μs | PyO3 ↔ asyncio bridge는 저렴 |
 | `tokio_schedule_delay` | 83.1 μs | Tokio scheduling은 정상 |
-| `as_dict` | 832 μs | Per-call dict materialization 정상 |
+| `to_dict` | 832 μs | Per-call dict materialization 정상 |
 | `key_parse` | 967 μs | 200-key tuple parsing 정상 |
-| `merge_as_dict` | 4.48 ms | 9-set merge는 중간 수준 |
+| `merge_to_dict` | 4.48 ms | 9-set merge는 중간 수준 |
 | `io` | 7.51 ms | 네트워크 — 다만 응답 파싱 중 GIL 경합으로 부풀려짐 |
 | **`event_loop_resume_delay`** | **39.7 ms** | 🚨 Coroutine이 GIL을 얻을 차례를 기다리는 시간 |
 | **`spawn_blocking_delay`** | **234 ms** | 🚨 `spawn_blocking` 큐가 GIL을 기다리는 시간 |
@@ -90,7 +91,7 @@ await asyncio.gather(*[
 ])
 ```
 
-GIL 환경에서 이는 9개의 동시 PyO3 → asyncio handoff를 만듭니다. 각 `key_parse`와 `as_dict` stage가 GIL을 획득하며 직렬화:
+GIL 환경에서 이는 9개의 동시 PyO3 → asyncio handoff를 만듭니다. 각 `key_parse`와 `to_dict` stage가 GIL을 획득하며 직렬화:
 
 ```
 타임라인 (gather mode, 9 sets × 200 keys):
@@ -103,9 +104,9 @@ T=~13ms   9개 key_parse 완료 (순차, 9 × 1.46 ms)
           └─ 9개 Rust async future가 Tokio에서 병렬 실행
 T=~15ms   9개 I/O 완료
 T=15-51ms event loop이 9개 coroutine을 순차 resume:
-          ├─ task 1 → as_dict (0.79 ms) → 완료
+          ├─ task 1 → to_dict (0.79 ms) → 완료
           ├─ (event loop tick: 3-5 ms)
-          └─ task 9 → as_dict (0.79 ms) → 완료
+          └─ task 9 → to_dict (0.79 ms) → 완료
 T=~51ms   gather 반환
 ```
 
@@ -120,7 +121,7 @@ result = await client.batch_read(all_keys)
 
 # Python에서 set별 demux (저렴)
 per_set_results = defaultdict(dict)
-for key, record in result.as_dict().items():
+for key, record in result.to_dict().items():
     per_set_results[key[1]][key[2]] = record
 ```
 

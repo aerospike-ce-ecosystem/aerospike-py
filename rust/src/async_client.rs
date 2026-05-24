@@ -759,19 +759,20 @@ impl PyAsyncClient {
 
     /// Read multiple records (async).
     ///
-    /// Returns a `BatchReadHandle` — a zero-conversion handle wrapping raw
+    /// Returns a `LazyBatchRecords` — a zero-conversion handle wrapping raw
     /// Rust results. The async future completes with near-zero GIL cost
     /// (just `Arc::new`). Call methods on the handle to access data:
-    /// - `handle.as_dict()` — fastest, returns `dict[key, bins_dict]`
+    /// - `handle.to_dict()` — returns `dict[user_key, bins_dict]`
+    /// - `handle.to_numpy(dtype)` — returns `NumpyBatchRecords`
+    ///   (GIL released during the buffer fill)
     /// - `handle.batch_records` — compat, returns `list[BatchRecord]`
-    #[pyo3(signature = (keys, bins=None, policy=None, _dtype=None))]
+    #[pyo3(signature = (keys, bins=None, policy=None))]
     fn batch_read<'py>(
         &self,
         py: Python<'py>,
         keys: &Bound<'_, PyList>,
         bins: Option<Vec<String>>,
         policy: Option<&Bound<'_, PyDict>>,
-        _dtype: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         debug!("async batch_read: keys_count={}", keys.len());
 
@@ -781,9 +782,6 @@ impl PyAsyncClient {
         let args = crate::stage_timer!("key_parse", "batch_read", {
             client_common::prepare_batch_read_args(py, keys, &bins, policy, &self.connection_info)?
         });
-
-        let use_numpy = _dtype.is_some();
-        let dtype_py: Option<Py<PyAny>> = _dtype.map(|d| d.clone().unbind());
 
         // ── (A) future_into_py setup (sync, GIL held) ──
         // spawned_at: Option<Instant> — None when profiling disabled, so the
@@ -822,21 +820,10 @@ impl PyAsyncClient {
                 // profiling is ON (Option<Instant>).
                 let io_complete_at = crate::metrics::maybe_now();
 
-                if use_numpy {
-                    Ok(PendingBatchRead::Numpy {
-                        results,
-                        dtype: dtype_py.ok_or_else(|| {
-                            pyo3::exceptions::PyValueError::new_err(
-                                "internal error: numpy path reached without dtype",
-                            )
-                        })?,
-                    })
-                } else {
-                    Ok(PendingBatchRead::Handle {
-                        results,
-                        io_complete_at,
-                    })
-                }
+                Ok(PendingBatchRead::Handle {
+                    results,
+                    io_complete_at,
+                })
             })
         })
     }

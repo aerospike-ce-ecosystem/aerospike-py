@@ -147,7 +147,7 @@ class TestAsyncConcurrency:
         dtype = np.dtype([("score", "i4")])
 
         async def numpy_read():
-            result = await async_client.batch_read(keys, bins=["score"], _dtype=dtype)
+            result = (await async_client.batch_read(keys, bins=["score"])).to_numpy(dtype)
             assert len(result) == 20
 
         await asyncio.gather(*(numpy_read() for _ in range(4)))

@@ -49,7 +49,7 @@ _, meta, bins = record     # tuple unpacking
 
 ### `BatchRecord`
 
-Returned by: batch operations (inside `BatchRecords.batch_records`)
+Returned by: batch operations (inside `BatchWriteResult.batch_records`)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -65,27 +65,44 @@ for br in results.batch_records:
         print(br.record.bins)
 ```
 
-### `BatchRecords`
+### `BatchWriteResult`
 
-Returned by: sync `batch_read()`, `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()`
+Returned by: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **and** async). Sync and async `batch_read()` return [`LazyBatchRecords`](#lazybatchrecords) instead.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `batch_records` | `list[BatchRecord]` | Per-record results |
 
-### `BatchReadHandle`
+### `BatchRecords`
 
-Returned by: async `batch_read()` (zero-conversion handle wrapping raw Rust results)
+`TypeAlias = dict[UserKey, AerospikeRecord]`. Historical alias retained for
+import-compat. PR-374 switched `batch_read()` to
+[`LazyBatchRecords`](#lazybatchrecords); call `.to_dict()` on that handle to
+get the same dict shape this alias names. The alias is not returned by any
+current method.
+
+### `LazyBatchRecords`
+
+Returned by: sync **and** async `batch_read()` — a zero-conversion
+wrapper around raw Rust results. Materialisation is deferred to
+explicit method calls (or the dict-like Mapping dunders, which proxy
+through a lazy + cached `to_dict()`).
 
 | Method / Property | Type | Description |
 |-------------------|------|-------------|
-| `as_dict()` | `dict[str \| int, dict[str, Any]]` | Fastest path: returns `dict[key, bins_dict]` directly. Excludes digest-only and failed records. |
-| `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion, cached after first access. |
+| `to_dict()` | `dict[UserKey, dict[str, Any]]` | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. |
+| `to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a `np.dtype` object** (e.g. `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). Each field name in the structured dtype maps to the bin of the same name; list-of-tuples shorthand and single-field strings are not auto-promoted — wrap them in `np.dtype(...)` first. The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. **Failed / missing reads (`result_code != 0`) leave their row at the dtype's zero value — always mask with `result_codes` before downstream math.** |
+| `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. |
 | `found_count()` | `int` | Count of successful records (no conversion needed). |
-| `keys()` | `list[str \| int]` | Extract user keys without converting record data. |
-| `len(handle)` | `int` | Total number of records (including failures). |
-| `handle[i]` | `BatchRecord` | Index access with negative index support. |
-| `for br in handle` | `BatchRecord` | Iteration (via `batch_records`). |
+| `keys()` | `dict_keys` | Dict-style keys view, mirrors `to_dict().keys()` (missing / failed records excluded). |
+| `all_user_keys()` | `list[UserKey \| None]` | Every batch record's `user_key` in request order — positionally aligned with `batch_records` and a `NumpyBatchRecords` data array. Digest-only requests (no `user_key` element) yield `None` in their slot so `zip(handle.all_user_keys(), handle.batch_records)` always pairs every record with its requested key. |
+| `iter_records()` | `Iterator[BatchRecord]` | Iterate every record (including digest-only and failed) in insertion order. |
+| `items()` / `values()` / `__iter__` | dict views | Dict-like backward-compat — same semantics as the cached `to_dict()`. |
+| `lazy_records[user_key]` | `dict[str, Any]` | Dict-style item access (`__getitem__`). |
+| `user_key in lazy_records` | `bool` | Dict-style membership (`__contains__`). |
+| `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | Dict-style `get` with optional default; mirrors `dict.get` semantics. |
+| `len(lazy_records)` | `int` | Dict-view cardinality — matches `len(lazy_records.to_dict())` (successful reads with a `user_key` and a `record` body). Fast: a pure-Rust filter+count, no PyDict allocation. For the raw record count (including missing reads / per-record failures) use `len(lazy_records.batch_records)`. |
+| `release_cache()` | `None` | Drop the cached `PyDict` built by the first Mapping access / `to_dict()`, keeping the raw Rust records (and therefore `batch_records`, `iter_records()`, `all_user_keys()`, `found_count()`, `to_numpy(dtype)`) intact. Subsequent Mapping access rebuilds the cache lazily. Useful after a large-batch materialisation that you no longer need. |
 
 ### `ExistsResult`
 
@@ -138,10 +155,9 @@ Returned by: `operate_ordered()`
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` (sync) | `BatchRecords` \| `NumpyBatchRecords` |
-| `batch_read()` (async) | `BatchReadHandle` \| `NumpyBatchRecords` |
-| `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchRecords` |
-| `batch_write_numpy()` | `BatchRecords` |
+| `batch_read()` (sync and async) | `LazyBatchRecords` — call `.to_dict()` or `.to_numpy(dtype)` to materialise |
+| `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchWriteResult` (`batch_records: list[BatchRecord]`) |
+| `batch_write_numpy()` | `BatchWriteResult` |
 | `Query.results()` | `list[Record]` |
 
 ---

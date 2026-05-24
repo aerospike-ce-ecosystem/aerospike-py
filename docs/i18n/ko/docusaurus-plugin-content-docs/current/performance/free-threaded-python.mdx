@@ -30,7 +30,7 @@ GIL은 두 client 공통 병목이었습니다. aerospike-py 의 효과는 **Rus
 | `spawn_blocking_delay` | **234 ms** | **0.12 ms** | **−99.95%** 🔥 |
 | `event_loop_resume_delay` | 39.7 ms | ≈ 0 | ≈ −100% |
 | `io` (Aerospike 네트워크) | 7.51 ms | **1.27 ms** | −83% |
-| `merge_as_dict` | 4.48 ms | 3.54 ms | −21% |
+| `merge_to_dict` | 4.48 ms | 3.54 ms | −21% |
 | `key_parse` | 967 μs | 1.06 ms | +10% (노이즈) |
 | `tokio_schedule_delay` | 83.1 μs | 49.5 μs | −40% |
 | `limiter_wait` | 3.56 μs | 0.96 μs | −73% |
@@ -115,7 +115,7 @@ Latency 개선이 throughput에 그대로 반영됩니다. 두 가지 TPS 관측
 **3.14t에서도 solo 부하에서 aerospike-py가 여전히 앞서는 이유:**
 
 1. **Native async vs threadpool 래핑.** GIL 경합이 없어도 `run_in_executor`는 요청당 thread pool hop을 추가. aerospike-py는 asyncio loop에서 직접 await.
-2. **Lazy dict 변환.** `batch_read()`는 `BatchReadHandle` (Arc-wrap, ~10 μs)를 반환. Python dict materialization은 호출자가 `.as_dict()`를 호출할 때 lazy하게 수행 — eager 작업 회피. 공식 client는 I/O 완료 즉시 전체 dict를 빌드.
+2. **Lazy dict 변환.** `batch_read()`는 `LazyBatchRecords` (Arc-wrap, ~10 μs)를 반환. Python dict materialization은 호출자가 `.to_dict()`를 호출할 때 lazy하게 수행 — eager 작업 회피. 공식 client는 I/O 완료 즉시 전체 dict를 빌드.
 3. **단일 FFI 경계 횡단.** aerospike-py Rust 코드는 한 번의 PyO3 호출 안에서 전체 `batch_read`를 완료. C extension은 호출당 Python ↔ C 경계를 여러 번 횡단.
 
 이 우위는 동시성이 올라갈수록 누적됨 (gather 수치 — 107 vs 253 ms — 가 가장 분명한 예).

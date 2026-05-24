@@ -23,27 +23,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `aerospike_py.RustPanicError` — re-exported from the top-level package and from `aerospike_py.exception`. Catch it (or its parent `ClientError`) to handle records that the underlying Rust client cannot decode.
 
 ### Changed (BREAKING)
-- `BatchRecords` is now a `TypeAlias = dict[UserKey, AerospikeRecord]` (was a `NamedTuple` with a `batch_records` attribute). This is the return type of both `Client.batch_read` and `AsyncClient.batch_read`. Migration:
+- `Client.batch_read` and `AsyncClient.batch_read` now return a **`LazyBatchRecords`** (zero-conversion wrapper around the raw Rust results). Materialise explicitly via `.to_dict()` for a `dict[UserKey, bins_dict]` or `.to_numpy(dtype)` for a `NumpyBatchRecords`. `LazyBatchRecords` also implements the dict-style Mapping protocol (`__getitem__`, `__contains__`, `__iter__`, `__len__`, `keys`, `values`, `items`, `get`) backed by a single cached `to_dict()` materialisation, so existing dict-style call sites keep working without a `.to_dict()` rewrite. The previous `_dtype=` kwarg on `batch_read` is removed; switch to `(await client.batch_read(keys)).to_numpy(dtype)`. The transitional `as_dict()` / `merge_as_dict()` aliases that briefly existed during this release cycle are also removed — use `to_dict()` / `merge_to_dict()` directly. Migration:
     ```python
     # Before
     for br in result.batch_records:
         if br.result == 0: print(br.record.bins)
-    # After
+    # After (explicit)
+    for user_key, bins in result.to_dict().items():
+        print(user_key, bins)
+    # After (dict-style, no rewrite)
     for user_key, bins in result.items():
         print(user_key, bins)
     ```
 - `Client.batch_operate`, `Client.batch_remove`, `AsyncClient.batch_operate`, `AsyncClient.batch_remove` now declare their return type as `BatchWriteResult` in the type stubs (previously `BatchRecords`). Runtime shape is unchanged — `BatchWriteResult` is a NamedTuple with `.batch_records: list[BatchRecord]`. Typecheckers may flag code that still expects the old annotation.
 - `BatchRecord` (used inside `BatchWriteResult`) now carries an `in_doubt: bool = False` field indicating whether a transport-level ambiguity occurred. Positional unpacking (`key, result, record = br`) breaks; switch to attribute access.
 - New top-level exports in `aerospike_py.__all__`: `BatchWriteResult`, `UserKey`, `AerospikeRecord`. Previously only `BatchRecord` and `BatchRecords` were exported.
+- `LazyBatchRecords.all_user_keys()` is **positional** and now returns `list[UserKey | None]` instead of dropping digest-only requests. Every batch record gets exactly one slot in request order — digest-only requests yield `None` rather than being filtered out — so `zip(handle.all_user_keys(), handle.batch_records)` and downstream NumPy-row alignment work in mixed batches. Callers that previously assumed every element was a non-None `str/int/bytes` (`set(handle.all_user_keys())`, `for k in handle.all_user_keys(): k.startswith(...)`, requeuing the list into another `batch_read`) must filter `None` first:
+    ```python
+    # Before (filtered, length <= len(batch_records))
+    for k in handle.all_user_keys():
+        do_something(k)
+    # After (positional, length == len(batch_records))
+    for k in handle.all_user_keys():
+        if k is None:
+            continue          # digest-only slot
+        do_something(k)
+    ```
+    **Heads-up: `None` is hashable.** `set(handle.all_user_keys())` and `dict.fromkeys(handle.all_user_keys())` *silently include* `None` rather than raising — the failure only surfaces a step later when downstream code does `k.startswith(...)` / sends `None` back into a `batch_read` and hits `AttributeError` / `TypeError`. Strip `None` before any aggregate-into-set/dict operation:
+    ```python
+    requested_keys = {k for k in handle.all_user_keys() if k is not None}
+    ```
+    `LazyBatchRecords.keys()` (Mapping-protocol view) is unchanged — it still excludes digest-only / failed slots and matches `to_dict().keys()`. Use `keys()` when you want the dict-view cardinality; use `all_user_keys()` when you need positional alignment.
 
 ### Changed
 - Internal: `PyAsyncClient::close` and `PyAsyncClient::__aexit__` (Rust, PyO3) share a new `prepare_close()` helper. Python users of `aerospike_py.AsyncClient` see no behaviour change — the Python wrapper's `__aexit__` already delegated to `close()`, so `async with` exiting during an in-flight `connect()` has always raised `ClientError`. The refactor removes a dead-code divergence at the native layer. Closes #293.
+- Native Rust MSRV pinned to **1.80** (`rust-version = "1.80"` in `rust/Cargo.toml`). Reflects what the codebase already required (clippy `incompatible_msrv` flagged a handful of std items stabilised in 1.77 / 1.80 that existing code uses, plus `Mutex::clear_poison()` introduced in 1.74 and used by `LazyBatchRecords::release_cache`'s poison-recovery path). Only affects `pip install --no-binary` / `cargo install` builds; the published wheels remain compatible with their existing Python version range.
 
 ### Added
 - `Client.batch_write` / `AsyncClient.batch_write` — per-record bins with optional per-record TTL via `WriteMeta`. Each entry is `(key, bins)` or `(key, bins, meta)`.
-- `BatchReadHandle` — zero-conversion handle for async `batch_read`; methods include `as_dict()`, `batch_records`, `keys()`, `found_count()`, and a static `merge_as_dict()` for combining multiple handles in a single GIL acquisition.
+- `LazyBatchRecords` — zero-conversion wrapper returned by both sync and async `batch_read`; methods include `to_dict()`, `to_numpy(dtype)`, `batch_records`, `iter_records()`, `all_user_keys()`, `keys()`, `values()`, `items()`, `get()`, `found_count()`, `release_cache()`, and a static `merge_to_dict()` for combining multiple results in a single GIL acquisition.
 - `AsyncClient` lifecycle state machine — explicit `Disconnected → Connecting → Connected → Closing` transitions with idempotent `close()`; `connect()` now errors when called on a non-disconnected client.
-- Internal stage profiling metric `db_client_internal_stage_seconds` — off by default, opt-in via `aerospike_py.set_internal_stage_metrics_enabled(True)`, the `aerospike_py.internal_stage_profiling()` context manager, or the `AEROSPIKE_PY_INTERNAL_METRICS=1` environment variable (case-insensitive: `1`, `true`, `yes`, `on`). Stages captured for `batch_read`: `key_parse`, `future_into_py_setup`, `tokio_schedule_delay`, `limiter_wait`, `io`, `spawn_blocking_delay`, `into_pyobject`, `event_loop_resume_delay`, `as_dict`, `merge_as_dict`.
+- Internal stage profiling metric `db_client_internal_stage_seconds` — off by default, opt-in via `aerospike_py.set_internal_stage_metrics_enabled(True)`, the `aerospike_py.internal_stage_profiling()` context manager, or the `AEROSPIKE_PY_INTERNAL_METRICS=1` environment variable (case-insensitive: `1`, `true`, `yes`, `on`). Stages captured for `batch_read`: `key_parse`, `future_into_py_setup`, `tokio_schedule_delay`, `limiter_wait`, `io`, `spawn_blocking_delay`, `into_pyobject`, `event_loop_resume_delay`, `to_dict`, `to_numpy`, `merge_to_dict`.
 - NumPy-based batch write support (`batch_write_numpy`) for high-throughput ingestion
 - OpenTelemetry distributed tracing with OTLP export and connection-level attributes
 - Prometheus-compatible metrics for database operation monitoring

@@ -36,8 +36,9 @@ Each `batch_read` is split into 10 stages. Histograms (`db_client_internal_stage
 | `into_pyobject` | Rust `BatchRecord` → `Py<...>` (Arc wrap, `spawn_blocking`) | held |
 | `spawn_blocking_delay` | Wall time `spawn_blocking` task spent waiting in queue | — |
 | `event_loop_resume_delay` | Event-loop tick from future-ready to coroutine resume | — |
-| `as_dict` | `BatchReadHandle.as_dict()` → `dict[Key, Record]` | held |
-| `merge_as_dict` | Multi-set merge into typed dict | held |
+| `to_dict` | `LazyBatchRecords.to_dict()` → `dict[Key, Record]` | held |
+| `to_numpy` | `LazyBatchRecords.to_numpy(dtype)` → `NumpyBatchRecords` framing — the per-record buffer fill itself runs with the GIL **released** via `py.detach` | held (framing only) |
+| `merge_to_dict` | Multi-set merge into typed dict | held |
 | `future_into_py_setup` | PyO3 future ↔ asyncio bridge setup | held |
 
 ### Activating stage profiling
@@ -82,9 +83,12 @@ into_pyobject            3.96 μs        Arc wrap is essentially free
 limiter_wait             3.56 μs        Backpressure not active
 future_into_py_setup     46.5 μs        PyO3 ↔ asyncio bridge is cheap
 tokio_schedule_delay     83.1 μs        Tokio scheduling fine
-as_dict                  832 μs         Per-call dict materialization OK
+to_dict                  832 μs         Per-call dict materialization OK
 key_parse                967 μs         200-key tuple parsing OK
-merge_as_dict            4.48 ms        9-set merge moderate
+merge_to_dict            4.48 ms        9-set merge moderate
+                                          (historical: this stage was
+                                           named `merge_as_dict` before
+                                           the alias drop in PR-374)
 io                       7.51 ms        Network (inflated by GIL during parse)
 event_loop_resume_delay  39.7 ms   🚨   Coroutines waiting their turn for GIL
 spawn_blocking_delay     234 ms    🚨   spawn_blocking queue waiting for GIL
@@ -96,13 +100,13 @@ This finding directly motivated the [Free-Threaded Python](./free-threaded-pytho
 
 ## Optimization 1: `gather(N)` → single `batch_read(mixed keys)`
 
-The 9-set serving pipeline originally fanned out via `asyncio.gather`. Under GIL, this creates 9 simultaneous PyO3 → asyncio handoffs, and `key_parse` + `as_dict` stages serialize against each other.
+The 9-set serving pipeline originally fanned out via `asyncio.gather`. Under GIL, this creates 9 simultaneous PyO3 → asyncio handoffs, and `key_parse` + `to_dict` stages serialize against each other.
 
 <Tabs>
   <TabItem value="before" label="Before (gather, 9 calls)" default>
 
 ```python
-# 9 concurrent batch_read calls — GIL serializes key_parse + as_dict
+# 9 concurrent batch_read calls — GIL serializes key_parse + to_dict
 await asyncio.gather(*[
     client.batch_read(set_i_keys) for i in range(9)
 ])
@@ -120,7 +124,7 @@ for set_name, keys in per_set_keys.items():
 result = await client.batch_read(all_keys)
 
 per_set_results = defaultdict(dict)
-for key, record in result.as_dict().items():
+for key, record in result.to_dict().items():
     per_set_results[key[1]][key[2]] = record
 ```
 
@@ -138,12 +142,12 @@ T=~13ms   9 key_parse done (sequential, 9 × 1.46 ms)
           └─ 9 Rust async futures execute in parallel on Tokio
 T=~15ms   9 I/O complete
 T=15-51ms event loop resumes 9 coroutines sequentially:
-          ├─ task 1 → as_dict (0.79 ms) → done
+          ├─ task 1 → to_dict (0.79 ms) → done
           ├─ (event loop tick: 3-5 ms)
-          └─ task 9 → as_dict (0.79 ms) → done
+          └─ task 9 → to_dict (0.79 ms) → done
 T=~51ms   gather returns
 
-single mode: only ONE key_parse, ONE as_dict, ONE future_into_py.
+single mode: only ONE key_parse, ONE to_dict, ONE future_into_py.
 ```
 
   </TabItem>

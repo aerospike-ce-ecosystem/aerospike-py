@@ -38,17 +38,23 @@ stop-aerospike-ce: ## Stop and remove Aerospike CE container
 # Lint & Format
 # ---------------------------------------------------------------------------
 
+# Python source roots that must clear ruff. Mirrors pre-commit and CI so
+# `make lint` catches the same failures locally — the historical
+# `benchmark/` exclusion let lint regressions ship and was hot-fixed
+# twice during the LazyBatchRecords PR.
+PY_LINT_PATHS := src/ tests/ benchmark/ examples/
+
 .PHONY: lint
 lint: ## Run all linters (ruff + clippy) — matches pre-commit strictness
-	uv run ruff check src/ tests/
-	uv run ruff format --check src/ tests/
+	uv run ruff check $(PY_LINT_PATHS)
+	uv run ruff format --check $(PY_LINT_PATHS)
 	cargo fmt --all -- --check
 	cargo clippy --manifest-path rust/Cargo.toml --features otel --all-targets -- -D warnings
 
 .PHONY: fmt
 fmt: ## Auto-format Python (ruff) and Rust (cargo fmt)
-	uv run ruff format src/ tests/
-	uv run ruff check --fix src/ tests/
+	uv run ruff format $(PY_LINT_PATHS)
+	uv run ruff check --fix $(PY_LINT_PATHS)
 	cargo fmt --all --manifest-path rust/Cargo.toml
 
 # ---------------------------------------------------------------------------

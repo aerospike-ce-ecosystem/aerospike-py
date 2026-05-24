@@ -45,7 +45,7 @@ dtype = np.dtype([
 ```python
 keys = [("test", "demo", f"user_{i}") for i in range(1000)]
 
-result = client.batch_read(keys, bins=["score", "count", "level", "tag"], _dtype=dtype)
+result = client.batch_read(keys, bins=["score", "count", "level", "tag"]).to_numpy(dtype)
 # result is a NumpyBatchRecords instance
 ```
 
@@ -72,7 +72,8 @@ valid_records = result.batch_records[success_mask]
 ### Async batch read
 
 ```python
-result = await async_client.batch_read(keys, bins=["score", "count"], _dtype=dtype)
+lazy_records = await async_client.batch_read(keys, bins=["score", "count"])
+result = lazy_records.to_numpy(dtype)
 ```
 
 ## Batch Write with NumPy
@@ -138,7 +139,7 @@ Variable-length strings (`U`), objects (`O`), and datetime (`M`/`m`) are **not s
 ```python
 import pandas as pd
 
-result = client.batch_read(keys, bins=["score", "count"], _dtype=dtype)
+result = client.batch_read(keys, bins=["score", "count"]).to_numpy(dtype)
 
 # Direct conversion — zero copy for numeric data
 df = pd.DataFrame(result.batch_records)
@@ -159,7 +160,7 @@ client.batch_write_numpy(data, "test", "demo", dtype)
 Enable warnings for missing or extra bins:
 
 ```python
-result = client.batch_read(keys, bins=["score", "count"], _dtype=dtype)
+result = client.batch_read(keys, bins=["score", "count"]).to_numpy(dtype)
 # No warnings — missing bins are zero-filled, extra bins are ignored
 
 # With strict=True (internal API via _batch_records_to_numpy):

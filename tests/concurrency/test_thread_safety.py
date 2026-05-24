@@ -265,7 +265,7 @@ class TestNumpyBatchConcurrency:
 
         def numpy_reader():
             try:
-                result = client.batch_read(keys, bins=["score", "count"], _dtype=dtype)
+                result = client.batch_read(keys, bins=["score", "count"]).to_numpy(dtype)
                 assert len(result) == 30
             except Exception as e:
                 errors.put(e)

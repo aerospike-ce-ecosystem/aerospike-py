@@ -13,6 +13,7 @@
 //! in [`batch_to_numpy_py`] (via `np.zeros`).
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::ptr;
 
 use aerospike_core::{BatchRecord, Bin, FloatValue, Key, Value};
@@ -518,11 +519,82 @@ fn float_value_to_f64(fv: &FloatValue) -> f64 {
 
 // ── main entry point ────────────────────────────────────────────
 
+/// NumPy buffer address stored as `usize` so that the `py.detach` closure
+/// can capture it across the GIL-free boundary.
+///
+/// Why `usize` instead of `*mut u8`: under Rust 2021 disjoint captures,
+/// reading the inner field of a `struct Wrapper(*mut u8)` causes the
+/// closure to capture the raw pointer directly, which is not `Send`. A
+/// `usize` field sidesteps that — `usize: Send` always — and we cast back
+/// to `*mut u8` at use sites where we already need an `unsafe` block.
+///
+/// The `PhantomData<&'py mut u8>` ties the address to the lifetime of
+/// the owning NumPy [`Bound`] so that the compiler statically forbids
+/// returning a `BufferAddr` out of [`batch_to_numpy_py`] or storing it
+/// past the array's drop — a guarantee the comment-only contract used
+/// to rely on. The `Send` impl re-enables the cross-`py.detach`
+/// capture that the marker would otherwise (correctly) forbid: we
+/// transfer the address into a closure that completes synchronously on
+/// the same thread before the borrow ends.
+///
+/// # Safety
+///
+/// `BufferAddr` is only constructed inside [`batch_to_numpy_py`] from the
+/// data pointer of a locally-held NumPy array. That array outlives every
+/// use of the address, and `py.detach` only releases the GIL on the
+/// calling thread — no other thread can resize or replace the buffer
+/// while the pointer is in use.
+#[derive(Clone, Copy)]
+struct BufferAddr<'py> {
+    addr: usize,
+    _phantom: PhantomData<&'py mut u8>,
+}
+
+// SAFETY: see the type docs — the address is captured into a
+// `py.detach` closure that completes on the same thread within the
+// originating NumPy array's borrow, so the `Send` cross-thread
+// implication of `PhantomData<&'py mut u8>` does not materialise.
+unsafe impl Send for BufferAddr<'_> {}
+
+impl<'py> BufferAddr<'py> {
+    /// # Safety
+    ///
+    /// `array` must own a writable buffer whose lifetime covers `'py`,
+    /// and `ptr` must be its current data pointer (as returned by
+    /// [`get_array_data_ptr`]).
+    #[inline]
+    unsafe fn from_ptr(_array: &Bound<'py, PyAny>, ptr: *mut u8) -> Self {
+        Self {
+            addr: ptr as usize,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Caller must uphold the lifetime invariants documented on the type:
+    /// the originating NumPy array must still be alive and its buffer
+    /// must not have been reallocated.
+    #[inline]
+    unsafe fn as_ptr(self) -> *mut u8 {
+        self.addr as *mut u8
+    }
+}
+
 /// Convert batch results into a `NumpyBatchRecords` Python object.
 ///
 /// Allocates three NumPy arrays (data, meta, result_codes) and writes
 /// Aerospike values directly into the data buffer via raw pointers,
 /// avoiding per-element Python object allocation.
+///
+/// **GIL handling.** The per-record fill loop runs under
+/// [`Python::detach`], so every `Value → buffer` write happens with the
+/// GIL released. This matters most for CPU-inference workloads
+/// (uvicorn/FastAPI + PyTorch), where another worker can hold the GIL for
+/// its tensor work while this thread is doing nothing but raw
+/// `ptr::write_unaligned`. Only the prep (numpy allocation, dtype parse,
+/// key_map build) and the final wrapper construction touch the
+/// interpreter.
 pub fn batch_to_numpy_py(
     py: Python<'_>,
     results: &[BatchRecord],
@@ -570,10 +642,24 @@ pub fn batch_to_numpy_py(
     let int32_dtype = np.getattr("int32")?;
     let result_codes_array = np.call_method1("zeros", (n, int32_dtype))?;
 
-    // 3. Get raw data pointers
-    let data_ptr = get_array_data_ptr(&data_array)?;
-    let meta_ptr = get_array_data_ptr(&meta_array)?;
-    let rc_ptr = get_array_data_ptr(&result_codes_array)?;
+    // 3. Get raw data pointers, stored as `usize` so they can cross
+    //    `py.detach` (Rust 2021 disjoint captures forbid capturing
+    //    `*mut u8` directly; see [`BufferAddr`] docs). The `'py`
+    //    lifetime on each address is tied to the owning `Bound`, so
+    //    the compiler statically rejects any use that outlives the
+    //    array.
+    //
+    // SAFETY: the `*mut u8` returned by `get_array_data_ptr` is the
+    // data pointer of the just-allocated NumPy array; the local
+    // `Bound` keeps that array alive for the whole `'py` borrow.
+    let data_addr = unsafe { BufferAddr::from_ptr(&data_array, get_array_data_ptr(&data_array)?) };
+    let meta_addr = unsafe { BufferAddr::from_ptr(&meta_array, get_array_data_ptr(&meta_array)?) };
+    let rc_addr = unsafe {
+        BufferAddr::from_ptr(
+            &result_codes_array,
+            get_array_data_ptr(&result_codes_array)?,
+        )
+    };
 
     // meta stride: gen(u4) + ttl(u4) = 8 bytes
     let meta_stride: usize = 8;
@@ -582,21 +668,102 @@ pub fn batch_to_numpy_py(
     let field_map: HashMap<&str, &FieldInfo> =
         fields.iter().map(|f| (f.name.as_str(), f)).collect();
 
-    // 5. Build key_map and fill arrays
-    let key_map = PyDict::new(py);
+    // 5. Fill data / meta / result_codes buffers WITHOUT the GIL.
+    //
+    // Every operation inside the loop is either pure Rust
+    // (`result_code_to_int`, `record_ttl_seconds`, `Value` matching) or a
+    // raw memory write (`ptr::write_unaligned`). Nothing touches the
+    // Python interpreter, so another thread (e.g. a sibling FastAPI worker
+    // running torch inference) can hold the GIL while this thread fills
+    // the array.
+    //
+    // `write_value_to_buffer` may construct a `PyErr` on overflow / type
+    // mismatch. pyo3's `PyErr::new_err` stores arguments lazily and only
+    // realises the Python exception object when the error escapes back
+    // through the FFI boundary, so it is safe to call without the GIL.
+    //
+    // The `entry_thread` snapshot exists to detect future refactors that
+    // try to move the fill loop off the calling thread (e.g. wrapping
+    // `tokio::spawn` or `rayon::par_iter` inside the closure). The
+    // `BufferAddr::as_ptr` safety contract requires single-thread sync
+    // execution; if that ever changes, the debug assert here will fire
+    // before the raw pointers cause UB. In release builds the snapshot
+    // compiles out.
+    let entry_thread = std::thread::current().id();
+    py.detach(move || -> PyResult<()> {
+        debug_assert_eq!(
+            std::thread::current().id(),
+            entry_thread,
+            "py.detach closure must run on the calling thread — BufferAddr is not Send across threads"
+        );
+        // SAFETY: the NumPy arrays (`data_array`, `meta_array`,
+        // `result_codes_array`) outlive this closure — they are owned by
+        // the outer scope which strictly outlives `py.detach`.
+        let data_ptr = unsafe { data_addr.as_ptr() };
+        let meta_ptr = unsafe { meta_addr.as_ptr() };
+        let rc_ptr = unsafe { rc_addr.as_ptr() };
 
-    for (i, br) in results.iter().enumerate() {
-        let result_code = match &br.result_code {
-            Some(rc) => result_code_to_int(rc),
-            None => 0,
-        };
+        for (i, br) in results.iter().enumerate() {
+            let result_code = match &br.result_code {
+                Some(rc) => result_code_to_int(rc),
+                None => 0,
+            };
 
-        // Write result_code
-        unsafe {
-            ptr::write_unaligned(rc_ptr.add(i * 4) as *mut i32, result_code);
+            // SAFETY: rc_ptr points to an i32 array of length n; i < n.
+            unsafe {
+                ptr::write_unaligned(rc_ptr.add(i * 4) as *mut i32, result_code);
+            }
+
+            if result_code != 0 {
+                continue;
+            }
+            let Some(record) = &br.record else {
+                log::warn!(
+                    "batch record at index {}: result_code is OK but record is None (data/meta will be zero-filled)",
+                    i
+                );
+                continue;
+            };
+
+            let gen = record.generation;
+            let ttl: u32 = record_ttl_seconds(record);
+
+            // SAFETY: meta_ptr points to a (u4,u4) array of length n; i < n.
+            unsafe {
+                let meta_row = meta_ptr.add(i * meta_stride);
+                ptr::write_unaligned(meta_row as *mut u32, gen);
+                ptr::write_unaligned(meta_row.add(4) as *mut u32, ttl);
+            }
+
+            // SAFETY: data_ptr points to a structured array of length n
+            // and row stride `row_stride`; bounds were checked via
+            // `n.checked_mul(row_stride)` above.
+            let row_ptr = unsafe { data_ptr.add(i * row_stride) };
+            for (bin_name, value) in &record.bins {
+                if let Some(field) = field_map.get(bin_name.as_str()) {
+                    // SAFETY: parse_dtype_fields validated that
+                    // offset + itemsize <= row_stride for every field.
+                    unsafe {
+                        write_value_to_buffer(row_ptr, field, value)?;
+                    }
+                }
+                // bins not in dtype are silently ignored
+            }
         }
+        // Mirror the entry-side check so a future refactor that swaps
+        // threads mid-closure (e.g. a worker steal) is also caught.
+        debug_assert_eq!(
+            std::thread::current().id(),
+            entry_thread,
+            "py.detach closure must exit on the same thread it entered — BufferAddr is not Send across threads"
+        );
+        Ok(())
+    })?;
 
-        // Extract user_key and map to index.
+    // 6. Build key_map with the GIL reacquired. This is the only
+    //    record-iterating step that genuinely needs Python objects.
+    let key_map = PyDict::new(py);
+    for (i, br) in results.iter().enumerate() {
         // Use a sentinel string for None keys to avoid collision with integer user_keys.
         let user_key = match &br.key.user_key {
             Some(v) => value_to_py(py, v)?,
@@ -606,40 +773,9 @@ pub fn batch_to_numpy_py(
                 .unbind(),
         };
         key_map.set_item(user_key, i)?;
-
-        // Fill data and meta if record exists and result is OK
-        if result_code == 0 {
-            if let Some(record) = &br.record {
-                // Write meta: generation and ttl
-                let gen = record.generation;
-                let ttl: u32 = record_ttl_seconds(record);
-
-                unsafe {
-                    let meta_row = meta_ptr.add(i * meta_stride);
-                    ptr::write_unaligned(meta_row as *mut u32, gen);
-                    ptr::write_unaligned(meta_row.add(4) as *mut u32, ttl);
-                }
-
-                // Write bin values directly into numpy buffer
-                let row_ptr = unsafe { data_ptr.add(i * row_stride) };
-                for (bin_name, value) in &record.bins {
-                    if let Some(field) = field_map.get(bin_name.as_str()) {
-                        unsafe {
-                            write_value_to_buffer(row_ptr, field, value)?;
-                        }
-                    }
-                    // bins not in dtype are silently ignored
-                }
-            } else {
-                log::warn!(
-                    "batch record at index {}: result_code is OK but record is None (data/meta will be zero-filled)",
-                    i
-                );
-            }
-        }
     }
 
-    // 6. Construct NumpyBatchRecords Python object
+    // 7. Construct NumpyBatchRecords Python object
     let numpy_batch_mod = py.import("aerospike_py.numpy_batch")?;
     let cls = numpy_batch_mod.getattr("NumpyBatchRecords")?;
     let result = cls.call1((&data_array, &meta_array, &result_codes_array, &key_map))?;

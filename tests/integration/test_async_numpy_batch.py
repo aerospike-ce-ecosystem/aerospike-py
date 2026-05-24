@@ -32,7 +32,7 @@ class TestAsyncNumericBatchRead:
             await async_client.put(key, {"temperature": 20.0 + i * 0.5, "reading_id": i})
 
         dtype = np.dtype([("temperature", "f8"), ("reading_id", "i4")])
-        result = await async_client.batch_read(keys, _dtype=dtype)
+        result = (await async_client.batch_read(keys)).to_numpy(dtype)
 
         assert isinstance(result, NumpyBatchRecords)
         assert len(result.batch_records) == 5
@@ -50,18 +50,20 @@ class TestAsyncNumericBatchRead:
             await async_client.put(key, {"val": 1})
 
         dtype = np.dtype([("val", "i4")])
-        result = await async_client.batch_read(keys, _dtype=dtype)
+        result = (await async_client.batch_read(keys)).to_numpy(dtype)
 
         np.testing.assert_array_equal(result.result_codes, [0, 0, 0])
 
     async def test_without_dtype(self, async_client, cleanup):
-        """Returns dict when _dtype=None."""
+        """batch_read now returns a LazyBatchRecords; .to_dict() materialises."""
         key = (NS, SET, "nodtype_1")
         cleanup.append(key)
         await async_client.put(key, {"x": 1})
 
-        result = await async_client.batch_read([key])
-        assert isinstance(result, dict)
+        lazy_records = await async_client.batch_read([key])
+        assert not isinstance(lazy_records, dict), "batch_read returns a LazyBatchRecords, not dict"
+        assert isinstance(lazy_records.to_dict(), dict)
+        assert lazy_records.to_dict()["nodtype_1"] == {"x": 1}
 
 
 # ── meta (gen, ttl) verification ───────────────────────────────
@@ -76,7 +78,7 @@ class TestAsyncMeta:
         await async_client.put(key, {"val": 2})
 
         dtype = np.dtype([("val", "i4")])
-        result = await async_client.batch_read([key], _dtype=dtype)
+        result = (await async_client.batch_read([key])).to_numpy(dtype)
 
         assert result.meta[0]["gen"] >= 2
 
@@ -87,7 +89,7 @@ class TestAsyncMeta:
         await async_client.put(key, {"val": 1}, meta={"ttl": 600})
 
         dtype = np.dtype([("val", "i4")])
-        result = await async_client.batch_read([key], _dtype=dtype)
+        result = (await async_client.batch_read([key])).to_numpy(dtype)
 
         assert result.meta[0]["ttl"] > 0
 
@@ -104,7 +106,7 @@ class TestAsyncGetByKey:
             await async_client.put(key, {"val": (i + 1) * 10})
 
         dtype = np.dtype([("val", "i4")])
-        result = await async_client.batch_read(keys, _dtype=dtype)
+        result = (await async_client.batch_read(keys)).to_numpy(dtype)
 
         assert result.get("get_0")["val"] == 10
         assert result.get("get_1")["val"] == 20
@@ -123,7 +125,7 @@ class TestAsyncMissingRecord:
         await async_client.put(existing, {"val": 42})
 
         dtype = np.dtype([("val", "i4")])
-        result = await async_client.batch_read([existing, missing], _dtype=dtype)
+        result = (await async_client.batch_read([existing, missing])).to_numpy(dtype)
 
         assert result.result_codes[0] == 0
         assert result.result_codes[1] != 0
@@ -143,7 +145,7 @@ class TestAsyncBytesBlob:
         await async_client.put(key, {"data": raw, "score": 0.5})
 
         dtype = np.dtype([("data", "S8"), ("score", "f4")])
-        result = await async_client.batch_read([key], _dtype=dtype)
+        result = (await async_client.batch_read([key])).to_numpy(dtype)
 
         assert result.batch_records[0]["data"] == raw
         np.testing.assert_almost_equal(result.batch_records[0]["score"], 0.5, decimal=5)
@@ -166,7 +168,7 @@ class TestAsyncVectorBatch:
 
         blob_size = dim * 4
         dtype = np.dtype([("embedding", f"S{blob_size}"), ("label", "i4")])
-        result = await async_client.batch_read(keys, _dtype=dtype)
+        result = (await async_client.batch_read(keys)).to_numpy(dtype)
 
         assert len(result.batch_records) == n
         for i in range(n):
@@ -183,7 +185,7 @@ class TestAsyncEmptyBatch:
     async def test_empty_keys(self, async_client):
         """async batch_read with an empty keys list."""
         dtype = np.dtype([("val", "i4")])
-        result = await async_client.batch_read([], _dtype=dtype)
+        result = (await async_client.batch_read([])).to_numpy(dtype)
 
         assert isinstance(result, NumpyBatchRecords)
         assert len(result.batch_records) == 0

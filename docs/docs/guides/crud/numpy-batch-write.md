@@ -182,7 +182,7 @@ When using a custom `key_field`, the field name should **not** start with `_` if
 
 ## Supported dtype Kinds
 
-The same dtype kinds supported by `batch_read()` with `_dtype` are supported for writes:
+The same dtype kinds supported by `batch_read().to_numpy(dtype)` are supported for writes:
 
 | numpy Kind | Code | Example | Aerospike Value |
 |------------|------|---------|-----------------|
@@ -304,7 +304,7 @@ results = client.batch_write_numpy(data, "test", "vectors", dtype)
 
 ### Write and Read Roundtrip
 
-Combine `batch_write_numpy()` and `batch_read()` with `_dtype` for a full numpy roundtrip:
+Combine `batch_write_numpy()` and `batch_read().to_numpy(dtype)` for a full numpy roundtrip:
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -331,10 +331,13 @@ data = np.array([
 ], dtype=dtype)
 client.batch_write_numpy(data, "test", "points", dtype)
 
-# Read back with _dtype
+# Read back with to_numpy(dtype) — the GIL is released during the buffer fill
 read_dtype = np.dtype([("x", "f8"), ("y", "f8"), ("category", "i4")])
 keys = [("test", "points", i) for i in range(1, 4)]
-batch = client.batch_read(keys, _dtype=read_dtype, policy={"key": aerospike.POLICY_KEY_SEND})
+batch = client.batch_read(
+    keys,
+    policy={"key": aerospike.POLICY_KEY_SEND},
+).to_numpy(read_dtype)
 
 # Vectorized analysis
 print(batch.batch_records["x"].mean())       # 3.0
@@ -370,7 +373,8 @@ async def main():
 
     read_dtype = np.dtype([("x", "f8"), ("y", "f8"), ("category", "i4")])
     keys = [("test", "points", i) for i in range(1, 4)]
-    batch = await client.batch_read(keys, _dtype=read_dtype, policy={"key": aerospike.POLICY_KEY_SEND})
+    lazy_records = await client.batch_read(keys, policy={"key": aerospike.POLICY_KEY_SEND})
+    batch = lazy_records.to_numpy(read_dtype)
 
     print(batch.batch_records["x"].mean())
     print(batch.batch_records["category"].sum())
@@ -456,7 +460,7 @@ except AerospikeError as e:
 - **Batch size** — keep arrays at 100-5,000 rows per call for optimal performance
 - **Key field convention** — use `"_key"` as the default key field to keep the convention consistent
 - **Underscore prefix** — fields starting with `_` are excluded from bins, use this for metadata fields
-- **Roundtrip with batch_read** — use the same dtype fields (minus `_key`) with `batch_read(_dtype=...)` for efficient read-back
+- **Roundtrip with batch_read** — use the same dtype fields (minus `_key`) with `batch_read(...).to_numpy(dtype)` for efficient read-back (the buffer fill runs with the GIL released)
 - **Large datasets** — split large arrays into chunks and write in batches:
 
 ```python
@@ -470,7 +474,7 @@ for i in range(0, len(data), chunk_size):
 
 ```python
 # Sync
-results: BatchRecords = client.batch_write_numpy(
+results: BatchWriteResult = client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -481,7 +485,7 @@ results: BatchRecords = client.batch_write_numpy(
 )
 
 # Async
-results: BatchRecords = await client.batch_write_numpy(
+results: BatchWriteResult = await client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -502,6 +506,6 @@ results: BatchRecords = await client.batch_write_numpy(
 | `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides |
 | `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). `0` = no retry. |
 
-**Returns:** `BatchRecords` — contains `batch_records: list[BatchRecord]` where each `BatchRecord` has `key`, `result` (0=success), and `record` (a `Record` or `None`).
+**Returns:** `BatchWriteResult` — NamedTuple with `batch_records: list[BatchRecord]`. Each `BatchRecord` carries `key`, `result` (0=success), `record` (a `Record` or `None`), and `in_doubt` (transport-ambiguity flag).
 
 **See also:** [NumPy Batch Read Guide](./numpy-batch.md) for reading records back into numpy arrays.

@@ -231,8 +231,8 @@ async def _batch_read_single_py(
             all_keys.append(k)
             key_to_set.append((set_name, i))
 
-    # batch_read returns dict[UserKey, bins_dict]
-    batch_result = await client.batch_read(all_keys)
+    # batch_read returns a LazyBatchRecords; materialise to a dict for lookup
+    batch_result = (await client.batch_read(all_keys)).to_dict()
 
     # Initialize result with empty dicts
     results: dict[str, list[dict]] = {sn: [{} for _ in range(cnt)] for sn, cnt in set_counts.items()}
@@ -253,13 +253,13 @@ async def _read_set_py(
         f"aerospike.py_async.batch_read.{set_name}",
         attributes={"aerospike.set": set_name, "aerospike.batch_size": len(keys)},
     ):
-        # Phase 1: Rust I/O — await returns PyBatchReadHandle (GIL <0.01ms)
+        # Phase 1: Rust I/O — await returns LazyBatchRecords (GIL <0.01ms)
         t0 = time.perf_counter()
-        handle = await client._inner.batch_read(keys, None, None, None)
+        lazy_records = await client._inner.batch_read(keys, None, None)
         t_io = time.perf_counter()
 
-        # Phase 2: Dict conversion — handle.as_dict() (GIL held, 3-8ms)
-        batch_result = handle.as_dict()
+        # Phase 2: Dict conversion — lazy_records.to_dict() (GIL held, 3-8ms)
+        batch_result = lazy_records.to_dict()
         t_conv = time.perf_counter()
 
         io_elapsed = t_io - t0

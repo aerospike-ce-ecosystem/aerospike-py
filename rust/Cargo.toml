@@ -3,6 +3,14 @@ name = "aerospike-py-native"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
+# MSRV: 1.80 reflects what the codebase already requires — clippy
+# `incompatible_msrv` flagged a handful of std items stabilised in
+# 1.77 / 1.80 that the existing code uses, plus `Mutex::clear_poison()`
+# (1.74+, used by `PyLazyBatchRecords::release_cache` in PR #374).
+# Pinning this here gives cargo a clear "package requires 1.80" error
+# on older toolchains instead of a cryptic "unknown method" from rustc
+# during a `pip install --no-binary` / `cargo install` build.
+rust-version = "1.80"
 
 [lib]
 name = "_aerospike"

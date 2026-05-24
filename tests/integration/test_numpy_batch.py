@@ -20,7 +20,7 @@ class TestNumericBatchRead:
             client.put(key, {"temperature": 20.0 + i * 0.5, "reading_id": i})
 
         dtype = np.dtype([("temperature", "f8"), ("reading_id", "i4")])
-        result = client.batch_read(keys, _dtype=dtype)
+        result = client.batch_read(keys).to_numpy(dtype)
 
         assert isinstance(result, NumpyBatchRecords)
         assert len(result.batch_records) == 5
@@ -38,18 +38,20 @@ class TestNumericBatchRead:
             client.put(key, {"val": 1})
 
         dtype = np.dtype([("val", "i4")])
-        result = client.batch_read(keys, _dtype=dtype)
+        result = client.batch_read(keys).to_numpy(dtype)
 
         np.testing.assert_array_equal(result.result_codes, [0, 0, 0])
 
-    def test_without_dtype_returns_dict(self, client, cleanup):
-        """Returns dict when _dtype=None."""
+    def test_without_dtype_returns_lazy_records(self, client, cleanup):
+        """batch_read now returns a LazyBatchRecords; .to_dict() materialises."""
         key = (NS, SET, "nodtype_1")
         cleanup.append(key)
         client.put(key, {"x": 1})
 
-        result = client.batch_read([key])
-        assert isinstance(result, dict)
+        lazy_records = client.batch_read([key])
+        assert not isinstance(lazy_records, dict), "batch_read returns a LazyBatchRecords, not dict"
+        assert isinstance(lazy_records.to_dict(), dict)
+        assert lazy_records.to_dict()["nodtype_1"] == {"x": 1}
 
 
 # ── meta (gen, ttl) verification ───────────────────────────────
@@ -64,7 +66,7 @@ class TestMetaIntegration:
         client.put(key, {"val": 2})
 
         dtype = np.dtype([("val", "i4")])
-        result = client.batch_read([key], _dtype=dtype)
+        result = client.batch_read([key]).to_numpy(dtype)
 
         assert result.meta[0]["gen"] >= 2
 
@@ -75,7 +77,7 @@ class TestMetaIntegration:
         client.put(key, {"val": 1}, meta={"ttl": 600})
 
         dtype = np.dtype([("val", "i4")])
-        result = client.batch_read([key], _dtype=dtype)
+        result = client.batch_read([key]).to_numpy(dtype)
 
         assert result.meta[0]["ttl"] > 0
 
@@ -92,7 +94,7 @@ class TestGetMethod:
             client.put(key, {"val": (i + 1) * 10})
 
         dtype = np.dtype([("val", "i4")])
-        result = client.batch_read(keys, _dtype=dtype)
+        result = client.batch_read(keys).to_numpy(dtype)
 
         assert result.get("get_0")["val"] == 10
         assert result.get("get_1")["val"] == 20
@@ -105,7 +107,7 @@ class TestGetMethod:
         client.put(key, {"val": 99})
 
         dtype = np.dtype([("val", "i4")])
-        result = client.batch_read([key], _dtype=dtype)
+        result = client.batch_read([key]).to_numpy(dtype)
 
         assert result.get(42)["val"] == 99
 
@@ -122,7 +124,7 @@ class TestMissingRecords:
         client.put(existing, {"val": 42})
 
         dtype = np.dtype([("val", "i4")])
-        result = client.batch_read([existing, missing], _dtype=dtype)
+        result = client.batch_read([existing, missing]).to_numpy(dtype)
 
         assert result.result_codes[0] == 0
         assert result.result_codes[1] != 0
@@ -136,7 +138,7 @@ class TestMissingRecords:
         client.put(key, {"a": 5})
 
         dtype = np.dtype([("a", "i4"), ("b", "f8")])
-        result = client.batch_read([key], _dtype=dtype)
+        result = client.batch_read([key]).to_numpy(dtype)
 
         assert result.batch_records[0]["a"] == 5
         assert result.batch_records[0]["b"] == 0.0
@@ -153,7 +155,7 @@ class TestBinsFilter:
         client.put(key, {"a": 1, "b": 2, "c": 3})
 
         dtype = np.dtype([("a", "i4"), ("b", "i4")])
-        result = client.batch_read([key], bins=["a", "b"], _dtype=dtype)
+        result = client.batch_read([key], bins=["a", "b"]).to_numpy(dtype)
 
         assert result.batch_records[0]["a"] == 1
         assert result.batch_records[0]["b"] == 2
@@ -171,7 +173,7 @@ class TestBytesBlob:
         client.put(key, {"data": raw, "score": 0.5})
 
         dtype = np.dtype([("data", "S8"), ("score", "f4")])
-        result = client.batch_read([key], _dtype=dtype)
+        result = client.batch_read([key]).to_numpy(dtype)
 
         assert result.batch_records[0]["data"] == raw
         np.testing.assert_almost_equal(result.batch_records[0]["score"], 0.5, decimal=5)
@@ -193,7 +195,7 @@ class TestVectorEmbedding:
 
         blob_size = dim * 4
         dtype = np.dtype([("embedding", f"S{blob_size}"), ("score", "f4")])
-        result = client.batch_read([key], _dtype=dtype)
+        result = client.batch_read([key]).to_numpy(dtype)
 
         recovered = np.frombuffer(result.batch_records[0]["embedding"], dtype=np.float32)
         np.testing.assert_array_almost_equal(recovered, vec)
@@ -211,7 +213,7 @@ class TestVectorEmbedding:
 
         blob_size = dim * 4
         dtype = np.dtype([("embedding", f"S{blob_size}"), ("label", "i4")])
-        result = client.batch_read(keys, _dtype=dtype)
+        result = client.batch_read(keys).to_numpy(dtype)
 
         assert len(result.batch_records) == n
         for i in range(n):
@@ -234,7 +236,7 @@ class TestColumnarAccess:
             client.put(key, {"temperature": float(i), "humidity": float(i * 2)})
 
         dtype = np.dtype([("temperature", "f8"), ("humidity", "f8")])
-        result = client.batch_read(keys, _dtype=dtype)
+        result = client.batch_read(keys).to_numpy(dtype)
 
         ok = result.result_codes == 0
         temps = result.batch_records["temperature"][ok]
@@ -251,7 +253,7 @@ class TestColumnarAccess:
 
         all_keys = existing + missing
         dtype = np.dtype([("val", "i4")])
-        result = client.batch_read(all_keys, _dtype=dtype)
+        result = client.batch_read(all_keys).to_numpy(dtype)
 
         ok_mask = result.result_codes == 0
         assert ok_mask.sum() == 3
@@ -266,7 +268,7 @@ class TestEmptyBatch:
     def test_empty_keys(self, client):
         """batch_read with an empty keys list."""
         dtype = np.dtype([("val", "i4")])
-        result = client.batch_read([], _dtype=dtype)
+        result = client.batch_read([]).to_numpy(dtype)
 
         assert isinstance(result, NumpyBatchRecords)
         assert len(result.batch_records) == 0

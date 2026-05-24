@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
+
+if TYPE_CHECKING:
+    from aerospike_py._aerospike import LazyBatchRecords
 from aerospike_py.types import (
     AerospikeKey,
     BatchRecord as BatchRecordTuple,
@@ -155,30 +159,37 @@ class Client(_NativeClient):
         return [InfoNodeResult(*t) for t in super().info_all(command, policy)]
 
     @catch_unexpected("Client.batch_read")
-    def batch_read(self, keys, bins=None, policy=None, _dtype=None):
+    def batch_read(self, keys, bins=None, policy=None) -> "LazyBatchRecords":
         """Read multiple records in a single batch call.
+
+        Returns a ``LazyBatchRecords`` — a zero-conversion wrapper around
+        the raw Rust results. Convert lazily with one of its methods:
+
+        * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
+        * ``lazy_records.to_numpy(dtype)`` → ``NumpyBatchRecords`` (GIL released
+          during the structured-array fill — ideal for FastAPI/PyTorch
+          inference workers)
+        * ``lazy_records.batch_records`` → ``list[BatchRecord]`` (compat)
 
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
-            bins: Optional list of bin names to read. ``None`` reads all bins;
-                an empty list performs an existence check only.
+            bins: Optional list of bin names to read. ``None`` reads all
+                bins; an empty list performs an existence check only.
             policy: Optional batch policy dict.
-            _dtype: Optional NumPy dtype. When provided, returns
-                ``NumpyBatchRecords`` instead of ``BatchRecords``.
 
         Returns:
-            ``BatchRecords`` (``dict[Key, AerospikeRecord]``) or
-            ``NumpyBatchRecords`` when ``_dtype`` is set.
+            ``LazyBatchRecords`` — call ``.to_dict()`` / ``.to_numpy(dtype)``
+            to materialise the result.
 
         Example:
             ```python
             keys = [("test", "demo", f"user_{i}") for i in range(10)]
-            result = client.batch_read(keys, bins=["name", "age"])
-            for user_key, bins_dict in result.items():
+            lazy_records = client.batch_read(keys, bins=["name", "age"])
+            for user_key, bins_dict in lazy_records.to_dict().items():
                 print(user_key, bins_dict)
             ```
         """
-        return super().batch_read(keys, bins, policy, _dtype)
+        return super().batch_read(keys, bins, policy)
 
     @catch_unexpected("Client.batch_write_numpy")
     def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0):

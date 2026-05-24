@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use aerospike_core::{BatchRecord, Record, ResultCode};
-use log::trace;
+use log::{debug, trace};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -140,7 +140,7 @@ impl<'py> IntoPyObject<'py> for PendingBatchRecords {
 ///   → total serialized time = N × 1-5ms (blocks Tokio from initiating new I/O).
 /// - With `Handle` (Arc wrap only): each thread holds GIL for < 0.01ms
 ///   → threads release almost instantly, Tokio workers are freed for new I/O.
-///   The heavier dict conversion runs later via `handle.as_dict()` in the
+///   The heavier dict conversion runs later via `lazy_records.to_dict()` in the
 ///   Python coroutine on the event loop, where there is no contention.
 pub enum PendingBatchRead {
     /// Zero-conversion handle: GIL hold < 0.01ms (Arc wrap only).
@@ -151,11 +151,6 @@ pub enum PendingBatchRead {
         /// stage profiling is enabled. `None` avoids an `Instant::now()` syscall
         /// per batch_read on the hot path.
         io_complete_at: Option<std::time::Instant>,
-    },
-    /// Numpy: returns structured NumPy array (eager, already fast).
-    Numpy {
-        results: Vec<BatchRecord>,
-        dtype: Py<PyAny>,
     },
 }
 
@@ -182,23 +177,19 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
                 // Capture into_pyobject_at only when profiling is ON.
                 let into_pyobject_at = crate::metrics::maybe_now();
                 crate::stage_timer!("into_pyobject", "batch_read", {
-                    let handle = PyBatchReadHandle {
-                        inner: Arc::new(results),
+                    let handle = PyLazyBatchRecords::from_arc_with_timestamp(
+                        Arc::new(results),
                         into_pyobject_at,
-                    };
+                    );
                     let result = Py::new(py, handle)?.into_bound(py).into_any();
                     Ok(result)
                 })
-            }
-            PendingBatchRead::Numpy { results, dtype } => {
-                crate::numpy_support::batch_to_numpy_py(py, &results, &dtype.into_bound(py))
-                    .map(|obj| obj.into_bound(py))
             }
         }
     }
 }
 
-// ── PyBatchReadHandle ────────────────────────────────────────────
+// ── PyLazyBatchRecords ────────────────────────────────────────────
 //
 // Zero-conversion handle returned by async `batch_read`. Wraps raw Rust
 // batch results in an `Arc`; actual Python conversion is deferred to
@@ -206,51 +197,209 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
 
 /// Handle wrapping raw Rust batch read results.
 ///
-/// Returned by `AsyncClient.batch_read()`. The async future completes
-/// with near-zero GIL cost (just an `Arc` wrap). Call methods on this
+/// Returned by both sync `Client.batch_read()` and async
+/// `AsyncClient.batch_read()`. The async future completes with
+/// near-zero GIL cost (just an `Arc` wrap). Call methods on this
 /// handle to access the data:
 ///
-/// - [`as_dict()`](Self::as_dict) — fastest path, returns `dict[key, bins_dict]`
+/// - [`to_dict()`](Self::to_dict) — fastest path, returns `dict[key, bins_dict]`
+/// - [`to_numpy(dtype)`](Self::to_numpy) — NumPy structured array, GIL released during fill
 /// - [`batch_records`](Self::batch_records) — compatibility path, returns `list[BatchRecord]`
-#[pyclass(name = "BatchReadHandle")]
-pub struct PyBatchReadHandle {
+///
+/// **Cost shape of the Mapping protocol.** The dict-style dunders
+/// (`__getitem__`, `__contains__`, `__iter__`, `items()`, `keys()`,
+/// `values()`, `get()`) and `__len__`-less iteration are all backed by
+/// a single cached `to_dict()`. The first such call pays the full
+/// Rust→Python dict materialisation; subsequent calls hit the cache.
+/// `__len__` itself is a pure-Rust filter+count and does not trigger
+/// the dict build. If you only need cardinality, prefer `len(handle)`
+/// or `found_count()` over `len(handle.to_dict())`.
+#[pyclass(name = "LazyBatchRecords", mapping)]
+pub struct PyLazyBatchRecords {
     inner: Arc<Vec<BatchRecord>>,
     /// Timestamp when `into_pyobject` completed — populated only when internal
     /// stage profiling is enabled (for `event_loop_resume_delay` measurement).
     into_pyobject_at: Option<std::time::Instant>,
+    /// Lazily-materialised `dict[user_key, bins_dict]` view shared by all the
+    /// dict-like dunder methods (`__contains__`, `__getitem__`, `__iter__`,
+    /// `__len__`, `items`, `values`, `keys`). The first call that needs a
+    /// dict pays the conversion cost; subsequent calls reuse the same
+    /// `PyDict`. `to_dict()` always returns a *new* dict so that callers can
+    /// mutate freely without poisoning the cache.
+    ///
+    /// `Mutex` is required because `#[pyclass]` types must be `Send + Sync`.
+    /// Under the GIL it's effectively uncontended; under free-threaded
+    /// CPython it provides real mutual exclusion during first materialisation.
+    cached_dict: Mutex<Option<Py<PyDict>>>,
+}
+
+impl PyLazyBatchRecords {
+    /// Build a handle directly from owned Rust batch results.
+    ///
+    /// Used by the sync `Client.batch_read` path, which has the GIL when
+    /// constructing the handle (no `IntoPyObject` plumbing required).
+    pub fn from_results(results: Vec<BatchRecord>) -> Self {
+        Self {
+            inner: Arc::new(results),
+            into_pyobject_at: None,
+            cached_dict: Mutex::new(None),
+        }
+    }
+
+    /// Build a handle from already-shared `Arc` results plus a profiling
+    /// timestamp. Used by the async `IntoPyObject` path.
+    fn from_arc_with_timestamp(
+        inner: Arc<Vec<BatchRecord>>,
+        into_pyobject_at: Option<std::time::Instant>,
+    ) -> Self {
+        Self {
+            inner,
+            into_pyobject_at,
+            cached_dict: Mutex::new(None),
+        }
+    }
+
+    /// Return the cached `dict[user_key, bins_dict]`, building it on first
+    /// access. Owned `Py<PyDict>` is cloned out so the caller can bind to
+    /// the current GIL token without holding the mutex lock.
+    fn cached_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let mut guard = self.cached_dict.lock().map_err(|_| {
+            crate::errors::RustPanicError::new_err(
+                "LazyBatchRecords dict cache mutex was poisoned by a previous \
+                 panic during conversion; this handle's data is unrecoverable",
+            )
+        })?;
+        if guard.is_none() {
+            let d = batch_to_dict_py(py, &self.inner)?;
+            *guard = Some(d.unbind());
+        }
+        Ok(guard.as_ref().unwrap().clone_ref(py).into_bound(py))
+    }
 }
 
 #[pymethods]
-impl PyBatchReadHandle {
+impl PyLazyBatchRecords {
+    /// Dict-view cardinality: number of records that ``to_dict()`` would
+    /// include — i.e. successful reads (`result_code == Ok`) that carry
+    /// both a `user_key` and a `record` body.
+    ///
+    /// Matches ``len(lazy_records.to_dict())`` and is the size users
+    /// expect from a Mapping-protocol ``__len__``. For the raw record
+    /// count (including missing reads and per-record failures) use
+    /// ``len(lazy_records.batch_records)``.
+    ///
+    /// Fast path: pure Rust filter+count, no `PyDict` allocation.
     fn __len__(&self) -> usize {
-        self.inner.len()
+        self.inner
+            .iter()
+            .filter(|br| {
+                br.key.user_key.is_some()
+                    && matches!(&br.result_code, None | Some(ResultCode::Ok))
+                    && br.record.is_some()
+            })
+            .count()
     }
 
-    fn __getitem__(&self, py: Python<'_>, index: isize) -> PyResult<Py<PyBatchRecord>> {
-        let len = self.inner.len() as isize;
-        let idx = if index < 0 { len + index } else { index };
-        if idx < 0 || idx >= len {
-            return Err(pyo3::exceptions::PyIndexError::new_err(
-                "BatchReadHandle index out of range",
-            ));
+    /// Dict-style item access: `lazy_records[user_key]` returns the bins dict.
+    ///
+    /// Records without a `user_key` (digest-only) or with a failed result
+    /// are not present in the dict view — use `batch_records[i]` for raw
+    /// index-based access (including digest-only and failed records).
+    fn __getitem__<'py>(
+        &self,
+        py: Python<'py>,
+        key: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        match d.get_item(key)? {
+            Some(v) => Ok(v),
+            None => Err(pyo3::exceptions::PyKeyError::new_err(format!(
+                "{} not present in LazyBatchRecords dict view \
+                 (key is digest-only, missing from the batch response, or its read failed — \
+                 inspect lazy_records.batch_records[i].result for the per-record code, \
+                 or iterate all_user_keys() for every requested user_key)",
+                key.repr()?
+            ))),
         }
-        single_batch_record_to_py(py, &self.inner[idx as usize])
     }
 
-    fn __iter__(slf: PyRef<'_, Self>) -> PyBatchReadIter {
+    fn __contains__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<bool> {
+        let d = self.cached_dict(py)?;
+        d.contains(key)
+    }
+
+    /// Dict-style ``lazy_records.get(key, default=None)`` — returns the
+    /// bins dict for ``key``, or ``default`` if ``key`` is not in the
+    /// dict view (digest-only / failed records are excluded). Mirrors
+    /// ``dict.get`` semantics so code written against the pre-
+    /// ``LazyBatchRecords`` ``dict`` return type keeps working unchanged.
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &Bound<'py, PyAny>,
+        default: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        match d.get_item(key)? {
+            Some(v) => Ok(v),
+            None => Ok(match default {
+                Some(d) => d.clone(),
+                None => py.None().into_bound(py),
+            }),
+        }
+    }
+
+    fn __iter__<'py>(slf: PyRef<'py, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let d = slf.cached_dict(py)?;
+        d.call_method0("__iter__")
+    }
+
+    /// Dict-style ``lazy_records.items()`` view.
+    fn items<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        d.call_method0("items")
+    }
+
+    /// Dict-style ``lazy_records.values()`` view.
+    fn values<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        d.call_method0("values")
+    }
+
+    /// Iterate records (BatchRecord wrappers) in insertion order.
+    ///
+    /// Preserves the pre-dict-like iteration semantics for callers that
+    /// need every record — including digest-only entries and failed reads
+    /// that the dict view skips.
+    fn iter_records(slf: PyRef<'_, Self>) -> PyBatchReadIter {
         PyBatchReadIter {
             inner: Arc::clone(&slf.inner),
             index: 0,
         }
     }
 
-    /// Fastest access path: returns `dict[key_str, bins_dict]` directly.
+    /// Fastest dict access: returns `dict[user_key, bins_dict]`.
     ///
-    /// Skips all intermediate objects (BatchRecord wrapper, key tuple, meta dict).
-    /// Records without a `user_key` (digest-only) or with a failed result are
-    /// excluded from the dict. Use `batch_records` to access all records.
-    fn as_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        // ── (D) event loop resume delay: into_pyobject → as_dict call ──
+    /// Skips all intermediate objects (BatchRecord wrapper, key tuple, meta
+    /// dict). Records without a `user_key` (digest-only) or with a failed
+    /// result are excluded from the dict — use `batch_records` to access
+    /// all records.
+    ///
+    /// This is the canonical conversion entry point; the Mapping-
+    /// protocol dunders (`__getitem__`, `__contains__`, `items`,
+    /// `keys`, `values`, `get`, `__iter__`) share the same cached
+    /// materialisation behind the scenes.
+    ///
+    /// **Returned dict is a fresh shallow copy of the cached materialisation.**
+    /// Mutating it will not affect future `to_dict()` calls nor the dict
+    /// view used by `__getitem__`/`__contains__`/`__iter__`/`items`/`keys`/
+    /// `values`. This preserves the original "callers can mutate freely"
+    /// guarantee while sharing the underlying record→Python conversion
+    /// cost between `to_dict()` and the Mapping-protocol dunders (was
+    /// double-materialised before).
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        // ── (D) event loop resume delay: into_pyobject → to_dict call ──
         if let Some(t) = self.into_pyobject_at {
             crate::metrics::record_internal_stage_unchecked(
                 "event_loop_resume_delay",
@@ -259,21 +408,42 @@ impl PyBatchReadHandle {
             );
         }
 
-        // ── Stage: as_dict (GIL held in event loop coroutine) ──
-        crate::stage_timer!("as_dict", "batch_read", batch_to_dict_py(py, &self.inner))
+        // ── Stage: to_dict (GIL held in event loop coroutine) ──
+        crate::stage_timer!("to_dict", "batch_read", {
+            let cached = self.cached_dict(py)?;
+            cached.copy()
+        })
+    }
+
+    /// Convert the batch read result into a `NumpyBatchRecords` structured
+    /// array. The fill loop runs under `Python::detach`, so the GIL is
+    /// released while raw Aerospike values are written into the NumPy
+    /// buffer — see `numpy_support::batch_to_numpy_py` for details.
+    ///
+    /// **Missing / failed reads silently zero-fill.** Rows whose
+    /// `result_code != 0` (including `RecordNotFound`) leave both the
+    /// data and meta arrays at the dtype's zero value — callers MUST
+    /// inspect `result.result_codes` (or `found_count()` on this
+    /// handle) before treating any row as a successful read. Aerospike
+    /// `Nil` bin values are also written as zero, so a genuinely-zero
+    /// bin and a missing bin are indistinguishable in the buffer alone.
+    fn to_numpy(&self, py: Python<'_>, dtype: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        crate::stage_timer!("to_numpy", "batch_read", {
+            crate::numpy_support::batch_to_numpy_py(py, &self.inner, dtype)
+        })
     }
 
     /// Merge multiple handles into a list of dicts in a single GIL acquisition.
     ///
     /// Avoids 9 separate event-loop coroutine resumes when using `asyncio.gather`.
-    /// Instead of `[h.as_dict() for h in handles]`, call
-    /// `BatchReadHandle.merge_as_dict(handles)` once.
+    /// Instead of `[h.to_dict() for h in handles]`, call
+    /// `LazyBatchRecords.merge_to_dict(handles)` once.
     #[staticmethod]
-    fn merge_as_dict<'py>(
+    fn merge_to_dict<'py>(
         handles: Vec<PyRef<'py, Self>>,
         py: Python<'py>,
     ) -> PyResult<Vec<Bound<'py, PyDict>>> {
-        crate::stage_timer!("merge_as_dict", "batch_read", {
+        crate::stage_timer!("merge_to_dict", "batch_read", {
             let result: PyResult<Vec<_>> = handles
                 .iter()
                 .map(|h| batch_to_dict_py(py, &h.inner))
@@ -293,6 +463,75 @@ impl PyBatchReadHandle {
             .collect()
     }
 
+    /// Drop the cached ``PyDict`` materialisation created by the first
+    /// Mapping-protocol access (``__getitem__``/``__contains__``/
+    /// ``items``/``keys``/``values``/``get``/``__iter__``) or by a
+    /// previous ``to_dict()`` call. The raw Rust ``Arc<Vec<BatchRecord>>``
+    /// is retained so that ``batch_records``, ``iter_records()``,
+    /// ``all_user_keys()``, ``found_count()``, ``__len__``, and
+    /// ``to_numpy(dtype)`` keep working without reissuing the read.
+    ///
+    /// Use this after a large-batch dict materialisation that you no
+    /// longer need (for example, after copying the result into a
+    /// downstream cache or feature store) to release the PyDict memory
+    /// without dropping the entire handle. A subsequent Mapping access
+    /// or ``to_dict()`` rebuilds the cache lazily on demand.
+    ///
+    /// **Poison recovery.** Unlike the dict-view accessors (which
+    /// surface a ``RustPanicError`` if a previous conversion panicked
+    /// mid-flight and poisoned the mutex), ``release_cache`` is a
+    /// cleanup intent: the whole point is to discard whatever the
+    /// cache currently holds. A poisoned cache *is* unrecoverable for
+    /// reads, but it can — and should — still be cleared, so the next
+    /// read rebuilds it from the raw Rust records. We therefore
+    /// recover the poisoned lock, write ``None``, and explicitly
+    /// clear the poison flag so that subsequent ``cached_dict`` calls
+    /// no longer raise ``RustPanicError``. This keeps
+    /// ``release_cache`` safe to call from ``finally:`` cleanup
+    /// blocks without masking the original exception, and the handle
+    /// is fully usable for fresh reads afterwards.
+    ///
+    /// **Recovery limit.** If the original panic was caused by an
+    /// undecodable record in ``inner`` (e.g. issue #280's legacy blob
+    /// particle), a fresh ``to_dict()`` will rebuild over the same
+    /// raw data and panic on the same record — re-poisoning the
+    /// mutex. ``release_cache`` cannot undo that; it only clears the
+    /// previous state so the next attempt has a clean baseline.
+    /// Inspect ``iter_records()`` / ``batch_records`` to isolate the
+    /// offending record before re-reading.
+    fn release_cache(&self) {
+        // Branch on the lock result itself rather than snapshotting
+        // `is_poisoned()` separately: under free-threaded CPython a
+        // sibling thread could poison the mutex between the snapshot
+        // and the lock, leaving us to recover silently with no
+        // `debug!` trace. The `LockResult` is authoritative for the
+        // path actually taken.
+        let mut guard = match self.cached_dict.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                // Log the recovery path so callers running release_cache from
+                // a retry loop can correlate repeated "panic → release →
+                // panic" against the underlying record. Plain `release_cache`
+                // calls (cache present but no poison) stay quiet.
+                debug!(
+                    "LazyBatchRecords::release_cache: recovered poisoned cache mutex \
+                     (records={}); next read will rebuild from raw records",
+                    self.inner.len()
+                );
+                poisoned.into_inner()
+            }
+        };
+        *guard = None;
+        drop(guard);
+        // `clear_poison` (stable in Rust 1.74+) resets the mutex's
+        // poison flag so a future `cached_dict()` lock succeeds —
+        // without it, the handle would stay in a "len()/found_count()
+        // works but `.to_dict()` raises" inconsistent state. Safe to
+        // call unconditionally: it's a no-op when the mutex isn't
+        // poisoned.
+        self.cached_dict.clear_poison();
+    }
+
     /// Count of records with successful result code (no conversion needed).
     fn found_count(&self) -> usize {
         self.inner
@@ -301,17 +540,53 @@ impl PyBatchReadHandle {
             .count()
     }
 
-    /// Extract just the user keys without converting record data.
+    /// Dict-style ``lazy_records.keys()`` view — user keys of records
+    /// that actually appear in the dict view (successful reads with a
+    /// ``user_key``). Missing / failed records are excluded so that
+    /// ``set(lazy_records.keys())`` matches
+    /// ``set(lazy_records.to_dict().keys())``.
     ///
-    /// Conversion errors are propagated (not silently dropped) so the returned
-    /// list length always matches the records that carry a `user_key`.
-    fn keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+    /// **`keys()` vs `all_user_keys()`.** `keys()` is the
+    /// Mapping-protocol view (dict-view cardinality, never contains
+    /// `None`); `all_user_keys()` is the positional view (length
+    /// always equals `len(batch_records)`, contains `None` for
+    /// digest-only slots). Use `keys()` when you need the dict-view
+    /// invariant `len(keys()) == len(to_dict())`; use
+    /// `all_user_keys()` when you need positional alignment with
+    /// `batch_records` / a `NumpyBatchRecords` row.
+    fn keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let d = self.cached_dict(py)?;
+        d.call_method0("keys")
+    }
+
+    /// Return *every* batch record's ``user_key`` in request order.
+    ///
+    /// The returned list has the same length as ``batch_records`` and is
+    /// positionally aligned with a ``NumpyBatchRecords`` data array.
+    /// Per-slot contents:
+    ///
+    /// - **User-keyed requests** (`(ns, set, user_key)` or
+    ///   `(ns, set, user_key, digest)`): the slot carries the
+    ///   `user_key` the caller supplied, *verbatim* — not echoed by
+    ///   the server. This holds regardless of whether the read
+    ///   succeeded, returned `RecordNotFound`, or failed for any
+    ///   other reason.
+    /// - **Digest-only requests** (`(ns, set, None, digest)`): the
+    ///   slot is `None`. The server never carries a user_key for
+    ///   these requests, so there is nothing to populate.
+    ///
+    /// **`all_user_keys()` vs `keys()`.** Use `all_user_keys()` for
+    /// the positional invariant (length matches `batch_records`,
+    /// may contain `None`); use the Mapping-protocol `keys()` for the
+    /// dict-view cardinality (matches `to_dict().keys()`, never
+    /// contains `None`).
+    fn all_user_keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let keys = collect_user_keys(py, &self.inner)?;
         PyList::new(py, &keys)
     }
 }
 
-/// Iterator for [`PyBatchReadHandle`], yielding [`PyBatchRecord`] one at a time.
+/// Iterator for [`PyLazyBatchRecords`], yielding [`PyBatchRecord`] one at a time.
 #[pyclass]
 pub struct PyBatchReadIter {
     inner: Arc<Vec<BatchRecord>>,
@@ -400,11 +675,29 @@ pub fn batch_to_dict_py<'py>(
     Ok(dict)
 }
 
-/// Convert each `BatchRecord`'s `user_key` to a Python object.
+/// Convert each `BatchRecord`'s `user_key` to a Python object, preserving
+/// the request-order index of every record.
 ///
-/// Records without a `user_key` (digest-only) are skipped. Conversion errors
-/// are `?`-propagated rather than silently dropped, so the returned `Vec`
-/// length always matches the number of records that carry a `user_key`.
+/// Records without a `user_key` (digest-only requests) are represented
+/// by `py.None()` instead of being filtered out, so the returned `Vec`
+/// length always equals `results.len()` and positional alignment with
+/// `batch_records` / a `NumpyBatchRecords` data array holds. Conversion
+/// errors are `?`-propagated rather than silently dropped.
+///
+/// **Allocation profile (intentional trade-off).** The previous
+/// implementation `filter_map`-skipped digest-only entries and so
+/// allocated nothing for them; the positional contract requires one
+/// `py.None()` clone per skipped entry. For a digest-only-heavy
+/// workload (e.g. a secondary-index follow-up that resolves every
+/// match by digest only) this is `N` additional refcount bumps per
+/// `all_user_keys()` call — `py.None()` is the interpreter-global
+/// singleton, so the cost is a `Py_INCREF` and a `Bound` wrap, not a
+/// fresh object. We accept the cost because the positional alignment
+/// it preserves is what every documented `zip(all_user_keys(),
+/// batch_records)` / NumPy-row consumer relies on; a future
+/// digest-only-bulk accessor that streams without materialising the
+/// list would be the right escape hatch if this ever shows up in a
+/// hot-path profile.
 pub fn collect_user_keys<'py>(
     py: Python<'py>,
     results: &[BatchRecord],
@@ -412,12 +705,12 @@ pub fn collect_user_keys<'py>(
     use crate::types::value::value_to_py;
     results
         .iter()
-        .filter_map(|br| br.key.user_key.as_ref())
-        .map(|uk| -> PyResult<Bound<'py, PyAny>> {
-            match uk {
-                aerospike_core::Value::String(s) => Ok(s.into_pyobject(py)?.into_any()),
-                aerospike_core::Value::Int(i) => Ok(i.into_pyobject(py)?.into_any()),
-                v => Ok(value_to_py(py, v)?.into_bound(py)),
+        .map(|br| -> PyResult<Bound<'py, PyAny>> {
+            match &br.key.user_key {
+                Some(aerospike_core::Value::String(s)) => Ok(s.into_pyobject(py)?.into_any()),
+                Some(aerospike_core::Value::Int(i)) => Ok(i.into_pyobject(py)?.into_any()),
+                Some(v) => Ok(value_to_py(py, v)?.into_bound(py)),
+                None => Ok(py.None().into_bound(py)),
             }
         })
         .collect()
@@ -479,6 +772,23 @@ mod tests {
     /// a layout-compatible mirror and transmute — the same pattern used by the
     /// `client_ops` unit tests. Size + alignment are guarded at compile time.
     fn make_batch_record(user_key: Value) -> BatchRecord {
+        make_batch_record_inner(aerospike_core::Key::new("test", "demo", user_key).unwrap())
+    }
+
+    /// Build a `BatchRecord` whose `Key` carries no `user_key` (digest-only).
+    /// The digest is a zero-filled placeholder — sufficient for unit tests
+    /// that don't perform any server-side lookup.
+    fn make_digest_only_batch_record() -> BatchRecord {
+        let key = aerospike_core::Key {
+            namespace: "test".to_string(),
+            set_name: "demo".to_string(),
+            user_key: None,
+            digest: [0u8; 20],
+        };
+        make_batch_record_inner(key)
+    }
+
+    fn make_batch_record_inner(key: aerospike_core::Key) -> BatchRecord {
         #[repr(C)]
         struct BatchRecordMirror {
             key: aerospike_core::Key,
@@ -492,7 +802,7 @@ mod tests {
         static_assertions::assert_eq_align!(BatchRecordMirror, BatchRecord);
 
         let mirror = BatchRecordMirror {
-            key: aerospike_core::Key::new("test", "demo", user_key).unwrap(),
+            key,
             record: None,
             result_code: Some(ResultCode::Ok),
             in_doubt: false,
@@ -542,6 +852,37 @@ mod tests {
         });
     }
 
+    /// A poisoned `cached_dict` mutex on a `PyLazyBatchRecords` (left behind
+    /// by a panic during a previous materialisation) must surface as a
+    /// `RustPanicError` from every dict-view dunder, not be silently
+    /// recovered. Mirrors the `PyBatchRecord.record_cell` poison contract.
+    #[test]
+    fn lazy_batch_records_rejects_poisoned_dict_cache() {
+        Python::initialize();
+        Python::attach(|py| {
+            let handle =
+                Py::new(py, PyLazyBatchRecords::from_results(Vec::new())).expect("construct");
+
+            // Poison the cached_dict mutex by panicking while holding the lock.
+            let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cell = handle.borrow(py);
+                let _g = cell.cached_dict.lock().unwrap();
+                panic!("synthetic cache materialisation panic");
+            }))
+            .is_err();
+            assert!(poisoned, "panic must unwind to poison the mutex");
+
+            let cell = handle.borrow(py);
+            let err = cell
+                .cached_dict(py)
+                .expect_err("poisoned cache must surface an error");
+            assert!(
+                err.is_instance_of::<crate::errors::RustPanicError>(py),
+                "poisoned cached_dict must raise RustPanicError"
+            );
+        });
+    }
+
     /// `collect_user_keys` returns every key for a normal batch, preserving
     /// order and length (round-trip) — no keys are silently dropped.
     #[test]
@@ -558,6 +899,138 @@ mod tests {
 
             assert_eq!(keys[0].extract::<String>().unwrap(), "k0");
             assert_eq!(keys[1].extract::<String>().unwrap(), "k1");
+            assert_eq!(keys[2].extract::<i64>().unwrap(), 42);
+        });
+    }
+
+    /// `release_cache()` must recover a poisoned `cached_dict` mutex
+    /// (instead of raising `RustPanicError`) so that callers using it
+    /// from cleanup blocks (e.g. `finally: handle.release_cache()`)
+    /// never mask the original in-flight exception. After
+    /// `release_cache()`, the cache must be observably `None` so that
+    /// the next read rebuilds it lazily.
+    #[test]
+    fn release_cache_recovers_poisoned_dict_cache() {
+        Python::initialize();
+        Python::attach(|py| {
+            let handle =
+                Py::new(py, PyLazyBatchRecords::from_results(Vec::new())).expect("construct");
+
+            // Poison the cached_dict mutex by panicking while holding the lock.
+            let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cell = handle.borrow(py);
+                let _g = cell.cached_dict.lock().unwrap();
+                panic!("synthetic cache materialisation panic");
+            }))
+            .is_err();
+            assert!(poisoned, "panic must unwind to poison the mutex");
+
+            // `release_cache()` must not raise — it is cleanup intent.
+            let cell = handle.borrow(py);
+            cell.release_cache();
+
+            // Cache state is observably reset to None even though the
+            // mutex was poisoned, so the next access can rebuild from
+            // the raw records.
+            let recovered = cell.cached_dict.lock().unwrap_or_else(|p| p.into_inner());
+            assert!(
+                recovered.is_none(),
+                "release_cache must clear the cache after recovering a poisoned mutex"
+            );
+            drop(recovered);
+
+            // Round-trip: a subsequent dict-view access succeeds and
+            // returns a fresh empty dict (the underlying results are
+            // empty in this test, so the rebuilt dict is empty too).
+            // This proves the handle is fully usable after release.
+            let d = cell
+                .cached_dict(py)
+                .expect("cached_dict must succeed after release_cache recovery");
+            assert_eq!(d.len(), 0);
+        });
+    }
+
+    /// `release_cache()` must remain idempotent across *repeated*
+    /// poison-and-release cycles. The docstring documents that a
+    /// fresh `to_dict()` over the same `inner` may re-poison the
+    /// mutex (e.g. an undecodable record stays undecodable across
+    /// retries); a subsequent `release_cache()` must still recover
+    /// the mutex so users can call it inside an outer retry loop
+    /// without leaving the handle wedged.
+    #[test]
+    fn release_cache_recovers_across_repeated_poisoning() {
+        Python::initialize();
+        Python::attach(|py| {
+            let handle =
+                Py::new(py, PyLazyBatchRecords::from_results(Vec::new())).expect("construct");
+
+            for cycle in 0..3 {
+                // Re-poison the cached_dict mutex with a synthetic panic.
+                let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let cell = handle.borrow(py);
+                    let _g = cell.cached_dict.lock().unwrap();
+                    panic!("synthetic conversion panic (cycle {cycle})");
+                }))
+                .is_err();
+                assert!(
+                    poisoned,
+                    "cycle {cycle}: panic must unwind to poison the mutex"
+                );
+
+                // release_cache must succeed (no raise) every cycle.
+                let cell = handle.borrow(py);
+                cell.release_cache();
+
+                // Mutex is unpoisoned and cache is observably None.
+                let recovered = cell
+                    .cached_dict
+                    .lock()
+                    .expect("cycle {cycle}: clear_poison must let lock() succeed");
+                assert!(
+                    recovered.is_none(),
+                    "cycle {cycle}: cache must be None after release_cache"
+                );
+                drop(recovered);
+
+                // Round-trip: a fresh dict-view access succeeds and
+                // returns an empty dict (inner is empty in this test).
+                let d = cell
+                    .cached_dict(py)
+                    .expect("cycle {cycle}: cached_dict must rebuild after release_cache");
+                assert_eq!(d.len(), 0);
+            }
+        });
+    }
+
+    /// `collect_user_keys` preserves positional alignment by yielding
+    /// `None` for digest-only requests (`user_key=None`) rather than
+    /// filtering them out — otherwise users zipping
+    /// `all_user_keys()` with `batch_records` / a `NumpyBatchRecords`
+    /// row would get a silent off-by-one for every digest-only entry.
+    #[test]
+    fn collect_user_keys_preserves_digest_only_slots_as_none() {
+        Python::initialize();
+        Python::attach(|py| {
+            let records = vec![
+                make_batch_record(Value::from("k0".to_string())),
+                // Digest-only request: the `Key` carries no `user_key`,
+                // only a digest. `Key::new` would reject `Value::Nil`,
+                // so we construct the `Key` directly via the helper.
+                make_digest_only_batch_record(),
+                make_batch_record(Value::Int(42)),
+            ];
+            let keys = collect_user_keys(py, &records).expect("conversion should succeed");
+            assert_eq!(
+                keys.len(),
+                records.len(),
+                "digest-only slots must remain in place, not be filtered"
+            );
+
+            assert_eq!(keys[0].extract::<String>().unwrap(), "k0");
+            assert!(
+                keys[1].is_none(),
+                "digest-only entry must be `None`, not skipped"
+            );
             assert_eq!(keys[2].extract::<i64>().unwrap(), 42);
         });
     }
