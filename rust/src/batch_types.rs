@@ -268,19 +268,25 @@ impl PyLazyBatchRecords {
 
 #[pymethods]
 impl PyLazyBatchRecords {
-    /// Total count of batch records returned by the server, including
-    /// missing reads and per-record failures.
+    /// Dict-view cardinality: number of records that ``to_dict()`` would
+    /// include — i.e. successful reads (`result_code == Ok`) that carry
+    /// both a `user_key` and a `record` body.
     ///
-    /// This matches the length of [`Self::batch_records`] / [`Self::iter_records`]
-    /// and is **not** the size of the dict view (`len(lazy_records.to_dict())`),
-    /// which excludes records without a `user_key` and records whose
-    /// `result_code` is not `Ok`. Use `len(lazy_records.to_dict())` (or
-    /// [`Self::found_count`]) when you specifically want the dict-view
-    /// cardinality.
+    /// Matches ``len(lazy_records.to_dict())`` and is the size users
+    /// expect from a Mapping-protocol ``__len__``. For the raw record
+    /// count (including missing reads and per-record failures) use
+    /// ``len(lazy_records.batch_records)``.
     ///
-    /// O(1): just reads the underlying `Vec` length, no dict materialisation.
+    /// Fast path: pure Rust filter+count, no `PyDict` allocation.
     fn __len__(&self) -> usize {
-        self.inner.len()
+        self.inner
+            .iter()
+            .filter(|br| {
+                br.key.user_key.is_some()
+                    && matches!(&br.result_code, None | Some(ResultCode::Ok))
+                    && br.record.is_some()
+            })
+            .count()
     }
 
     /// Dict-style item access: `lazy_records[user_key]` returns the bins dict.

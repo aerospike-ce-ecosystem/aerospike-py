@@ -109,9 +109,12 @@ class LazyBatchRecords:
         ...
 
     # Dict-like Mapping backward-compat — backed by cached `to_dict()`.
-    # `__len__` is the *raw record count* (matches `batch_records` /
-    # `iter_records`), not the dict-view cardinality; call
-    # ``len(handle.to_dict())`` or `found_count()` if you want the latter.
+    # `__len__` is the *dict-view cardinality* (matches
+    # ``len(lazy_records.to_dict())``: successful reads with a `user_key`
+    # and a `record` body). Computed via a pure-Rust filter+count, so it
+    # does NOT trigger PyDict materialisation. For the raw record count
+    # (including missing reads / failures) use
+    # ``len(lazy_records.batch_records)``.
     def items(self) -> Any: ...
     def keys(self) -> Any: ...
     def values(self) -> Any: ...

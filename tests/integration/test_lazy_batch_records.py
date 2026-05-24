@@ -130,17 +130,19 @@ class TestLazyBatchRecordsMapping:
     any single dunder from ``#[pymethods]`` is caught.
     """
 
-    async def test_len_is_raw_record_count(self, async_client, _seed_records):
-        """``len(lazy_records)`` returns the raw record count (matches
-        ``batch_records``), not the dict-view cardinality."""
+    async def test_len_is_dict_view_cardinality(self, async_client, _seed_records):
+        """``len(lazy_records)`` matches ``len(lazy_records.to_dict())`` —
+        missing reads and per-record failures are excluded. The raw record
+        count is available via ``len(lazy_records.batch_records)``."""
         keys = _seed_records
         missing = [(NS, SET, "missing_X"), (NS, SET, "missing_Y")]
         lazy_records = await async_client.batch_read(keys + missing)
 
-        # Raw record count includes missing reads
-        assert len(lazy_records) == len(keys) + len(missing)
-        # Dict view excludes them
-        assert len(lazy_records.to_dict()) == len(keys)
+        # Dict-view cardinality: only the 5 found records
+        assert len(lazy_records) == len(keys)
+        assert len(lazy_records) == len(lazy_records.to_dict())
+        # Raw record count (includes missing reads) lives on `batch_records`
+        assert len(lazy_records.batch_records) == len(keys) + len(missing)
 
     async def test_contains_iter_keys_values_items(self, async_client, _seed_records):
         keys = _seed_records
