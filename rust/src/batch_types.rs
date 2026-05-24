@@ -500,29 +500,36 @@ impl PyLazyBatchRecords {
     /// Inspect ``iter_records()`` / ``batch_records`` to isolate the
     /// offending record before re-reading.
     fn release_cache(&self) {
-        let was_poisoned = self.cached_dict.is_poisoned();
-        let mut guard = self
-            .cached_dict
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Branch on the lock result itself rather than snapshotting
+        // `is_poisoned()` separately: under free-threaded CPython a
+        // sibling thread could poison the mutex between the snapshot
+        // and the lock, leaving us to recover silently with no
+        // `debug!` trace. The `LockResult` is authoritative for the
+        // path actually taken.
+        let mut guard = match self.cached_dict.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                // Log the recovery path so callers running release_cache from
+                // a retry loop can correlate repeated "panic → release →
+                // panic" against the underlying record. Plain `release_cache`
+                // calls (cache present but no poison) stay quiet.
+                debug!(
+                    "LazyBatchRecords::release_cache: recovered poisoned cache mutex \
+                     (records={}); next read will rebuild from raw records",
+                    self.inner.len()
+                );
+                poisoned.into_inner()
+            }
+        };
         *guard = None;
         drop(guard);
         // `clear_poison` (stable in Rust 1.74+) resets the mutex's
         // poison flag so a future `cached_dict()` lock succeeds —
         // without it, the handle would stay in a "len()/found_count()
-        // works but `.to_dict()` raises" inconsistent state.
+        // works but `.to_dict()` raises" inconsistent state. Safe to
+        // call unconditionally: it's a no-op when the mutex isn't
+        // poisoned.
         self.cached_dict.clear_poison();
-        // Log the recovery path so callers running release_cache from
-        // a retry loop can correlate repeated "panic → release →
-        // panic" against the underlying record. Plain `release_cache`
-        // calls (cache present but no poison) stay quiet.
-        if was_poisoned {
-            debug!(
-                "LazyBatchRecords::release_cache: recovered poisoned cache mutex \
-                 (records={}); next read will rebuild from raw records",
-                self.inner.len()
-            );
-        }
     }
 
     /// Count of records with successful result code (no conversion needed).

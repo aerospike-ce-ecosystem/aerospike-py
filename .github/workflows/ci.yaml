@@ -85,10 +85,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # Mirrors `rust-version` in rust/Cargo.toml. Keep in sync when bumping.
+      # Mirrors `rust-version` in rust/Cargo.toml. Keep in sync when bumping;
+      # the "MSRV ↔ Cargo.toml drift gate" step below hard-fails the build if
+      # the two values get out of step.
       MSRV: "1.80"
     steps:
       - uses: actions/checkout@v6
+
+      # Drift gate: refuse to run cargo check on a fictitious MSRV.
+      # If a future PR bumps `rust-version = "1.85"` in rust/Cargo.toml
+      # but forgets to update `MSRV: "..."` above (or vice versa), this
+      # step fails *before* the check job runs, surfacing the drift
+      # rather than silently pinning a stale toolchain.
+      - name: Verify MSRV matches rust/Cargo.toml
+        run: |
+          declared=$(awk -F\" '/^rust-version *=/ {print $2; exit}' rust/Cargo.toml)
+          if [ -z "$declared" ]; then
+            echo "::error file=rust/Cargo.toml::rust-version is missing from [package] — required to back the msrv-check job"
+            exit 1
+          fi
+          if [ "$declared" != "${{ env.MSRV }}" ]; then
+            echo "::error::MSRV drift: workflow declares ${{ env.MSRV }} but rust/Cargo.toml declares $declared. Update both in the same PR."
+            exit 1
+          fi
+          echo "MSRV in workflow (${{ env.MSRV }}) matches rust/Cargo.toml ($declared)."
 
       - name: Install Rust ${{ env.MSRV }}
         uses: dtolnay/rust-toolchain@master

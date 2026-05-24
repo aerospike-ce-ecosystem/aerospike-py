@@ -73,13 +73,14 @@ print(record.key.user_key)    # "user1"
 
 ### `BatchRecord`
 
-배치 작업 내의 개별 레코드 결과입니다 (`BatchRecords.batch_records` 내부).
+배치 작업 내의 개별 레코드 결과입니다 (`BatchRecords.batch_records` 또는 `BatchWriteResult.batch_records` 내부).
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `key` | `AerospikeKey \| None` | 레코드 키 |
 | `result` | `int` | 개별 레코드 결과 코드 (0 = 성공) |
 | `record` | `Record \| None` | 레코드 데이터 (작업 실패 시 `None`) |
+| `in_doubt` | `bool` | 일시적 전송 오류 후에도 쓰기가 완료됐을 수 있는지 (기본값 `False`). PR-374에서 추가됨 — 기존의 `key, result, record = br` 위치 언패킹 코드는 깨지므로 속성 접근(`br.in_doubt`)으로 마이그레이션. |
 
 ```python
 results = client.batch_operate(keys, ops)
@@ -192,7 +193,7 @@ for bin_tuple in result.ordered_bins:
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
 | `batch_read()` (sync 및 async) | `LazyBatchRecords` (→ `.to_dict()` 또는 `.to_numpy(dtype)`로 materialise) |
-| `batch_operate()`, `batch_remove()` | `BatchWriteResult` (`batch_records: list[BatchRecord]`) |
+| `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchWriteResult` (`batch_records: list[BatchRecord]`) |
 | `batch_write_numpy()` | `BatchWriteResult` |
 | `Query.results()` | `list[Record]` |
 

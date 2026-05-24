@@ -148,8 +148,8 @@ Returned by: `operate_ordered()`
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
 | `batch_read()` (sync and async) | `LazyBatchRecords` — call `.to_dict()` or `.to_numpy(dtype)` to materialise |
-| `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchRecords` |
-| `batch_write_numpy()` | `BatchRecords` |
+| `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchWriteResult` (`batch_records: list[BatchRecord]`) |
+| `batch_write_numpy()` | `BatchWriteResult` |
 | `Query.results()` | `list[Record]` |
 
 ---
