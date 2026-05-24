@@ -134,6 +134,11 @@ class LazyBatchRecords:
           ``None`` in their slot rather than being dropped, so
           ``zip(handle.all_user_keys(), handle.batch_records)`` always
           pairs every record with its requested key (or ``None``).
+
+        Pair this with :meth:`keys` consciously: ``keys()`` is the
+        Mapping-protocol view (dict-view cardinality, never contains
+        ``None``); ``all_user_keys()`` is the positional view (length
+        always equals ``len(batch_records)``, may contain ``None``).
         """
         ...
 
@@ -157,8 +162,11 @@ class LazyBatchRecords:
         the cache lazily.
 
         Safe to call from ``finally:`` cleanup blocks: a previously
-        poisoned cache mutex is recovered and cleared rather than
-        re-raising, so this method never masks an in-flight exception.
+        poisoned cache mutex is recovered, cleared, and its poison
+        flag is reset so that subsequent reads (``to_dict``,
+        ``__getitem__``, etc.) succeed instead of raising
+        ``RustPanicError``. ``release_cache`` never masks an
+        in-flight exception.
         """
         ...
 
@@ -170,7 +178,8 @@ class LazyBatchRecords:
     # (including missing reads / failures) use
     # ``len(lazy_records.batch_records)``.
     def items(self) -> Any: ...
-    def keys(self) -> Any: ...
+    def keys(self) -> Any:  # Dict-view; never None. See `all_user_keys` for positional view.
+        ...
     def values(self) -> Any: ...
     def __len__(self) -> int: ...
     def __iter__(self) -> Any: ...

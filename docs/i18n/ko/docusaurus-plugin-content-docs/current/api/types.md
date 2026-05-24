@@ -171,10 +171,9 @@ for bin_tuple in result.ordered_bins:
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` (sync) | `BatchRecords` \| `NumpyBatchRecords` |
-| `batch_read()` (async) | `BatchReadHandle` \| `NumpyBatchRecords` |
-| `batch_operate()`, `batch_remove()` | `BatchRecords` |
-| `batch_write_numpy()` | `BatchRecords` |
+| `batch_read()` (sync 및 async) | `LazyBatchRecords` (→ `.to_dict()` 또는 `.to_numpy(dtype)`로 materialise) |
+| `batch_operate()`, `batch_remove()` | `BatchWriteResult` (`batch_records: list[BatchRecord]`) |
+| `batch_write_numpy()` | `BatchWriteResult` |
 | `Query.results()` | `list[Record]` |
 
 ---

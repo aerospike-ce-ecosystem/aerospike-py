@@ -10,6 +10,14 @@
 > `LazyBatchRecords` / `to_dict()`로 통일되며 제거되었습니다.
 > 최신 API 레퍼런스는 `docs/docs/api/types.md`와
 > `docs/docs/guides/crud/numpy-batch.md`를 참조하세요.
+>
+> **`all_user_keys()` 시맨틱 변경 (PR #374)**: 이제 digest-only
+> 요청도 `None`으로 슬롯이 보존되어 반환값이 `list[UserKey | None]`이
+> 되며 `len()`이 항상 `len(batch_records)`와 일치합니다.
+> `set(handle.all_user_keys())` 또는
+> `for k in handle.all_user_keys(): k.startswith(...)`처럼 모든
+> 원소가 비-None이라고 가정했던 코드는 `None` 가드를 추가해야 합니다.
+> Dict-view cardinality (None 제외)가 필요하면 `keys()`를 사용하세요.
 
 ---
 

@@ -484,16 +484,24 @@ impl PyLazyBatchRecords {
     /// cache currently holds. A poisoned cache *is* unrecoverable for
     /// reads, but it can — and should — still be cleared, so the next
     /// read rebuilds it from the raw Rust records. We therefore
-    /// recover the poisoned lock and write ``None`` rather than
-    /// raising. This keeps ``release_cache`` safe to call from
-    /// ``finally:`` cleanup blocks without masking the original
-    /// exception.
+    /// recover the poisoned lock, write ``None``, and explicitly
+    /// clear the poison flag so that subsequent ``cached_dict`` calls
+    /// no longer raise ``RustPanicError``. This keeps
+    /// ``release_cache`` safe to call from ``finally:`` cleanup
+    /// blocks without masking the original exception, and the handle
+    /// is fully usable for fresh reads afterwards.
     fn release_cache(&self) {
         let mut guard = self
             .cached_dict
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *guard = None;
+        drop(guard);
+        // `clear_poison` (stable in Rust 1.74+) resets the mutex's
+        // poison flag so a future `cached_dict()` lock succeeds —
+        // without it, the handle would stay in a "len()/found_count()
+        // works but `.to_dict()` raises" inconsistent state.
+        self.cached_dict.clear_poison();
     }
 
     /// Count of records with successful result code (no conversion needed).
@@ -509,6 +517,15 @@ impl PyLazyBatchRecords {
     /// ``user_key``). Missing / failed records are excluded so that
     /// ``set(lazy_records.keys())`` matches
     /// ``set(lazy_records.to_dict().keys())``.
+    ///
+    /// **`keys()` vs `all_user_keys()`.** `keys()` is the
+    /// Mapping-protocol view (dict-view cardinality, never contains
+    /// `None`); `all_user_keys()` is the positional view (length
+    /// always equals `len(batch_records)`, contains `None` for
+    /// digest-only slots). Use `keys()` when you need the dict-view
+    /// invariant `len(keys()) == len(to_dict())`; use
+    /// `all_user_keys()` when you need positional alignment with
+    /// `batch_records` / a `NumpyBatchRecords` row.
     fn keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let d = self.cached_dict(py)?;
         d.call_method0("keys")
@@ -525,6 +542,12 @@ impl PyLazyBatchRecords {
     ///   in their slot rather than being dropped, so indexing into
     ///   ``batch_records[i]`` / ``np_batch.batch_records[i]`` always
     ///   pairs with ``all_user_keys()[i]``.
+    ///
+    /// **`all_user_keys()` vs `keys()`.** Use `all_user_keys()` for
+    /// the positional invariant (length matches `batch_records`,
+    /// may contain `None`); use the Mapping-protocol `keys()` for the
+    /// dict-view cardinality (matches `to_dict().keys()`, never
+    /// contains `None`).
     fn all_user_keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let keys = collect_user_keys(py, &self.inner)?;
         PyList::new(py, &keys)
@@ -628,6 +651,21 @@ pub fn batch_to_dict_py<'py>(
 /// length always equals `results.len()` and positional alignment with
 /// `batch_records` / a `NumpyBatchRecords` data array holds. Conversion
 /// errors are `?`-propagated rather than silently dropped.
+///
+/// **Allocation profile (intentional trade-off).** The previous
+/// implementation `filter_map`-skipped digest-only entries and so
+/// allocated nothing for them; the positional contract requires one
+/// `py.None()` clone per skipped entry. For a digest-only-heavy
+/// workload (e.g. a secondary-index follow-up that resolves every
+/// match by digest only) this is `N` additional refcount bumps per
+/// `all_user_keys()` call — `py.None()` is the interpreter-global
+/// singleton, so the cost is a `Py_INCREF` and a `Bound` wrap, not a
+/// fresh object. We accept the cost because the positional alignment
+/// it preserves is what every documented `zip(all_user_keys(),
+/// batch_records)` / NumPy-row consumer relies on; a future
+/// digest-only-bulk accessor that streams without materialising the
+/// list would be the right escape hatch if this ever shows up in a
+/// hot-path profile.
 pub fn collect_user_keys<'py>(
     py: Python<'py>,
     results: &[BatchRecord],
@@ -830,6 +868,53 @@ mod tests {
             assert_eq!(keys[0].extract::<String>().unwrap(), "k0");
             assert_eq!(keys[1].extract::<String>().unwrap(), "k1");
             assert_eq!(keys[2].extract::<i64>().unwrap(), 42);
+        });
+    }
+
+    /// `release_cache()` must recover a poisoned `cached_dict` mutex
+    /// (instead of raising `RustPanicError`) so that callers using it
+    /// from cleanup blocks (e.g. `finally: handle.release_cache()`)
+    /// never mask the original in-flight exception. After
+    /// `release_cache()`, the cache must be observably `None` so that
+    /// the next read rebuilds it lazily.
+    #[test]
+    fn release_cache_recovers_poisoned_dict_cache() {
+        Python::initialize();
+        Python::attach(|py| {
+            let handle =
+                Py::new(py, PyLazyBatchRecords::from_results(Vec::new())).expect("construct");
+
+            // Poison the cached_dict mutex by panicking while holding the lock.
+            let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cell = handle.borrow(py);
+                let _g = cell.cached_dict.lock().unwrap();
+                panic!("synthetic cache materialisation panic");
+            }))
+            .is_err();
+            assert!(poisoned, "panic must unwind to poison the mutex");
+
+            // `release_cache()` must not raise — it is cleanup intent.
+            let cell = handle.borrow(py);
+            cell.release_cache();
+
+            // Cache state is observably reset to None even though the
+            // mutex was poisoned, so the next access can rebuild from
+            // the raw records.
+            let recovered = cell.cached_dict.lock().unwrap_or_else(|p| p.into_inner());
+            assert!(
+                recovered.is_none(),
+                "release_cache must clear the cache after recovering a poisoned mutex"
+            );
+            drop(recovered);
+
+            // Round-trip: a subsequent dict-view access succeeds and
+            // returns a fresh empty dict (the underlying results are
+            // empty in this test, so the rebuilt dict is empty too).
+            // This proves the handle is fully usable after release.
+            let d = cell
+                .cached_dict(py)
+                .expect("cached_dict must succeed after release_cache recovery");
+            assert_eq!(d.len(), 0);
         });
     }
 

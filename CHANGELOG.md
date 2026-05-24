@@ -38,6 +38,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Client.batch_operate`, `Client.batch_remove`, `AsyncClient.batch_operate`, `AsyncClient.batch_remove` now declare their return type as `BatchWriteResult` in the type stubs (previously `BatchRecords`). Runtime shape is unchanged — `BatchWriteResult` is a NamedTuple with `.batch_records: list[BatchRecord]`. Typecheckers may flag code that still expects the old annotation.
 - `BatchRecord` (used inside `BatchWriteResult`) now carries an `in_doubt: bool = False` field indicating whether a transport-level ambiguity occurred. Positional unpacking (`key, result, record = br`) breaks; switch to attribute access.
 - New top-level exports in `aerospike_py.__all__`: `BatchWriteResult`, `UserKey`, `AerospikeRecord`. Previously only `BatchRecord` and `BatchRecords` were exported.
+- `LazyBatchRecords.all_user_keys()` is **positional** and now returns `list[UserKey | None]` instead of dropping digest-only requests. Every batch record gets exactly one slot in request order — digest-only requests yield `None` rather than being filtered out — so `zip(handle.all_user_keys(), handle.batch_records)` and downstream NumPy-row alignment work in mixed batches. Callers that previously assumed every element was a non-None `str/int/bytes` (`set(handle.all_user_keys())`, `for k in handle.all_user_keys(): k.startswith(...)`, requeuing the list into another `batch_read`) must filter `None` first:
+    ```python
+    # Before (filtered, length <= len(batch_records))
+    for k in handle.all_user_keys():
+        do_something(k)
+    # After (positional, length == len(batch_records))
+    for k in handle.all_user_keys():
+        if k is None:
+            continue          # digest-only slot
+        do_something(k)
+    ```
+    `LazyBatchRecords.keys()` (Mapping-protocol view) is unchanged — it still excludes digest-only / failed slots and matches `to_dict().keys()`. Use `keys()` when you want the dict-view cardinality; use `all_user_keys()` when you need positional alignment.
 
 ### Changed
 - Internal: `PyAsyncClient::close` and `PyAsyncClient::__aexit__` (Rust, PyO3) share a new `prepare_close()` helper. Python users of `aerospike_py.AsyncClient` see no behaviour change — the Python wrapper's `__aexit__` already delegated to `close()`, so `async with` exiting during an in-flight `connect()` has always raised `ClientError`. The refactor removes a dead-code divergence at the native layer. Closes #293.

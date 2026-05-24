@@ -275,12 +275,18 @@ class TestLazyBatchRecordsReleaseCacheAsync:
     """
 
     async def test_release_cache_keeps_handle_usable_async(self, async_client, async_cleanup):
+        import aerospike_py
+
         keys = [(NS, SET, f"rel_async_{i}") for i in range(3)]
         for i, k in enumerate(keys):
             async_cleanup.append(k)
             await async_client.put(k, {"v": i})
 
         handle = await async_client.batch_read(keys)
+        # The async wrapper must hand back a real `LazyBatchRecords`
+        # instance (not a private subclass) so that downstream
+        # `isinstance(...)` checks behave the same as on the sync path.
+        assert isinstance(handle, aerospike_py.LazyBatchRecords)
         assert "rel_async_1" in handle
         first_dict = handle.to_dict()
 
