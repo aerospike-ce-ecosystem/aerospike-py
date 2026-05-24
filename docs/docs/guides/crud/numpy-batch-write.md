@@ -474,7 +474,7 @@ for i in range(0, len(data), chunk_size):
 
 ```python
 # Sync
-results: BatchRecords = client.batch_write_numpy(
+results: BatchWriteResult = client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -485,7 +485,7 @@ results: BatchRecords = client.batch_write_numpy(
 )
 
 # Async
-results: BatchRecords = await client.batch_write_numpy(
+results: BatchWriteResult = await client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -506,6 +506,6 @@ results: BatchRecords = await client.batch_write_numpy(
 | `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides |
 | `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). `0` = no retry. |
 
-**Returns:** `BatchRecords` — contains `batch_records: list[BatchRecord]` where each `BatchRecord` has `key`, `result` (0=success), and `record` (a `Record` or `None`).
+**Returns:** `BatchWriteResult` — NamedTuple with `batch_records: list[BatchRecord]`. Each `BatchRecord` carries `key`, `result` (0=success), `record` (a `Record` or `None`), and `in_doubt` (transport-ambiguity flag).
 
 **See also:** [NumPy Batch Read Guide](./numpy-batch.md) for reading records back into numpy arrays.

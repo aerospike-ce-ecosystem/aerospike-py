@@ -49,7 +49,7 @@ _, meta, bins = record     # tuple unpacking
 
 ### `BatchRecord`
 
-Returned by: batch operations (inside `BatchRecords.batch_records`)
+Returned by: batch operations (inside `BatchWriteResult.batch_records`)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -65,13 +65,21 @@ for br in results.batch_records:
         print(br.record.bins)
 ```
 
-### `BatchRecords`
+### `BatchWriteResult`
 
-Returned by: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **and** async). Sync and async `batch_read()` now return [`LazyBatchRecords`](#lazybatchrecords) instead.
+Returned by: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **and** async). Sync and async `batch_read()` return [`LazyBatchRecords`](#lazybatchrecords) instead.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `batch_records` | `list[BatchRecord]` | Per-record results |
+
+### `BatchRecords`
+
+`TypeAlias = dict[UserKey, AerospikeRecord]`. Historical alias retained for
+import-compat. PR-374 switched `batch_read()` to
+[`LazyBatchRecords`](#lazybatchrecords); call `.to_dict()` on that handle to
+get the same dict shape this alias names. The alias is not returned by any
+current method.
 
 ### `LazyBatchRecords`
 

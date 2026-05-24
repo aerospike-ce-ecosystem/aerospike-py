@@ -73,7 +73,7 @@ print(record.key.user_key)    # "user1"
 
 ### `BatchRecord`
 
-배치 작업 내의 개별 레코드 결과입니다 (`BatchRecords.batch_records` 또는 `BatchWriteResult.batch_records` 내부).
+배치 작업 내의 개별 레코드 결과입니다 (`BatchWriteResult.batch_records` 내부).
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
@@ -89,15 +89,19 @@ for br in results.batch_records:
         print(br.record.bins)
 ```
 
-### `BatchRecords`
+### `BatchWriteResult`
 
-배치 작업의 전체 결과를 담는 컨테이너입니다.
+배치 쓰기 작업의 전체 결과를 담는 NamedTuple 컨테이너입니다.
 
-**반환하는 메서드**: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **및** async). sync 및 async `batch_read()`는 이제 [`LazyBatchRecords`](#lazybatchrecords)를 반환합니다.
+**반환하는 메서드**: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **및** async). sync 및 async `batch_read()`는 [`LazyBatchRecords`](#lazybatchrecords)를 반환합니다.
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `batch_records` | `list[BatchRecord]` | 개별 레코드 결과 리스트 |
+
+### `BatchRecords`
+
+`TypeAlias = dict[UserKey, AerospikeRecord]`. import-compat 용도로 유지되는 historical alias. PR-374에서 `batch_read()`는 [`LazyBatchRecords`](#lazybatchrecords)를 반환하도록 바뀌었고, 해당 핸들에서 `.to_dict()`를 호출하면 이 alias가 지칭하는 dict shape와 동일한 결과를 얻습니다. 현재 어떤 메서드도 이 alias를 직접 반환하지 않습니다.
 
 ### `LazyBatchRecords`
 

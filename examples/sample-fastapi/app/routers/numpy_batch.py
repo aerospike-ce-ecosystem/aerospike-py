@@ -118,7 +118,7 @@ async def numpy_batch_write(
 
     results = await client.batch_write_numpy(data, body.namespace, body.set_name, dtype, retry=body.retry)
 
-    # batch_write_numpy returns BatchRecords; br.result == 0 means success.
+    # batch_write_numpy returns BatchWriteResult; br.result == 0 means success.
     result_codes = []
     failed_count = 0
     for br in results.batch_records:
