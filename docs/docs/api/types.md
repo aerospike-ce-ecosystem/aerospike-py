@@ -87,7 +87,7 @@ through a lazy + cached `to_dict()`).
 | `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. |
 | `found_count()` | `int` | Count of successful records (no conversion needed). |
 | `keys()` | `dict_keys` | Dict-style keys view, mirrors `to_dict().keys()` (missing / failed records excluded). |
-| `all_user_keys()` | `list[UserKey]` | Every batch record's `user_key`, including missing and failed reads — useful for positional alignment with `batch_records` or a `NumpyBatchRecords`. |
+| `all_user_keys()` | `list[UserKey \| None]` | Every batch record's `user_key` in request order — positionally aligned with `batch_records` and a `NumpyBatchRecords` data array. Digest-only requests (no `user_key` element) yield `None` in their slot so `zip(handle.all_user_keys(), handle.batch_records)` always pairs every record with its requested key. |
 | `iter_records()` | `Iterator[BatchRecord]` | Iterate every record (including digest-only and failed) in insertion order. |
 | `items()` / `values()` / `__iter__` | dict views | Dict-like backward-compat — same semantics as the cached `to_dict()`. |
 | `lazy_records[user_key]` | `dict[str, Any]` | Dict-style item access (`__getitem__`). |

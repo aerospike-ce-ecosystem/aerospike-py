@@ -122,10 +122,18 @@ class LazyBatchRecords:
         ...
 
     def all_user_keys(self) -> list[Any]:
-        """Every record's ``user_key`` including missing / failed reads.
+        """Every record's ``user_key`` in request order.
 
-        Preserves request order, so the returned list aligns positionally
-        with ``batch_records`` and the ``NumpyBatchRecords`` data array.
+        The returned list has the same length as ``batch_records`` and
+        is positionally aligned with a ``NumpyBatchRecords`` data
+        array:
+
+        - successful and failed reads carry the same ``user_key`` they
+          were requested with (str / int / bytes);
+        - **digest-only** requests (no ``user_key`` element) yield
+          ``None`` in their slot rather than being dropped, so
+          ``zip(handle.all_user_keys(), handle.batch_records)`` always
+          pairs every record with its requested key (or ``None``).
         """
         ...
 
@@ -147,6 +155,10 @@ class LazyBatchRecords:
         ``found_count()``, ``__len__``, and ``to_numpy(dtype)`` continue
         to work, and a later Mapping access or ``to_dict()`` rebuilds
         the cache lazily.
+
+        Safe to call from ``finally:`` cleanup blocks: a previously
+        poisoned cache mutex is recovered and cleared rather than
+        re-raising, so this method never masks an in-flight exception.
         """
         ...
 

@@ -681,7 +681,21 @@ pub fn batch_to_numpy_py(
     // mismatch. pyo3's `PyErr::new_err` stores arguments lazily and only
     // realises the Python exception object when the error escapes back
     // through the FFI boundary, so it is safe to call without the GIL.
+    //
+    // The `entry_thread` snapshot exists to detect future refactors that
+    // try to move the fill loop off the calling thread (e.g. wrapping
+    // `tokio::spawn` or `rayon::par_iter` inside the closure). The
+    // `BufferAddr::as_ptr` safety contract requires single-thread sync
+    // execution; if that ever changes, the debug assert here will fire
+    // before the raw pointers cause UB. In release builds the snapshot
+    // compiles out.
+    let entry_thread = std::thread::current().id();
     py.detach(move || -> PyResult<()> {
+        debug_assert_eq!(
+            std::thread::current().id(),
+            entry_thread,
+            "py.detach closure must run on the calling thread — BufferAddr is not Send across threads"
+        );
         // SAFETY: the NumPy arrays (`data_array`, `meta_array`,
         // `result_codes_array`) outlive this closure — they are owned by
         // the outer scope which strictly outlives `py.detach`.
@@ -736,6 +750,13 @@ pub fn batch_to_numpy_py(
                 // bins not in dtype are silently ignored
             }
         }
+        // Mirror the entry-side check so a future refactor that swaps
+        // threads mid-closure (e.g. a worker steal) is also caught.
+        debug_assert_eq!(
+            std::thread::current().id(),
+            entry_thread,
+            "py.detach closure must exit on the same thread it entered — BufferAddr is not Send across threads"
+        );
         Ok(())
     })?;
 

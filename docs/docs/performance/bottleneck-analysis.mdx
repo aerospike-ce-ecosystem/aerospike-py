@@ -83,9 +83,12 @@ into_pyobject            3.96 μs        Arc wrap is essentially free
 limiter_wait             3.56 μs        Backpressure not active
 future_into_py_setup     46.5 μs        PyO3 ↔ asyncio bridge is cheap
 tokio_schedule_delay     83.1 μs        Tokio scheduling fine
-as_dict                  832 μs         Per-call dict materialization OK
+to_dict                  832 μs         Per-call dict materialization OK
 key_parse                967 μs         200-key tuple parsing OK
-merge_as_dict            4.48 ms        9-set merge moderate
+merge_to_dict            4.48 ms        9-set merge moderate
+                                          (historical: this stage was
+                                           named `merge_as_dict` before
+                                           the alias drop in PR-374)
 io                       7.51 ms        Network (inflated by GIL during parse)
 event_loop_resume_delay  39.7 ms   🚨   Coroutines waiting their turn for GIL
 spawn_blocking_delay     234 ms    🚨   spawn_blocking queue waiting for GIL
@@ -139,12 +142,12 @@ T=~13ms   9 key_parse done (sequential, 9 × 1.46 ms)
           └─ 9 Rust async futures execute in parallel on Tokio
 T=~15ms   9 I/O complete
 T=15-51ms event loop resumes 9 coroutines sequentially:
-          ├─ task 1 → as_dict (0.79 ms) → done
+          ├─ task 1 → to_dict (0.79 ms) → done
           ├─ (event loop tick: 3-5 ms)
-          └─ task 9 → as_dict (0.79 ms) → done
+          └─ task 9 → to_dict (0.79 ms) → done
 T=~51ms   gather returns
 
-single mode: only ONE key_parse, ONE as_dict, ONE future_into_py.
+single mode: only ONE key_parse, ONE to_dict, ONE future_into_py.
 ```
 
   </TabItem>

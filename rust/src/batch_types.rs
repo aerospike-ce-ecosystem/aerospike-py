@@ -386,8 +386,10 @@ impl PyLazyBatchRecords {
     /// result are excluded from the dict — use `batch_records` to access
     /// all records.
     ///
-    /// This is the canonical conversion entry point. `as_dict()` remains
-    /// available as a deprecated alias that forwards here unchanged.
+    /// This is the canonical conversion entry point; the Mapping-
+    /// protocol dunders (`__getitem__`, `__contains__`, `items`,
+    /// `keys`, `values`, `get`, `__iter__`) share the same cached
+    /// materialisation behind the scenes.
     ///
     /// **Returned dict is a fresh shallow copy of the cached materialisation.**
     /// Mutating it will not affect future `to_dict()` calls nor the dict
@@ -474,15 +476,24 @@ impl PyLazyBatchRecords {
     /// downstream cache or feature store) to release the PyDict memory
     /// without dropping the entire handle. A subsequent Mapping access
     /// or ``to_dict()`` rebuilds the cache lazily on demand.
-    fn release_cache(&self) -> PyResult<()> {
-        let mut guard = self.cached_dict.lock().map_err(|_| {
-            crate::errors::RustPanicError::new_err(
-                "LazyBatchRecords dict cache mutex was poisoned by a previous \
-                 panic during conversion; release_cache cannot reset it safely",
-            )
-        })?;
+    ///
+    /// **Poison recovery.** Unlike the dict-view accessors (which
+    /// surface a ``RustPanicError`` if a previous conversion panicked
+    /// mid-flight and poisoned the mutex), ``release_cache`` is a
+    /// cleanup intent: the whole point is to discard whatever the
+    /// cache currently holds. A poisoned cache *is* unrecoverable for
+    /// reads, but it can — and should — still be cleared, so the next
+    /// read rebuilds it from the raw Rust records. We therefore
+    /// recover the poisoned lock and write ``None`` rather than
+    /// raising. This keeps ``release_cache`` safe to call from
+    /// ``finally:`` cleanup blocks without masking the original
+    /// exception.
+    fn release_cache(&self) {
+        let mut guard = self
+            .cached_dict
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *guard = None;
-        Ok(())
     }
 
     /// Count of records with successful result code (no conversion needed).
@@ -503,11 +514,17 @@ impl PyLazyBatchRecords {
         d.call_method0("keys")
     }
 
-    /// Return *every* batch record's ``user_key``, including missing and
-    /// failed reads (i.e. records that ``to_dict()`` filters out).
+    /// Return *every* batch record's ``user_key`` in request order.
     ///
-    /// Useful when you need positional alignment with the raw
-    /// ``batch_records`` list or with a ``NumpyBatchRecords`` result.
+    /// The returned list has the same length as ``batch_records`` and is
+    /// positionally aligned with a ``NumpyBatchRecords`` data array:
+    ///
+    /// - successful and failed reads carry the same ``user_key`` they
+    ///   were requested with (string / int / bytes);
+    /// - digest-only requests (no ``user_key`` element) yield ``None``
+    ///   in their slot rather than being dropped, so indexing into
+    ///   ``batch_records[i]`` / ``np_batch.batch_records[i]`` always
+    ///   pairs with ``all_user_keys()[i]``.
     fn all_user_keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let keys = collect_user_keys(py, &self.inner)?;
         PyList::new(py, &keys)
@@ -603,11 +620,14 @@ pub fn batch_to_dict_py<'py>(
     Ok(dict)
 }
 
-/// Convert each `BatchRecord`'s `user_key` to a Python object.
+/// Convert each `BatchRecord`'s `user_key` to a Python object, preserving
+/// the request-order index of every record.
 ///
-/// Records without a `user_key` (digest-only) are skipped. Conversion errors
-/// are `?`-propagated rather than silently dropped, so the returned `Vec`
-/// length always matches the number of records that carry a `user_key`.
+/// Records without a `user_key` (digest-only requests) are represented
+/// by `py.None()` instead of being filtered out, so the returned `Vec`
+/// length always equals `results.len()` and positional alignment with
+/// `batch_records` / a `NumpyBatchRecords` data array holds. Conversion
+/// errors are `?`-propagated rather than silently dropped.
 pub fn collect_user_keys<'py>(
     py: Python<'py>,
     results: &[BatchRecord],
@@ -615,12 +635,12 @@ pub fn collect_user_keys<'py>(
     use crate::types::value::value_to_py;
     results
         .iter()
-        .filter_map(|br| br.key.user_key.as_ref())
-        .map(|uk| -> PyResult<Bound<'py, PyAny>> {
-            match uk {
-                aerospike_core::Value::String(s) => Ok(s.into_pyobject(py)?.into_any()),
-                aerospike_core::Value::Int(i) => Ok(i.into_pyobject(py)?.into_any()),
-                v => Ok(value_to_py(py, v)?.into_bound(py)),
+        .map(|br| -> PyResult<Bound<'py, PyAny>> {
+            match &br.key.user_key {
+                Some(aerospike_core::Value::String(s)) => Ok(s.into_pyobject(py)?.into_any()),
+                Some(aerospike_core::Value::Int(i)) => Ok(i.into_pyobject(py)?.into_any()),
+                Some(v) => Ok(value_to_py(py, v)?.into_bound(py)),
+                None => Ok(py.None().into_bound(py)),
             }
         })
         .collect()
@@ -682,6 +702,23 @@ mod tests {
     /// a layout-compatible mirror and transmute — the same pattern used by the
     /// `client_ops` unit tests. Size + alignment are guarded at compile time.
     fn make_batch_record(user_key: Value) -> BatchRecord {
+        make_batch_record_inner(aerospike_core::Key::new("test", "demo", user_key).unwrap())
+    }
+
+    /// Build a `BatchRecord` whose `Key` carries no `user_key` (digest-only).
+    /// The digest is a zero-filled placeholder — sufficient for unit tests
+    /// that don't perform any server-side lookup.
+    fn make_digest_only_batch_record() -> BatchRecord {
+        let key = aerospike_core::Key {
+            namespace: "test".to_string(),
+            set_name: "demo".to_string(),
+            user_key: None,
+            digest: [0u8; 20],
+        };
+        make_batch_record_inner(key)
+    }
+
+    fn make_batch_record_inner(key: aerospike_core::Key) -> BatchRecord {
         #[repr(C)]
         struct BatchRecordMirror {
             key: aerospike_core::Key,
@@ -695,7 +732,7 @@ mod tests {
         static_assertions::assert_eq_align!(BatchRecordMirror, BatchRecord);
 
         let mirror = BatchRecordMirror {
-            key: aerospike_core::Key::new("test", "demo", user_key).unwrap(),
+            key,
             record: None,
             result_code: Some(ResultCode::Ok),
             in_doubt: false,
@@ -792,6 +829,39 @@ mod tests {
 
             assert_eq!(keys[0].extract::<String>().unwrap(), "k0");
             assert_eq!(keys[1].extract::<String>().unwrap(), "k1");
+            assert_eq!(keys[2].extract::<i64>().unwrap(), 42);
+        });
+    }
+
+    /// `collect_user_keys` preserves positional alignment by yielding
+    /// `None` for digest-only requests (`user_key=None`) rather than
+    /// filtering them out — otherwise users zipping
+    /// `all_user_keys()` with `batch_records` / a `NumpyBatchRecords`
+    /// row would get a silent off-by-one for every digest-only entry.
+    #[test]
+    fn collect_user_keys_preserves_digest_only_slots_as_none() {
+        Python::initialize();
+        Python::attach(|py| {
+            let records = vec![
+                make_batch_record(Value::from("k0".to_string())),
+                // Digest-only request: the `Key` carries no `user_key`,
+                // only a digest. `Key::new` would reject `Value::Nil`,
+                // so we construct the `Key` directly via the helper.
+                make_digest_only_batch_record(),
+                make_batch_record(Value::Int(42)),
+            ];
+            let keys = collect_user_keys(py, &records).expect("conversion should succeed");
+            assert_eq!(
+                keys.len(),
+                records.len(),
+                "digest-only slots must remain in place, not be filtered"
+            );
+
+            assert_eq!(keys[0].extract::<String>().unwrap(), "k0");
+            assert!(
+                keys[1].is_none(),
+                "digest-only entry must be `None`, not skipped"
+            );
             assert_eq!(keys[2].extract::<i64>().unwrap(), 42);
         });
     }

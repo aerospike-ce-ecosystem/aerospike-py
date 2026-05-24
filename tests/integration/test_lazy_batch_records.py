@@ -224,6 +224,90 @@ class TestLazyBatchRecordsAllRecordsViews:
         # Order matches the request order
         assert raw == [f"h_{i}" for i in range(5)] + ["missing_raw"]
 
+    async def test_all_user_keys_keeps_digest_only_as_none_positional(self, async_client, _seed_records):
+        """digest-only requests stay in their slot as ``None`` so
+        ``zip(all_user_keys(), batch_records)`` never silently
+        off-by-ones a real-world mix of user-keyed and digest-only reads.
+        """
+        keys = _seed_records
+        # Use the seeded h_2 record's digest to construct a digest-only request:
+        # 4-element tuple ``(ns, set, None, digest_bytes)``. The server still
+        # returns the record body; aerospike-py drops the user_key because the
+        # client requested by digest alone.
+        first_read = await async_client.batch_read([keys[2]])
+        # LazyBatchRecords.batch_records yields the raw PyO3 BatchRecord
+        # whose .key is the unwrapped 4-tuple `(ns, set, user_key, digest)`.
+        digest = first_read.batch_records[0].key[3]
+        assert isinstance(digest, bytes) and len(digest) == 20
+
+        digest_only = (NS, SET, None, digest)
+        # Layout: [keys[0], keys[1], DIGEST_ONLY, keys[3], keys[4]]
+        # so a positional align bug shows up as the 3rd slot being a string.
+        mixed = [keys[0], keys[1], digest_only, keys[3], keys[4]]
+
+        lazy_records = await async_client.batch_read(mixed)
+        raw = list(lazy_records.all_user_keys())
+
+        assert len(raw) == len(mixed), "all_user_keys() must preserve every request slot, including digest-only"
+        assert raw[0] == "h_0"
+        assert raw[1] == "h_1"
+        assert raw[2] is None, "digest-only slot must be None, not skipped"
+        assert raw[3] == "h_3"
+        assert raw[4] == "h_4"
+
+        # Positional alignment with batch_records must hold for downstream
+        # ``zip(all_user_keys(), batch_records)`` consumers. The raw
+        # PyO3 BatchRecord exposes ``.key`` as a 4-tuple
+        # ``(ns, set, user_key, digest)`` — index [2] is the user_key.
+        records = list(lazy_records.iter_records())
+        assert len(records) == len(raw)
+        for slot_key, br in zip(raw, records):
+            assert br.key[2] == slot_key
+
+
+class TestLazyBatchRecordsReleaseCacheAsync:
+    """Async mirror of the sync ``TestLazyBatchRecordsReleaseCache`` in
+    ``test_batch.py``. The cache itself lives on ``PyLazyBatchRecords``
+    so behaviour is shared with sync, but the async wrapper path
+    (``AsyncClient.batch_read`` returning the handle out of ``await``)
+    is otherwise untested — a future refactor that eagerly materialises
+    on the async side would pass every existing test without this.
+    """
+
+    async def test_release_cache_keeps_handle_usable_async(self, async_client, async_cleanup):
+        keys = [(NS, SET, f"rel_async_{i}") for i in range(3)]
+        for i, k in enumerate(keys):
+            async_cleanup.append(k)
+            await async_client.put(k, {"v": i})
+
+        handle = await async_client.batch_read(keys)
+        assert "rel_async_1" in handle
+        first_dict = handle.to_dict()
+
+        handle.release_cache()
+        assert len(handle) == 3
+        assert handle.found_count() == 3
+        assert [br.result for br in handle.batch_records] == [0, 0, 0]
+
+        # Mapping access after release rebuilds the cache transparently
+        assert handle["rel_async_0"]["v"] == 0
+        assert handle.to_dict() == first_dict
+
+    async def test_release_cache_does_not_invalidate_to_numpy_async(self, async_client, async_cleanup):
+        import numpy as np
+
+        keys = [(NS, SET, f"rel_async_np_{i}") for i in range(3)]
+        for i, k in enumerate(keys):
+            async_cleanup.append(k)
+            await async_client.put(k, {"score": i * 10})
+
+        handle = await async_client.batch_read(keys)
+        _ = handle.to_dict()
+        handle.release_cache()
+
+        np_batch = handle.to_numpy(np.dtype([("score", "<i8")]))
+        assert int((np_batch.result_codes == 0).sum()) == 3
+
 
 class TestLazyBatchRecordsMerge:
     """``merge_to_dict`` (single-GIL merge of multiple `LazyBatchRecords`)."""

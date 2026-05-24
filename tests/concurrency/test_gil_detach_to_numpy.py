@@ -86,8 +86,9 @@ class TestToNumpyReleasesGil:
     """``to_numpy(dtype)`` must let a sidecar Python thread make progress."""
 
     def test_to_numpy_releases_gil_for_sidecar(self, client, _seed_numpy_batch):
-        """A sidecar Python thread must reach ≥ 30 % of its alone-rate
-        progress while ``to_numpy(dtype)`` runs on the main thread.
+        """A sidecar Python thread must reach a meaningful share of its
+        alone-rate progress while ``to_numpy(dtype)`` runs on the main
+        thread.
 
         Methodology (cross-platform robust):
 
@@ -98,13 +99,17 @@ class TestToNumpyReleasesGil:
            is now active in native Rust code; the only way the sidecar
            can keep close to its alone-rate is if that native code
            explicitly releases the GIL via ``py.detach``.
+        3) Take best-of-3 ``share = measured_rate / alone_rate`` to
+           absorb single-sample jitter from a busy CI runner.
 
-        We don't try to assert near-100 % because CPython's GIL switch
-        latency, Tokio's brief GIL touches around `into_pyobject`, and
-        the OS scheduler all shave a few percent off in practice. 30 %
-        is well above the floor without ``py.detach`` (single-digit
-        percent in our measurements on macOS) but well below the
-        observed steady-state with ``py.detach`` (typically 80-95 %).
+        We assert two complementary gates:
+
+        - **Relative**: best-of-3 ``share >= 0.30`` (typical with
+          ``py.detach`` is 0.8 - 0.95; without it the share collapses
+          to single-digit percent).
+        - **Absolute floor**: the alone-rate calibration must produce a
+          non-trivial count (the relative gate is meaningless if the
+          calibration is throttled to near-zero).
         """
         keys = _seed_numpy_batch
 
@@ -114,7 +119,7 @@ class TestToNumpyReleasesGil:
         client.batch_read(keys).to_dict()
 
         # 1) Calibrate sidecar alone-rate while the main thread sleeps
-        #    (sleep releases the GIL unconditionally → sidecar runs
+        #    (sleep releases the GIL unconditionally -> sidecar runs
         #    essentially uncontended on its own core).
         sidecar_alone = _CounterSidecar()
         sidecar_alone.start()
@@ -123,42 +128,49 @@ class TestToNumpyReleasesGil:
         alone_wall = time.perf_counter() - t0
         alone_count = sidecar_alone.stop()
 
-        # 2) Measure how far the sidecar advances during a real
-        #    `to_numpy(dtype)` call. With `py.detach` in place the rate
-        #    should be close to `alone_rate`; without it the rate
-        #    drops to whatever a GIL-rotation tick gives the sidecar.
-        lazy_records_measured = client.batch_read(keys)
-        sidecar_numpy = _CounterSidecar()
-        sidecar_numpy.start()
-        t0 = time.perf_counter()
-        lazy_records_measured.to_numpy(DTYPE)
-        measured_wall = time.perf_counter() - t0
-        measured_count = sidecar_numpy.stop()
-
-        # Sanity: both windows actually elapsed enough that the
-        # comparison is not measuring scheduling jitter.
         assert alone_wall > 1e-3
-        assert measured_wall > 1e-3, (
-            f"to_numpy window too short to measure GIL release: {measured_wall * 1000:.3f} ms — raise N_RECORDS"
+        # Stricter absolute floor than before — if the system is so
+        # throttled that even an uncontended sidecar can't count >10k
+        # in 50ms, the relative gate downstream is meaningless and
+        # could silently mask a real GIL-release regression.
+        assert alone_count > 10_000, (
+            f"sidecar alone-rate calibration produced only {alone_count} counts in "
+            f"{alone_wall * 1000:.2f} ms (~{alone_count / alone_wall:.0f}/s) — "
+            f"system is too throttled to evaluate the relative share gate"
         )
-        # Sanity: the sidecar's calibration actually counted something.
-        assert alone_count > 1000, (
-            f"sidecar alone-rate calibration produced {alone_count} counts "
-            f"in {alone_wall * 1000:.2f} ms — system is too noisy to run this test"
-        )
-
         alone_rate = alone_count / alone_wall
-        measured_rate = measured_count / measured_wall
-        share = measured_rate / alone_rate if alone_rate > 0 else 0.0
 
-        # The load-bearing assertion: the GIL must be released for at
-        # least ~30 % of the to_numpy wall-clock window. The threshold
-        # is intentionally lenient (typical share is 0.8 - 0.95).
-        assert share >= 0.30, (
-            "to_numpy(dtype) did not release the GIL enough — sidecar reached "
-            f"only {share:.1%} of its alone-rate "
-            f"({measured_rate:.0f}/s during to_numpy vs {alone_rate:.0f}/s during "
-            f"time.sleep). The per-record fill loop in `batch_to_numpy_py` is "
-            f"probably no longer wrapped in `py.detach(...)` — see "
-            f"rust/src/numpy_support.rs."
+        # 2) Best-of-3 to_numpy measurements. We take the *maximum*
+        #    share (not mean) because the failure mode we're catching
+        #    — GIL never released — would force the share down on
+        #    every trial. A single-trial dip from CI scheduling jitter
+        #    therefore cannot mask a real regression, while a real
+        #    regression still fails best-of-3.
+        trials = []
+        for _ in range(3):
+            lazy_records_measured = client.batch_read(keys)
+            sidecar_numpy = _CounterSidecar()
+            sidecar_numpy.start()
+            t0 = time.perf_counter()
+            lazy_records_measured.to_numpy(DTYPE)
+            measured_wall = time.perf_counter() - t0
+            measured_count = sidecar_numpy.stop()
+
+            assert measured_wall > 1e-3, (
+                f"to_numpy window too short to measure GIL release: {measured_wall * 1000:.3f} ms - raise N_RECORDS"
+            )
+            measured_rate = measured_count / measured_wall
+            trials.append((measured_rate / alone_rate, measured_rate, measured_wall))
+
+        best_share, best_rate, best_wall = max(trials, key=lambda t: t[0])
+
+        # The load-bearing assertion: best-of-3 share >= 30%.
+        assert best_share >= 0.30, (
+            "to_numpy(dtype) did not release the GIL enough - best-of-3 sidecar "
+            f"reached only {best_share:.1%} of its alone-rate "
+            f"({best_rate:.0f}/s during a {best_wall * 1000:.1f} ms to_numpy window "
+            f"vs {alone_rate:.0f}/s during time.sleep). The per-record fill loop "
+            f"in `batch_to_numpy_py` is probably no longer wrapped in "
+            f"`py.detach(...)` - see rust/src/numpy_support.rs. All trials: "
+            f"{[f'{s:.1%}' for s, _, _ in trials]}"
         )

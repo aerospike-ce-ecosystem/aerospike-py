@@ -2,6 +2,14 @@
 
 > **대상 버전**: 0.4.0
 > **이전 버전**: 0.3.0 (`BatchRecords` NamedTuple 반환)
+>
+> **이 문서는 historical design note 입니다 (PR #264 시점).** 현재
+> `batch_read()`는 `LazyBatchRecords` 핸들을 반환하며, dict 변환은
+> 명시적으로 `.to_dict()`(또는 dict-style Mapping 접근)을 호출해야
+> 합니다. `BatchReadHandle` / `as_dict()` 같은 옛 이름은 PR #374에서
+> `LazyBatchRecords` / `to_dict()`로 통일되며 제거되었습니다.
+> 최신 API 레퍼런스는 `docs/docs/api/types.md`와
+> `docs/docs/guides/crud/numpy-batch.md`를 참조하세요.
 
 ---
 
