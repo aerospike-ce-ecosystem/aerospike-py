@@ -168,7 +168,7 @@ For high-throughput pipelines, pass a NumPy dtype to get a structured array with
 import numpy as np
 
 dtype = np.dtype([("score", "f8"), ("count", "i4")])
-result = client.batch_read(keys, _dtype=dtype)
+result = client.batch_read(keys).to_numpy(dtype)
 print(result.batch_records["score"].mean())  # columnar access
 ```
 

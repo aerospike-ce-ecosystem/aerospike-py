@@ -334,7 +334,7 @@ client.batch_write_numpy(data, "test", "points", dtype)
 # _dtype으로 읽기
 read_dtype = np.dtype([("x", "f8"), ("y", "f8"), ("category", "i4")])
 keys = [("test", "points", i) for i in range(1, 4)]
-batch = client.batch_read(keys, _dtype=read_dtype, policy={"key": aerospike.POLICY_KEY_SEND})
+batch = client.batch_read(keys, policy={"key": aerospike.POLICY_KEY_SEND}).to_numpy(read_dtype)
 
 # 벡터화 분석
 print(batch.batch_records["x"].mean())       # 3.0
@@ -370,7 +370,7 @@ async def main():
 
     read_dtype = np.dtype([("x", "f8"), ("y", "f8"), ("category", "i4")])
     keys = [("test", "points", i) for i in range(1, 4)]
-    batch = await client.batch_read(keys, _dtype=read_dtype, policy={"key": aerospike.POLICY_KEY_SEND})
+    batch = await client.batch_read(keys, policy={"key": aerospike.POLICY_KEY_SEND}).to_numpy(read_dtype)
 
     print(batch.batch_records["x"].mean())
     print(batch.batch_records["category"].sum())
@@ -456,7 +456,7 @@ except AerospikeError as e:
 - **배치 크기** -- 최적의 성능을 위해 호출당 100-5,000행을 유지하세요
 - **키 필드 규칙** -- 일관성을 위해 기본 키 필드로 `"_key"`를 사용하세요
 - **밑줄 접두사** -- `_`로 시작하는 필드는 bin에서 제외됩니다. 메타데이터 필드에 활용하세요
-- **batch_read와의 왕복** -- 효율적인 읽기를 위해 동일한 dtype 필드(`_key` 제외)를 `batch_read(_dtype=...)`에 사용하세요
+- **batch_read와의 왕복** -- 효율적인 읽기를 위해 동일한 dtype 필드(`_key` 제외)를 `batch_read(...).to_numpy(dtype)`에 사용하세요
 - **대용량 데이터셋** -- 큰 배열을 청크로 분할하여 배치로 기록하세요:
 
 ```python
@@ -470,7 +470,7 @@ for i in range(0, len(data), chunk_size):
 
 ```python
 # Sync
-results: BatchRecords = client.batch_write_numpy(
+results: BatchWriteResult = client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -481,7 +481,7 @@ results: BatchRecords = client.batch_write_numpy(
 )
 
 # Async
-results: BatchRecords = await client.batch_write_numpy(
+results: BatchWriteResult = await client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
@@ -502,6 +502,6 @@ results: BatchRecords = await client.batch_write_numpy(
 | `policy` | `dict \| None` | `None` | 선택적 [`BatchPolicy`](/docs/api/types#batchpolicy) 오버라이드 |
 | `retry` | `int` | `0` | 일시적 실패(timeout, device overload, key busy) 최대 재시도 횟수. `0` = 재시도 안 함. |
 
-**반환값:** `BatchRecords` -- `batch_records: list[BatchRecord]`를 포함하며, 각 `BatchRecord`는 `key`, `result` (0=성공), `record` (`Record` 또는 `None`)를 가집니다.
+**반환값:** `BatchWriteResult` -- `batch_records: list[BatchRecord]`를 포함하며, 각 `BatchRecord`는 `key`, `result` (0=성공), `record` (`Record` 또는 `None`), `in_doubt` (transport-level ambiguity 여부)를 가집니다.
 
 **참고:** numpy 배열로 레코드를 읽어오려면 [NumPy 배치 읽기 가이드](./numpy-batch.md)를 참조하세요.

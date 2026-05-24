@@ -126,14 +126,16 @@ class LazyBatchRecords:
 
         The returned list has the same length as ``batch_records`` and
         is positionally aligned with a ``NumpyBatchRecords`` data
-        array:
+        array. Per-slot contents:
 
-        - successful and failed reads carry the same ``user_key`` they
-          were requested with (str / int / bytes);
-        - **digest-only** requests (no ``user_key`` element) yield
-          ``None`` in their slot rather than being dropped, so
-          ``zip(handle.all_user_keys(), handle.batch_records)`` always
-          pairs every record with its requested key (or ``None``).
+        - **User-keyed requests** (``(ns, set, user_key)`` or
+          ``(ns, set, user_key, digest)``): the slot carries the
+          ``user_key`` the caller supplied, *verbatim* — not echoed by
+          the server. This holds regardless of whether the read
+          succeeded, returned ``RecordNotFound``, or failed otherwise.
+        - **Digest-only requests** (``(ns, set, None, digest)``): the
+          slot is ``None`` (the server never carries a user_key for
+          these requests).
 
         Pair this with :meth:`keys` consciously: ``keys()`` is the
         Mapping-protocol view (dict-view cardinality, never contains

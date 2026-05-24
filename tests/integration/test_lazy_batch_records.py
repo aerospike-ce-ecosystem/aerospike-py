@@ -264,6 +264,18 @@ class TestLazyBatchRecordsAllRecordsViews:
         for slot_key, br in zip(raw, records):
             assert br.key[2] == slot_key
 
+        # Visible divergence between ``keys()`` (Mapping-protocol view,
+        # excludes digest-only / failed slots) and ``all_user_keys()``
+        # (positional view, includes them as ``None``). Locks in the
+        # documented contract that the two methods *intentionally*
+        # return different lengths so a future refactor merging them
+        # cannot land silently.
+        keys_view = list(lazy_records.keys())
+        assert len(keys_view) == 4, "dict-view excludes the digest-only slot"
+        assert len(raw) == 5, "positional view keeps the digest-only slot as None"
+        assert None not in keys_view, "dict-view must never expose None"
+        assert None in raw, "positional view must surface the digest-only slot as None"
+
 
 class TestLazyBatchRecordsReleaseCacheAsync:
     """Async mirror of the sync ``TestLazyBatchRecordsReleaseCache`` in

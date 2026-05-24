@@ -108,7 +108,7 @@ else:
 
 ## Batch Read
 
-단일 네트워크 호출로 여러 record를 읽습니다. `BatchRecords` 객체를 반환합니다.
+단일 네트워크 호출로 여러 record를 읽습니다. `LazyBatchRecords` 핸들을 반환하며, `.to_dict()` / `.to_numpy(dtype)` 호출 또는 dict-style Mapping 접근(`handle["k"]`, `handle.items()` 등)으로 materialise 합니다.
 
 - `bins=None` - 모든 bin 읽기
 - `bins=["a", "b"]` - 특정 bin만 읽기

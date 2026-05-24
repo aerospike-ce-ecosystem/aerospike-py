@@ -271,7 +271,7 @@ _, meta, results = await client.operate_ordered(key, ops)
 ## Batch Operate / Remove
 
 ```python
-# Batch operate — BatchRecords 반환 (batch_read와 동일)
+# Batch operate — BatchWriteResult 반환 (.batch_records: list[BatchRecord])
 ops = [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}]
 results = client.batch_operate(keys, ops)
 for br in results.batch_records:

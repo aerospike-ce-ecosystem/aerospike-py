@@ -490,6 +490,15 @@ impl PyLazyBatchRecords {
     /// ``release_cache`` safe to call from ``finally:`` cleanup
     /// blocks without masking the original exception, and the handle
     /// is fully usable for fresh reads afterwards.
+    ///
+    /// **Recovery limit.** If the original panic was caused by an
+    /// undecodable record in ``inner`` (e.g. issue #280's legacy blob
+    /// particle), a fresh ``to_dict()`` will rebuild over the same
+    /// raw data and panic on the same record — re-poisoning the
+    /// mutex. ``release_cache`` cannot undo that; it only clears the
+    /// previous state so the next attempt has a clean baseline.
+    /// Inspect ``iter_records()`` / ``batch_records`` to isolate the
+    /// offending record before re-reading.
     fn release_cache(&self) {
         let mut guard = self
             .cached_dict
@@ -534,14 +543,18 @@ impl PyLazyBatchRecords {
     /// Return *every* batch record's ``user_key`` in request order.
     ///
     /// The returned list has the same length as ``batch_records`` and is
-    /// positionally aligned with a ``NumpyBatchRecords`` data array:
+    /// positionally aligned with a ``NumpyBatchRecords`` data array.
+    /// Per-slot contents:
     ///
-    /// - successful and failed reads carry the same ``user_key`` they
-    ///   were requested with (string / int / bytes);
-    /// - digest-only requests (no ``user_key`` element) yield ``None``
-    ///   in their slot rather than being dropped, so indexing into
-    ///   ``batch_records[i]`` / ``np_batch.batch_records[i]`` always
-    ///   pairs with ``all_user_keys()[i]``.
+    /// - **User-keyed requests** (`(ns, set, user_key)` or
+    ///   `(ns, set, user_key, digest)`): the slot carries the
+    ///   `user_key` the caller supplied, *verbatim* — not echoed by
+    ///   the server. This holds regardless of whether the read
+    ///   succeeded, returned `RecordNotFound`, or failed for any
+    ///   other reason.
+    /// - **Digest-only requests** (`(ns, set, None, digest)`): the
+    ///   slot is `None`. The server never carries a user_key for
+    ///   these requests, so there is nothing to populate.
     ///
     /// **`all_user_keys()` vs `keys()`.** Use `all_user_keys()` for
     /// the positional invariant (length matches `batch_records`,
@@ -915,6 +928,58 @@ mod tests {
                 .cached_dict(py)
                 .expect("cached_dict must succeed after release_cache recovery");
             assert_eq!(d.len(), 0);
+        });
+    }
+
+    /// `release_cache()` must remain idempotent across *repeated*
+    /// poison-and-release cycles. The docstring documents that a
+    /// fresh `to_dict()` over the same `inner` may re-poison the
+    /// mutex (e.g. an undecodable record stays undecodable across
+    /// retries); a subsequent `release_cache()` must still recover
+    /// the mutex so users can call it inside an outer retry loop
+    /// without leaving the handle wedged.
+    #[test]
+    fn release_cache_recovers_across_repeated_poisoning() {
+        Python::initialize();
+        Python::attach(|py| {
+            let handle =
+                Py::new(py, PyLazyBatchRecords::from_results(Vec::new())).expect("construct");
+
+            for cycle in 0..3 {
+                // Re-poison the cached_dict mutex with a synthetic panic.
+                let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let cell = handle.borrow(py);
+                    let _g = cell.cached_dict.lock().unwrap();
+                    panic!("synthetic conversion panic (cycle {cycle})");
+                }))
+                .is_err();
+                assert!(
+                    poisoned,
+                    "cycle {cycle}: panic must unwind to poison the mutex"
+                );
+
+                // release_cache must succeed (no raise) every cycle.
+                let cell = handle.borrow(py);
+                cell.release_cache();
+
+                // Mutex is unpoisoned and cache is observably None.
+                let recovered = cell
+                    .cached_dict
+                    .lock()
+                    .expect("cycle {cycle}: clear_poison must let lock() succeed");
+                assert!(
+                    recovered.is_none(),
+                    "cycle {cycle}: cache must be None after release_cache"
+                );
+                drop(recovered);
+
+                // Round-trip: a fresh dict-view access succeeds and
+                // returns an empty dict (inner is empty in this test).
+                let d = cell
+                    .cached_dict(py)
+                    .expect("cycle {cycle}: cached_dict must rebuild after release_cache");
+                assert_eq!(d.len(), 0);
+            }
         });
     }
 

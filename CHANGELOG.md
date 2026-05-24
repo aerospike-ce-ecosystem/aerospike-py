@@ -49,10 +49,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
             continue          # digest-only slot
         do_something(k)
     ```
+    **Heads-up: `None` is hashable.** `set(handle.all_user_keys())` and `dict.fromkeys(handle.all_user_keys())` *silently include* `None` rather than raising — the failure only surfaces a step later when downstream code does `k.startswith(...)` / sends `None` back into a `batch_read` and hits `AttributeError` / `TypeError`. Strip `None` before any aggregate-into-set/dict operation:
+    ```python
+    requested_keys = {k for k in handle.all_user_keys() if k is not None}
+    ```
     `LazyBatchRecords.keys()` (Mapping-protocol view) is unchanged — it still excludes digest-only / failed slots and matches `to_dict().keys()`. Use `keys()` when you want the dict-view cardinality; use `all_user_keys()` when you need positional alignment.
 
 ### Changed
 - Internal: `PyAsyncClient::close` and `PyAsyncClient::__aexit__` (Rust, PyO3) share a new `prepare_close()` helper. Python users of `aerospike_py.AsyncClient` see no behaviour change — the Python wrapper's `__aexit__` already delegated to `close()`, so `async with` exiting during an in-flight `connect()` has always raised `ClientError`. The refactor removes a dead-code divergence at the native layer. Closes #293.
+- Native Rust MSRV pinned to **1.80** (`rust-version = "1.80"` in `rust/Cargo.toml`). Reflects what the codebase already required (clippy `incompatible_msrv` flagged a handful of std items stabilised in 1.77 / 1.80 that existing code uses, plus `Mutex::clear_poison()` introduced in 1.74 and used by `LazyBatchRecords::release_cache`'s poison-recovery path). Only affects `pip install --no-binary` / `cargo install` builds; the published wheels remain compatible with their existing Python version range.
 
 ### Added
 - `Client.batch_write` / `AsyncClient.batch_write` — per-record bins with optional per-record TTL via `WriteMeta`. Each entry is `(key, bins)` or `(key, bins, meta)`.

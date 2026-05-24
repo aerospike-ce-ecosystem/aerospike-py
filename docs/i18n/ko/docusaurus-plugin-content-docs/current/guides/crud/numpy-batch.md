@@ -16,7 +16,7 @@ import TabItem from '@theme/TabItem';
 - **메모리 효율성** -- Rust가 Python 객체를 거치지 않고 numpy 버퍼에 직접 기록
 
 :::tip[성능]
-5개 bin이 있는 10K 레코드의 경우, 표준 `BatchRecords` 경로 대비 약 60K개의 중간 Python 객체를 제거합니다.
+5개 bin이 있는 10K 레코드의 경우, 표준 `LazyBatchRecords.to_dict()` 경로 대비 약 60K개의 중간 Python 객체를 제거합니다.
 :::
 
 ## 설치
@@ -57,7 +57,7 @@ dtype = np.dtype([
 
 # 3. _dtype으로 배치 읽기
 keys = [("test", "sensors", f"sensor_{i}") for i in range(100)]
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 
 # 4. numpy 배열로 접근
 print(batch.batch_records["temperature"].mean())  # 컬럼형 접근
@@ -97,7 +97,7 @@ async def main():
 
     # 3. _dtype으로 배치 읽기
     keys = [("test", "sensors", f"sensor_{i}") for i in range(100)]
-    batch = await client.batch_read(keys, _dtype=dtype)
+    batch = await client.batch_read(keys).to_numpy(dtype)
 
     # 4. numpy 배열로 접근
     print(batch.batch_records["temperature"].mean())
@@ -114,7 +114,13 @@ asyncio.run(main())
 
 ## NumpyBatchRecords
 
-`_dtype`을 전달하면 `batch_read()`는 `NumpyBatchRecords` 객체를 반환합니다:
+`batch_read()`가 반환하는 `LazyBatchRecords`에 `.to_numpy(dtype)`을 호출하면 `NumpyBatchRecords` 객체를 얻습니다. 구조화 배열의 per-record fill loop은 `py.detach`로 GIL을 release하므로 결과를 `torch.from_numpy(...)`로 zero-copy 전달할 수 있습니다:
+
+:::warning[Missing reads silently zero-fill]
+
+`result_codes[i] != 0`인 행(`RecordNotFound` 포함)은 dtype의 zero value로 남아 일반 0과 구분 불가합니다. 합산/평균/추론 입력으로 사용하기 전에 반드시 `batch.result_codes == 0` mask로 걸러내거나 `lazy_records.found_count()`를 확인하세요.
+
+:::
 
 | 속성 | 타입 | 설명 |
 |------|------|------|
@@ -236,7 +242,7 @@ client.put(
 
 # 읽기: 바이트에서 하위 배열이 자동 복원됨
 keys = [("test", "vectors", "vec_1")]
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 
 recovered = batch.batch_records[0]["embedding"]  # float32[128]
 np.testing.assert_array_almost_equal(recovered, embedding)
@@ -269,7 +275,7 @@ async def main():
     )
 
     keys = [("test", "vectors", "vec_1")]
-    batch = await client.batch_read(keys, _dtype=dtype)
+    batch = await client.batch_read(keys).to_numpy(dtype)
 
     recovered = batch.batch_records[0]["embedding"]
     np.testing.assert_array_almost_equal(recovered, embedding)
@@ -288,7 +294,7 @@ asyncio.run(main())
 
 ```python
 dtype = np.dtype([("temperature", "f8")])
-batch = client.batch_read(keys, bins=["temperature"], _dtype=dtype)
+batch = client.batch_read(keys, bins=["temperature"]).to_numpy(dtype)
 ```
 
 서버에서 `temperature` bin만 전송되므로 네트워크 I/O가 줄어듭니다.
@@ -300,7 +306,7 @@ batch = client.batch_read(keys, bins=["temperature"], _dtype=dtype)
 찾을 수 없는 레코드(결과 코드 2)는 구조화 배열에서 0으로 채워집니다:
 
 ```python
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 
 # 결과 코드 확인
 for i, rc in enumerate(batch.result_codes):
@@ -319,7 +325,7 @@ valid_data = batch.batch_records[success_mask]
 ```python
 # 레코드에 "temperature"는 있지만 "humidity"는 없는 경우
 dtype = np.dtype([("temperature", "f8"), ("humidity", "i4")])
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 # 해당 bin이 없는 레코드의 humidity는 0이 됩니다
 ```
 
@@ -328,11 +334,11 @@ batch = client.batch_read(keys, _dtype=dtype)
 ```python
 # TypeError: 유니코드 문자열은 지원되지 않음
 dtype = np.dtype([("name", "U10")])
-batch = client.batch_read(keys, _dtype=dtype)  # TypeError 발생
+batch = client.batch_read(keys).to_numpy(dtype)  # TypeError 발생
 
 # TypeError: Python 객체는 지원되지 않음
 dtype = np.dtype([("data", "O")])
-batch = client.batch_read(keys, _dtype=dtype)  # TypeError 발생
+batch = client.batch_read(keys).to_numpy(dtype)  # TypeError 발생
 ```
 
 ## Pandas 연동
@@ -342,7 +348,7 @@ batch = client.batch_read(keys, _dtype=dtype)  # TypeError 발생
 ```python
 import pandas as pd
 
-batch = client.batch_read(keys, _dtype=dtype)
+batch = client.batch_read(keys).to_numpy(dtype)
 
 df = pd.DataFrame(batch.batch_records)
 df["gen"] = batch.meta["gen"]
@@ -370,16 +376,14 @@ batch: NumpyBatchRecords = client.batch_read(
     keys: list[tuple[str, str, str | int | bytes]],
     bins: list[str] | None = None,
     policy: dict | None = None,
-    _dtype: np.dtype = ...,
-)
+).to_numpy(dtype: np.dtype)
 
 # Async
-batch: NumpyBatchRecords = await client.batch_read(
+batch: NumpyBatchRecords = (await client.batch_read(
     keys: list[tuple[str, str, str | int | bytes]],
     bins: list[str] | None = None,
     policy: dict | None = None,
-    _dtype: np.dtype = ...,
-)
+)).to_numpy(dtype: np.dtype)
 ```
 
 | 파라미터 | 타입 | 기본값 | 설명 |
