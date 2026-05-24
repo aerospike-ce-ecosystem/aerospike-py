@@ -87,19 +87,14 @@ through a lazy + cached `to_dict()`).
 | `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. |
 | `found_count()` | `int` | Count of successful records (no conversion needed). |
 | `keys()` | `dict_keys` | Dict-style keys view, mirrors `to_dict().keys()` (missing / failed records excluded). |
-| `raw_user_keys()` | `list[UserKey]` | Every batch record's `user_key`, including missing and failed reads — useful for positional alignment with `batch_records` or a `NumpyBatchRecords`. |
+| `all_user_keys()` | `list[UserKey]` | Every batch record's `user_key`, including missing and failed reads — useful for positional alignment with `batch_records` or a `NumpyBatchRecords`. |
 | `iter_records()` | `Iterator[BatchRecord]` | Iterate every record (including digest-only and failed) in insertion order. |
 | `items()` / `values()` / `__iter__` | dict views | Dict-like backward-compat — same semantics as the cached `to_dict()`. |
 | `lazy_records[user_key]` | `dict[str, Any]` | Dict-style item access (`__getitem__`). |
 | `user_key in lazy_records` | `bool` | Dict-style membership (`__contains__`). |
 | `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | Dict-style `get` with optional default; mirrors `dict.get` semantics. |
 | `len(lazy_records)` | `int` | Dict-view cardinality — matches `len(lazy_records.to_dict())` (successful reads with a `user_key` and a `record` body). Fast: a pure-Rust filter+count, no PyDict allocation. For the raw record count (including missing reads / per-record failures) use `len(lazy_records.batch_records)`. |
-
-Legacy aliases for code written against earlier releases:
-
-- `as_dict()` → forwards to `to_dict()`.
-- `LazyBatchRecords.merge_as_dict(...)` → forwards to
-  `LazyBatchRecords.merge_to_dict(...)`.
+| `release_cache()` | `None` | Drop the cached `PyDict` built by the first Mapping access / `to_dict()`, keeping the raw Rust records (and therefore `batch_records`, `iter_records()`, `all_user_keys()`, `found_count()`, `to_numpy(dtype)`) intact. Subsequent Mapping access rebuilds the cache lazily. Useful after a large-batch materialisation that you no longer need. |
 
 ### `ExistsResult`
 

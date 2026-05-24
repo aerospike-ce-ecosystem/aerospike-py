@@ -317,7 +317,7 @@ impl PyLazyBatchRecords {
                 "{} not present in LazyBatchRecords dict view \
                  (key is digest-only, missing from the batch response, or its read failed — \
                  inspect lazy_records.batch_records[i].result for the per-record code, \
-                 or iterate raw_user_keys() for every requested user_key)",
+                 or iterate all_user_keys() for every requested user_key)",
                 key.repr()?
             ))),
         }
@@ -413,15 +413,6 @@ impl PyLazyBatchRecords {
         })
     }
 
-    /// Backwards-compatible alias for [`Self::to_dict`].
-    ///
-    /// Kept for code written against earlier releases that exposed only the
-    /// async path. New code should call `to_dict()` so that sync and async
-    /// clients line up symmetrically with `to_numpy(dtype)`.
-    fn as_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        self.to_dict(py)
-    }
-
     /// Convert the batch read result into a `NumpyBatchRecords` structured
     /// array. The fill loop runs under `Python::detach`, so the GIL is
     /// released while raw Aerospike values are written into the NumPy
@@ -459,15 +450,6 @@ impl PyLazyBatchRecords {
         })
     }
 
-    /// Backwards-compatible alias for [`Self::merge_to_dict`].
-    #[staticmethod]
-    fn merge_as_dict<'py>(
-        handles: Vec<PyRef<'py, Self>>,
-        py: Python<'py>,
-    ) -> PyResult<Vec<Bound<'py, PyDict>>> {
-        Self::merge_to_dict(handles, py)
-    }
-
     /// Compatibility path: returns `list[BatchRecord]` with lazy per-record conversion.
     ///
     /// Each `BatchRecord`'s `.record` field is lazily converted on first access.
@@ -477,6 +459,30 @@ impl PyLazyBatchRecords {
             .iter()
             .map(|br| single_batch_record_to_py(py, br))
             .collect()
+    }
+
+    /// Drop the cached ``PyDict`` materialisation created by the first
+    /// Mapping-protocol access (``__getitem__``/``__contains__``/
+    /// ``items``/``keys``/``values``/``get``/``__iter__``) or by a
+    /// previous ``to_dict()`` call. The raw Rust ``Arc<Vec<BatchRecord>>``
+    /// is retained so that ``batch_records``, ``iter_records()``,
+    /// ``all_user_keys()``, ``found_count()``, ``__len__``, and
+    /// ``to_numpy(dtype)`` keep working without reissuing the read.
+    ///
+    /// Use this after a large-batch dict materialisation that you no
+    /// longer need (for example, after copying the result into a
+    /// downstream cache or feature store) to release the PyDict memory
+    /// without dropping the entire handle. A subsequent Mapping access
+    /// or ``to_dict()`` rebuilds the cache lazily on demand.
+    fn release_cache(&self) -> PyResult<()> {
+        let mut guard = self.cached_dict.lock().map_err(|_| {
+            crate::errors::RustPanicError::new_err(
+                "LazyBatchRecords dict cache mutex was poisoned by a previous \
+                 panic during conversion; release_cache cannot reset it safely",
+            )
+        })?;
+        *guard = None;
+        Ok(())
     }
 
     /// Count of records with successful result code (no conversion needed).
@@ -502,7 +508,7 @@ impl PyLazyBatchRecords {
     ///
     /// Useful when you need positional alignment with the raw
     /// ``batch_records`` list or with a ``NumpyBatchRecords`` result.
-    fn raw_user_keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+    fn all_user_keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
         let keys = collect_user_keys(py, &self.inner)?;
         PyList::new(py, &keys)
     }

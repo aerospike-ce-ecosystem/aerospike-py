@@ -36,9 +36,9 @@ Each `batch_read` is split into 10 stages. Histograms (`db_client_internal_stage
 | `into_pyobject` | Rust `BatchRecord` → `Py<...>` (Arc wrap, `spawn_blocking`) | held |
 | `spawn_blocking_delay` | Wall time `spawn_blocking` task spent waiting in queue | — |
 | `event_loop_resume_delay` | Event-loop tick from future-ready to coroutine resume | — |
-| `to_dict` | `LazyBatchRecords.to_dict()` → `dict[Key, Record]` (legacy name: `as_dict`) | held |
+| `to_dict` | `LazyBatchRecords.to_dict()` → `dict[Key, Record]` | held |
 | `to_numpy` | `LazyBatchRecords.to_numpy(dtype)` → `NumpyBatchRecords` framing — the per-record buffer fill itself runs with the GIL **released** via `py.detach` | held (framing only) |
-| `merge_to_dict` | Multi-set merge into typed dict (legacy name: `merge_as_dict`) | held |
+| `merge_to_dict` | Multi-set merge into typed dict | held |
 | `future_into_py_setup` | PyO3 future ↔ asyncio bridge setup | held |
 
 ### Activating stage profiling

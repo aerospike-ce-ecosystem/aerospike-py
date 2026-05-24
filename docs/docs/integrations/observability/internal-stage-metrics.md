@@ -66,9 +66,9 @@ A **histogram** tracking per-stage durations inside a single database operation.
 | `spawn_blocking_delay` | Gap between I/O completion and `IntoPyObject::into_pyobject` starting on a spawn-blocking thread (GIL-bound) |
 | `into_pyobject` | `Arc` wrap + `LazyBatchRecords` construction |
 | `event_loop_resume_delay` | Gap between `into_pyobject` returning and the Python coroutine actually resuming in the event loop |
-| `to_dict` | `batch_to_dict_py` conversion (GIL held). `LazyBatchRecords.as_dict()` forwards here, so the same stage covers both names. |
+| `to_dict` | `batch_to_dict_py` conversion (GIL held). |
 | `to_numpy` | `batch_to_numpy_py` structured-array fill. The hot `Value → buffer` loop runs under `Python::detach`, so the **timer wraps only the GIL-held framing** (allocation, dtype parse, `key_map` build) — not the GIL-released fill itself. |
-| `merge_to_dict` | Static `LazyBatchRecords.merge_to_dict` — single-GIL merge of multiple handles. `merge_as_dict` is the legacy alias that forwards here. |
+| `merge_to_dict` | Static `LazyBatchRecords.merge_to_dict` — single-GIL merge of multiple handles. |
 
 ## Why This Is Opt-In
 

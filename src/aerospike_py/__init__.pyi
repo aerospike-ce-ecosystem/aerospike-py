@@ -121,12 +121,33 @@ class LazyBatchRecords:
         """Iterate every record (including digest-only and failed) in order."""
         ...
 
-    def raw_user_keys(self) -> list[Any]:
-        """Every record's ``user_key`` including missing / failed reads."""
+    def all_user_keys(self) -> list[Any]:
+        """Every record's ``user_key`` including missing / failed reads.
+
+        Preserves request order, so the returned list aligns positionally
+        with ``batch_records`` and the ``NumpyBatchRecords`` data array.
+        """
         ...
 
     def found_count(self) -> int:
         """Count of successful records (no conversion needed)."""
+        ...
+
+    def release_cache(self) -> None:
+        """Drop the cached ``PyDict`` materialisation, keeping the raw
+        Rust records intact.
+
+        The first Mapping-protocol access (``__getitem__``, ``items``,
+        ``keys``, ``values``, ``get``, ``__contains__``, ``__iter__``)
+        or call to ``to_dict()`` builds a single cached ``PyDict`` that
+        is reused on subsequent accesses. After a large-batch
+        materialisation that you no longer need, call ``release_cache()``
+        to drop the ``PyDict`` without dropping the entire handle —
+        ``batch_records``, ``iter_records()``, ``all_user_keys()``,
+        ``found_count()``, ``__len__``, and ``to_numpy(dtype)`` continue
+        to work, and a later Mapping access or ``to_dict()`` rebuilds
+        the cache lazily.
+        """
         ...
 
     # Dict-like Mapping backward-compat — backed by cached `to_dict()`.
@@ -149,19 +170,9 @@ class LazyBatchRecords:
         dict view (digest-only or failed reads are excluded)."""
         ...
 
-    # Legacy aliases (kept for code written against earlier releases).
-    def as_dict(self) -> dict[Any, dict[str, Any]]:
-        """Deprecated alias for :meth:`to_dict`."""
-        ...
-
     @staticmethod
     def merge_to_dict(handles: list["LazyBatchRecords"]) -> list[dict[Any, dict[str, Any]]]:
         """Single-GIL merge of multiple handles into a list of dicts."""
-        ...
-
-    @staticmethod
-    def merge_as_dict(handles: list["LazyBatchRecords"]) -> list[dict[Any, dict[str, Any]]]:
-        """Deprecated alias for :meth:`merge_to_dict`."""
         ...
 
 # -- Client --------------------------------------------------------------

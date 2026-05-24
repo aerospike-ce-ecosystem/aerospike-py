@@ -197,14 +197,9 @@ class TestLazyBatchRecordsConversionCache:
         # A second `to_dict()` is also unaffected
         assert "mutated_after_to_dict" not in lazy_records.to_dict()
 
-    async def test_to_dict_equals_as_dict_alias(self, async_client, _seed_records):
-        keys = _seed_records
-        lazy_records = await async_client.batch_read(keys)
-        assert lazy_records.as_dict() == lazy_records.to_dict()
-
 
 class TestLazyBatchRecordsAllRecordsViews:
-    """``iter_records`` / ``raw_user_keys`` expose every batch record,
+    """``iter_records`` / ``all_user_keys`` expose every batch record,
     including digest-only and per-record-failed entries that the dict
     view filters out."""
 
@@ -219,19 +214,19 @@ class TestLazyBatchRecordsAllRecordsViews:
         # Dict view filters the missing entry out
         assert len(lazy_records.to_dict()) == len(keys)
 
-    async def test_raw_user_keys_includes_missing(self, async_client, _seed_records):
+    async def test_all_user_keys_includes_missing(self, async_client, _seed_records):
         keys = _seed_records
         missing_key = (NS, SET, "missing_raw")
         lazy_records = await async_client.batch_read([*keys, missing_key])
 
-        raw = list(lazy_records.raw_user_keys())
+        raw = list(lazy_records.all_user_keys())
         assert "missing_raw" in raw
         # Order matches the request order
         assert raw == [f"h_{i}" for i in range(5)] + ["missing_raw"]
 
 
 class TestLazyBatchRecordsMerge:
-    """``merge_to_dict`` / ``merge_as_dict`` (single-GIL merge of multiple `LazyBatchRecords`)."""
+    """``merge_to_dict`` (single-GIL merge of multiple `LazyBatchRecords`)."""
 
     async def test_merge_to_dict_combines_lazy_records(self, async_client, async_cleanup):
         from aerospike_py import LazyBatchRecords
@@ -249,19 +244,6 @@ class TestLazyBatchRecordsMerge:
         assert len(merged) == 2
         assert set(merged[0].keys()) == {f"merge_a_{i}" for i in range(3)}
         assert set(merged[1].keys()) == {f"merge_b_{i}" for i in range(2)}
-
-    async def test_merge_as_dict_alias_matches_merge_to_dict(self, async_client, async_cleanup):
-        from aerospike_py import LazyBatchRecords
-
-        keys = [(NS, SET, f"merge_alias_{i}") for i in range(2)]
-        for k in keys:
-            async_cleanup.append(k)
-            await async_client.put(k, {"v": 1})
-
-        r1 = await async_client.batch_read(keys)
-        r2 = await async_client.batch_read(keys)
-        # Two separate `LazyBatchRecords` to avoid Rust-side PyRef aliasing concerns
-        assert LazyBatchRecords.merge_as_dict([r1, r2]) == LazyBatchRecords.merge_to_dict([r1, r2])
 
     async def test_merge_to_dict_empty_list(self):
         from aerospike_py import LazyBatchRecords

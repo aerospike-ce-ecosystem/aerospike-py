@@ -13,6 +13,7 @@
 //! in [`batch_to_numpy_py`] (via `np.zeros`).
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::ptr;
 
 use aerospike_core::{BatchRecord, Bin, FloatValue, Key, Value};
@@ -527,6 +528,15 @@ fn float_value_to_f64(fv: &FloatValue) -> f64 {
 /// `usize` field sidesteps that — `usize: Send` always — and we cast back
 /// to `*mut u8` at use sites where we already need an `unsafe` block.
 ///
+/// The `PhantomData<&'py mut u8>` ties the address to the lifetime of
+/// the owning NumPy [`Bound`] so that the compiler statically forbids
+/// returning a `BufferAddr` out of [`batch_to_numpy_py`] or storing it
+/// past the array's drop — a guarantee the comment-only contract used
+/// to rely on. The `Send` impl re-enables the cross-`py.detach`
+/// capture that the marker would otherwise (correctly) forbid: we
+/// transfer the address into a closure that completes synchronously on
+/// the same thread before the borrow ends.
+///
 /// # Safety
 ///
 /// `BufferAddr` is only constructed inside [`batch_to_numpy_py`] from the
@@ -535,12 +545,29 @@ fn float_value_to_f64(fv: &FloatValue) -> f64 {
 /// calling thread — no other thread can resize or replace the buffer
 /// while the pointer is in use.
 #[derive(Clone, Copy)]
-struct BufferAddr(usize);
+struct BufferAddr<'py> {
+    addr: usize,
+    _phantom: PhantomData<&'py mut u8>,
+}
 
-impl BufferAddr {
+// SAFETY: see the type docs — the address is captured into a
+// `py.detach` closure that completes on the same thread within the
+// originating NumPy array's borrow, so the `Send` cross-thread
+// implication of `PhantomData<&'py mut u8>` does not materialise.
+unsafe impl Send for BufferAddr<'_> {}
+
+impl<'py> BufferAddr<'py> {
+    /// # Safety
+    ///
+    /// `array` must own a writable buffer whose lifetime covers `'py`,
+    /// and `ptr` must be its current data pointer (as returned by
+    /// [`get_array_data_ptr`]).
     #[inline]
-    fn from_ptr(ptr: *mut u8) -> Self {
-        Self(ptr as usize)
+    unsafe fn from_ptr(_array: &Bound<'py, PyAny>, ptr: *mut u8) -> Self {
+        Self {
+            addr: ptr as usize,
+            _phantom: PhantomData,
+        }
     }
 
     /// # Safety
@@ -550,7 +577,7 @@ impl BufferAddr {
     /// must not have been reallocated.
     #[inline]
     unsafe fn as_ptr(self) -> *mut u8 {
-        self.0 as *mut u8
+        self.addr as *mut u8
     }
 }
 
@@ -617,10 +644,22 @@ pub fn batch_to_numpy_py(
 
     // 3. Get raw data pointers, stored as `usize` so they can cross
     //    `py.detach` (Rust 2021 disjoint captures forbid capturing
-    //    `*mut u8` directly; see [`BufferAddr`] docs).
-    let data_addr = BufferAddr::from_ptr(get_array_data_ptr(&data_array)?);
-    let meta_addr = BufferAddr::from_ptr(get_array_data_ptr(&meta_array)?);
-    let rc_addr = BufferAddr::from_ptr(get_array_data_ptr(&result_codes_array)?);
+    //    `*mut u8` directly; see [`BufferAddr`] docs). The `'py`
+    //    lifetime on each address is tied to the owning `Bound`, so
+    //    the compiler statically rejects any use that outlives the
+    //    array.
+    //
+    // SAFETY: the `*mut u8` returned by `get_array_data_ptr` is the
+    // data pointer of the just-allocated NumPy array; the local
+    // `Bound` keeps that array alive for the whole `'py` borrow.
+    let data_addr = unsafe { BufferAddr::from_ptr(&data_array, get_array_data_ptr(&data_array)?) };
+    let meta_addr = unsafe { BufferAddr::from_ptr(&meta_array, get_array_data_ptr(&meta_array)?) };
+    let rc_addr = unsafe {
+        BufferAddr::from_ptr(
+            &result_codes_array,
+            get_array_data_ptr(&result_codes_array)?,
+        )
+    };
 
     // meta stride: gen(u4) + ttl(u4) = 8 bytes
     let meta_stride: usize = 8;

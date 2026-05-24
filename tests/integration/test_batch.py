@@ -151,8 +151,8 @@ class TestSyncLazyBatchRecordsMapping:
         assert len(lazy_records) == 0
         assert lazy_records.to_dict() == {}
         assert lazy_records.found_count() == 0
-        # raw_user_keys preserves the request order
-        assert list(lazy_records.raw_user_keys()) == [f"all_missing_{i}" for i in range(3)]
+        # all_user_keys preserves the request order
+        assert list(lazy_records.all_user_keys()) == [f"all_missing_{i}" for i in range(3)]
         # iter_records yields one entry per missing key
         assert len(list(lazy_records.iter_records())) == 3
 
@@ -176,11 +176,70 @@ class TestLazyBatchRecordsPublicImport:
         assert isinstance(handle, aerospike_py.LazyBatchRecords)
 
 
+class TestLazyBatchRecordsReleaseCache:
+    """``release_cache()`` drops the cached PyDict without dropping the
+    raw Rust records: subsequent reads of ``batch_records`` /
+    ``to_numpy(dtype)`` keep working, and a later Mapping access
+    rebuilds the cache lazily.
+    """
+
+    def test_release_cache_keeps_handle_usable(self, client, cleanup):
+        keys = [("test", "demo", f"rel_cache_{i}") for i in range(3)]
+        for i, k in enumerate(keys):
+            cleanup.append(k)
+            client.put(k, {"v": i})
+
+        handle = client.batch_read(keys)
+
+        # Build the cached PyDict via a Mapping-protocol access
+        assert "rel_cache_1" in handle
+        first_dict = handle.to_dict()
+
+        # Drop the cache — raw records survive
+        handle.release_cache()
+        assert len(handle) == 3  # __len__ still uses the pure-Rust filter
+        assert handle.found_count() == 3
+        assert [br.result for br in handle.batch_records] == [0, 0, 0]
+
+        # Mapping access after release rebuilds the cache transparently
+        assert handle["rel_cache_0"]["v"] == 0
+        rebuilt_dict = handle.to_dict()
+        assert rebuilt_dict == first_dict
+
+    def test_release_cache_before_first_access_is_idempotent(self, client, cleanup):
+        key = ("test", "demo", "rel_cache_idempotent")
+        cleanup.append(key)
+        client.put(key, {"v": 1})
+
+        handle = client.batch_read([key])
+        # Never accessed any Mapping dunder / to_dict() — cache is empty
+        handle.release_cache()
+        handle.release_cache()  # idempotent
+        # Still usable
+        assert handle.to_dict() == {"rel_cache_idempotent": {"v": 1}}
+
+    def test_release_cache_does_not_invalidate_to_numpy(self, client, cleanup):
+        import numpy as np
+
+        keys = [("test", "demo", f"rel_cache_np_{i}") for i in range(3)]
+        for i, k in enumerate(keys):
+            cleanup.append(k)
+            client.put(k, {"score": i * 10})
+
+        handle = client.batch_read(keys)
+        _ = handle.to_dict()  # warms cache
+        handle.release_cache()
+
+        # to_numpy must still produce a populated buffer for all 3 reads
+        np_batch = handle.to_numpy(np.dtype([("score", "<i8")]))
+        assert int((np_batch.result_codes == 0).sum()) == 3
+
+
 class TestLazyBatchRecordsMergeDuplicateHandle:
     """``merge_to_dict([h, h])`` with the *same* handle passed twice must
-    not panic on the Rust side (each ``PyRef`` would alias). This test
-    locks in the safety contract referenced by the comment in
-    ``test_lazy_batch_records.py::test_merge_as_dict_alias_matches_merge_to_dict``.
+    not panic on the Rust side (each ``PyRef`` would alias). Pins the
+    safety contract that the dropped ``merge_as_dict`` alias previously
+    side-stepped by using two distinct handles.
     """
 
     def test_merge_with_same_handle_twice(self, client, cleanup):
