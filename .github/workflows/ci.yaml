@@ -42,6 +42,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   AEROSPIKE_PORT: "3000"
+  # Mirrors `rust-version` in rust/Cargo.toml. Defined at workflow level
+  # (not job level) so it is available inside `name:` expressions; using
+  # `${{ env.MSRV }}` in `jobs.<id>.name` is evaluated before job-level
+  # `env:` is in scope and causes "Unrecognized named-value: 'env'".
+  MSRV: "1.80"
 
 jobs:
   lint:
@@ -82,14 +87,13 @@ jobs:
         run: cargo test --manifest-path rust/Cargo.toml --features otel
 
   msrv-check:
-    name: MSRV cargo check (Rust ${{ env.MSRV }})
+    # Note: `name:` at job level cannot reference `env.MSRV` (env context
+    # is not available during workflow parsing). The version below is the
+    # display string; the actual MSRV is read from `env.MSRV` defined at
+    # the workflow level, and the drift-gate step below keeps them in sync.
+    name: MSRV cargo check (Rust 1.80)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # Mirrors `rust-version` in rust/Cargo.toml. Keep in sync when bumping;
-      # the "MSRV ↔ Cargo.toml drift gate" step below hard-fails the build if
-      # the two values get out of step.
-      MSRV: "1.80"
     steps:
       - uses: actions/checkout@v6
 
