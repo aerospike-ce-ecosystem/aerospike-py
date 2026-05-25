@@ -66,6 +66,7 @@ dev = [
     { name = "ruff" },
 ]
 test = [
+    { name = "hypothesis" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pytest" },
@@ -76,6 +77,7 @@ test-all = [
     { name = "fastapi" },
     { name = "gunicorn" },
     { name = "httpx" },
+    { name = "hypothesis" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "prometheus-client" },
@@ -103,6 +105,7 @@ test-gunicorn = [
 test-integration = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "hypothesis" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "prometheus-client" },
@@ -131,6 +134,7 @@ dev = [
     { name = "ruff" },
 ]
 test = [
+    { name = "hypothesis", specifier = ">=6.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -140,6 +144,7 @@ test-all = [
     { name = "fastapi" },
     { name = "gunicorn" },
     { name = "httpx" },
+    { name = "hypothesis", specifier = ">=6.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "prometheus-client" },
     { name = "pytest" },
@@ -166,6 +171,7 @@ test-gunicorn = [
 test-integration = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "hypothesis", specifier = ">=6.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "prometheus-client" },
     { name = "pytest" },
