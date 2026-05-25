@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Rust",
     "Topic :: Database",
@@ -128,7 +129,7 @@ venv = ".venv"
 
 [tool.tox]
 requires = ["tox-uv>=1.25"]
-env_list = ["py{310,311,312,313,314}", "py314t"]
+env_list = ["py{310,311,312,313,314,315}", "py313t", "py314t", "py315t"]
 
 [tool.tox.env_run_base]
 package = "wheel"
@@ -136,8 +137,14 @@ dependency_groups = ["test"]
 pass_env = ["AEROSPIKE_HOST", "AEROSPIKE_PORT", "AEROSPIKE_CLUSTER_NAME"]
 commands = [["pytest", "tests/unit/", "-v"]]
 
+[tool.tox.env.py313t]
+base_python = ["python3.13t"]
+
 [tool.tox.env.py314t]
 base_python = ["python3.14t"]
+
+[tool.tox.env.py315t]
+base_python = ["python3.15t"]
 
 [tool.tox.env.integration]
 dependency_groups = ["test-integration"]
@@ -146,6 +153,25 @@ commands = [["pytest", "tests/integration/", "-v"]]
 [tool.tox.env.concurrency]
 commands = [["pytest", "tests/concurrency/", "-v", "--ignore=tests/concurrency/test_freethreading.py"]]
 
+# Free-threaded (no-GIL) concurrency runs.
+# The crate ships #[pymodule(gil_used = false)] so every free-threaded CPython
+# build (3.13t experimental, 3.14t supported-but-not-default, 3.15t alpha)
+# should pass the same concurrency suite.
+[tool.tox.env.freethreading-py313t]
+base_python = ["python3.13t"]
+commands = [["pytest", "tests/concurrency/", "-v"]]
+
+[tool.tox.env.freethreading-py314t]
+base_python = ["python3.14t"]
+commands = [["pytest", "tests/concurrency/", "-v"]]
+
+[tool.tox.env.freethreading-py315t]
+base_python = ["python3.15t"]
+commands = [["pytest", "tests/concurrency/", "-v"]]
+
+# Back-compat alias — older docs/CI may still call `tox -e freethreading`.
+# Points at 3.14t (the supported reference build); use the per-version envs
+# above when you need to pin a specific free-threaded interpreter.
 [tool.tox.env.freethreading]
 base_python = ["python3.14t"]
 commands = [["pytest", "tests/concurrency/", "-v"]]

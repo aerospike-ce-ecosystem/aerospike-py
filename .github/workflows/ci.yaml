@@ -1,5 +1,6 @@
 name: CI
-# Rust build + Python 3.10~3.14 unit tests + integration tests + concurrency tests + compatibility tests + lint + security audit
+# Rust build + Python 3.10~3.15 unit tests (incl. 3.13t/3.14t/3.15t free-threaded)
+# + integration tests + concurrency tests + compatibility tests + lint + security audit
 
 on:
   push:
@@ -41,6 +42,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   AEROSPIKE_PORT: "3000"
+  # Mirrors `rust-version` in rust/Cargo.toml. Defined at workflow level
+  # (not job level) so it is available inside `name:` expressions; using
+  # `${{ env.MSRV }}` in `jobs.<id>.name` is evaluated before job-level
+  # `env:` is in scope and causes "Unrecognized named-value: 'env'".
+  MSRV: "1.80"
 
 jobs:
   lint:
@@ -81,14 +87,13 @@ jobs:
         run: cargo test --manifest-path rust/Cargo.toml --features otel
 
   msrv-check:
-    name: MSRV cargo check (Rust ${{ env.MSRV }})
+    # Note: `name:` at job level cannot reference `env.MSRV` (env context
+    # is not available during workflow parsing). The version below is the
+    # display string; the actual MSRV is read from `env.MSRV` defined at
+    # the workflow level, and the drift-gate step below keeps them in sync.
+    name: MSRV cargo check (Rust 1.80)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # Mirrors `rust-version` in rust/Cargo.toml. Keep in sync when bumping;
-      # the "MSRV ↔ Cargo.toml drift gate" step below hard-fails the build if
-      # the two values get out of step.
-      MSRV: "1.80"
     steps:
       - uses: actions/checkout@v6
 
@@ -134,10 +139,11 @@ jobs:
     name: Build & Unit Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # 3.15 is alpha — let it report status without blocking the merge gate.
+    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
           - python-version: "3.10"
             tox-env: py310
@@ -149,6 +155,9 @@ jobs:
             tox-env: py313
           - python-version: "3.14"
             tox-env: py314
+          - python-version: "3.15"
+            tox-env: py315
+            experimental: true
     steps:
       - uses: actions/checkout@v6
 
@@ -172,9 +181,25 @@ jobs:
         run: uvx --with tox-uv tox -e ${{ matrix.tox-env }}
 
   build-freethreaded:
-    name: Build & Unit Tests (Python 3.14t free-threaded)
+    # Free-threaded (no-GIL) builds. The crate ships
+    # #[pymodule(gil_used = false)] so unit tests are expected to pass on
+    # every free-threaded CPython without re-enabling the GIL at import.
+    name: Build & Unit Tests (Python ${{ matrix.python-version }} free-threaded)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.13t"
+            tox-env: py313t
+            experimental: true  # 3.13t was experimental upstream
+          - python-version: "3.14t"
+            tox-env: py314t
+          - python-version: "3.15t"
+            tox-env: py315t
+            experimental: true  # 3.15 is alpha
     steps:
       - uses: actions/checkout@v6
 
@@ -185,7 +210,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: "rust-build-freethreaded"
+          shared-key: "rust-build-freethreaded-${{ matrix.python-version }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up uv
@@ -194,12 +219,16 @@ jobs:
           enable-cache: true
 
       - name: Install free-threaded Python
-        run: uv python install 3.14t
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Verify GIL is actually disabled
+        run: |
+          uv run --python ${{ matrix.python-version }} python -c "import sys; assert not sys._is_gil_enabled(), 'GIL must be OFF for free-threaded build'; print('GIL OFF on', sys.version)"
 
       - name: Run unit tests
-        run: uvx --with tox-uv tox -e py314t
+        run: uvx --with tox-uv tox -e ${{ matrix.tox-env }}
         env:
-          UV_PYTHON: 3.14t
+          UV_PYTHON: ${{ matrix.python-version }}
 
   integration:
     name: Integration Tests (AS ${{ matrix.server_version }})
@@ -298,9 +327,26 @@ jobs:
         run: uvx --with tox-uv tox -e concurrency
 
   test-concurrency-freethreaded:
-    name: Concurrency Tests (Python 3.14t free-threaded)
+    # End-to-end concurrency suite under a real free-threaded interpreter.
+    # This is the single load-bearing test of the gil_used = false guarantee:
+    # if shared state across threads in the Rust extension were unsafe under
+    # no-GIL semantics, these tests would surface it.
+    name: Concurrency Tests (Python ${{ matrix.python-version }} free-threaded)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.13t"
+            tox-env: freethreading-py313t
+            experimental: true
+          - python-version: "3.14t"
+            tox-env: freethreading-py314t
+          - python-version: "3.15t"
+            tox-env: freethreading-py315t
+            experimental: true
     services:
       aerospike:
         image: aerospike/aerospike-server:latest
@@ -328,7 +374,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          shared-key: "rust-build-freethreaded"
+          shared-key: "rust-build-freethreaded-${{ matrix.python-version }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up uv
@@ -337,15 +383,19 @@ jobs:
           enable-cache: true
 
       - name: Install free-threaded Python
-        run: uv python install 3.14t
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Verify GIL is actually disabled
+        run: |
+          uv run --python ${{ matrix.python-version }} python -c "import sys; assert not sys._is_gil_enabled(), 'GIL must be OFF for free-threaded build'; print('GIL OFF on', sys.version)"
 
       - name: Wait for Aerospike
         uses: ./.github/actions/wait-for-aerospike
 
       - name: Run free-threaded concurrency tests
-        run: uvx --with tox-uv tox -e freethreading
+        run: uvx --with tox-uv tox -e ${{ matrix.tox-env }}
         env:
-          UV_PYTHON: 3.14t
+          UV_PYTHON: ${{ matrix.python-version }}
 
   feasibility:
     name: Feasibility

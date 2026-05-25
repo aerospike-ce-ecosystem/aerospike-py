@@ -649,29 +649,110 @@ pub fn batch_to_dict_py<'py>(
     results: &[BatchRecord],
 ) -> PyResult<Bound<'py, PyDict>> {
     use crate::types::value::value_to_py;
+    use std::time::{Duration, Instant};
+
+    let stage_enabled = crate::metrics::is_internal_stage_enabled();
+    let mut t_key = Duration::ZERO;
+    let mut t_inner_alloc = Duration::ZERO;
+    let mut t_value_to_py = Duration::ZERO;
+    let mut t_bin_setitem = Duration::ZERO;
+    let mut t_outer_setitem = Duration::ZERO;
 
     let dict = PyDict::new(py);
     for br in results {
         // Extract user_key as Python string directly from Rust Key
+        let t0 = if stage_enabled {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let key_str = match &br.key.user_key {
             Some(aerospike_core::Value::String(s)) => s.into_pyobject(py)?.into_any(),
             Some(aerospike_core::Value::Int(i)) => i.into_pyobject(py)?.into_any(),
             Some(v) => value_to_py(py, v)?.into_bound(py),
             None => continue, // skip records without user_key
         };
+        if let Some(t0) = t0 {
+            t_key += t0.elapsed();
+        }
 
         // Skip per-record errors even if a body was returned (e.g. FilteredOut, RecordTooBig)
         if !matches!(&br.result_code, None | Some(ResultCode::Ok)) {
             continue;
         }
         if let Some(record) = &br.record {
+            let t1 = if stage_enabled {
+                Some(Instant::now())
+            } else {
+                None
+            };
             let bins = PyDict::new(py);
-            for (name, value) in &record.bins {
-                bins.set_item(name, value_to_py(py, value)?)?;
+            if let Some(t1) = t1 {
+                t_inner_alloc += t1.elapsed();
             }
+
+            for (name, value) in &record.bins {
+                let t2 = if stage_enabled {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
+                let v = value_to_py(py, value)?;
+                if let Some(t2) = t2 {
+                    t_value_to_py += t2.elapsed();
+                }
+
+                let t3 = if stage_enabled {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
+                bins.set_item(name, v)?;
+                if let Some(t3) = t3 {
+                    t_bin_setitem += t3.elapsed();
+                }
+            }
+
+            let t4 = if stage_enabled {
+                Some(Instant::now())
+            } else {
+                None
+            };
             dict.set_item(&key_str, &bins)?;
+            if let Some(t4) = t4 {
+                t_outer_setitem += t4.elapsed();
+            }
         }
     }
+
+    if stage_enabled {
+        crate::metrics::record_internal_stage_unchecked(
+            "as_dict_key",
+            "batch_read",
+            t_key.as_secs_f64(),
+        );
+        crate::metrics::record_internal_stage_unchecked(
+            "as_dict_inner_alloc",
+            "batch_read",
+            t_inner_alloc.as_secs_f64(),
+        );
+        crate::metrics::record_internal_stage_unchecked(
+            "as_dict_value_to_py",
+            "batch_read",
+            t_value_to_py.as_secs_f64(),
+        );
+        crate::metrics::record_internal_stage_unchecked(
+            "as_dict_bin_setitem",
+            "batch_read",
+            t_bin_setitem.as_secs_f64(),
+        );
+        crate::metrics::record_internal_stage_unchecked(
+            "as_dict_outer_setitem",
+            "batch_read",
+            t_outer_setitem.as_secs_f64(),
+        );
+    }
+
     Ok(dict)
 }
 

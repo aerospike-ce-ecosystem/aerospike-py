@@ -77,7 +77,7 @@ fn dropped_log_count() -> u64 {
 }
 
 /// Native Aerospike Python client module
-#[pymodule(gil_used = true)]
+#[pymodule(gil_used = false)]
 fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     logging::init();
 
