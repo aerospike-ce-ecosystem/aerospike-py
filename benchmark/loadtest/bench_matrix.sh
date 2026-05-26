@@ -20,13 +20,18 @@ PORT="${PORT:-8000}"
 WARMUP_SECS=3
 SERVER_PID=""
 
-cleanup() {
+# Single stop path used by both the in-loop "==> stopping" call and the
+# EXIT/INT/TERM trap. Guarded by `kill -0` so a re-entry after the PID
+# has been cleared is a no-op. `wait` ignores nonexistent PIDs on bash 5+
+# and is tolerated via `|| true` for older shells.
+stop_server() {
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
+  SERVER_PID=""
 }
-trap cleanup EXIT INT TERM
+trap stop_server EXIT INT TERM
 
 for CLIENT in py official; do
   echo "==> starting uvicorn with CLIENT=$CLIENT"
@@ -62,9 +67,7 @@ for CLIENT in py official; do
     bash loadtest/run_oha.sh "$SCENARIO" "$CLIENT" "$CONCURRENCY" "$DURATION" "$BATCH_SIZE"
 
   echo "==> stopping uvicorn (pid $SERVER_PID)"
-  kill "$SERVER_PID" 2>/dev/null || true
-  wait "$SERVER_PID" 2>/dev/null || true
-  SERVER_PID=""
+  stop_server
 done
 
 echo

@@ -33,5 +33,13 @@ class PyAsyncBench:
         return await self._client.batch_read(keys)
 
     async def close(self) -> None:
-        # aerospike-py AsyncClient closes on drop; explicit close is optional.
-        pass
+        # aerospike-py AsyncClient currently closes on drop; explicit close
+        # is optional. Forward to client.close() if/when the underlying API
+        # exposes it, so graceful uvicorn shutdown gets a structured close
+        # instead of relying on garbage collection.
+        close = getattr(self._client, "close", None)
+        if close is None:
+            return
+        result = close()
+        if hasattr(result, "__await__"):
+            await result

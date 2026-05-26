@@ -39,9 +39,16 @@ def _load_run(run_dir: Path) -> dict | None:
     summary = oha.get("summary", {})
     latency = oha.get("latencyPercentiles", {}) or oha.get("latency_percentiles", {})
 
+    rps = summary.get("requestsPerSec") or summary.get("requests_per_sec")
+    if rps is None:
+        # Schema drift in oha would land us here. Skip silently rather than
+        # crashing the format string in render below.
+        print(f"[skip] {run_dir.name}: oha summary missing requestsPerSec")
+        return None
+
     return {
         "meta": meta,
-        "rps": summary.get("requestsPerSec") or summary.get("requests_per_sec"),
+        "rps": rps,
         "avg_ms": _ms(summary.get("average", 0.0)),
         "p50_ms": _ms(latency.get("p50", 0.0)),
         "p95_ms": _ms(latency.get("p95", 0.0)),
@@ -104,13 +111,22 @@ def main() -> None:
 
             if "official" in by_client and "py" in by_client:
                 o, p = by_client["official"], by_client["py"]
-                rps_sp = p["rps"] / o["rps"] if o["rps"] else float("nan")
-                avg_sp = o["avg_ms"] / p["avg_ms"] if p["avg_ms"] else float("nan")
-                p95_sp = o["p95_ms"] / p["p95_ms"] if p["p95_ms"] else float("nan")
-                print(
-                    f"| {batch} | {conc} | {py} | **speedup** | "
-                    f"**{rps_sp:.2f}×** | **{avg_sp:.2f}×** | — | **{p95_sp:.2f}×** | — | — |"
-                )
+                # Skip the speedup row when either client served 0 RPS (run
+                # was effectively a failure) — otherwise the row prints
+                # "**nan×**" which is more misleading than absent.
+                if o["rps"] and p["rps"] and o["avg_ms"] and p["avg_ms"]:
+                    rps_sp = p["rps"] / o["rps"]
+                    avg_sp = o["avg_ms"] / p["avg_ms"]
+                    p95_sp = o["p95_ms"] / p["p95_ms"] if p["p95_ms"] else float("nan")
+                    print(
+                        f"| {batch} | {conc} | {py} | **speedup** | "
+                        f"**{rps_sp:.2f}×** | **{avg_sp:.2f}×** | — | **{p95_sp:.2f}×** | — | — |"
+                    )
+                else:
+                    print(
+                        f"_(skipping speedup for batch={batch}, conc={conc}, py={py}: "
+                        f"official rps={o['rps']}, py rps={p['rps']})_"
+                    )
         print()
 
 

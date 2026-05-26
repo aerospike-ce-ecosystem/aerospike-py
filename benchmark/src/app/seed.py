@@ -37,7 +37,10 @@ def main() -> None:
     parser.add_argument("--cluster-name", default="docker")
     args = parser.parse_args()
 
-    client = aerospike.client({"hosts": [(args.host, args.port)], "cluster_name": args.cluster_name}).connect()
+    try:
+        client = aerospike.client({"hosts": [(args.host, args.port)], "cluster_name": args.cluster_name}).connect()
+    except aerospike.exception.AerospikeError as e:
+        raise SystemExit(f"seed connect failed: host={args.host}:{args.port} cluster={args.cluster_name}: {e}") from e
     try:
         t0 = time.perf_counter()
         for i in range(args.count):

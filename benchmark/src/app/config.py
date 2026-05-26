@@ -19,6 +19,11 @@ AEROSPIKE_CLUSTER_NAME = os.environ.get("AEROSPIKE_CLUSTER_NAME", "docker")
 # Which client to mount on app startup. The server runs ONE client per process
 # to keep the comparison clean — no in-process toggle.
 CLIENT_KIND = os.environ.get("CLIENT", "py")  # "py" | "official"
+if CLIENT_KIND not in {"py", "official"}:
+    raise RuntimeError(
+        f"Unknown CLIENT={CLIENT_KIND!r}; expected 'py' or 'official'. "
+        "Set the CLIENT env var (see benchmark/README.md)."
+    )
 
 # Optional backpressure cap for aerospike-py AsyncClient. Without this, a
 # bursty load can put more in-flight batch_reads than the server pool can
