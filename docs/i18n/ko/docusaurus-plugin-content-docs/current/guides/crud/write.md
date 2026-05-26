@@ -3,278 +3,260 @@ title: Write Operations
 sidebar_label: Write
 sidebar_position: 2
 slug: /guides/write
-description: put, update, delete, operate, batch operate 및 낙관적 잠금 가이드
+description: Put, update, delete, operate, batch operate, and optimistic locking.
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-## Write (Put)
+## Write
 
 <Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+  <TabItem value="sync" label="Sync" default>
 
 ```python
 import aerospike_py as aerospike
 
 client = aerospike.client({"hosts": [("127.0.0.1", 3000)]}).connect()
+key: tuple[str, str, str] = ("test", "demo", "user1")
 
-key = ("test", "demo", "user1")
-
-# 단순 쓰기
+# 단순 write
 client.put(key, {"name": "Alice", "age": 30})
 
-# 지원되는 bin 값 타입
+# 지원 타입: str, int, float, bytes, list, dict, bool, None
 client.put(key, {
     "str_bin": "hello",
     "int_bin": 42,
     "float_bin": 3.14,
-    "bytes_bin": b"\x00\x01\x02",
     "list_bin": [1, 2, 3],
     "map_bin": {"nested": "dict"},
-    "bool_bin": True,
-    "none_bin": None,
 })
-```
 
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-import asyncio
-import aerospike_py as aerospike
-from aerospike_py import AsyncClient
-
-async def main():
-    client = AsyncClient({"hosts": [("127.0.0.1", 3000)]})
-    await client.connect()
-
-    key = ("test", "demo", "user1")
-
-    # 단순 쓰기
-    await client.put(key, {"name": "Alice", "age": 30})
-
-    # 지원되는 bin 값 타입
-    await client.put(key, {
-        "str_bin": "hello",
-        "int_bin": 42,
-        "float_bin": 3.14,
-        "bytes_bin": b"\x00\x01\x02",
-        "list_bin": [1, 2, 3],
-        "map_bin": {"nested": "dict"},
-        "bool_bin": True,
-        "none_bin": None,
-    })
-
-asyncio.run(main())
-```
-
-  </TabItem>
-</Tabs>
-
-### Write with TTL
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-```python
-# TTL (초 단위)
+# TTL 포함
 client.put(key, {"val": 1}, meta={"ttl": 300})
 
-# 만료하지 않음
-client.put(key, {"val": 1}, meta={"ttl": aerospike.TTL_NEVER_EXPIRE})
+# Create only (존재 시 실패)
+client.put(key, {"val": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 ```
 
   </TabItem>
-  <TabItem value="async" label="Async Client">
+  <TabItem value="async" label="Async">
 
 ```python
+await client.put(key, {"name": "Alice", "age": 30})
 await client.put(key, {"val": 1}, meta={"ttl": 300})
-await client.put(key, {"val": 1}, meta={"ttl": aerospike.TTL_NEVER_EXPIRE})
+await client.put(key, {"val": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 ```
 
   </TabItem>
 </Tabs>
 
-### Write Policies
+## Update
 
 <Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+  <TabItem value="sync" label="Sync" default>
 
 ```python
-from aerospike_py import WritePolicy
-
-# 생성 전용 (record가 이미 존재하면 실패)
-policy: WritePolicy = {"exists": aerospike.POLICY_EXISTS_CREATE_ONLY}
-client.put(key, bins, policy=policy)
-
-# 교체 전용 (record가 존재하지 않으면 실패)
-client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_REPLACE_ONLY})
-
-# key를 서버로 전송 (record와 함께 저장)
-client.put(key, bins, policy={"key": aerospike.POLICY_KEY_SEND})
-```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-await client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
-await client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_REPLACE_ONLY})
-await client.put(key, bins, policy={"key": aerospike.POLICY_KEY_SEND})
-```
-
-  </TabItem>
-</Tabs>
-
-## Update (Increment, Append, Prepend)
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-```python
-# 정수 bin 증가
 client.increment(key, "age", 1)
-
-# 실수 bin 증가
 client.increment(key, "score", 0.5)
-
-# 문자열에 추가
 client.append(key, "name", " Smith")
-
-# 문자열 앞에 추가
 client.prepend(key, "greeting", "Hello, ")
 ```
 
   </TabItem>
-  <TabItem value="async" label="Async Client">
+  <TabItem value="async" label="Async">
 
 ```python
 await client.increment(key, "age", 1)
-await client.increment(key, "score", 0.5)
 await client.append(key, "name", " Smith")
-await client.prepend(key, "greeting", "Hello, ")
 ```
 
   </TabItem>
 </Tabs>
 
-## Delete (Remove)
+## Delete
 
 <Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+  <TabItem value="sync" label="Sync" default>
 
 ```python
-# 단순 삭제
 client.remove(key)
 
-# generation 확인 후 삭제
+# generation check 포함
 client.remove(key, meta={"gen": 5}, policy={"gen": aerospike.POLICY_GEN_EQ})
-```
 
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-await client.remove(key)
-await client.remove(key, meta={"gen": 5}, policy={"gen": aerospike.POLICY_GEN_EQ})
-```
-
-  </TabItem>
-</Tabs>
-
-### Remove Specific Bins
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-```python
+# 특정 bin 만 제거
 client.remove_bin(key, ["temp_bin", "debug_bin"])
 ```
 
   </TabItem>
-  <TabItem value="async" label="Async Client">
+  <TabItem value="async" label="Async">
 
 ```python
-await client.remove_bin(key, ["temp_bin", "debug_bin"])
+await client.remove(key)
+await client.remove_bin(key, ["temp_bin"])
 ```
 
   </TabItem>
 </Tabs>
 
-## Touch (Reset TTL)
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+## Touch (TTL Reset)
 
 ```python
-client.touch(key, val=600)  # TTL을 600초로 재설정
+client.touch(key, val=600)  # 또는: await client.touch(key, val=600)
 ```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-await client.touch(key, val=600)
-```
-
-  </TabItem>
-</Tabs>
 
 ## Multi-Operation (Operate)
 
-단일 record에서 여러 작업을 원자적으로 실행합니다:
+단일 record 에 여러 operation 을 atomic 하게 실행.
 
 <Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+  <TabItem value="sync" label="Sync" default>
 
 ```python
-ops = [
+ops: list[dict] = [
     {"op": aerospike.OPERATOR_WRITE, "bin": "name", "val": "Bob"},
     {"op": aerospike.OPERATOR_INCR, "bin": "counter", "val": 1},
     {"op": aerospike.OPERATOR_READ, "bin": "counter", "val": None},
 ]
-_, meta, bins = client.operate(key, ops)
-print(bins["counter"])
-```
+record = client.operate(key, ops)
+print(record.bins["counter"])
 
-### Ordered Results
-
-```python
-_, meta, results = client.operate_ordered(key, ops)
-# results = [("name", "Bob"), ("counter", 2)]
+# 순서 보존 결과
+result = client.operate_ordered(key, ops)
+for bt in result.ordered_bins:
+    print(f"{bt.name} = {bt.value}")
 ```
 
   </TabItem>
-  <TabItem value="async" label="Async Client">
+  <TabItem value="async" label="Async">
 
 ```python
-ops = [
-    {"op": aerospike.OPERATOR_WRITE, "bin": "name", "val": "Bob"},
-    {"op": aerospike.OPERATOR_INCR, "bin": "counter", "val": 1},
-    {"op": aerospike.OPERATOR_READ, "bin": "counter", "val": None},
-]
-_, meta, bins = await client.operate(key, ops)
-print(bins["counter"])
-```
-
-### Ordered Results
-
-```python
-_, meta, results = await client.operate_ordered(key, ops)
-# results = [("name", "Bob"), ("counter", 2)]
+record = await client.operate(key, ops)
+result = await client.operate_ordered(key, ops)
 ```
 
   </TabItem>
 </Tabs>
+
+## Batch Write
+
+**per-record bin** 으로 다수 record 를 한 batch 호출로 write. `put()` 의 batch 버전 — 각 record 가 다른 bin name 과 value 를 가질 수 있음.
+
+<Tabs>
+  <TabItem value="sync" label="Sync" default>
+
+```python
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+    (("test", "demo", "user3"), {"name": "Charlie", "age": 35}),
+]
+results = client.batch_write(records)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async">
+
+```python
+records = [
+    (("test", "demo", "user1"), {"name": "Alice", "age": 30}),
+    (("test", "demo", "user2"), {"name": "Bob", "age": 25}),
+    (("test", "demo", "user3"), {"name": "Charlie", "age": 35}),
+]
+results = await client.batch_write(records)
+for br in results.batch_records:
+    if br.result != 0:
+        print(f"Failed: {br.key}, code={br.result}, in_doubt={br.in_doubt}")
+```
+
+  </TabItem>
+</Tabs>
+
+### TTL 이 있는 Batch Write
+
+TTL 은 두 수준에서 설정 가능:
+
+- **Batch-level**: `policy={"ttl": N}` 이 batch 의 모든 record 에 적용.
+- **Per-record**: `(key, bins, {"ttl": N})` 이 해당 record 에 대해 batch-level TTL 을 override.
+
+<Tabs>
+  <TabItem value="sync" label="Sync" default>
+
+```python
+# Batch-level TTL — 모든 record 가 30일 후 만료
+results = client.batch_write(records, policy={"ttl": 2592000})
+
+# Per-record TTL — 각 record 가 자기 만료 시간
+records_with_ttl = [
+    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),     # 1시간
+    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),      # 1일
+    (("test", "demo", "user3"), {"name": "Charlie"}),                   # namespace default
+]
+results = client.batch_write(records_with_ttl)
+
+# Mix: batch-level default + per-record override
+results = client.batch_write(
+    [
+        (("test", "demo", "user1"), {"name": "Alice"}),                 # batch-level TTL 사용
+        (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 3600}),   # 1시간으로 override
+    ],
+    policy={"ttl": 86400},  # default: 1일
+)
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async">
+
+```python
+# Batch-level TTL
+results = await client.batch_write(records, policy={"ttl": 2592000})
+
+# Per-record TTL
+records_with_ttl = [
+    (("test", "demo", "user1"), {"name": "Alice"}, {"ttl": 3600}),
+    (("test", "demo", "user2"), {"name": "Bob"}, {"ttl": 86400}),
+]
+results = await client.batch_write(records_with_ttl)
+```
+
+  </TabItem>
+</Tabs>
+
+**auto-recovery retry:** transient error (timeout, device overload, key busy) 로 실패한 record 는 exponential backoff 로 자동 재시도:
+
+<Tabs>
+  <TabItem value="sync" label="Sync" default>
+
+```python
+# 실패 record 를 최대 5회 retry
+results = client.batch_write(records, retry=5)
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async">
+
+```python
+# 실패 record 를 최대 5회 retry
+results = await client.batch_write(records, retry=5)
+```
+
+  </TabItem>
+</Tabs>
+
+:::tip[in_doubt flag]
+`br.in_doubt` 가 `True` 일 때 error 에도 불구하고 write 가 server 에서 완료되었을 수 있음 (예: write 전송 후 timeout). non-idempotent operation 의 중복 write 방지 위해 retry 전 `in_doubt` 확인.
+:::
 
 ## Batch Operate / Remove
 
 ```python
-# Batch operate — BatchWriteResult 반환 (.batch_records: list[BatchRecord]).
-#   참고: batch_read는 LazyBatchRecords를 반환합니다. 양쪽이 공유하는 것은
-#   per-record `BatchRecord` 행뿐이며, batch_write / batch_operate /
-#   batch_remove 결과는 동일한 `BatchWriteResult` 컨테이너로 묶입니다.
+# Batch operate — BatchWriteResult (.batch_records: list[BatchRecord]) 반환.
+#   참고: batch_read 는 LazyBatchRecords 를 반환; per-record `BatchRecord` row 만
+#   batch_write / batch_operate / batch_remove 와 공유.
 ops = [{"op": aerospike.OPERATOR_INCR, "bin": "views", "val": 1}]
 results = client.batch_operate(keys, ops)
 for br in results.batch_records:
@@ -290,70 +272,23 @@ for br in results.batch_records:
 
 ## Optimistic Locking
 
-generation 기반 충돌 해결을 사용합니다:
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
 ```python
 from aerospike_py.exception import RecordGenerationError
 
-# 현재 상태 읽기
-_, meta, bins = client.get(key)
-
+record = client.get(key)
 try:
-    # generation이 일치하는 경우에만 업데이트
     client.put(
         key,
-        {"val": bins["val"] + 1},
-        meta={"gen": meta.gen},
+        {"val": record.bins["val"] + 1},
+        meta={"gen": record.meta.gen},
         policy={"gen": aerospike.POLICY_GEN_EQ},
     )
 except RecordGenerationError:
-    print("Record was modified concurrently, retry needed")
+    print("Concurrent modification, retry needed")
 ```
 
-  </TabItem>
-  <TabItem value="async" label="Async Client">
+## 팁
 
-```python
-from aerospike_py.exception import RecordGenerationError
-
-_, meta, bins = await client.get(key)
-
-try:
-    await client.put(
-        key,
-        {"val": bins["val"] + 1},
-        meta={"gen": meta.gen},
-        policy={"gen": aerospike.POLICY_GEN_EQ},
-    )
-except RecordGenerationError:
-    print("Record was modified concurrently, retry needed")
-```
-
-  </TabItem>
-</Tabs>
-
-## Error Handling
-
-```python
-from aerospike_py.exception import (
-    RecordNotFound,
-    RecordExistsError,
-    AerospikeError,
-)
-
-try:
-    _, _, bins = client.get(key)      # or: await client.get(key)
-except RecordNotFound:
-    print("Not found")
-except AerospikeError as e:
-    print(f"Error: {e}")
-```
-
-## Best Practices
-
-- **배치 크기**: 배치당 100-5,000 keys가 최적입니다. 매우 큰 배치는 타임아웃이 발생할 수 있습니다.
-- **타임아웃**: 대규모 배치 작업에는 `total_timeout`을 늘리세요.
-- **오류 처리**: 배치 내의 개별 record는 독립적으로 실패할 수 있습니다. `br.record`가 `None`인지 항상 확인하세요.
+- **Batch size**: batch 당 100-5,000 key 가 최적. 너무 크면 timeout 가능.
+- **Timeout**: 큰 batch operation 의 경우 `total_timeout` 증가.
+- **Error handling**: 개별 batch record 는 독립적으로 실패 가능. `br.record` 가 `None` 인지 항상 확인.

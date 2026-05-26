@@ -3,36 +3,25 @@ title: Query Guide
 sidebar_label: Query
 sidebar_position: 1
 slug: /guides/query-scan
-description: 보조 인덱스 쿼리 가이드
+description: Secondary index queries with predicates.
 ---
 
 ## Secondary Index Query
 
-쿼리를 수행하려면 조회 대상 bin에 Secondary Index가 필요합니다.
+Query 는 query 대상 bin 에 secondary index 가 필요합니다.
 
-### Step 1: Create Secondary Index
+### Index 생성 + 데이터 insert
 
 ```python
 import aerospike_py as aerospike
 
-client = aerospike.client({
-    "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
-}).connect()
+client = aerospike.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 
-# 정수 인덱스
+# index 생성
 client.index_integer_create("test", "users", "age", "users_age_idx")
-
-# 문자열 인덱스
 client.index_string_create("test", "users", "city", "users_city_idx")
 
-# 지리공간 인덱스
-client.index_geo2dsphere_create("test", "locations", "coords", "geo_idx")
-```
-
-### Step 2: Insert Data
-
-```python
+# 데이터 insert
 for i in range(100):
     client.put(("test", "users", f"user_{i}"), {
         "name": f"User {i}",
@@ -41,61 +30,49 @@ for i in range(100):
     })
 ```
 
-### Step 3: Query with Predicate
+### Predicate 로 query
 
 ```python
-from aerospike_py import predicates
+from aerospike_py import predicates, Record
 
-# 동등 쿼리
+# Equality
 query = client.query("test", "users")
 query.where(predicates.equals("city", "Seoul"))
-records = query.results()
+records: list[Record] = query.results()
 
-# 범위 쿼리
-query = client.query("test", "users")
-query.where(predicates.between("age", 25, 35))
-records = query.results()
-```
-
-### Select Specific Bins
-
-```python
+# Range
 query = client.query("test", "users")
 query.select("name", "age")
 query.where(predicates.between("age", 25, 35))
 records = query.results()
 ```
 
-### Iterate with Callback
+### Callback 순회
 
 ```python
+def process(record: Record) -> None:
+    print(f"{record.bins['name']}: age {record.bins['age']}")
+
 query = client.query("test", "users")
 query.where(predicates.between("age", 25, 35))
-
-def process(record):
-    key, meta, bins = record
-    print(f"{bins['name']}: age {bins['age']}")
-
 query.foreach(process)
 ```
 
-### Early Termination
+callback 에서 `False` 반환 시 조기 종료:
 
 ```python
 count = 0
 
-def limited(record):
+def limited(record: Record):
     global count
     count += 1
-    _, _, bins = record
-    print(bins)
     if count >= 5:
-        return False  # 반복 중단
+        return False  # 순회 중단
 
 query.foreach(limited)
 ```
 
-### Cleanup Indexes
+### 정리
 
 ```python
 client.index_remove("test", "users_age_idx")
@@ -104,26 +81,28 @@ client.index_remove("test", "users_city_idx")
 
 ## Predicate Reference
 
-| 함수 | 설명 | 예시 |
-|------|------|------|
-| `equals(bin, val)` | 동등 조건 | `equals("name", "Alice")` |
-| `between(bin, min, max)` | 범위 조건 (양 끝 포함) | `between("age", 20, 30)` |
-| `contains(bin, idx_type, val)` | list/map 포함 여부 | `contains("tags", INDEX_TYPE_LIST, "py")` |
-| `geo_within_geojson_region(bin, geojson)` | 영역 내 포인트 | 아래 참조 |
-| `geo_within_radius(bin, lat, lng, radius)` | 원형 범위 내 포인트 | 아래 참조 |
-| `geo_contains_geojson_point(bin, geojson)` | 포인트를 포함하는 영역 | 아래 참조 |
+| Function | 설명 |
+|----------|-------------|
+| `equals(bin, val)` | equality 매칭 |
+| `between(bin, min, max)` | 범위 (inclusive) |
+| `contains(bin, idx_type, val)` | list/map contains |
+| `geo_within_geojson_region(bin, geojson)` | 영역 안의 point |
+| `geo_within_radius(bin, lat, lng, radius)` | circle 안의 point (m 단위) |
+| `geo_contains_geojson_point(bin, geojson)` | point 를 포함하는 region |
 
-### 지리공간 예시
+### Geospatial
 
 ```python
-# 다각형 내의 포인트
+# polygon 안의 point
 region = '{"type":"Polygon","coordinates":[[[126.9,37.5],[126.9,37.6],[127.0,37.6],[127.0,37.5],[126.9,37.5]]]}'
 query.where(predicates.geo_within_geojson_region("location", region))
 
-# 반경 내의 포인트 (미터 단위)
+# 반경 (m) 안의 point
 query.where(predicates.geo_within_radius("location", 37.5665, 126.978, 5000.0))
 
-# 포인트를 포함하는 영역
+# point 를 포함하는 region
 point = '{"type":"Point","coordinates":[126.978, 37.5665]}'
 query.where(predicates.geo_contains_geojson_point("coverage", point))
 ```
+
+secondary index 없이 server-side filtering 은 [Expression Filters](./expression-filters.md) 참조.
