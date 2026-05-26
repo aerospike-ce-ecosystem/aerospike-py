@@ -34,9 +34,10 @@ def main() -> None:
     parser.add_argument("--count", type=int, default=10_000)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18710)
+    parser.add_argument("--cluster-name", default="docker")
     args = parser.parse_args()
 
-    client = aerospike.client({"hosts": [(args.host, args.port)]}).connect()
+    client = aerospike.client({"hosts": [(args.host, args.port)], "cluster_name": args.cluster_name}).connect()
     try:
         t0 = time.perf_counter()
         for i in range(args.count):
