@@ -56,7 +56,7 @@ bench: ## End-to-end bench for SCENARIO=<s1|s2|s3|s4_gather|s4_single|s5>
 	bash loadtest/bench_matrix.sh $(SCENARIO) $(CONCURRENCY) $(DURATION) $(BATCH_SIZE)
 
 bench-all: ## Bench all 6 scenario variants sequentially (py vs official for each)
-	@for s in s1 s2 s3 s4_gather s4_single s5; do \
+	@set -e; for s in s1 s2 s3 s4_gather s4_single s5; do \
 		echo; echo "===== scenario $$s ====="; \
 		bash loadtest/bench_matrix.sh $$s $(CONCURRENCY) $(DURATION) $(BATCH_SIZE); \
 	done

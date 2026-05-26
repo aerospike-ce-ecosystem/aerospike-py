@@ -1,16 +1,18 @@
 ---
-title: Benchmarks
-sidebar_label: Benchmarks
-sidebar_position: 2
-description: Detailed benchmark numbers for aerospike-py vs official Python client across pure DB, FastAPI ASGI, and DLRM-serving workloads (Python 3.11 + GIL)
+title: Production Benchmark
+sidebar_label: Production Benchmark
+sidebar_position: 3
+description: End-to-end production-shaped benchmark — FastAPI + DLRM inference + Aerospike CE, k6 load against deployed pods, including Python 3.14t free-threaded results
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-Per-environment numbers backing the [Overview](./overview).
-All measurements use **Python 3.11 with the GIL** (the production default).
-For the free-threaded Python 3.14t comparison, see [Free-Threaded Python](./free-threaded-python).
+End-to-end measurement against a **production-shaped deployment**: FastAPI on uvicorn, DLRM (CPU inference) in the request path, Aerospike CE behind it, real HTTP load from k6, and the response body serialised back to the client.
+
+Everything that a real recsys serving pod pays for — HTTP parse, JSON serialise, model forward — is in the measurement, so the headline numbers compress relative to an [Isolated Benchmark](./isolated-benchmark), but they're the ones to quote for **capacity planning**.
+
+> **Sources**: internal benchmark runs, April 2026. Raw measurement artifacts are not committed to the repo (see git history before the `benchmark/` rewrite for the original `benchmark/results/*.md` files). The headline numbers below are reproduced from those artifacts; a clean re-measurement on the new isolated harness is tracked in [Bottleneck Analysis](./bottleneck-analysis).
 
 ## Where the gap lives
 
@@ -21,7 +23,7 @@ A) Pure DB client       ██████████████████�
 B) uvicorn ASGI         █████                 −21%  (290 → 228 ms)
 C) uvicorn + DLRM       ███████████           −42% p95 (324→189 ms)  🔥
 
-p95 advantage holds even when mean compresses (C): the GIL serializes
+p95 advantage holds even when mean compresses (C): the GIL serialises
 official-client result conversion at the tail.
 ```
 
@@ -36,7 +38,7 @@ official-client result conversion at the tail.
 
 | Item | Value |
 |---|---|
-| Source | `benchmark/results/20260416_134243/report.md` |
+| Source | Internal run, April 2026 (pre-rewrite artifact; recoverable from git history) |
 | Clients | `official` (sync C), `official-async` (sync wrapped via executor), `py-async` (aerospike-py) |
 | Sets / batch sizes | 9 / 50, 200 |
 | Concurrency / iterations | 10 / 30 |
@@ -77,7 +79,7 @@ Outlier: set_8 (0% found rate) → fast not-found path, not real read latency.
 
 | Item | Value |
 |---|---|
-| Source | `benchmark/results/asgi_20260416_134730/asgi-report.md` |
+| Source | Internal run, April 2026 (pre-rewrite artifact) |
 | Concurrency / iterations | 5 / 50 |
 
 ### Pipeline breakdown (latency in ms)
@@ -94,7 +96,7 @@ Outlier: set_8 (0% found rate) → fast not-found path, not real read latency.
 
 ### Higher concurrency exposes backpressure
 
-A second run at concurrency=10, 200 iter (`benchmark/results/asgi_20260416_135234/asgi-report.md`):
+A second run at concurrency=10, 200 iter (same April 2026 artifact set):
 
 | Client | total mean | p95 | TPS | errors |
 |---|---:|---:|---:|---:|
@@ -123,7 +125,7 @@ Closest measurement to a real recsys serving pod.
 
 | Item | Value |
 |---|---|
-| Source | `benchmark/results/k6-runtime-client-comparison.md` (config "3.11 + GIL, stage OFF") |
+| Source | Internal run, April 2026 (k6 runtime/client comparison; config "3.11 + GIL, stage OFF") |
 | Image | `aerospike-benchmark:latest` (Python 3.11.14) |
 | Loadgen | k6 10 VUs × 60s per scenario, 4 scenarios |
 | Pods | 2 replicas, 4 CPU / 4 GiB request, 8 CPU / 8 GiB limit |
@@ -152,7 +154,7 @@ avg     aerospike-py  █████████                    118 ms
 | merge_gather (aero-py only) | 202 | — | — |
 | stress (0→20→50 VUs ramp) | 592 | — | — |
 
-The **gather** gap shrinks because both clients hit GIL serialization on the result conversion step — see [Bottleneck Analysis](./bottleneck-analysis).
+The **gather** gap shrinks because both clients hit GIL serialisation on the result conversion step — see [Bottleneck Analysis](./bottleneck-analysis).
 
 ### Server-side Prometheus (same run, single mode)
 
@@ -176,9 +178,137 @@ B) uvicorn ASGI              mean 1.27×             ≈ noise at C=5
 C) uvicorn + DLRM            mean 1.24×             p95 −42%  🔥
 ```
 
-As layers are added around the DB call, the **ratio compresses** (4.8× → 1.24× mean) but **upper-percentile advantage holds** — aerospike-py keeps the GIL released during I/O, while the official client serializes GIL acquisition through `run_in_executor` and spikes at the tail.
+As layers are added around the DB call, the **ratio compresses** (4.8× → 1.24× mean) but **upper-percentile advantage holds** — aerospike-py keeps the GIL released during I/O, while the official client serialises GIL acquisition through `run_in_executor` and spikes at the tail.
+
+---
+
+## Python 3.14t free-threaded — same pipeline, GIL removed
+
+Python 3.14t is the **free-threaded** build of CPython — the GIL is disabled (`Py_GIL_DISABLED=1`). The numbers below come from the **same** Environment C pipeline (FastAPI + DLRM + k6 10 VUs × 60s), with only the runtime swapped. **No Rust or C source changes.**
+
+### TL;DR
+
+```text
+p95 single-mode (k6 10 VUs × 60s, FastAPI + DLRM)
+
+aerospike-py
+  3.11 + GIL    ███████████████              189 ms
+  3.14t         ████████                      97 ms   −49% 🔥
+
+official (C extension)
+  3.11 + GIL    █████████████████████████    324 ms
+  3.14t         ██████████                   128 ms   −60% 🔥
+
+Throughput (aerospike-py): 41.6 → 61.2 iter/s   +47%
+```
+
+The GIL was a shared bottleneck for both clients. **aerospike-py's gain came without touching Rust.**
+
+### What gets faster (and why)
+
+<Tabs>
+  <TabItem value="aspy" label="aerospike-py: stage breakdown" default>
+
+Internal stage timings under load. The two GIL-bound stages collapse to near-zero.
+
+```text
+Stage                     3.11 + GIL              3.14t       Change
+────────────────────────────────────────────────────────────────────
+spawn_blocking_delay      234 ms     ████████    0.12 ms      −99.95% 🔥
+event_loop_resume_delay   39.7 ms    ██           ≈ 0         ≈ −100%
+io (Aerospike network)    7.51 ms    ▌           1.27 ms      −83%
+merge_to_dict             4.48 ms    ▎           3.54 ms      −21%
+key_parse                 967 μs     ·           1.06 ms      +10% (noise)
+tokio_schedule_delay      83.1 μs                49.5 μs      −40%
+limiter_wait              3.56 μs                0.96 μs      −73%
+```
+
+**Two stages dominate the gain:**
+
+- **`spawn_blocking_delay`** drops from 234 ms to 0.12 ms. Under GIL, when a Rust async future completes and needs to convert results into `Py<...>` objects, it dispatches that work to a `spawn_blocking` worker. That worker has to acquire the GIL — and under contention from the asyncio event loop and other workers, the queue stretches into hundreds of milliseconds. With no GIL, the worker runs immediately.
+- **`event_loop_resume_delay`** drops to effectively zero. Under GIL, after the future resolves and the event loop is woken up, the coroutine still has to wait its turn for the GIL before resuming. Free-threaded mode lets multiple coroutines resume in parallel.
+
+`io` shrinking 8× is a second-order effect: Tokio workers can now parse Aerospike protocol responses without contending with Python code for the GIL.
+
+  </TabItem>
+  <TabItem value="official" label="official C client: even bigger ratio">
+
+The official `aerospike` client is a synchronous C extension; applications wrap it with `loop.run_in_executor(ThreadPoolExecutor, ...)`. Each request:
+
+```text
+1. Thread-pool worker dispatch
+2. C extension acquires GIL to parse arguments     ← serialised under GIL
+3. Network call (releases GIL)
+4. C extension reacquires GIL to build Python dict ← serialised under GIL
+```
+
+Under GIL contention, **steps 2 and 4 serialise** across all in-flight requests.
+
+Removing the GIL parallelises them. The official client's p95 falls **60%** (324 → 128 ms) — even more than aerospike-py's 49% in absolute terms — because it had more to lose.
+
+  </TabItem>
+</Tabs>
+
+### Same-workload comparison on 3.14t
+
+On 3.14t, when both clients hit the **same server load** (alternating endpoints in the same pod, k6 10 VUs):
+
+| Client | p95 (single mode) | Difference |
+|---|---:|---|
+| aerospike-py | **126 ms** | baseline |
+| official aerospike | 128 ms | +2 ms (~1.5%, noise) |
+
+**The 42% gap that existed under 3.11 + GIL collapses to ~2 ms under 3.14t.**
+
+This is the cleanest evidence that GIL contention — not architectural difference — was responsible for the bulk of the original gap.
+
+### Throughput (TPS)
+
+```text
+3.11 + GIL, stage OFF             ████████████        41.6  baseline
+3.11 + GIL, stage ON              █████████████       44.1  +6% (noise)
+3.14t, aerospike-py only          ███████████████████ 61.2  +47% 🔥
+3.14t, both clients (split load)  ██████████████      47.3  +14%
+```
+
+| Config | iterations/s | http_reqs/s |
+|---|---:|---:|
+| 3.11 + GIL, stage OFF | 41.6 | 50.8 |
+| 3.11 + GIL, stage ON | 44.1 | 52.9 |
+| **3.14t, aerospike-py only** | **61.2** | **80.0** |
+| 3.14t, both clients (split load) | 47.3 | 59.8 |
+
+### But aerospike-py still wins under solo load on 3.14t
+
+The "126 vs 128 ms" tie comes from a configuration where each client only sees ~5 effective VUs (10 VUs split across two endpoints). When the load is concentrated on one client, the gap reopens.
+
+| Metric | aerospike-py solo | official solo | aerospike-py advantage |
+|---|---:|---:|---|
+| k6 single p95 | **97 ms** | 134 ms | **−28%** |
+| k6 gather p95 (9× fan-out) | **107 ms** | 253 ms | **−58%** 🔥 |
+| Server `predict_duration_seconds` p95 | **100 ms** | 138 ms | **−28%** |
+| Server `batch_read_all` p95 | **64 ms** | 67 ms | −4% |
+| Theoretical capacity (Little's Law: 10 VUs / p95) | **~103 req/s** | ~75 req/s | **+37%** |
+
+**Why aerospike-py still leads under solo load on 3.14t:**
+
+1. **Native async vs threadpool wrapping.** Even without GIL contention, `run_in_executor` adds a thread-pool hop per request. aerospike-py awaits directly on the asyncio loop.
+2. **Lazy dict conversion.** `batch_read()` returns a `LazyBatchRecords` handle. The Python-dict materialisation happens lazily when the caller invokes `.to_dict()`; `.to_numpy(dtype)` provides the GIL-released structured-array path.
+3. **Single FFI boundary crossing.** The aerospike-py Rust code completes a full `batch_read` inside one PyO3 call. The C extension crosses the Python ↔ C boundary multiple times per call.
+
+These advantages compound as concurrency rises (the gather number — 107 vs 253 ms — is the clearest example).
+
+### Migration notes
+
+1. **Add a 3.14t row to CI matrix.** Run unit + integration tests under `python:3.14.2t-slim`.
+2. **Audit `unsafe` and shared mutable state in Rust** before declaring `gil_used = false`.
+3. **Wait for or build official client wheels.** PyPI does not yet ship `cp314t` wheels for the official `aerospike` package; source build works.
+
+**Side-effect: inference also got faster.** DLRM inference (PyTorch CPU, control variable) dropped from **43.5 ms → 20.7 ms (−52%)** on 3.14t. Unrelated to aerospike-py — a free side benefit for any GIL-bound inference path running alongside async I/O.
+
+---
 
 What's next:
 
-- [Free-Threaded Python](./free-threaded-python) — what happens when GIL is removed entirely
-- [Bottleneck Analysis](./bottleneck-analysis) — the `gather`→`single` recipe (another −33%)
+- [Isolated Benchmark](./isolated-benchmark) — strip the FastAPI/JSON/inference cost out to see the client gap by itself
+- [Bottleneck Analysis](./bottleneck-analysis) — per-stage profiling, the `gather`→`single` recipe (TODO: re-measure on the new harness)

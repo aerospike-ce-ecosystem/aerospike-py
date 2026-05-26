@@ -31,15 +31,15 @@ class ReadResponse(BaseModel):
 
 
 def _materialise(result, client_name: str, batch_size: int) -> int:
-    """Force materialisation and return how many records were found.
+    """Return how many records were found WITHOUT materialising bins.
 
-    Same work for both clients so the count step doesn't bias either side.
+    S1 is the "pure round trip" baseline — calling LazyBatchRecords.to_dict()
+    here would trigger the full PyDict build that S2 measures. Use the
+    pure-Rust filter+count on the aerospike-py side, and the per-record
+    result_code check on the official side. Both count result_code == 0.
     """
     if client_name == "aerospike-py":
-        # LazyBatchRecords → dict of {user_key_str: bins or None}
-        return sum(1 for v in result.to_dict().values() if v is not None)
-    # Official client (>= 19): BatchRecords.batch_records is list[BatchRecord].
-    # br.result == 0 means OK; non-zero (e.g. 2 = KEY_NOT_FOUND) means missing.
+        return result.found_count()
     return sum(1 for br in result.batch_records if br.result == 0)
 
 

@@ -10,8 +10,20 @@ import aerospike_py
 class PyAsyncBench:
     name = "aerospike-py"
 
-    def __init__(self, host: str, port: int) -> None:
-        self._client = aerospike_py.AsyncClient({"hosts": [(host, port)]})
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        cluster_name: str = "docker",
+        max_concurrent_operations: int | None = None,
+    ) -> None:
+        cfg: dict[str, Any] = {
+            "hosts": [(host, port)],
+            "cluster_name": cluster_name,
+        }
+        if max_concurrent_operations is not None:
+            cfg["max_concurrent_operations"] = max_concurrent_operations
+        self._client = aerospike_py.AsyncClient(cfg)
 
     async def connect(self) -> None:
         await self._client.connect()

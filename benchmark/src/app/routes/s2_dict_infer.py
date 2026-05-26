@@ -45,6 +45,9 @@ async def s2_predict(req: PredictRequest, request: Request) -> PredictResponse:
                 found += 1
                 rows.append([bins[name] for name in FEATURE_NAMES])
     else:
+        # Official client (aerospike >= 19): batch_records is returned in
+        # request order — verified against the live server, matches the
+        # aerospike-py path positionally.
         for br in result.batch_records:
             if br.result == 0:
                 found += 1

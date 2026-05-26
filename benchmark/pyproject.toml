@@ -1,7 +1,7 @@
 [project]
 name = "aerospike-py-benchmark"
 version = "0.1.0"
-description = "uvicorn ASGI 위에서 aerospike-py vs 공식 aerospike Python client 성능 비교"
+description = "uvicorn ASGI benchmark comparing aerospike-py against the official aerospike Python client"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
