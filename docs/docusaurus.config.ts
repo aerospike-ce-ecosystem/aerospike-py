@@ -1,14 +1,6 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
-import type {VersionBanner} from '@docusaurus/plugin-content-docs';
-import versionsConfigRaw from './versions-config.json';
-
-type VersionEntry = {label: string; path: string; banner: VersionBanner};
-const versionsConfig = versionsConfigRaw as {
-  lastVersion: string;
-  versions: Record<string, VersionEntry>;
-};
 
 const config: Config = {
   stylesheets: [
@@ -92,10 +84,6 @@ const config: Config = {
           editUrl:
             'https://github.com/aerospike-ce-ecosystem/aerospike-py/tree/main/docs/',
           showLastUpdateTime: true,
-          // Versioning: managed via versions-config.json
-          // Automatically updated by the docs-version.yaml workflow on release
-          lastVersion: versionsConfig.lastVersion,
-          versions: versionsConfig.versions,
         },
         blog: false,
         theme: {
@@ -126,11 +114,6 @@ const config: Config = {
           label: 'Docs',
         },
         {to: '/releases', label: 'Releases', position: 'left'},
-        {
-          type: 'docsVersionDropdown',
-          position: 'right',
-          dropdownActiveClassDisabled: true,
-        },
         {
           type: 'localeDropdown',
           position: 'right',

@@ -1,0 +1,120 @@
+---
+title: Isolated Benchmark
+sidebar_label: Isolated Benchmark
+sidebar_position: 2
+description: 5-scenario uvicorn ASGI benchmark suite (benchmark/) — strips FastAPI serialisation and inference cost out where possible to surface the client gap itself; includes Python 3.14t plan
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+A focused comparison of **aerospike-py vs the official `aerospike` Python client** behind a real uvicorn ASGI process. The suite intentionally **strips response serialisation cost** (each endpoint returns a single derived scalar — `found`, `pred_sum`, `subset_sum`) so the measured latency reflects `batch_read` + materialisation + (optional) inference, not JSON encoding.
+
+The opposite end of the spectrum is the [Production Benchmark](./production-benchmark), which keeps every cost a real serving pod pays (HTTP parse, full record marshalling, DLRM, network out). Use this page when you want to know **how much of the gap belongs to the client library itself**, and that page when you want **capacity-planning numbers**.
+
+> **Source**: `benchmark/` in this repo. Runs locally on podman/docker against Aerospike CE 8.1.2.1_3.
+
+## What's in the suite
+
+One FastAPI app, one client per process (`CLIENT=py|official` at startup), five scenarios — same key shape, same response shape per scenario, only the client and the materialisation path change.
+
+| # | Endpoint | What it isolates |
+|---|---|---|
+| **s1** | `POST /s1/read`                    | Pure ASGI + `batch_read` round trip. No ML, no per-record materialisation. Most direct measure of the `asyncio.to_thread` hop cost the official client pays. |
+| **s2** | `POST /s2/predict`                  | `batch_read` → Python dict iteration → `torch.tensor(rows)` → DLRM (2-layer MLP, 64→256→1). Common FastAPI ML pattern. |
+| **s3** | `POST /s3/predict`                  | aerospike-py: `to_numpy(dtype)` zero-copy structured array → `view(float32).reshape(-1, 64)` → `torch.from_numpy` → DLRM. Official client falls back to per-bin matrix copy. Pair with **s2** to isolate the zero-copy gain. |
+| **s4** | `POST /s4/gather` · `/single`       | `asyncio.gather(N batch_reads)` vs single `batch_read(mixed keys)`. Same wire payload, fixed-cost amortisation difference. |
+| **s5** | `POST /s5/subset`                   | 8 of 64 bins consumed downstream. aerospike-py: `to_numpy(subset_dtype)` materialises 8 columns; official: every record is already a 64-key Python dict. |
+
+## How to run
+
+```bash
+cd benchmark
+make up           # podman compose → aerospike:ce-8.1.2.1_3 on 127.0.0.1:18710
+make seed         # 10k deterministic records, 5 metadata bins + 64 float features f0..f63
+make bench-all CONCURRENCY=10 DURATION=30s BATCH_SIZE=50
+make report       # → markdown comparison grouped per scenario, with descriptions
+```
+
+`make bench` starts a uvicorn process per CLIENT, waits for `/healthz`, runs `oha` for the given duration, kills the process, and moves on. `oha` is the load generator (`oha --output-format json --no-tui -c $C -z $D -m POST …`); each run drops a `meta.json` next to `oha.json` so `loadtest/report.py` can group runs by `(scenario, batch_size, concurrency, python)` without re-parsing oha output.
+
+The Aerospike CE container mounts `scripts/aerospike.template.conf` so `access-address` is pinned to `127.0.0.1`. aerospike-py performs full cluster discovery on `connect()` and would otherwise re-connect to the podman-internal IP and fail; the official client only hits the seed host and gets away without it.
+
+## Smoke result
+
+Short matrix used during development (py3.11, concurrency=4, batch=30, 3s per run):
+
+| scenario | RPS speedup (py/official) | avg speedup |
+|---|---:|---:|
+| s1 read-only | 1.04× | 1.04× |
+| s2 dict-infer | 1.11× | 1.11× |
+| **s3 numpy-infer** | **1.33×** | **1.33×** |
+| s4 gather | 1.25× | 1.25× |
+| s4 single | 1.39× | 1.39× |
+| s5 lazy subset | 1.12× | 1.12× |
+
+Two patterns to note even at this size:
+
+- **s3 widens vs s2 (1.11×→1.33×).** That delta is the `to_numpy(dtype)` zero-copy advantage isolated from inference cost: same DLRM, same DB, only the materialisation path differs. The official client has no equivalent — it falls back to a per-bin Python loop.
+- **s4 single beats s4 gather (1.39× vs 1.25×).** Same key set, fewer round trips. The official client's `asyncio.to_thread` hop serialises gather, so the fan-out cost is paid N× instead of overlapping. Native async on aerospike-py overlaps the round trips and absorbs less of the gap.
+
+:::caution Real measurement is follow-up
+3s × batch=30 × concurrency=4 with everything cache-warm is a sanity check, not a benchmark you should quote. Production-grade numbers want **larger seed (10k–100k records), longer duration (60s), higher concurrency (10–50)** — and importantly the [Production Benchmark](./production-benchmark) shape if you care about end-to-end FastAPI cost.
+:::
+
+## What's deliberately not measured
+
+| Excluded | Why |
+|---|---|
+| Response body serialisation | Each endpoint returns `{found: N}` (or `+ pred_sum / subset_sum`) — a single scalar derived from the records. JSON encoding of full records would add a cost both clients pay but with different key/digest shapes, inflating the official-client side asymmetrically and burying the client gap. |
+| OTel / Prometheus / nelo | Measurement noise. The parent client library exposes those features; the benchmark suite stays clean. |
+| Docker image / k8s manifests | The point is to isolate the client library — adding a deploy/registry/manifests path drags in noise unrelated to it. |
+| Bin projection (`bins=[…]` on the wire) | Server-side optimisation, orthogonal to the client comparison. **s5** measures client-side materialisation cost on the same wire payload. |
+
+For the inverse — measurement that *includes* all the production cost — see the [Production Benchmark](./production-benchmark).
+
+---
+
+## Python 3.14t — runtime swap on the same suite
+
+Python 3.14t is the **free-threaded** build of CPython (GIL disabled). The expectation from the [Production Benchmark's 3.14t section](./production-benchmark#python-314t-free-threaded--same-pipeline-gil-removed) — where `spawn_blocking_delay` (234 ms → 0.12 ms) and `event_loop_resume_delay` (39.7 ms → ~0) collapse — should reproduce here too, but the absolute deltas will be smaller because the isolated suite already trims the GIL-bound stages downstream of `batch_read`.
+
+The benchmark/ project supports the runtime swap with a single argument:
+
+```bash
+PYTHON=3.14t uv sync           # creates a separate 3.14t venv
+PYTHON=3.14t make bench-all CONCURRENCY=10 DURATION=30s BATCH_SIZE=50
+make report                    # report.py groups runs by python version
+```
+
+Expected patterns (extrapolating from the production-benchmark stage breakdown):
+
+| Scenario | Expected on 3.14t |
+|---|---|
+| s1 read-only | Largest absolute drop on both clients — `spawn_blocking_delay` was a big share of a short request |
+| s2 dict-infer | Both improve (inference path also benefits from GIL removal — DLRM dropped 43.5 → 20.7 ms in production), the **ratio** between clients narrows but doesn't disappear |
+| **s3 numpy-infer** | The `to_numpy(dtype)` advantage is **architectural** (fewer FFI hops, no Python loop) — should survive the GIL removal more than the other scenarios |
+| s4 gather | Official client's `asyncio.to_thread` hop is now cheap; expect the gap with s4 single to narrow |
+| s5 lazy subset | aerospike-py's lazy-materialisation advantage is independent of the GIL — should hold its relative position |
+
+:::note 3.14t isolated-benchmark matrix is a TODO
+Numbers above are predictions, not measurements. The harness supports the runtime swap; what's missing is a published matrix run. Tracked in [Bottleneck Analysis](./bottleneck-analysis).
+:::
+
+## Files of interest
+
+```
+benchmark/
+├── pyproject.toml              # uv project, editable parent aerospike-py
+├── compose.yaml                # aerospike:ce-8.1.2.1_3
+├── scripts/aerospike.template.conf
+├── Makefile                    # up · seed · serve-{py,official} · bench[-all] · report
+├── src/app/
+│   ├── main.py · lifespan.py · config.py · model.py · seed.py
+│   ├── clients/{py_async,official_async}.py
+│   └── routes/s{1..5}*.py
+└── loadtest/
+    ├── run_oha.sh · bench_matrix.sh
+    ├── scenarios.py            # id → one-line description
+    └── report.py
+```

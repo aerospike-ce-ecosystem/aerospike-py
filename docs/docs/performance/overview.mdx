@@ -50,7 +50,7 @@ Full HTTP → batch_read → DLRM CPU inference → response. Closest to a real 
 | p90 | **173 ms** | 293 ms | **−41%** |
 | **p95** | **189 ms** | 324 ms | **−42%** 🔥 |
 
-[→ Full numbers (Benchmarks C)](./benchmarks?env=C)
+[→ Full numbers (Production Benchmark, env C)](./production-benchmark?env=C)
 
   </TabItem>
   <TabItem value="asgi" label="B — uvicorn ASGI only">
@@ -62,7 +62,7 @@ FastAPI + uvicorn around `batch_read`, no model inference. The "REST API in fron
 | total mean | **228 ms** | 290 ms | **−21%** |
 | TPS | **19.4** | 16.6 | **+17%** |
 
-[→ Full numbers (Benchmarks B)](./benchmarks?env=B)
+[→ Full numbers (Production Benchmark, env B)](./production-benchmark?env=B)
 
   </TabItem>
   <TabItem value="pure" label="A — Pure DB client (no HTTP/ML)">
@@ -75,15 +75,17 @@ Python loop drives `batch_read` directly. Largest gap — surrounding stack is a
 | avg p99 | **121 ms** | 195 ms | −38% |
 | TPS | **374** | 138 | **+171%** 🔥 |
 
-[→ Full numbers (Benchmarks A)](./benchmarks?env=A)
+[→ Full numbers (Production Benchmark, env A)](./production-benchmark?env=A)
 
   </TabItem>
 </Tabs>
 
-## Read next
+## How the three docs split up
 
-- **[Benchmarks](./benchmarks)** — per-environment numbers, k6 raw output, server-side Prometheus metrics
-- **[Free-Threaded Python](./free-threaded-python)** — what changes when the GIL is removed (3.14t)
-- **[Bottleneck Analysis](./bottleneck-analysis)** — internal stage profiling, why action #2 works
+| Page | When to read it |
+|---|---|
+| **[Isolated Benchmark](./isolated-benchmark)** | "How much of the gap belongs to the client library itself?" — 5 scenarios (s1..s5) on a local podman/oha harness, response serialisation stripped out. Each scenario isolates one materialisation path (dict / `to_numpy` zero-copy / gather vs single / lazy subset). Includes a 3.14t section. |
+| **[Production Benchmark](./production-benchmark)** | "What do real serving pods see?" — FastAPI + DLRM + Aerospike CE on k8s, k6 load, response body serialised, two replicas. The headline 324→189→97 ms cumulative-gain story. Includes a 3.14t section. |
+| **[Bottleneck Analysis](./bottleneck-analysis)** | Internal stage profiling and recipes (`gather→single`, etc.). Currently being re-measured on the new isolated harness. |
 
 To reproduce locally, see `benchmark/README.md`.
