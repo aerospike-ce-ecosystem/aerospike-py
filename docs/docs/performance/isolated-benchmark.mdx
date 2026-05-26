@@ -82,6 +82,7 @@ Python 3.14t is the **free-threaded** build of CPython (GIL disabled). The expec
 The benchmark/ project supports the runtime swap with a single argument:
 
 ```bash
+uv python install 3.14t        # one-time, ~30 MB download (managed by uv)
 PYTHON=3.14t uv sync           # creates a separate 3.14t venv
 PYTHON=3.14t make bench-all CONCURRENCY=10 DURATION=30s BATCH_SIZE=50
 make report                    # report.py groups runs by python version

@@ -27,8 +27,14 @@ def _load_run(run_dir: Path) -> dict | None:
     oha_path = run_dir / "oha.json"
     if not (meta_path.exists() and oha_path.exists()):
         return None
-    meta = json.loads(meta_path.read_text())
-    oha = json.loads(oha_path.read_text())
+    try:
+        meta = json.loads(meta_path.read_text())
+        oha = json.loads(oha_path.read_text())
+    except json.JSONDecodeError as e:
+        # A truncated oha.json typically means the run was killed mid-stream
+        # (Ctrl-C, OOM, port conflict). Skip rather than abort the whole report.
+        print(f"[skip] {run_dir.name}: {e}")
+        return None
 
     summary = oha.get("summary", {})
     latency = oha.get("latencyPercentiles", {}) or oha.get("latency_percentiles", {})
