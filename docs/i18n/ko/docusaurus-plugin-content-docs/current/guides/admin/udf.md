@@ -3,42 +3,27 @@ title: UDF Guide
 sidebar_label: UDF (Lua)
 sidebar_position: 2
 slug: /guides/udf
-description: Aerospike 서버에서 Lua UDF 등록, 실행, 제거 가이드
+description: Register, execute, and remove Lua UDFs on the Aerospike server.
 ---
 
-UDF (User Defined Functions)는 Aerospike 서버에서 실행되는 Lua 스크립트입니다.
+User Defined Function (UDF) 은 record 를 소유한 Aerospike server node 위에서 실행되는 Lua 스크립트.
 
-## Register UDF
+## API
 
 ```python
+# 등록
 client.udf_put("my_udf.lua")
+
+# record 에 대해 실행
+result = client.apply(key, "module_name", "function_name", [arg1, arg2])
+
+# 제거
+client.udf_remove("module_name")
 ```
 
-파일은 Python 프로세스에서 접근 가능해야 합니다. UDF는 모든 클러스터 노드에 등록됩니다.
+## 예제: Counter UDF
 
-## Execute UDF on Record
-
-```python
-key = ("test", "demo", "user1")
-result = client.apply(key, "my_udf", "my_function", [1, "hello"])
-```
-
-| 매개변수 | 설명 |
-|----------|------|
-| `key` | 실행 대상 record 키 |
-| `module` | UDF 모듈 이름 (`.lua` 제외) |
-| `function` | 모듈 내 함수 이름 |
-| `args` | 선택적 인수 리스트 |
-
-## Remove UDF
-
-```python
-client.udf_remove("my_udf")
-```
-
-## Example: Counter UDF
-
-### Lua Script (counter.lua)
+**`counter.lua`**
 
 ```lua
 function increment(rec, bin_name, amount)
@@ -53,52 +38,28 @@ function increment(rec, bin_name, amount)
 end
 ```
 
-### Python Usage
+**Python**
 
 ```python
-# 등록
 client.udf_put("counter.lua")
 
-# 실행
 key = ("test", "demo", "counter1")
-result = client.apply(key, "counter", "increment", ["count", 5])
-print(result)  # 5
+result = client.apply(key, "counter", "increment", ["count", 5])  # 5
+result = client.apply(key, "counter", "increment", ["count", 3])  # 8
 
-result = client.apply(key, "counter", "increment", ["count", 3])
-print(result)  # 8
-
-# 정리
 client.udf_remove("counter")
 ```
 
-## Async UDF
+**Async**
 
 ```python
-import asyncio
-from aerospike_py import AsyncClient
-
-async def main():
-    client = AsyncClient({
-        "hosts": [("127.0.0.1", 3000)],
-        "cluster_name": "docker",
-    })
-    await client.connect()
-
-    await client.udf_put("counter.lua")
-
-    key = ("test", "demo", "counter1")
-    result = await client.apply(key, "counter", "increment", ["count", 1])
-    print(result)
-
-    await client.udf_remove("counter")
-    await client.close()
-
-asyncio.run(main())
+await client.udf_put("counter.lua")
+result = await client.apply(key, "counter", "increment", ["count", 1])
+await client.udf_remove("counter")
 ```
 
-## Notes
+## 비고
 
-- UDF는 해당 record를 소유한 서버 노드에서 실행됩니다
-- Lua만 UDF 언어로 지원됩니다
-- UDF 변경 사항이 모든 노드에 전파되는 데 몇 초가 걸립니다
-- 최적의 성능을 위해 UDF를 간결하게 유지하세요
+- Lua 가 유일한 UDF 언어
+- UDF 변경이 모든 node 에 전파되는 데 수 초 소요
+- 최선의 성능을 위해 UDF 는 단순하게 유지
