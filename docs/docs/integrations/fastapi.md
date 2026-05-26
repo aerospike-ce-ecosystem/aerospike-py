@@ -55,7 +55,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     aerospike_host: str = "127.0.0.1"
-    aerospike_port: int = 3000
+    aerospike_port: int = 18710
     aerospike_namespace: str = "test"
     aerospike_set: str = "users"
 
@@ -132,8 +132,8 @@ The [`examples/sample-fastapi/`](https://github.com/aerospike-ce-ecosystem/aeros
 
 ```bash
 cd examples/sample-fastapi
-docker compose up -d
-pip install -r requirements.txt
+docker compose -f ../../compose.sample-fastapi.yaml up -d aerospike
+uv sync --all-extras
 uvicorn app.main:app --reload
 # Visit http://localhost:8000/docs
 ```

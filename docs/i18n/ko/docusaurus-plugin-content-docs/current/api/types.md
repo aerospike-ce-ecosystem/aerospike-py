@@ -217,7 +217,7 @@ TypedDict 입력 타입은 `policy` 및 `meta` 파라미터에 대한 IDE 자동
 | 필드 | 타입 | 기본값 | 설명 |
 |------|------|--------|------|
 | `hosts` | `list[tuple[str, int]]` | *필수* | 클러스터 시드 노드 |
-| `cluster_name` | `str` | | 예상 클러스터 이름 |
+| `cluster_name` | `str \| None` | | 예상 클러스터 이름. `None`은 필드를 생략한 것과 동일하게 처리됩니다. |
 | `auth_mode` | `int` | `AUTH_INTERNAL` | 인증 모드 (`AUTH_INTERNAL`, `AUTH_EXTERNAL`, `AUTH_PKI`) |
 | `user` | `str` | | 인증 사용자명 |
 | `password` | `str` | | 인증 비밀번호 |
