@@ -10,9 +10,10 @@ SET = "bench"
 AEROSPIKE_HOST = os.environ.get("AEROSPIKE_HOST", "127.0.0.1")
 AEROSPIKE_PORT = int(os.environ.get("AEROSPIKE_PORT", "18710"))
 
-# Must match `cluster-name` in scripts/aerospike.template.conf, otherwise the
-# client silently connects to whichever Aerospike node happens to answer the
-# seed-host cluster-info round-trip.
+# Should match `cluster-name` in scripts/aerospike.template.conf.
+# The official client uses this to verify the cluster-info handshake at
+# connect time; aerospike-py treats it as a tracing label only
+# (see rust/src/client_common.rs::extract_cluster_name).
 AEROSPIKE_CLUSTER_NAME = os.environ.get("AEROSPIKE_CLUSTER_NAME", "docker")
 
 # Which client to mount on app startup. The server runs ONE client per process
