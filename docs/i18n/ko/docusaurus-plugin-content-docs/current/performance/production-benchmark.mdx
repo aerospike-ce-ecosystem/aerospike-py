@@ -1,0 +1,313 @@
+---
+title: Production Benchmark
+sidebar_label: Production Benchmark
+sidebar_position: 3
+description: FastAPI + DLRM inference + Aerospike CE end-to-end production-shape 벤치마크. k6 부하, Python 3.14t free-threaded 결과 포함.
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+**production-shaped deployment** 에서의 end-to-end 측정: uvicorn 위 FastAPI, request path 안의 DLRM (CPU inference), 그 뒤의 Aerospike CE, k6 의 실 HTTP 부하, client 로 직렬화되어 돌아가는 response body.
+
+실제 recsys 서빙 pod 가 부담하는 모든 비용 (HTTP parse, JSON serialise, model forward) 이 측정에 포함되므로 [Isolated Benchmark](./isolated-benchmark) 대비 headline 숫자는 압축됩니다. 다만 이 수치가 **capacity planning** 용으로 인용하기에 알맞습니다.
+
+> **Sources**: 2026년 4월 내부 측정 run. raw 산출물은 commit 되어 있지 않음 (`benchmark/` rewrite 이전 git history 의 `benchmark/results/*.md` 파일들). 아래 headline 숫자는 그 산출물에서 재현됨; 새 isolated harness 기반 clean re-measurement 는 [Bottleneck Analysis](./bottleneck-analysis) 에서 추적.
+
+## 격차가 어디 있는가
+
+```text
+Mean latency advantage of aerospike-py vs official (Python 3.11 + GIL)
+
+A) Pure DB client       ████████████████████  −80%  (108 → 22 ms)    🔥
+B) uvicorn ASGI         █████                 −21%  (290 → 228 ms)
+C) uvicorn + DLRM       ███████████           −42% p95 (324→189 ms)  🔥
+
+mean 이 compress 되어도 p95 우위는 유지 (C): 공식 client 의 result 변환이 tail 에서 GIL 직렬화됨.
+```
+
+<Tabs queryString="env">
+  <TabItem value="A" label="A — Pure DB client" default>
+
+## Environment A — Pure DB Client
+
+**격리하는 것.** FastAPI 없음, model inference 없음, HTTP loadgen 없음. Python 루프가 `batch_read` 를 직접 driver — 주변 스택이 최대한 얇아서 aerospike-py 의 우위가 **가장 큼**.
+
+### Setup
+
+| Item | Value |
+|---|---|
+| Source | 2026년 4월 내부 run (pre-rewrite artifact; git history 에서 복원 가능) |
+| Clients | `official` (sync C), `official-async` (executor 로 sync 래핑), `py-async` (aerospike-py) |
+| Sets / batch sizes | 9 / 50, 200 |
+| Concurrency / iterations | 10 / 30 |
+
+### Aggregate 결과 (9 sets × 2 batch sizes 평균)
+
+| Client | avg mean (ms) | avg p99 (ms) | avg TPS |
+|---|---:|---:|---:|
+| official | 107.56 | 195.34 | 138.2 |
+| official-async | 110.64 | 211.33 | 125.7 |
+| **py-async (aerospike-py)** | **22.45** | **120.67** | **373.7** |
+| py-async vs official | latency **4.8× 빠름** | 1.6× | TPS **2.7× 높음** |
+| py-async vs official-async | **4.9× 빠름** | 1.8× | 3.0× |
+
+### Per-set speedup 분포 (aerospike-py vs official)
+
+```text
+Batch 50:   mean speedup across 9 sets   4.4× ──────── 7.8×    (median ~5.8×)
+Batch 200:  mean speedup across 9 sets   3.1× ──────── 6.6×    (median ~4.5×)
+
+Outlier: set_8 (0% found rate) → fast not-found path, 실 read latency 아님.
+```
+
+:::note `set_8` 은 outlier
+0% found rate — 공식 client 는 success path 보다 error 를 빨리 반환하므로 이 row 는 실 read latency 가 아니라 "fast not-found" 를 반영. **나머지 모든 set 은 4–8× mean speedup.**
+:::
+
+**`official-async`** (sync C client 를 `loop.run_in_executor` 로 래핑) 는 모든 set 에서 bare sync client 보다 약간 느림 — 매 request 가 thread-pool hop 을 지불. aerospike-py 의 `official-async` 대비 격차는 `official` 대비 격차보다 *일관되게 큼*.
+
+  </TabItem>
+  <TabItem value="B" label="B — uvicorn ASGI only">
+
+## Environment B — uvicorn ASGI Only
+
+**격리하는 것.** `batch_read` 주변에 FastAPI 와 uvicorn 만 추가, model inference 없음. "Key-value 조회 앞단의 REST API" 형태.
+
+### Setup
+
+| Item | Value |
+|---|---|
+| Source | 2026년 4월 내부 run (pre-rewrite artifact) |
+| Concurrency / iterations | 5 / 50 |
+
+### Pipeline breakdown (latency in ms)
+
+| Client | total mean | p50 | p90 | p95 | p99 | aerospike step | inference | TPS |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| official | 289.56 | 289.36 | 429.74 | 461.15 | 473.60 | 280.00 | 1.55 | 16.6 |
+| **aerospike-py** | **228.49** | **189.56** | 457.42 | 468.03 | 497.09 | **221.12** | 1.46 | **19.4** |
+
+- **Total mean: −21%** (290 → 228 ms)
+- **Aerospike step: −21%** (280 → 221 ms) — 대부분의 wall time 이 DB 호출이라 client gain 이 E2E 로 그대로 전이
+- **TPS: +17%** (16.6 → 19.4 req/s)
+- p99 는 거의 동등 (474 vs 497 ms) — concurrency=5 에선 Tokio 모델이 GIL 을 충분히 stress 해서 tail 을 벌릴 만큼 부하가 강하지 않음
+
+### 더 높은 concurrency 에서 backpressure 노출
+
+concurrency=10, 200 iter 두 번째 run (동일 2026년 4월 artifact set):
+
+| Client | total mean | p95 | TPS | errors |
+|---|---:|---:|---:|---:|
+| official | 465.81 | 885.64 | 20.9 | 0 |
+| aerospike-py | 580.70 | 986.93 | 13.9 | **56** |
+
+:::caution Saturation 상황의 backpressure
+이 run 은 테스트 하네스를 saturate 시킴 (공식 client 가 다르게 흡수한 부하에서 56건의 request rejection / timeout). **apples-to-apples 아님** — 적절한 backpressure 튜닝 없이는 native async client 가 server pool 이 흡수 가능한 양 이상의 in-flight 작업을 발행할 수 있다는 증거. [Bottleneck Analysis](./bottleneck-analysis) 의 `gather`→`single` recipe 가 이 문제를 해소.
+:::
+
+  </TabItem>
+  <TabItem value="C" label="C — uvicorn + DLRM (실 서빙)">
+
+## Environment C — uvicorn + DLRM (실 서빙)
+
+**격리하는 것.** Full production-style pipeline:
+
+```
+HTTP request → key extraction → batch_read(9 sets × 200 keys)
+            → feature build → DLRM inference (PyTorch CPU) → response
+```
+
+실 recsys 서빙 pod 와 가장 가까운 측정.
+
+### Setup
+
+| Item | Value |
+|---|---|
+| Source | 2026년 4월 내부 run (k6 runtime/client 비교; config "3.11 + GIL, stage OFF") |
+| Image | `aerospike-benchmark:latest` (Python 3.11.14) |
+| Loadgen | k6 10 VUs × 60s per scenario, 4 scenarios |
+| Pods | replica 2, 4 CPU / 4 GiB request, 8 CPU / 8 GiB limit |
+
+두 endpoint (`/predict/official/sample` 와 `/predict/py-async/sample`) 가 **같은 pod** 안에 있으며 k6 가 번갈아 호출 — server state 와 네트워크가 완전 동일.
+
+### k6 client-side latency
+
+```text
+single mode (10 VUs × 60s)
+
+p95     aerospike-py  ███████████████              189 ms
+        official      █████████████████████████    324 ms   −42% 🔥
+
+p90     aerospike-py  █████████████                173 ms
+        official      ██████████████████████       293 ms   −41% 🔥
+
+avg     aerospike-py  █████████                    118 ms
+        official      ████████████                 146 ms   −19%
+```
+
+| Mode | aerospike-py p95 | official p95 | aerospike-py 우위 |
+|---|---:|---:|---:|
+| **single** | **189** | 324 | **−42%** 🔥 |
+| gather (9× fan-out) | **234** | 266 | −12% |
+| merge_gather (aero-py only) | 202 | — | — |
+| stress (0→20→50 VUs ramp) | 592 | — | — |
+
+**gather** 격차가 좁아지는 이유는 양 client 모두 result 변환 step 에서 GIL 직렬화에 부딪힘 — [Bottleneck Analysis](./bottleneck-analysis) 참조.
+
+### Server-side Prometheus (동일 run, single mode)
+
+| Metric | aerospike-py | official |
+|---|---:|---:|
+| `predict_duration_seconds` p95 (FastAPI E2E) | **202 ms** | 274 ms |
+| `aerospike_batch_read_all_duration_seconds` p95 | **137 ms** | 252 ms |
+
+server- 와 client-side 수치가 같은 방향으로 움직임 — 둘 사이 ~13 ms 격차는 네트워크 RTT + gateway + connection setup.
+
+  </TabItem>
+</Tabs>
+
+## 환경별 패턴
+
+```text
+   layer 가 추가될수록 →        ratio 압축,            tail 은 여전히 우위
+   ─────────────────             ──────────             ──────────────────
+A) Pure DB (HTTP/ML 없음)        mean 4.8×              p99 1.6×
+B) uvicorn ASGI                  mean 1.27×             ≈ noise at C=5
+C) uvicorn + DLRM                mean 1.24×             p95 −42%  🔥
+```
+
+DB 호출 주위에 layer 가 추가될수록 **ratio 는 압축** (4.8× → 1.24× mean) 되지만 **upper-percentile 우위는 유지** — aerospike-py 는 I/O 동안 GIL 해제, 공식 client 는 `run_in_executor` 통해 GIL 획득을 직렬화하므로 tail 에서 spike.
+
+---
+
+## Python 3.14t free-threaded — 같은 pipeline, GIL 제거 {#python-314t-free-threaded--same-pipeline-gil-removed}
+
+Python 3.14t 는 free-threaded CPython 빌드 (GIL disabled, `Py_GIL_DISABLED=1`). 아래 수치는 **동일한** Environment C pipeline (FastAPI + DLRM + k6 10 VUs × 60s) 에서 런타임만 swap 한 결과. **Rust 또는 C source 변경 없음.**
+
+### TL;DR
+
+```text
+p95 single-mode (k6 10 VUs × 60s, FastAPI + DLRM)
+
+aerospike-py
+  3.11 + GIL    ███████████████              189 ms
+  3.14t         ████████                      97 ms   −49% 🔥
+
+official (C extension)
+  3.11 + GIL    █████████████████████████    324 ms
+  3.14t         ██████████                   128 ms   −60% 🔥
+
+Throughput (aerospike-py): 41.6 → 61.2 iter/s   +47%
+```
+
+GIL 이 양 client 공통 병목이었음. **aerospike-py 의 gain 은 Rust 를 건드리지 않고 얻음.**
+
+### 무엇이 빨라지는가 (그리고 왜) {#what-gets-faster-and-why}
+
+<Tabs>
+  <TabItem value="aspy" label="aerospike-py: stage breakdown" default>
+
+부하 환경의 internal stage timing. 두 GIL-bound stage 가 거의 0으로 collapse.
+
+```text
+Stage                     3.11 + GIL              3.14t       Change
+────────────────────────────────────────────────────────────────────
+spawn_blocking_delay      234 ms     ████████    0.12 ms      −99.95% 🔥
+event_loop_resume_delay   39.7 ms    ██           ≈ 0         ≈ −100%
+io (Aerospike network)    7.51 ms    ▌           1.27 ms      −83%
+merge_to_dict             4.48 ms    ▎           3.54 ms      −21%
+key_parse                 967 μs     ·           1.06 ms      +10% (noise)
+tokio_schedule_delay      83.1 μs                49.5 μs      −40%
+limiter_wait              3.56 μs                0.96 μs      −73%
+```
+
+**두 stage 가 gain 을 지배:**
+
+- **`spawn_blocking_delay`** 가 234 ms 에서 0.12 ms 로 drop. GIL 환경에선 Rust async future 가 완료되어 결과를 `Py<...>` 객체로 변환할 때 `spawn_blocking` worker 로 그 작업을 dispatch. 그 worker 가 GIL 을 acquire 해야 하는데, asyncio event loop 와 다른 worker 들과의 contention 하에서 queue 가 수백 ms 까지 늘어남. GIL 없으면 worker 가 즉시 실행.
+- **`event_loop_resume_delay`** 가 거의 0으로 drop. GIL 환경에선 future 가 resolve 되어 event loop 가 깨어난 후에도 coroutine 이 GIL 차례를 기다려야 resume. free-threaded mode 는 여러 coroutine 이 병렬 resume 허용.
+
+`io` 가 8× 작아진 것은 second-order effect: Tokio worker 가 Python 코드와 GIL 경쟁 없이 Aerospike 프로토콜 응답을 parse 할 수 있게 됨.
+
+  </TabItem>
+  <TabItem value="official" label="official C client: 더 큰 ratio">
+
+공식 `aerospike` client 는 synchronous C extension; 앱은 `loop.run_in_executor(ThreadPoolExecutor, ...)` 로 래핑. 각 request:
+
+```text
+1. Thread-pool worker dispatch
+2. C extension 이 인자 parse 하려 GIL 획득     ← GIL 하에서 직렬화
+3. 네트워크 호출 (GIL release)
+4. C extension 이 Python dict 빌드 위해 GIL 재획득 ← GIL 하에서 직렬화
+```
+
+GIL contention 하에서 **2번과 4번이 모든 in-flight request 에 걸쳐 직렬화**.
+
+GIL 제거가 이를 병렬화. 공식 client 의 p95 는 **60%** 떨어짐 (324 → 128 ms) — 절대값으로 aerospike-py 의 49% 보다 더 큰 drop, 잃을 게 더 많았기 때문.
+
+  </TabItem>
+</Tabs>
+
+### 3.14t 의 same-workload 비교
+
+3.14t 에서 양 client 가 **같은 server load** 를 hit (같은 pod 안 endpoint 번갈아 호출, k6 10 VUs):
+
+| Client | p95 (single mode) | Difference |
+|---|---:|---|
+| aerospike-py | **126 ms** | baseline |
+| official aerospike | 128 ms | +2 ms (~1.5%, noise) |
+
+**3.11 + GIL 하의 42% 격차가 3.14t 에선 ~2ms 로 collapse.**
+
+GIL contention 이 — 구조적 차이가 아니라 — 원래 격차 대부분의 원인이었다는 가장 깔끔한 증거.
+
+### Throughput (TPS)
+
+```text
+3.11 + GIL, stage OFF             ████████████        41.6  baseline
+3.11 + GIL, stage ON              █████████████       44.1  +6% (noise)
+3.14t, aerospike-py only          ███████████████████ 61.2  +47% 🔥
+3.14t, both clients (split load)  ██████████████      47.3  +14%
+```
+
+| Config | iterations/s | http_reqs/s |
+|---|---:|---:|
+| 3.11 + GIL, stage OFF | 41.6 | 50.8 |
+| 3.11 + GIL, stage ON | 44.1 | 52.9 |
+| **3.14t, aerospike-py only** | **61.2** | **80.0** |
+| 3.14t, both clients (split load) | 47.3 | 59.8 |
+
+### 그래도 solo load 에선 aerospike-py 가 여전히 우위 (3.14t)
+
+"126 vs 128 ms" tie 는 각 client 가 ~5 effective VUs 만 보는 configuration 에서 나옴 (10 VUs 가 두 endpoint 로 분산). 부하가 한 client 에 집중되면 격차가 다시 벌어짐.
+
+| Metric | aerospike-py solo | official solo | aerospike-py 우위 |
+|---|---:|---:|---|
+| k6 single p95 | **97 ms** | 134 ms | **−28%** |
+| k6 gather p95 (9× fan-out) | **107 ms** | 253 ms | **−58%** 🔥 |
+| Server `predict_duration_seconds` p95 | **100 ms** | 138 ms | **−28%** |
+| Server `batch_read_all` p95 | **64 ms** | 67 ms | −4% |
+| 이론 capacity (Little's Law: 10 VUs / p95) | **~103 req/s** | ~75 req/s | **+37%** |
+
+**3.14t solo load 에서 aerospike-py 가 여전히 leading 하는 이유:**
+
+1. **Native async vs threadpool 래핑.** GIL contention 없어도 `run_in_executor` 는 request 당 thread-pool hop 을 추가. aerospike-py 는 asyncio loop 위에서 직접 await.
+2. **Lazy dict conversion.** `batch_read()` 가 `LazyBatchRecords` 핸들 반환. Python-dict materialisation 은 caller 가 `.to_dict()` 호출 시 lazy 하게 일어남; `.to_numpy(dtype)` 는 GIL-released structured-array 경로 제공.
+3. **단일 FFI boundary crossing.** aerospike-py Rust 코드는 1회 PyO3 호출 안에서 full `batch_read` 완료. C extension 은 호출당 Python ↔ C 경계를 여러 번 통과.
+
+이 우위들은 concurrency 가 올라갈수록 compound (gather 수치 — 107 vs 253 ms — 가 가장 명확한 예).
+
+### Migration notes
+
+1. **CI matrix 에 3.14t row 추가.** `python:3.14.2t-slim` 하에서 unit + integration test 실행.
+2. **`gil_used = false` 선언 전 Rust 의 `unsafe` 와 shared mutable state audit.**
+3. **공식 client wheel 기다리거나 build.** PyPI 는 아직 공식 `aerospike` 패키지에 대한 `cp314t` wheel 미배포; source build 는 동작.
+
+**Side-effect: inference 도 빨라짐.** DLRM inference (PyTorch CPU, control variable) 가 3.14t 에서 **43.5 ms → 20.7 ms (−52%)**. aerospike-py 와 무관 — async I/O 옆에서 도는 GIL-bound inference path 라면 누구든 free 로 얻는 side benefit.
+
+---
+
+다음 단계:
+
+- [Isolated Benchmark](./isolated-benchmark) — FastAPI/JSON/inference 비용을 빼고 client 격차 자체 보기
+- [Bottleneck Analysis](./bottleneck-analysis) — per-stage profiling, `gather`→`single` recipe (TODO: 새 harness 에서 재측정)

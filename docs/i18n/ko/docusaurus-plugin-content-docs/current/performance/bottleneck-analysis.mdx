@@ -1,0 +1,26 @@
+---
+title: Bottleneck Analysis
+sidebar_label: Bottleneck Analysis
+sidebar_position: 4
+description: aerospike-py 의 stage-별 profiling 및 최적화 recipe. 새 isolated 하네스 기반 재측정 대기 중.
+---
+
+:::caution TODO — 재측정 대기 중
+이전 bottleneck-analysis 콘텐츠는 삭제된 `benchmark/results/*` 산출물 (`bottleneck-analysis.md`, `internal-stage-toggle-comparison.md`) 을 기반으로 작성되었습니다. 그 측정에서 `spawn_blocking_delay` + `event_loop_resume_delay` 가 GIL 환경의 지배적 비용으로 식별되었고, 그 스토리는 [Production Benchmark → Python 3.14t](./production-benchmark#what-gets-faster-and-why) 에 보존되어 있습니다 — free-threaded Python 에서 두 stage 가 거의 0으로 collapse 되는 것을 확인 가능.
+
+빠진 것: 새 [Isolated Benchmark](./isolated-benchmark) 하네스 (s1–s5, oha, podman, 로컬 Aerospike CE 8.1.2.1_3) 기반의 stage breakdown 신규 측정. 하네스 자체는 stage profiling 을 이미 지원합니다 — `AEROSPIKE_PY_INTERNAL_METRICS=1` 로 `db_client_internal_stage_seconds` 히스토그램이 켜지며 오버헤드는 무시 가능 — 다만 매트릭스 측정 + 페이지 reduction 이 아직.
+
+추적 항목:
+
+- [ ] Isolated 하네스에서 stage profiling 매트릭스 재측정 (s1 / s3 / s4_gather × py3.11 GIL × py3.14t free-threaded)
+- [ ] **s4_gather vs s4_single** 에서 `gather(N) → single batch_read(mixed keys)` recipe 재검증
+- [ ] 새 측정값 반영 후 stage profiling 활성화 표면 (env var · 런타임 토글 · scoped context manager) 정리
+:::
+
+## 재측정 시 다룰 내용
+
+1. **stage 별 breakdown** — `batch_read` 의 stage 이름 (`key_parse`, `limiter_wait`, `tokio_schedule_delay`, `io`, `into_pyobject`, `spawn_blocking_delay`, `event_loop_resume_delay`, `to_dict`, `to_numpy`, `merge_to_dict`, `future_into_py_setup`) 별 latency 분포.
+2. **stage profiling 활성화 방법** — `AEROSPIKE_PY_INTERNAL_METRICS=1` env var, `aerospike_py.set_internal_stage_metrics_enabled(True)` 런타임 토글, scoped context manager. 세 가지 모두 현재 존재; 비활성 시 오버헤드는 stage entry 당 `AtomicBool` 로드 1회 수준.
+3. **유의미한 최적화 recipe**. 이전 round 의 우승자: (a) aerospike-py 로 교체, (b) `gather(N batch_reads)` 를 단일 `batch_read(mixed keys)` 로 통합, (c) Python 3.14t free-threaded 로 전환. (a) 와 (c) 는 [Isolated Benchmark](./isolated-benchmark) 와 [Production Benchmark](./production-benchmark) 에 이미 정량화되어 있고, (b) 는 **s4_gather vs s4_single** 에서 재측정 예정.
+
+재측정 전까지는 [Production Benchmark 의 3.14t stage breakdown](./production-benchmark#what-gets-faster-and-why) 을 canonical "시간이 어디 가는지" reference 로 사용하세요.
