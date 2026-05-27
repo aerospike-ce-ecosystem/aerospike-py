@@ -1,0 +1,26 @@
+services:
+  aerospike-bench:
+    image: aerospike:ce-8.1.2.1_3
+    container_name: aerospike-bench
+    ports:
+      - "127.0.0.1:18710:3000"
+    cpus: 2
+    mem_limit: 2g
+    shm_size: 1g
+    environment:
+      NAMESPACE: test
+      CLUSTER_NAME: bench
+      DEFAULT_TTL: "0"
+      ACCESS_PORT: "18710"
+    volumes:
+      # Pins access-address to 127.0.0.1 so aerospike-py's cluster
+      # discovery hop lands on the published port instead of the
+      # podman-internal IP. Aerospike CE Docker ignores ACCESS_ADDRESS
+      # env unless a template conf is mounted.
+      - ./scripts/aerospike.template.conf:/etc/aerospike/aerospike.template.conf
+    healthcheck:
+      test: ["CMD", "asinfo", "-v", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s

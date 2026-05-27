@@ -26,8 +26,9 @@ jobs:
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           # Only commits that touch user-facing library code or package metadata count
           # toward a release. CI workflows, docs, tests, examples, build configs, etc.
-          # don't change what gets shipped to PyPI and so don't warrant a new release —
-          # this also implicitly excludes the auto `docs: freeze version` commits.
+          # don't change what gets shipped to PyPI and so don't warrant a new release.
+          # (Note: the historical `docs: freeze version` commits no longer occur —
+          # versioned docs were dropped along with docs-version.yaml.)
           RELEASE_PATHS=(rust/ src/ pyproject.toml Cargo.toml Cargo.lock uv.lock)
           if [ -z "$LATEST_TAG" ]; then
             echo "No previous release found. Checking all commits."

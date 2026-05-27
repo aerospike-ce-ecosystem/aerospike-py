@@ -1,0 +1,243 @@
+---
+title: Isolated Benchmark
+sidebar_label: Isolated Benchmark
+sidebar_position: 2
+description: 5-시나리오 uvicorn ASGI 벤치마크 스위트 (benchmark/) — FastAPI 직렬화·추론 비용을 가능한 한 제거해서 client 자체의 격차를 드러냄. Python 3.14t 계획 포함.
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+실제 uvicorn ASGI 프로세스 위에서 **aerospike-py vs 공식 `aerospike` Python client** 를 비교하는 focused 스위트. 각 endpoint 는 의도적으로 **응답 직렬화 비용을 제거**하고 단일 파생 scalar (`found`, `pred_sum`, `subset_sum`) 만 반환합니다 — 측정된 latency 는 `batch_read` + materialisation + (선택적) inference 만 반영하고 JSON encoding 은 들어가지 않습니다.
+
+반대편 끝은 [Production Benchmark](./production-benchmark) — 실 서빙 pod 가 부담하는 모든 비용 (HTTP parse, full record marshalling, DLRM, network out) 을 그대로 포함. **client 라이브러리 자체가 격차에서 얼마나 차지하나** 를 보고 싶을 때 이 페이지를, **capacity planning 숫자** 가 필요할 땐 그 페이지를 보세요.
+
+> **Source**: 본 repo 의 `benchmark/`. podman/docker 로 Aerospike CE 8.1.2.1_3 띄워서 로컬 실행.
+
+## 실행 방법
+
+```bash
+cd benchmark
+make up           # podman compose → aerospike:ce-8.1.2.1_3 on 127.0.0.1:18710
+make seed         # 결정론적 10k records, 5개 메타 bin + 64개 float feature f0..f63
+make bench-all CONCURRENCY=10 DURATION=30s BATCH_SIZE=50
+make report       # → 시나리오별 markdown 비교 표
+```
+
+`make bench` 는 CLIENT 별 uvicorn 프로세스를 띄우고 `/healthz` 대기 후 `oha` 를 주어진 duration 만큼 실행, 죽이고 다음 client 로. `oha` 가 부하 생성기 (`oha --output-format json --no-tui -c $C -z $D -m POST …`). 각 run 은 `oha.json` 옆에 `meta.json` 을 남기므로 `loadtest/report.py` 가 `(scenario, batch_size, concurrency, python)` 단위로 그룹화 가능.
+
+Aerospike CE 컨테이너는 `scripts/aerospike.template.conf` 를 마운트해서 `access-address` 를 `127.0.0.1` 로 고정합니다. aerospike-py 는 `connect()` 시 full cluster discovery 를 수행해서 그 옵션 없으면 podman 내부 IP 로 재연결을 시도하고 실패합니다; 공식 client 는 seed host 만 hit 하므로 이 옵션 없이도 우연히 동작.
+
+:::caution 실측은 follow-up
+아래 시나리오마다 적힌 숫자는 개발 중 sanity 매트릭스 (py3.11, concurrency=4, batch=30, 3s per run, 모든 데이터 cache-warm) 기준입니다. **격차의 모양** (어느 시나리오가 격차를 벌리고 어느 시나리오가 좁히는지) 을 보세요 — 절대값으로 인용하지 마세요. 본격 측정은 더 큰 시드 (10k–100k), 더 긴 duration (60s), 더 높은 concurrency (10–50) 가 필요.
+:::
+
+## 시나리오
+
+<Tabs queryString="scenario">
+  <TabItem value="s1" label="s1 — read-only" default>
+
+### s1 — 순수 `batch_read` 라운드트립
+
+가장 얇은 측정: `{offset, batch_size}` JSON body 를 받아 키를 만들고 `batch_read` 호출, found count 만 반환. 다운스트림 bin materialisation 없음, 추론 없음, full-record 직렬화 없음.
+
+**코드 경로 차이**
+
+| client | `_materialise` |
+|---|---|
+| aerospike-py | `result.found_count()` — pure-Rust filter+count, PyDict build 없음 |
+| official | `sum(1 for br in result.batch_records if br.result == 0)` — BatchRecord 리스트 Python 순회 |
+
+공식 client 는 batch_read 호출 자체에 `asyncio.to_thread` hop 비용을 항상 지불; s1 이 그 hop 비용을 가장 깔끔히 격리합니다.
+
+**Smoke (py3.11, c=4, batch=30, 3s)**
+
+| client | RPS | avg ms | p95 |
+|---|---:|---:|---:|
+| official | 2383.2 | 1.68 | 2.14 |
+| aerospike-py | 2466.8 | 1.62 | 2.39 |
+| **speedup** | **1.04×** | **1.04×** | — |
+
+5개 시나리오 중 가장 작은 격차 — request shape 이 HTTP framing + 단일 round trip 으로 dominate 되고 둘 다 공통 비용. concurrency 가 커지면 격차 벌어짐 (production-benchmark Env A 는 ASGI 레이어 없이 동일 DB shape 에서 4.8× 관찰).
+
+**3.14t 예상**
+
+양 client 의 가장 큰 절대 drop — `spawn_blocking_delay` 와 `event_loop_resume_delay` 가 짧은 request 의 큰 비중. client 간 ratio 는 좁아질 수 있음 (production-benchmark same-workload 3.14t run 에서 42% 격차가 ~2ms 로 collapse 한 사례).
+
+  </TabItem>
+
+  <TabItem value="s2" label="s2 — dict-path infer">
+
+### s2 — `batch_read` → dict → tensor → DLRM
+
+레코드를 per-row Python list 로 materialise → `torch.tensor` 빌드 → 2-layer MLP (64→256→1) forward. 업스트림 코드가 dict-of-dicts 결과를 기대하는 흔한 패턴.
+
+**코드 경로 차이**
+
+| client | materialise step |
+|---|---|
+| aerospike-py | `result.to_dict()` → request 순서대로 `bins_by_key.get(key)` |
+| official | `result.batch_records` 순회 (aerospike 19.x 가 request 순서 보존, 실측 확인) |
+
+양 path 모두 Python list-of-lists 를 빌드한 뒤 `torch.tensor(rows, dtype=torch.float32)` 를 정확히 1회 호출 — cell-by-cell tensor 할당으로 한 쪽을 불공정하게 punish 하는 패턴은 회피.
+
+**Smoke**
+
+| client | RPS | avg ms | p95 |
+|---|---:|---:|---:|
+| official | 1986.0 | 2.01 | 2.48 |
+| aerospike-py | 2206.6 | 1.81 | 2.56 |
+| **speedup** | **1.11×** | **1.11×** | — |
+
+1.11× 라는 비율이 s2 vs s3 비교의 baseline — 양 client 가 per-record dict 를 순회해야 할 때의 격차는 modest. **s3 는 이걸 1.33× 로 벌립니다** — aerospike-py 가 Rust-side zero-copy 경로를 쓰기 때문 (공식 client 엔 equivalent 없음).
+
+**3.14t 예상**
+
+양 client 모두 개선. DLRM CPU inference 경로 자체도 이득 (`torch` GIL release) — production-benchmark side-effect 노트가 3.14t 에서 inference 43.5→20.7 ms (−52%) 를 관찰. client 간 ratio 는 좁아지지만 *격차의 종류* (dict iteration cost) 는 사라지지 않음.
+
+  </TabItem>
+
+  <TabItem value="s3" label="s3 — numpy zero-copy 🔥">
+
+### s3 — `batch_read` → numpy structured array → torch → DLRM
+
+aerospike-py path 는 `LazyBatchRecords.to_numpy(dtype)` 로 GIL release 된 채 연속 메모리의 structured array 를 채운 후, copy 없이 `(batch, N_FEATURES)` float32 매트릭스로 view:
+
+```python
+np_batch = result.to_numpy(_DTYPE)                       # structured (batch,) array
+matrix_np = np_batch.batch_records.view(np.float32) \
+                    .reshape(-1, N_FEATURES)             # zero-copy view
+tensor = torch.from_numpy(matrix_np)                     # zero-copy
+preds = infer(tensor)
+```
+
+zero-copy 검증: numpy 2.x + 64-`<f4` packed dtype 에서 `np_batch.batch_records.view(np.float32).reshape(-1, 64).base is np_batch.batch_records` 와 `np.shares_memory(matrix_np, np_batch.batch_records)` 둘 다 True.
+
+**공식 client 엔 equivalent 없음** — `np.zeros((batch, N), dtype=np.float32)` 를 할당하고 field-by-field Python loop 로 복사.
+
+**Smoke**
+
+| client | RPS | avg ms | p95 |
+|---|---:|---:|---:|
+| official | 1854.0 | 2.16 | 2.75 |
+| **aerospike-py** | **2466.2** | **1.62** | **2.36** |
+| **speedup** | **1.33×** | **1.33×** | **1.16×** |
+
+**s2 → s3 점프 (1.11× → 1.33×) 가 격리된 `to_numpy()` 우위** — 같은 DLRM, 같은 DB shape, materialisation 경로만 다름. 페이지의 헤드라인: 다운스트림 consumer 가 numpy-친화 framework (PyTorch, JAX, scikit-learn) 일 때 aerospike-py 는 Python-loop materialisation 을 우회.
+
+**3.14t 예상**
+
+우위가 **구조적** (단일 Rust→numpy fill with GIL released, vs Python loop). GIL 제거 후에도 다른 시나리오보다 더 잘 살아남음 — s3 vs s2 ratio 는 3.14t 에서 더 벌어질 것 (s2 도 GIL 제거로 이득이지만 s3 는 애초에 GIL 을 우회했음).
+
+  </TabItem>
+
+  <TabItem value="s4" label="s4 — gather vs single">
+
+### s4 — `asyncio.gather(N batch_reads)` vs 단일 `batch_read(mixed keys)`
+
+같은 총 key 수, 두 endpoint. **`/s4/gather`** 는 `n_groups` 개 parallel `batch_read` 를 fan-out; **`/s4/single`** 은 모든 key 를 한 호출로 합침. DB wire payload 동일, fixed-cost 분할 방식만 다름.
+
+**aerospike-py 가 gather 에서 더 크게 이기는 이유**
+
+공식 client 의 `asyncio.to_thread` hop 이 각 sub-batch 를 thread pool 통해 직렬화; aerospike-py 는 Tokio 안에서 동시 실행. 그래서 gather 의 per-call 오버헤드를 공식은 N× 지불, aerospike-py 는 (대략) 1× 지불.
+
+**Smoke (n_groups=4, per_group=30 → total 120 keys)**
+
+| endpoint | client | RPS | avg ms | p95 |
+|---|---|---:|---:|---:|
+| `/s4/gather` | official | 902.8 | 4.43 | 4.80 |
+| `/s4/gather` | aerospike-py | 1130.3 | 3.54 | 4.95 |
+| `/s4/gather` | **speedup** | **1.25×** | **1.25×** | — |
+| `/s4/single` | official | 996.1 | 4.02 | 4.70 |
+| `/s4/single` | aerospike-py | 1385.4 | 2.89 | 4.24 |
+| `/s4/single` | **speedup** | **1.39×** | **1.39×** | **1.11×** |
+
+`/s4/single` 이 **양 client 에서 `/s4/gather` 보다 빠름** (round trip 줄어 amortise 잘 됨), 다만 client 간 격차는 **`/s4/single` 에서 더 큼** (1.39× vs 1.25×) — gather path 의 threading penalty 가 진짜 병렬성으로 일부 흡수되는데, single 엔 그 escape valve 없음.
+
+**Recipe**: key 가 사전에 알려진 경우 `gather(N batch_reads)` 대신 단일 `batch_read(mixed_keys)` 선호. production-benchmark Env C 가 이 패턴으로 p95 추가 −33% 확인.
+
+**3.14t 예상**
+
+공식의 `asyncio.to_thread` hop 이 cheap 해짐 → 공식에서 gather-vs-single 격차 좁아짐. aerospike-py 의 single-call 우위 (Rust ↔ Python 경계 1회 통과) 는 그대로 유지.
+
+  </TabItem>
+
+  <TabItem value="s5" label="s5 — lazy subset">
+
+### s5 — `LazyBatchRecords` 의 부분 materialisation
+
+wire 상의 record 는 64 bin (`f0..f63`). endpoint 는 그중 8개만 소비. 양 client 모두 full payload 수신 — bin projection (`bins=[…]`) 은 server-side 최적화로 의도적으로 skip, 비교 대상은 **client-side materialisation 비용** at 고정 wire size.
+
+**코드 경로 차이**
+
+| client | materialise step |
+|---|---|
+| aerospike-py | `result.to_numpy(_SUBSET_DTYPE)` — dtype 에 지정된 8개 field 만 structured array 에 기록; 나머지 56개는 Python 에 절대 노출 안 됨 |
+| official | 각 `BatchRecord.record[2]` 는 C extension 이 Python 반환 *전*에 빌드한 **fully-materialised 64-key Python dict** — subset 접근 (`bins[name]`) 은 무료지만 up-front dict build 는 회피 불가 |
+
+**Smoke**
+
+| client | RPS | avg ms | p95 |
+|---|---:|---:|---:|
+| official | 2421.4 | 1.65 | 2.09 |
+| aerospike-py | 2722.0 | 1.47 | 2.16 |
+| **speedup** | **1.12×** | **1.12×** | — |
+
+s3 보다 격차 작음 — wire payload 가 동일하고 공식 client 의 eager dict build 가 C extension 이라 빠름. aerospike-py 의 우위는 **사용 안 하는 bin 수** 에 비례 — 8-of-64 에선 modest, 1-of-128 이라면 커짐.
+
+**3.14t 예상**
+
+aerospike-py 의 `to_numpy(subset_dtype)` 는 per-record fill 동안 GIL release → 3.14t 에서 여러 s5 request 가 병렬 materialise 가능. 공식 client 의 per-request dict build 도 C extension 안에선 GIL release 되나, dict ownership 이 Python 으로 넘어가는 시점에 GIL flip. ratio 는 유지될 것.
+
+  </TabItem>
+</Tabs>
+
+## 의도적으로 측정 안 한 것
+
+| 제외 | 이유 |
+|---|---|
+| Response body 직렬화 | 각 endpoint 는 `{found: N}` (or `+ pred_sum / subset_sum`) — 레코드에서 파생된 단일 scalar 만 반환. full-record JSON encoding 은 양 client 에 들어가는 비용이지만 key/digest shape 가 달라서 공식 client 쪽을 비대칭으로 부풀리고 client 격차를 묻어버림. |
+| OTel / Prometheus / nelo | 측정 노이즈. 부모 라이브러리는 그 기능을 노출하지만 벤치마크 스위트는 깨끗하게 유지. |
+| Docker image / k8s manifests | client 라이브러리 격리가 목적 — deploy/registry/manifests 경로는 무관 노이즈. |
+| Bin projection (`bins=[…]` on the wire) | server-side 최적화, client 비교와 orthogonal. **s5** 는 동일 wire payload 위에서 client-side materialisation 비용을 측정. |
+
+반대편 — 모든 production 비용을 *포함*한 측정 — 은 [Production Benchmark](./production-benchmark) 참조.
+
+---
+
+## Python 3.14t — 같은 스위트 위 런타임 swap
+
+Python 3.14t 는 free-threaded CPython 빌드 (GIL disabled). [Production Benchmark 의 3.14t 섹션](./production-benchmark#python-314t-free-threaded--same-pipeline-gil-removed) 에서 본 `spawn_blocking_delay` (234 ms → 0.12 ms) 와 `event_loop_resume_delay` (39.7 ms → ~0) collapse 가 여기서도 재현될 것이나, isolated 스위트는 `batch_read` 다운스트림의 GIL-bound stage 를 이미 잘라낸 상태이므로 절대 delta 는 더 작을 것.
+
+benchmark/ 프로젝트는 단일 인자로 런타임 swap 지원:
+
+```bash
+uv python install 3.14t        # 일회성, ~30 MB 다운로드 (uv 관리)
+PYTHON=3.14t uv sync           # 별도의 3.14t venv 생성
+PYTHON=3.14t make bench-all CONCURRENCY=10 DURATION=30s BATCH_SIZE=50
+make report                    # report.py 가 python 버전별 그룹화
+```
+
+per-scenario 예상 효과는 위 시나리오 탭마다 "3.14t 예상" 으로 기재.
+
+:::note 3.14t isolated-benchmark 매트릭스는 TODO
+시나리오마다 적힌 "3.14t 예상" 은 production-benchmark stage breakdown 으로부터의 외삽 — 측정값 아님. 하네스는 런타임 swap 을 지원; 매트릭스 측정 published 는 [Bottleneck Analysis](./bottleneck-analysis) 에서 추적.
+:::
+
+## 관련 파일
+
+```
+benchmark/
+├── pyproject.toml              # uv project, editable parent aerospike-py
+├── compose.yaml                # aerospike:ce-8.1.2.1_3
+├── scripts/aerospike.template.conf
+├── Makefile                    # up · seed · serve-{py,official} · bench[-all] · report
+├── src/app/
+│   ├── main.py · lifespan.py · config.py · model.py · seed.py
+│   ├── clients/{py_async,official_async}.py
+│   └── routes/s{1..5}*.py
+└── loadtest/
+    ├── run_oha.sh · bench_matrix.sh
+    ├── scenarios.py            # id → 한 줄 description
+    └── report.py
+```

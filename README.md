@@ -158,7 +158,6 @@ Active when developing through [Claude Code](https://docs.anthropic.com/en/docs/
 | `daily-release.yml` | nightly cron / manual | nightly release pipeline. |
 | `docs.yaml` | PR touching `docs/` | Docusaurus build check. |
 | `docs-publish.yaml` | `push` to `main` | publish Docusaurus site to GitHub Pages. |
-| `docs-version.yaml` | manual | freeze a versioned docs snapshot. |
 
 **PR & issue automation (Claude-driven)**
 

@@ -1,10 +1,10 @@
 {
-  "label": "성능",
+  "label": "Performance",
   "position": 5,
   "collapsed": false,
   "link": {
     "type": "generated-index",
-    "title": "성능",
+    "title": "Performance",
     "description": "aerospike-py 벤치마크 결과 및 성능 분석"
   }
 }

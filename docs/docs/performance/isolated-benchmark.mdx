@@ -1,0 +1,243 @@
+---
+title: Isolated Benchmark
+sidebar_label: Isolated Benchmark
+sidebar_position: 2
+description: 5-scenario uvicorn ASGI benchmark suite (benchmark/) — strips FastAPI serialisation and inference cost out where possible to surface the client gap itself; includes Python 3.14t plan
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+A focused comparison of **aerospike-py vs the official `aerospike` Python client** behind a real uvicorn ASGI process. The suite intentionally **strips response serialisation cost** (each endpoint returns a single derived scalar — `found`, `pred_sum`, `subset_sum`) so the measured latency reflects `batch_read` + materialisation + (optional) inference, not JSON encoding.
+
+The opposite end of the spectrum is the [Production Benchmark](./production-benchmark), which keeps every cost a real serving pod pays (HTTP parse, full record marshalling, DLRM, network out). Use this page when you want to know **how much of the gap belongs to the client library itself**, and that page when you want **capacity-planning numbers**.
+
+> **Source**: `benchmark/` in this repo. Runs locally on podman/docker against Aerospike CE 8.1.2.1_3.
+
+## How to run
+
+```bash
+cd benchmark
+make up           # podman compose → aerospike:ce-8.1.2.1_3 on 127.0.0.1:18710
+make seed         # 10k deterministic records, 5 metadata bins + 64 float features f0..f63
+make bench-all CONCURRENCY=10 DURATION=30s BATCH_SIZE=50
+make report       # → markdown comparison grouped per scenario
+```
+
+`make bench` starts a uvicorn process per CLIENT, waits for `/healthz`, runs `oha` for the given duration, kills the process, and moves on. `oha` is the load generator (`oha --output-format json --no-tui -c $C -z $D -m POST …`); each run drops a `meta.json` next to `oha.json` so `loadtest/report.py` can group runs by `(scenario, batch_size, concurrency, python)`.
+
+The Aerospike CE container mounts `scripts/aerospike.template.conf` so `access-address` is pinned to `127.0.0.1`. aerospike-py performs full cluster discovery on `connect()` and would otherwise re-connect to the podman-internal IP and fail; the official client only hits the seed host and gets away without it.
+
+:::caution Real measurement is follow-up
+The numbers per scenario below come from a short development sanity matrix (py3.11, concurrency=4, batch=30, 3s per run) with everything cache-warm. Use them for **shape** (which scenario widens or compresses the gap), not for absolute claims. Production-grade matrices want larger seed (10k–100k), longer duration (60s), higher concurrency (10–50).
+:::
+
+## Scenarios
+
+<Tabs queryString="scenario">
+  <TabItem value="s1" label="s1 — read-only" default>
+
+### s1 — pure `batch_read` round trip
+
+The leanest possible measurement: receive a JSON body with `{offset, batch_size}`, build keys, call `batch_read`, return only the count of found records. No materialisation of bins downstream, no inference, no full-record serialisation.
+
+**Code path differences**
+
+| client | `_materialise` |
+|---|---|
+| aerospike-py | `result.found_count()` — pure-Rust filter+count, no PyDict build |
+| official | `sum(1 for br in result.batch_records if br.result == 0)` — Python loop over BatchRecord list |
+
+The official client always pays its `asyncio.to_thread` hop for the batch_read call itself; that hop is what s1 isolates most cleanly.
+
+**Smoke (py3.11, c=4, batch=30, 3s)**
+
+| client | RPS | avg ms | p95 |
+|---|---:|---:|---:|
+| official | 2383.2 | 1.68 | 2.14 |
+| aerospike-py | 2466.8 | 1.62 | 2.39 |
+| **speedup** | **1.04×** | **1.04×** | — |
+
+Smallest gap of the five scenarios — request shape is dominated by HTTP framing + a single round trip, both of which are common cost. Larger concurrency widens it (production-benchmark Env A shows 4.8× on the same DB shape without the ASGI layer).
+
+**Expected on 3.14t**
+
+Largest absolute drop on both clients — `spawn_blocking_delay` and `event_loop_resume_delay` are big shares of a short request. Ratio between clients may shrink (the production-benchmark same-workload run on 3.14t saw the 42% gap collapse to ~2ms).
+
+  </TabItem>
+
+  <TabItem value="s2" label="s2 — dict-path infer">
+
+### s2 — `batch_read` → dict → tensor → DLRM
+
+Materialise records into per-row Python lists, build a `torch.tensor`, run a 2-layer MLP (64→256→1). This is the common pattern when upstream code expects a dict-of-dicts result.
+
+**Code path differences**
+
+| client | materialise step |
+|---|---|
+| aerospike-py | `result.to_dict()` → `bins_by_key.get(key)` per record (key order from request list) |
+| official | iterate `result.batch_records` (preserves request order per aerospike 19.x, verified) |
+
+Both paths build a Python list of lists and call `torch.tensor(rows, dtype=torch.float32)` exactly once — no cell-by-cell tensor assignment that would unfairly punish either side.
+
+**Smoke**
+
+| client | RPS | avg ms | p95 |
+|---|---:|---:|---:|
+| official | 1986.0 | 2.01 | 2.48 |
+| aerospike-py | 2206.6 | 1.81 | 2.56 |
+| **speedup** | **1.11×** | **1.11×** | — |
+
+The 1.11× ratio is the baseline for the s2 vs s3 comparison: when both clients must walk per-record dicts, the gap is modest. **s3 widens it to 1.33×** by using a Rust-side zero-copy path on aerospike-py that the official client has no equivalent for.
+
+**Expected on 3.14t**
+
+Both clients improve. DLRM CPU inference path itself benefits (`torch` GIL release) — the production-benchmark side-effect note saw inference drop 43.5→20.7 ms (−52%) on 3.14t. The ratio between clients narrows but the *kind* of difference (dict iteration cost) doesn't disappear.
+
+  </TabItem>
+
+  <TabItem value="s3" label="s3 — numpy zero-copy 🔥">
+
+### s3 — `batch_read` → numpy structured array → torch → DLRM
+
+The aerospike-py path uses `LazyBatchRecords.to_numpy(dtype)` to fill a contiguous structured array with the GIL released, then views it as a `(batch, N_FEATURES)` float32 matrix without copying:
+
+```python
+np_batch = result.to_numpy(_DTYPE)                       # structured (batch,) array
+matrix_np = np_batch.batch_records.view(np.float32) \
+                    .reshape(-1, N_FEATURES)             # zero-copy view
+tensor = torch.from_numpy(matrix_np)                     # zero-copy
+preds = infer(tensor)
+```
+
+Verified zero-copy: `np_batch.batch_records.view(np.float32).reshape(-1, 64).base is np_batch.batch_records` and `np.shares_memory(matrix_np, np_batch.batch_records)` both true on numpy 2.x with the 64-`<f4` packed dtype.
+
+**Official client has no equivalent** — falls back to allocating `np.zeros((batch, N), dtype=np.float32)` and copying field-by-field through Python.
+
+**Smoke**
+
+| client | RPS | avg ms | p95 |
+|---|---:|---:|---:|
+| official | 1854.0 | 2.16 | 2.75 |
+| **aerospike-py** | **2466.2** | **1.62** | **2.36** |
+| **speedup** | **1.33×** | **1.33×** | **1.16×** |
+
+**The s2 → s3 jump (1.11× → 1.33×) is the isolated `to_numpy()` advantage** — same DLRM, same DB shape, only the materialisation differs. This is the headline of the page: when the downstream consumer is a numpy-friendly framework (PyTorch, JAX, scikit-learn), aerospike-py routes around Python-loop materialisation.
+
+**Expected on 3.14t**
+
+The advantage is **architectural** (single Rust→numpy fill with GIL released, vs Python loop). It should survive GIL removal better than the other scenarios — s3 vs s2 ratio likely widens on 3.14t because s2 also wins from GIL removal while s3 mostly already routed around the GIL.
+
+  </TabItem>
+
+  <TabItem value="s4" label="s4 — gather vs single">
+
+### s4 — `asyncio.gather(N batch_reads)` vs single `batch_read(mixed keys)`
+
+Same total key count, two endpoints. **`/s4/gather`** fans out `n_groups` parallel `batch_read` calls; **`/s4/single`** concatenates all keys into one call. Same wire payload at the DB, different fixed-cost amortisation.
+
+**Why aerospike-py wins gather harder**
+
+The official client's `asyncio.to_thread` hop serialises each sub-batch through the thread pool; aerospike-py runs them concurrently inside Tokio. So gather's per-call overhead is paid N× on official, 1× (roughly) on aerospike-py.
+
+**Smoke (n_groups=4, per_group=30 → 120 keys total)**
+
+| endpoint | client | RPS | avg ms | p95 |
+|---|---|---:|---:|---:|
+| `/s4/gather` | official | 902.8 | 4.43 | 4.80 |
+| `/s4/gather` | aerospike-py | 1130.3 | 3.54 | 4.95 |
+| `/s4/gather` | **speedup** | **1.25×** | **1.25×** | — |
+| `/s4/single` | official | 996.1 | 4.02 | 4.70 |
+| `/s4/single` | aerospike-py | 1385.4 | 2.89 | 4.24 |
+| `/s4/single` | **speedup** | **1.39×** | **1.39×** | **1.11×** |
+
+`/s4/single` is **faster than `/s4/gather` on both clients** (fewer round trips amortises better) but the gap between clients is **bigger on `/s4/single`** (1.39× vs 1.25×) because the gather-path threading penalty is partly absorbed by genuine parallelism — single doesn't have that escape valve.
+
+**Recipe**: prefer a single `batch_read(mixed_keys)` over `gather(N batch_reads)` when the keys are known upfront. Production-benchmark Env C confirmed this pattern reduces p95 a further −33% over the gather baseline.
+
+**Expected on 3.14t**
+
+Official's `asyncio.to_thread` hop becomes cheap → the gather-vs-single gap on official narrows. aerospike-py's single-call advantage (one Rust ↔ Python boundary crossing) is unchanged.
+
+  </TabItem>
+
+  <TabItem value="s5" label="s5 — lazy subset">
+
+### s5 — partial materialisation with `LazyBatchRecords`
+
+Records on the wire have 64 bins (`f0..f63`). The endpoint only consumes 8 of them. Both clients receive the full payload — bin projection (`bins=[…]`) is a server-side optimisation we explicitly skip here, the comparison is **client-side materialisation cost** at fixed wire size.
+
+**Code path differences**
+
+| client | materialise step |
+|---|---|
+| aerospike-py | `result.to_numpy(_SUBSET_DTYPE)` — only the 8 named fields are written into the structured array; the other 56 never touch Python |
+| official | each `BatchRecord.record[2]` is a **fully-materialised 64-key Python dict** built by the C extension *before* it returns to Python — subset access (`bins[name]`) is then free, but the up-front dict build is unavoidable |
+
+**Smoke**
+
+| client | RPS | avg ms | p95 |
+|---|---:|---:|---:|
+| official | 2421.4 | 1.65 | 2.09 |
+| aerospike-py | 2722.0 | 1.47 | 2.16 |
+| **speedup** | **1.12×** | **1.12×** | — |
+
+Smaller gap than s3 because the wire payload is identical and the official client's eager dict build is fast (C-extension). The aerospike-py advantage scales with **how many bins you DON'T need** — at 8-of-64 the saving is modest; at 1-of-128 it grows.
+
+**Expected on 3.14t**
+
+aerospike-py's `to_numpy(subset_dtype)` releases the GIL during the per-record fill, so multiple s5 requests can materialise in parallel under 3.14t. Official client's per-request dict build is also GIL-released inside the C extension itself, but the resulting dict ownership flips the GIL on the Python side. Ratio likely holds.
+
+  </TabItem>
+</Tabs>
+
+## What's deliberately not measured
+
+| Excluded | Why |
+|---|---|
+| Response body serialisation | Each endpoint returns `{found: N}` (or `+ pred_sum / subset_sum`) — a single scalar derived from the records. JSON encoding of full records would add a cost both clients pay but with different key/digest shapes, inflating the official-client side asymmetrically and burying the client gap. |
+| OTel / Prometheus / nelo | Measurement noise. The parent client library exposes those features; the benchmark suite stays clean. |
+| Docker image / k8s manifests | The point is to isolate the client library — adding a deploy/registry/manifests path drags in noise unrelated to it. |
+| Bin projection (`bins=[…]` on the wire) | Server-side optimisation, orthogonal to the client comparison. **s5** measures client-side materialisation cost on the same wire payload. |
+
+For the inverse — measurement that *includes* all the production cost — see the [Production Benchmark](./production-benchmark).
+
+---
+
+## Python 3.14t — runtime swap on the same suite
+
+Python 3.14t is the **free-threaded** build of CPython (GIL disabled). The expectation from the [Production Benchmark's 3.14t section](./production-benchmark#python-314t-free-threaded--same-pipeline-gil-removed) — where `spawn_blocking_delay` (234 ms → 0.12 ms) and `event_loop_resume_delay` (39.7 ms → ~0) collapse — should reproduce here too, but the absolute deltas will be smaller because the isolated suite already trims the GIL-bound stages downstream of `batch_read`.
+
+The benchmark/ project supports the runtime swap with a single argument:
+
+```bash
+uv python install 3.14t        # one-time, ~30 MB download (managed by uv)
+PYTHON=3.14t uv sync           # creates a separate 3.14t venv
+PYTHON=3.14t make bench-all CONCURRENCY=10 DURATION=30s BATCH_SIZE=50
+make report                    # report.py groups runs by python version
+```
+
+The per-scenario expected effects are written under each scenario tab above ("Expected on 3.14t").
+
+:::note 3.14t isolated-benchmark matrix is a TODO
+The "Expected on 3.14t" lines under each scenario are extrapolations from the production-benchmark stage breakdown, not measurements. The harness supports the runtime swap; a published matrix run is tracked in [Bottleneck Analysis](./bottleneck-analysis).
+:::
+
+## Files of interest
+
+```
+benchmark/
+├── pyproject.toml              # uv project, editable parent aerospike-py
+├── compose.yaml                # aerospike:ce-8.1.2.1_3
+├── scripts/aerospike.template.conf
+├── Makefile                    # up · seed · serve-{py,official} · bench[-all] · report
+├── src/app/
+│   ├── main.py · lifespan.py · config.py · model.py · seed.py
+│   ├── clients/{py_async,official_async}.py
+│   └── routes/s{1..5}*.py
+└── loadtest/
+    ├── run_oha.sh · bench_matrix.sh
+    ├── scenarios.py            # id → one-line description
+    └── report.py
+```

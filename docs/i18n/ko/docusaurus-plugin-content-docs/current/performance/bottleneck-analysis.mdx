@@ -1,188 +1,26 @@
 ---
-title: 병목 분석 및 최적화
-sidebar_label: 병목 분석
+title: Bottleneck Analysis
+sidebar_label: Bottleneck Analysis
 sidebar_position: 4
-description: aerospike-py 내부 stage profiling, gather→single recipe (p95 −33%), stage profiling toggle 오버헤드, 권장 최적화
+description: aerospike-py 의 stage-별 profiling 및 최적화 recipe. 새 isolated 하네스 기반 재측정 대기 중.
 ---
 
-이 페이지는 **부하 환경에서 batch_read를 느리게 만드는 것이 무엇인지**, aerospike-py가 이를 찾기 위해 stage 단위 timing을 어떻게 노출하는지, 그리고 어떤 최적화가 측정 가능한 도움을 주는지를 설명합니다.
+:::caution TODO — 재측정 대기 중
+이전 bottleneck-analysis 콘텐츠는 삭제된 `benchmark/results/*` 산출물 (`bottleneck-analysis.md`, `internal-stage-toggle-comparison.md`) 을 기반으로 작성되었습니다. 그 측정에서 `spawn_blocking_delay` + `event_loop_resume_delay` 가 GIL 환경의 지배적 비용으로 식별되었고, 그 스토리는 [Production Benchmark → Python 3.14t](./production-benchmark#what-gets-faster-and-why) 에 보존되어 있습니다 — free-threaded Python 에서 두 stage 가 거의 0으로 collapse 되는 것을 확인 가능.
 
-> **출처**: `benchmark/results/bottleneck-analysis.md`, `benchmark/results/internal-stage-toggle-comparison.md`, `benchmark/results/k6-runtime-client-comparison.md`.
+빠진 것: 새 [Isolated Benchmark](./isolated-benchmark) 하네스 (s1–s5, oha, podman, 로컬 Aerospike CE 8.1.2.1_3) 기반의 stage breakdown 신규 측정. 하네스 자체는 stage profiling 을 이미 지원합니다 — `AEROSPIKE_PY_INTERNAL_METRICS=1` 로 `db_client_internal_stage_seconds` 히스토그램이 켜지며 오버헤드는 무시 가능 — 다만 매트릭스 측정 + 페이지 reduction 이 아직.
 
-## 처음의 미스터리
+추적 항목:
 
-프로덕션 observability 결과 Rust 내부 `batch_read` I/O는 **~0.9 ms** 인데, Python layer의 set 단위 read 메트릭은 **~51 ms** 였습니다. **wall time의 99%가 Rust 외부에서 발생.**
+- [ ] Isolated 하네스에서 stage profiling 매트릭스 재측정 (s1 / s3 / s4_gather × py3.11 GIL × py3.14t free-threaded)
+- [ ] **s4_gather vs s4_single** 에서 `gather(N) → single batch_read(mixed keys)` recipe 재검증
+- [ ] 새 측정값 반영 후 stage profiling 활성화 표면 (env var · 런타임 토글 · scoped context manager) 정리
+:::
 
-```
-Rust metrics (db_client_operation_duration_seconds):    0.9 ms
-Python metrics (aerospike_batch_read_set_duration):    51.0 ms
-─────────────────────────────────────────────────────────────
-미식별 오버헤드:                                       50.1 ms (98.2%)
-```
+## 재측정 시 다룰 내용
 
-50 ms가 어디로 갔는지 찾기 위해, aerospike-py는 Rust 내부와 PyO3 ↔ asyncio 경계를 모두 포함하는 stage별 histogram을 추가했습니다.
+1. **stage 별 breakdown** — `batch_read` 의 stage 이름 (`key_parse`, `limiter_wait`, `tokio_schedule_delay`, `io`, `into_pyobject`, `spawn_blocking_delay`, `event_loop_resume_delay`, `to_dict`, `to_numpy`, `merge_to_dict`, `future_into_py_setup`) 별 latency 분포.
+2. **stage profiling 활성화 방법** — `AEROSPIKE_PY_INTERNAL_METRICS=1` env var, `aerospike_py.set_internal_stage_metrics_enabled(True)` 런타임 토글, scoped context manager. 세 가지 모두 현재 존재; 비활성 시 오버헤드는 stage entry 당 `AtomicBool` 로드 1회 수준.
+3. **유의미한 최적화 recipe**. 이전 round 의 우승자: (a) aerospike-py 로 교체, (b) `gather(N batch_reads)` 를 단일 `batch_read(mixed keys)` 로 통합, (c) Python 3.14t free-threaded 로 전환. (a) 와 (c) 는 [Isolated Benchmark](./isolated-benchmark) 와 [Production Benchmark](./production-benchmark) 에 이미 정량화되어 있고, (b) 는 **s4_gather vs s4_single** 에서 재측정 예정.
 
-## Internal Stage Profiling
-
-각 `batch_read`는 10개 stage로 분할됩니다. `db_client_internal_stage_seconds` histogram이 stage별 latency를 개별 기록.
-
-| Stage | 위치 | GIL 상태 |
-|---|---|---|
-| `key_parse` | Python tuple → Rust `Vec<Key>` | held |
-| `limiter_wait` | Backpressure semaphore acquire | released |
-| `tokio_schedule_delay` | Tokio task scheduling | released |
-| `io` | Aerospike 네트워크 round-trip | released |
-| `into_pyobject` | Rust `BatchRecord` → `Py<...>` (Arc wrap, `spawn_blocking`에서 실행) | held |
-| `spawn_blocking_delay` | `spawn_blocking` task가 큐에서 대기한 wall time | — |
-| `event_loop_resume_delay` | future-ready부터 coroutine resume까지 event-loop tick | — |
-| `to_dict` | `LazyBatchRecords.to_dict()` → `dict[Key, Record]` | held |
-| `to_numpy` | `LazyBatchRecords.to_numpy(dtype)` → `NumpyBatchRecords` framing — per-record fill loop은 `py.detach`로 GIL **release** | held (framing only) |
-| `merge_to_dict` | 다중 set을 typed dict로 merge | held |
-| `future_into_py_setup` | PyO3 future ↔ asyncio bridge setup | held |
-
-### Stage Profiling 활성화
-
-Stage profiling은 **기본 OFF, 오버헤드 0**. 활성화 방법 3가지:
-
-```python
-# 프로세스 전체 — 환경 변수 (프로세스 시작 시점에 읽음)
-# AEROSPIKE_PY_INTERNAL_METRICS=1
-
-# 런타임 토글
-import aerospike_py
-aerospike_py.set_internal_stage_metrics_enabled(True)
-
-# Scoped context manager
-with aerospike_py.internal_stage_profiling():
-    await client.batch_read(keys)
-```
-
-비활성화 상태에서는 `Instant::now()` syscall과 histogram 업데이트가 elide됨 — stage 진입당 `AtomicBool` load 1회 (~1 ns)만 추가.
-
-## Stage가 드러낸 것 (Python 3.11 + GIL)
-
-Profiling **on** 상태에서 k6 부하를 받았을 때:
-
-| Stage | avg | 의미 |
-|---|---:|---|
-| `into_pyobject` | 3.96 μs | Arc wrap은 사실상 무료 |
-| `limiter_wait` | 3.56 μs | Backpressure 미작동 (경합 없음) |
-| `future_into_py_setup` | 46.5 μs | PyO3 ↔ asyncio bridge는 저렴 |
-| `tokio_schedule_delay` | 83.1 μs | Tokio scheduling은 정상 |
-| `to_dict` | 832 μs | Per-call dict materialization 정상 |
-| `key_parse` | 967 μs | 200-key tuple parsing 정상 |
-| `merge_to_dict` | 4.48 ms | 9-set merge는 중간 수준 |
-| `io` | 7.51 ms | 네트워크 — 다만 응답 파싱 중 GIL 경합으로 부풀려짐 |
-| **`event_loop_resume_delay`** | **39.7 ms** | 🚨 Coroutine이 GIL을 얻을 차례를 기다리는 시간 |
-| **`spawn_blocking_delay`** | **234 ms** | 🚨 `spawn_blocking` 큐가 GIL을 기다리는 시간 |
-
-**결론**: aerospike-py의 Rust 코드는 빠름 (실제 batch_read 작업에 ~5 ms 합산). 미식별 오버헤드 46 ms는 실재하지만, **Rust 내부의 고칠 수 있는 hot loop 때문이 아니라 PyO3 ↔ asyncio 경계의 GIL 직렬화** 때문.
-
-이 발견이 [Free-Threaded Python](./free-threaded-python) 실험을 직접 동기 부여 — 두 stage 모두 ~0으로 압축됨.
-
-## 최적화 1: `gather(N)` → 단일 `batch_read(mixed keys)`
-
-원래 9-set serving 파이프라인은 `asyncio.gather`로 fan-out:
-
-```python
-# 9개 동시 batch_read 호출
-await asyncio.gather(*[
-    client.batch_read(set_i_keys) for i in range(9)
-])
-```
-
-GIL 환경에서 이는 9개의 동시 PyO3 → asyncio handoff를 만듭니다. 각 `key_parse`와 `to_dict` stage가 GIL을 획득하며 직렬화:
-
-```
-타임라인 (gather mode, 9 sets × 200 keys):
-T=0ms     asyncio.gather 시작
-          ├─ task 1: key_parse (1.46 ms, GIL held)
-          ├─ task 2: key_parse 대기 (GIL)
-          ├─ ...
-          └─ task 9: key_parse 대기 (GIL)
-T=~13ms   9개 key_parse 완료 (순차, 9 × 1.46 ms)
-          └─ 9개 Rust async future가 Tokio에서 병렬 실행
-T=~15ms   9개 I/O 완료
-T=15-51ms event loop이 9개 coroutine을 순차 resume:
-          ├─ task 1 → to_dict (0.79 ms) → 완료
-          ├─ (event loop tick: 3-5 ms)
-          └─ task 9 → to_dict (0.79 ms) → 완료
-T=~51ms   gather 반환
-```
-
-**해결책**: `batch_read`는 이미 mixed-set key를 지원. 1800 keys (9 × 200) 전체를 단일 호출로 보내고 Python에서 demux:
-
-```python
-all_keys = []
-for set_name, keys in per_set_keys.items():
-    all_keys.extend(("ns", set_name, k) for k in keys)
-
-result = await client.batch_read(all_keys)
-
-# Python에서 set별 demux (저렴)
-per_set_results = defaultdict(dict)
-for key, record in result.to_dict().items():
-    per_set_results[key[1]][key[2]] = record
-```
-
-### 측정 효과 (k6 10 VUs × 60s, FastAPI + DLRM)
-
-| Client | Mode | avg | median | p90 | p95 |
-|---|---|---:|---:|---:|---:|
-| **aerospike-py** | gather (9×) | 189 | 176 | 393 | 434 |
-| **aerospike-py** | single (mixed keys) | **126** | **101** | **284** | **302** |
-| **개선** | | **−33%** | **−43%** | **−28%** | **−30%** |
-
-| Client | Mode | avg | p95 |
-|---|---|---:|---:|
-| official | gather | 251 | 502 |
-| official | single | 188 | 396 |
-| **aerospike-py vs official (single mode)** | | **1.49×** | **1.31×** |
-
-Single-call 패턴은 두 client 모두에 도움 (항상 작업량이 적음). 다만 **aerospike-py에서 이득이 더 큼** — 9개 PyO3 ↔ asyncio handoff 중 8개를 제거하면 8배의 GIL 직렬화 비용이 사라지기 때문.
-
-이를 default로 활성화한 후속 run (다른 테스트 조건, 더 가벼운 부하)은 aerospike-py single mode에서 **avg 60.8 ms / p95 154.6 ms** — 지속적인 절대 floor를 보여줌.
-
-## 최적화 2: Stage Profiling 상시 ON
-
-Toggle을 만든 이유는 오버헤드가 충분히 작다면 **프로덕션에서 stage profiling을 켠 채로 운영**할 수 있도록 하기 위함. 측정 결과:
-
-| 지표 (Rust 내부 `batch_read` op_duration) | OFF (baseline) | ON (debug) | Δ |
-|---|---:|---:|---:|
-| avg | 2.16 ms | 3.22 ms | +1.06 ms (+49%) |
-| p95 | 4.67 ms | 7.61 ms | +2.94 ms (+63%) |
-| p99 | 4.93 ms | 9.51 ms | +4.58 ms (+93%) |
-
-단독으로 보면 나쁘지만 — **Rust 내부 시간은 E2E latency의 5–10%에 불과**. 사용자가 실제로 체감하는 FastAPI E2E 레벨에서는:
-
-| 구성 | k6 single p95 |
-|---|---:|
-| 3.11 + GIL, stage OFF | 189 ms |
-| 3.11 + GIL, stage ON | **143 ms** |
-
-Stage ON 이 OFF 보다 E2E p95가 **더 낮게** 측정됨 — 노이즈 범위 내. Toggle은 측정 가능한 E2E 영향이 없음. Rust 레벨 오버헤드는 그 외부의 훨씬 큰 asyncio + GIL 비용에 묻힘.
-
-**권장**: 프로덕션에서 `AEROSPIKE_PY_INTERNAL_METRICS=1` 상시 ON. 장애 발생 시 stage 단위 attribution을 즉시 얻을 수 있음. GIL이 제거되면 (3.14t) Rust 내부 오버헤드도 무시할 수준.
-
-## 최적화 3: Python 3.14t로 전환
-
-가장 큰 단일 lever — 전체 분석은 [Free-Threaded Python](./free-threaded-python) 페이지 참조. 요약:
-
-- 같은 Rust 바이너리
-- `spawn_blocking_delay`: 234 ms → 0.12 ms
-- `event_loop_resume_delay`: 39.7 ms → ≈ 0
-- `io`: 7.51 ms → 1.27 ms
-- E2E p95: 189 ms → **97 ms** (**−49%**)
-- TPS: 41.6 → **61.2 iter/s** (**+47%**)
-
-세 최적화를 누적 적용한 효과와 권장 적용 순서는 [Overview](./overview) 참조.
-
-## 향후 최적화 후보
-
-측정 시점에 식별되었으나 미구현:
-
-| 아이디어 | 예상 효과 | 난이도 |
-|---|---|---|
-| `key_parse` interning (bin name `py.intern()`) | −10–15% | 중간 |
-| `future_into_py` 개선 | 이 stage의 이론적 최대치 | 높음 — upstream PyO3 PR 필요 |
-| 감사 후 `#[pymodule(gil_used = false)]`로 승격 | 3.14t에서 잠재적인 GIL 재획득 비용 제거 | 중간 |
+재측정 전까지는 [Production Benchmark 의 3.14t stage breakdown](./production-benchmark#what-gets-faster-and-why) 을 canonical "시간이 어디 가는지" reference 로 사용하세요.

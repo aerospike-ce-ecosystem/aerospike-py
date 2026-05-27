@@ -1,72 +1,74 @@
-IMAGE_REGISTRY := n3r-namespace-mrad1.n3r.reg.navercorp.com/mona-public
-IMAGE_NAME := aerospike-benchmark
-IMAGE_TAG := latest
-IMAGE := $(IMAGE_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
-K8S_CONTEXT := mrad1-n3r-cluster-admin
-K8S_NS := mona-adagent
 RUNTIME ?= podman
+PYTHON ?= 3.11
+HOST ?= 127.0.0.1
+PORT ?= 8000
+AEROSPIKE_HOST ?= 127.0.0.1
+AEROSPIKE_PORT ?= 18710
+SEED_COUNT ?= 10000
+SCENARIO ?= s1
+CONCURRENCY ?= 10
+DURATION ?= 30s
+BATCH_SIZE ?= 50
 
-.PHONY: sync run-benchmark run-asgi-benchmark serve docker-build docker-push deploy undeploy loadtest lint help
+.PHONY: help sync up down seed serve-py serve-official bench-s1-py bench-s1-official bench-s1 report clean fmt lint
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
-sync: ## Install dependencies
-	uv sync
+sync: ## Install deps in this project's .venv (does not affect parent venv)
+	uv sync --python $(PYTHON)
 
-run-benchmark: ## Run pure batch_read benchmark (Rich table + Markdown report)
-	PYTHONPATH=src uv run python -m benchmark \
-		--clients official official-async py-async \
-		--concurrency 10 \
-		--batch-sizes 50 200 \
-		--iterations 30 \
-		--warmup 5 \
-		--interleave \
-		--shuffle-keys
+up: ## Start Aerospike CE container (port $(AEROSPIKE_PORT))
+	$(RUNTIME) compose -f compose.yaml up -d
+	@echo "Waiting for Aerospike to be healthy..."
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if $(RUNTIME) exec aerospike-bench asinfo -v status 2>/dev/null | grep -q ok; then \
+			echo "Aerospike ready."; exit 0; \
+		fi; \
+		sleep 2; \
+	done; \
+	echo "Aerospike did not become healthy in 20s"; exit 1
 
-run-asgi-benchmark: ## Run ASGI serving benchmark (FastAPI + DLRM + Aerospike)
-	@echo "Starting FastAPI server in background..."
-	PYTHONPATH=src uv run uvicorn serving.app:app --host 0.0.0.0 --port 8000 --workers 1 & \
-	SERVER_PID=$$!; \
-	echo "Server PID: $$SERVER_PID"; \
-	sleep 5; \
-	echo "Running ASGI benchmark..."; \
-	PYTHONPATH=src uv run python -m serving.asgi_benchmark \
-		--base-url http://127.0.0.1:8000 \
-		--clients official py-async \
-		--iterations 200 \
-		--concurrency 10 \
-		--warmup 20; \
-	echo "Stopping server (PID $$SERVER_PID)..."; \
-	kill $$SERVER_PID 2>/dev/null || true; \
-	wait $$SERVER_PID 2>/dev/null || true; \
-	echo "Done."
+down: ## Stop and remove the Aerospike container
+	$(RUNTIME) compose -f compose.yaml down -v
 
-serve: ## Run FastAPI serving app locally
-	PYTHONPATH=src uv run uvicorn serving.app:app --host 0.0.0.0 --port 8000 --reload
+seed: ## Load $(SEED_COUNT) deterministic records into test/bench
+	uv run python -m app.seed --count $(SEED_COUNT) --host $(AEROSPIKE_HOST) --port $(AEROSPIKE_PORT)
 
-wheel-amd64: ## Cross-compile aerospike-py wheel for linux/amd64 (via zig)
-	cd .. && maturin build --release --target x86_64-unknown-linux-gnu --zig \
-		-o benchmark/deploy/wheels/ -i python3.11
+serve-py: ## Run FastAPI with aerospike-py AsyncClient
+	CLIENT=py AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
+		uv run uvicorn app.main:app --host $(HOST) --port $(PORT) --workers 1
 
-docker-build: wheel-amd64 ## Build Docker image (pre-built wheel + python deps)
-	cd .. && $(RUNTIME) buildx build --platform linux/amd64 \
-		-t $(IMAGE) -f benchmark/deploy/Dockerfile .
+serve-official: ## Run FastAPI with official client + asyncio.to_thread
+	CLIENT=official AEROSPIKE_HOST=$(AEROSPIKE_HOST) AEROSPIKE_PORT=$(AEROSPIKE_PORT) \
+		uv run uvicorn app.main:app --host $(HOST) --port $(PORT) --workers 1
 
-docker-push: ## Push Docker image to registry
-	$(RUNTIME) push $(IMAGE)
+bench-s1-py: ## Run oha against S1 with aerospike-py (server must be serve-py)
+	bash loadtest/run_oha.sh s1 py $(CONCURRENCY) $(DURATION) $(BATCH_SIZE)
 
-deploy: ## Deploy to K8s (mrad1, mona-adagent)
-	kubectl --context $(K8S_CONTEXT) apply -k deploy/k8s/ -n $(K8S_NS)
-	kubectl --context $(K8S_CONTEXT) -n $(K8S_NS) \
-		rollout status deployment/aerospike-benchmark --timeout=180s
+bench-s1-official: ## Run oha against S1 with official (server must be serve-official)
+	bash loadtest/run_oha.sh s1 official $(CONCURRENCY) $(DURATION) $(BATCH_SIZE)
 
-undeploy: ## Remove deployment from K8s
-	kubectl --context $(K8S_CONTEXT) delete -k deploy/k8s/ -n $(K8S_NS) --ignore-not-found
+bench-s1: ## End-to-end: start/stop both servers and bench S1
+	bash loadtest/bench_matrix.sh s1 $(CONCURRENCY) $(DURATION) $(BATCH_SIZE)
 
-loadtest: ## Run k6 load test
-	k6 run loadtest/k6_benchmark.js
+bench: ## End-to-end bench for SCENARIO=<s1|s2|s3|s4_gather|s4_single|s5>
+	bash loadtest/bench_matrix.sh $(SCENARIO) $(CONCURRENCY) $(DURATION) $(BATCH_SIZE)
 
-lint: ## Lint Python code
-	uv run ruff check src/
-	uv run ruff format --check src/
+bench-all: ## Bench all 6 scenario variants sequentially (py vs official for each)
+	@set -e; for s in s1 s2 s3 s4_gather s4_single s5; do \
+		echo; echo "===== scenario $$s ====="; \
+		bash loadtest/bench_matrix.sh $$s $(CONCURRENCY) $(DURATION) $(BATCH_SIZE); \
+	done
+
+report: ## Render a markdown comparison table from results/
+	uv run python -m loadtest.report
+
+fmt: ## Format with ruff
+	uv run ruff format src/ loadtest/report.py
+
+lint: ## Lint with ruff
+	uv run ruff check src/ loadtest/report.py
+
+clean: ## Remove .venv and __pycache__
+	rm -rf .venv src/**/__pycache__ src/__pycache__ .ruff_cache
