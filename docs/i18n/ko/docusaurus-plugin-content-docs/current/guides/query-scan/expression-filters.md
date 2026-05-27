@@ -3,15 +3,13 @@ title: Expression Filters
 sidebar_label: Expression Filters
 sidebar_position: 2
 slug: /guides/expression-filters
-description: 서버 측 레코드 필터링을 위한 Expression 필터 가이드
+description: Server-side record filtering with 104+ composable expression functions.
 ---
 
-Expression 필터를 사용하면 읽기, 쓰기, 쿼리 작업 중에 서버 측에서 record를 필터링할 수 있습니다. 서버가 expression을 평가하고 일치하는 record만 반환(또는 수정)합니다.
+read, write, query operation 동안 server-side filtering. server 가 expression 을 평가하여 매칭되는 record 만 반환 (또는 수정).
 
-:::note[서버 요구 사항]
-
-Expression 필터는 Aerospike Server **5.2+** 이상이 필요합니다.
-
+:::note[서버 요구사항]
+Expression filter 는 Aerospike Server **5.2+** 필요.
 :::
 
 ## Import
@@ -20,99 +18,67 @@ Expression 필터는 Aerospike Server **5.2+** 이상이 필요합니다.
 from aerospike_py import exp
 ```
 
-## Overview
-
-Expression은 dict 노드를 반환하는 함수 호출을 조합하여 구성합니다. 이 dict는 `filter_expression` policy 키를 통해 Rust 레이어로 전달되며, Aerospike 와이어 포맷으로 컴파일됩니다.
+## 기본 사용
 
 ```python
-# Expression 구성: age >= 21
+# 표현식 빌드: age >= 21
 expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
 
-# policy에서 사용
-policy = {"filter_expression": expr}
-_, _, bins = client.get(key, policy=policy)
+# policy 통해 어떤 operation 에서든 사용
+record = client.get(key, policy={"filter_expression": expr})
 ```
 
-## Value Constructors
+## Value Constructor
 
-리터럴 값 expression을 생성합니다:
+| Function | 설명 |
+|----------|-------------|
+| `int_val(v)` | 64-bit integer |
+| `float_val(v)` | 64-bit float |
+| `string_val(v)` | String |
+| `bool_val(v)` | Boolean |
+| `blob_val(v)` | Bytes |
+| `list_val(v)` | List |
+| `map_val(v)` | Map/dict |
+| `geo_val(v)` | GeoJSON string |
+| `nil()` | Nil |
+| `infinity()` | Infinity (unbounded range) |
+| `wildcard()` | Wildcard |
 
-| 함수 | 설명 |
-|------|------|
-| `exp.int_val(val)` | 64비트 정수 |
-| `exp.float_val(val)` | 64비트 실수 |
-| `exp.string_val(val)` | 문자열 |
-| `exp.bool_val(val)` | 불리언 |
-| `exp.blob_val(val)` | 바이트 |
-| `exp.list_val(val)` | 리스트 |
-| `exp.map_val(val)` | Map/dict |
-| `exp.geo_val(val)` | GeoJSON 문자열 |
-| `exp.nil()` | Nil 값 |
-| `exp.infinity()` | 무한대 (범위 제한 없음에 사용) |
-| `exp.wildcard()` | 와일드카드 (모든 값과 일치) |
+## Bin Accessor
 
-```python
-exp.int_val(42)
-exp.string_val("hello")
-exp.bool_val(True)
-exp.list_val([1, 2, 3])
-exp.map_val({"key": "value"})
-```
+| Function | 설명 |
+|----------|-------------|
+| `int_bin(name)` | Integer bin |
+| `float_bin(name)` | Float bin |
+| `string_bin(name)` | String bin |
+| `bool_bin(name)` | Boolean bin |
+| `blob_bin(name)` | Blob bin |
+| `list_bin(name)` | List bin |
+| `map_bin(name)` | Map bin |
+| `geo_bin(name)` | Geospatial bin |
+| `hll_bin(name)` | HyperLogLog bin |
+| `bin_exists(name)` | bin 존재 시 True |
+| `bin_type(name)` | bin particle type |
 
-## Bin Accessors
+## Comparison
 
-타입별로 bin 값을 읽습니다:
+| Function | Operator |
+|----------|----------|
+| `eq(l, r)` | `==` |
+| `ne(l, r)` | `!=` |
+| `gt(l, r)` | `>` |
+| `ge(l, r)` | `>=` |
+| `lt(l, r)` | `<` |
+| `le(l, r)` | `<=` |
 
-| 함수 | 설명 |
-|------|------|
-| `exp.int_bin(name)` | 정수 bin 읽기 |
-| `exp.float_bin(name)` | 실수 bin 읽기 |
-| `exp.string_bin(name)` | 문자열 bin 읽기 |
-| `exp.bool_bin(name)` | 불리언 bin 읽기 |
-| `exp.blob_bin(name)` | blob bin 읽기 |
-| `exp.list_bin(name)` | list bin 읽기 |
-| `exp.map_bin(name)` | map bin 읽기 |
-| `exp.geo_bin(name)` | 지리공간 bin 읽기 |
-| `exp.hll_bin(name)` | HyperLogLog bin 읽기 |
-| `exp.bin_exists(name)` | bin이 존재하면 True |
-| `exp.bin_type(name)` | bin 파티클 타입 |
+## Logic
 
-```python
-exp.int_bin("age")
-exp.string_bin("name")
-exp.bin_exists("optional_field")
-```
-
-## Comparison Operations
-
-| 함수 | 설명 |
-|------|------|
-| `exp.eq(left, right)` | 같음 (`==`) |
-| `exp.ne(left, right)` | 같지 않음 (`!=`) |
-| `exp.gt(left, right)` | 보다 큼 (`>`) |
-| `exp.ge(left, right)` | 크거나 같음 (`>=`) |
-| `exp.lt(left, right)` | 보다 작음 (`<`) |
-| `exp.le(left, right)` | 작거나 같음 (`<=`) |
-
-```python
-# age == 30
-exp.eq(exp.int_bin("age"), exp.int_val(30))
-
-# score > 100.5
-exp.gt(exp.float_bin("score"), exp.float_val(100.5))
-
-# name != "admin"
-exp.ne(exp.string_bin("name"), exp.string_val("admin"))
-```
-
-## Logical Operations
-
-| 함수 | 설명 |
-|------|------|
-| `exp.and_(*exprs)` | 논리 AND |
-| `exp.or_(*exprs)` | 논리 OR |
-| `exp.not_(expr)` | 논리 NOT |
-| `exp.xor_(*exprs)` | 논리 XOR |
+| Function | 설명 |
+|----------|-------------|
+| `and_(*exprs)` | Logical AND |
+| `or_(*exprs)` | Logical OR |
+| `not_(expr)` | Logical NOT |
+| `xor_(*exprs)` | Logical XOR |
 
 ```python
 # age >= 18 AND active == true
@@ -121,34 +87,19 @@ exp.and_(
     exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
 )
 
-# status == "gold" OR status == "platinum"
-exp.or_(
-    exp.eq(exp.string_bin("status"), exp.string_val("gold")),
-    exp.eq(exp.string_bin("status"), exp.string_val("platinum")),
-)
-
 # NOT deleted
 exp.not_(exp.eq(exp.bool_bin("deleted"), exp.bool_val(True)))
 ```
 
-## Arithmetic Operations
+## 수치 연산
 
-| 함수 | 설명 |
-|------|------|
-| `exp.num_add(*exprs)` | 덧셈 |
-| `exp.num_sub(*exprs)` | 뺄셈 |
-| `exp.num_mul(*exprs)` | 곱셈 |
-| `exp.num_div(*exprs)` | 나눗셈 |
-| `exp.num_mod(num, denom)` | 나머지 |
-| `exp.num_pow(base, exponent)` | 거듭제곱 |
-| `exp.num_log(num, base)` | 로그 |
-| `exp.num_abs(value)` | 절댓값 |
-| `exp.num_floor(num)` | 내림 |
-| `exp.num_ceil(num)` | 올림 |
-| `exp.to_int(num)` | 정수로 변환 |
-| `exp.to_float(num)` | 실수로 변환 |
-| `exp.min_(*exprs)` | 최솟값 |
-| `exp.max_(*exprs)` | 최댓값 |
+| Function | 설명 |
+|----------|-------------|
+| `num_add`, `num_sub`, `num_mul`, `num_div` | 산술 |
+| `num_mod`, `num_pow`, `num_log` | modulo, power, log |
+| `num_abs`, `num_floor`, `num_ceil` | absolute, floor, ceil |
+| `to_int`, `to_float` | 타입 변환 |
+| `min_`, `max_` | min/max |
 
 ```python
 # (price * quantity) > 1000
@@ -158,121 +109,83 @@ exp.gt(
 )
 ```
 
-## Integer Bitwise Operations
-
-| 함수 | 설명 |
-|------|------|
-| `exp.int_and(*exprs)` | 비트 AND |
-| `exp.int_or(*exprs)` | 비트 OR |
-| `exp.int_xor(*exprs)` | 비트 XOR |
-| `exp.int_not(expr)` | 비트 NOT |
-| `exp.int_lshift(value, shift)` | 왼쪽 시프트 |
-| `exp.int_rshift(value, shift)` | 논리 오른쪽 시프트 |
-| `exp.int_arshift(value, shift)` | 산술 오른쪽 시프트 |
-| `exp.int_count(expr)` | 비트 수 |
-| `exp.int_lscan(value, search)` | MSB에서 스캔 |
-| `exp.int_rscan(value, search)` | LSB에서 스캔 |
-
 ## Record Metadata
 
-| 함수 | 설명 |
-|------|------|
-| `exp.key(exp_type)` | Record 기본 키 |
-| `exp.key_exists()` | 메타데이터에 key가 저장되어 있으면 True |
-| `exp.set_name()` | Record set 이름 |
-| `exp.record_size()` | Record 크기 (바이트, Server 7.0+) |
-| `exp.last_update()` | 마지막 업데이트 시간 (에포크 이후 나노초) |
-| `exp.since_update()` | 마지막 업데이트 이후 밀리초 |
-| `exp.void_time()` | 만료 시간 (에포크 이후 나노초) |
-| `exp.ttl()` | Record TTL (초 단위) |
-| `exp.is_tombstone()` | 삭제 표시 record이면 True |
-| `exp.digest_modulo(mod)` | 다이제스트 모듈로 (샘플링용) |
+| Function | 설명 |
+|----------|-------------|
+| `key(exp_type)` | primary key |
+| `key_exists()` | metadata 에 key 저장되어 있는가? |
+| `set_name()` | set 이름 |
+| `record_size()` | 바이트 크기 (Server 7.0+) |
+| `last_update()` | 마지막 update (epoch 부터 ns) |
+| `since_update()` | 마지막 update 부터 ms |
+| `void_time()` | expiration (epoch 부터 ns) |
+| `ttl()` | TTL 초 |
+| `is_tombstone()` | tombstone record? |
+| `digest_modulo(mod)` | digest modulo (sampling) |
 
 ```python
-# TTL < 3600 (1시간 이내에 만료)
+# 1시간 내 만료
 exp.lt(exp.ttl(), exp.int_val(3600))
 
-# 최근 24시간 이내에 업데이트된 record (86400000 ms)
-exp.lt(exp.since_update(), exp.int_val(86_400_000))
-
-# record의 약 10% 샘플링
+# record 의 ~10% sample
 exp.eq(exp.digest_modulo(10), exp.int_val(0))
 ```
 
 ## Pattern Matching
 
-### Regex
-
 ```python
-# name이 패턴과 일치 (대소문자 무시: flags=2)
+# Regex (flags=2 는 case insensitive)
 exp.regex_compare("^alice.*", 2, exp.string_bin("name"))
-```
 
-### Geospatial
-
-```python
-# 영역 내의 포인트
+# Geospatial: 원 안의 point
 region = '{"type":"AeroCircle","coordinates":[[-122.0, 37.5], 1000]}'
 exp.geo_compare(exp.geo_bin("location"), exp.geo_val(region))
 ```
 
-## Variables & Control Flow
-
-### Conditional (cond)
+## 변수와 제어 흐름
 
 ```python
-# if age < 18: "minor", elif age < 65: "adult", else: "senior"
+# Conditional
 exp.cond(
     exp.lt(exp.int_bin("age"), exp.int_val(18)), exp.string_val("minor"),
     exp.lt(exp.int_bin("age"), exp.int_val(65)), exp.string_val("adult"),
     exp.string_val("senior"),
 )
-```
 
-### Let Binding (let_ / def_ / var)
-
-```python
-# let total = price * qty in total > 1000
+# Let binding
 exp.let_(
     exp.def_("total", exp.num_mul(exp.int_bin("price"), exp.int_bin("qty"))),
     exp.gt(exp.var("total"), exp.int_val(1000)),
 )
 ```
 
-## Usage in Operations
+## Operation 과 함께 사용
 
-Expression 필터는 `filter_expression` policy 키를 통해 모든 작업에 적용할 수 있습니다.
-
-### Get with Filter
+### Get / Put
 
 ```python
 expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
-try:
-    _, _, bins = client.get(key, policy={"filter_expression": expr})
-except aerospike.FilteredOut:
-    print("Record does not match filter")
-```
 
-### Put with Filter
+# Get: 매칭 없으면 FilteredOut raise
+record = client.get(key, policy={"filter_expression": expr})
 
-```python
-# status == "active"인 경우에만 업데이트
+# Put: status == "active" 일 때만 update
 expr = exp.eq(exp.string_bin("status"), exp.string_val("active"))
 client.put(key, {"visits": 1}, policy={"filter_expression": expr})
 ```
 
-### Query with Filter
+### Query
 
 ```python
-# 보조 인덱스 쿼리 + expression 필터
 query = client.query("test", "demo")
-query.where(aerospike.predicates.between("age", 20, 50))
+query.where(predicates.between("age", 20, 50))
 
 expr = exp.eq(exp.string_bin("region"), exp.string_val("US"))
 records = query.results(policy={"filter_expression": expr})
 ```
 
-### Batch with Filter
+### Batch
 
 ```python
 expr = exp.ge(exp.int_bin("score"), exp.int_val(100))
@@ -280,11 +193,61 @@ ops = [{"op": aerospike.OPERATOR_READ, "bin": "score", "val": None}]
 records = client.batch_operate(keys, ops, policy={"filter_expression": expr})
 ```
 
-## Practical Examples
+## Integer Bitwise Operation
 
-### Active Premium Users
+| Function | 설명 |
+|----------|-------------|
+| `int_and(*exprs)` | Bitwise AND |
+| `int_or(*exprs)` | Bitwise OR |
+| `int_xor(*exprs)` | Bitwise XOR |
+| `int_not(expr)` | Bitwise NOT |
+| `int_lshift(value, shift)` | Left shift |
+| `int_rshift(value, shift)` | Logical right shift |
+| `int_arshift(value, shift)` | Arithmetic right shift |
+| `int_count(expr)` | bit count (popcount) |
+| `int_lscan(value, search)` | MSB 부터 scan |
+| `int_rscan(value, search)` | LSB 부터 scan |
 
 ```python
+# flags 의 bit 3 가 set 되어 있는가
+exp.ne(
+    exp.int_and(exp.int_bin("flags"), exp.int_val(0x08)),
+    exp.int_val(0),
+)
+
+# permissions 를 왼쪽으로 4 bit shift
+exp.int_lshift(exp.int_bin("perms"), exp.int_val(4))
+```
+
+## Type Constants
+
+`key()` 와 `bin_type()` 과 함께 `EXP_TYPE_*` constant 사용:
+
+| Constant | Value | 설명 |
+|----------|-------|-------------|
+| `exp.EXP_TYPE_NIL` | 0 | Nil |
+| `exp.EXP_TYPE_BOOL` | 1 | Boolean |
+| `exp.EXP_TYPE_INT` | 2 | Integer |
+| `exp.EXP_TYPE_STRING` | 3 | String |
+| `exp.EXP_TYPE_LIST` | 4 | List |
+| `exp.EXP_TYPE_MAP` | 5 | Map |
+| `exp.EXP_TYPE_BLOB` | 6 | Blob (bytes) |
+| `exp.EXP_TYPE_FLOAT` | 7 | Float |
+| `exp.EXP_TYPE_GEO` | 8 | GeoJSON |
+| `exp.EXP_TYPE_HLL` | 9 | HyperLogLog |
+
+```python
+# integer primary key 가져오기
+exp.key(exp.EXP_TYPE_INT)
+
+# "data" bin 이 list 인 record 필터
+exp.eq(exp.bin_type("data"), exp.int_val(exp.EXP_TYPE_LIST))
+```
+
+## 실용 예제
+
+```python
+# active premium user
 expr = exp.and_(
     exp.eq(exp.bool_bin("active"), exp.bool_val(True)),
     exp.or_(
@@ -293,31 +256,19 @@ expr = exp.and_(
     ),
     exp.ge(exp.int_bin("age"), exp.int_val(18)),
 )
+records = client.query("test", "users").results(policy={"filter_expression": expr})
 
-query = client.query("test", "users")
-records = query.results(policy={"filter_expression": expr})
-```
-
-### Records Expiring Soon
-
-```python
-# TTL < 1시간인 record
+# 1시간 내 만료되는 record
 expr = exp.and_(
-    exp.gt(exp.ttl(), exp.int_val(0)),       # 영구 보존이 아닌 record
-    exp.lt(exp.ttl(), exp.int_val(3600)),     # 1시간 이내에 만료
+    exp.gt(exp.ttl(), exp.int_val(0)),
+    exp.lt(exp.ttl(), exp.int_val(3600)),
 )
-query = client.query("test", "cache")
-expiring = query.results(policy={"filter_expression": expr})
-```
+expiring = client.query("test", "cache").results(policy={"filter_expression": expr})
 
-### High-Value Transactions
-
-```python
-# amount * quantity > 10000
+# 고액 transaction
 expr = exp.gt(
     exp.num_mul(exp.float_bin("amount"), exp.int_bin("quantity")),
     exp.float_val(10000.0),
 )
-query = client.query("test", "transactions")
-records = query.results(policy={"filter_expression": expr})
+records = client.query("test", "transactions").results(policy={"filter_expression": expr})
 ```

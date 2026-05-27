@@ -3,15 +3,15 @@ title: Read Operations
 sidebar_label: Read
 sidebar_position: 1
 slug: /guides/read
-description: get, select, exists, batch read 작업 가이드
+description: Get, select, exists, and batch read operations.
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-## Keys
+## Key
 
-모든 record는 key 튜플로 식별됩니다: `(namespace, set, primary_key)`.
+모든 record 는 key tuple `(namespace, set, primary_key)` 로 식별:
 
 ```python
 key = ("test", "demo", "user1")      # string PK
@@ -19,150 +19,91 @@ key = ("test", "demo", 12345)         # integer PK
 key = ("test", "demo", b"\x01\x02")   # bytes PK
 ```
 
-## Read (Get)
+## Read
 
 <Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+  <TabItem value="sync" label="Sync" default>
 
 ```python
 from aerospike_py import Record
 
-record: Record = client.get(("test", "demo", "user1"))
-# record.key  → AerospikeKey | None
-# record.meta → RecordMetadata | None (meta.gen, meta.ttl)
-# record.bins → dict[str, Any] | None
+record: Record = client.get(key)
+print(record.bins)       # {"name": "Alice", "age": 30}
+print(record.meta.gen)   # 1
+print(record.meta.ttl)   # 2591998
 
-# 튜플 언패킹도 가능 (하위 호환)
-key, meta, bins = client.get(("test", "demo", "user1"))
-# meta.gen == 1, meta.ttl == 2591998
-# bins = {"name": "Alice", "age": 30}
+# Tuple unpacking (backward compat)
+_, meta, bins = client.get(key)
+
+# 특정 bin 만 읽기
+record = client.select(key, ["name"])
+# record.bins = {"name": "Alice"}
 ```
 
   </TabItem>
-  <TabItem value="async" label="Async Client">
+  <TabItem value="async" label="Async">
 
 ```python
-from aerospike_py import Record
-
-record: Record = await client.get(("test", "demo", "user1"))
-# 또는 튜플 언패킹
-key, meta, bins = await client.get(("test", "demo", "user1"))
+record: Record = await client.get(key)
+_, meta, bins = await client.get(key)
+record = await client.select(key, ["name"])
 ```
 
   </TabItem>
 </Tabs>
 
-### Read Specific Bins (Select)
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
-
-```python
-_, meta, bins = client.select(key, ["name"])
-# bins = {"name": "Alice"}
-```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-_, meta, bins = await client.select(key, ["name"])
-```
-
-  </TabItem>
-</Tabs>
-
-## Check Existence
-
-<Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+## Exists
 
 ```python
 from aerospike_py import ExistsResult
 
-result: ExistsResult = client.exists(key)
+result: ExistsResult = client.exists(key)  # 또는: await client.exists(key)
 if result.meta is not None:
-    print(f"Record exists, gen={result.meta.gen}")
-else:
-    print("Record not found")
-
-# 튜플 언패킹도 가능
-_, meta = client.exists(key)
+    print(f"gen={result.meta.gen}")
 ```
-
-  </TabItem>
-  <TabItem value="async" label="Async Client">
-
-```python
-from aerospike_py import ExistsResult
-
-result: ExistsResult = await client.exists(key)
-if result.meta is not None:
-    print(f"Record exists, gen={result.meta.gen}")
-else:
-    print("Record not found")
-```
-
-  </TabItem>
-</Tabs>
 
 ## Batch Read
 
-단일 네트워크 호출로 여러 record를 읽습니다. `LazyBatchRecords` 핸들을 반환하며, `.to_dict()` / `.to_numpy(dtype)` 호출 또는 dict-style Mapping 접근(`handle["k"]`, `handle.items()` 등)으로 materialise 합니다.
-
-- `bins=None` - 모든 bin 읽기
-- `bins=["a", "b"]` - 특정 bin만 읽기
-- `bins=[]` - 존재 여부만 확인
+다수 record 를 단일 네트워크 호출로 read.
 
 <Tabs>
-  <TabItem value="sync" label="Sync Client" default>
+  <TabItem value="sync" label="Sync" default>
 
 ```python
-keys = [("test", "demo", f"user_{i}") for i in range(10)]
+keys: list[tuple] = [("test", "demo", f"user_{i}") for i in range(10)]
 
-# 모든 bin 읽기
+# 모든 bin — `LazyBatchRecords` 반환. dict-style Mapping
+# protocol (`items`, `keys`, `values`, `get`, `__getitem__`, `__iter__`,
+# `__contains__`, `__len__`) 이 단일 cached `to_dict()` materialisation 으로
+# backed 되어 명시 변환 없이 iterate 가능. plain mutable dict 가 명시적으로
+# 필요하면 `batch.to_dict()` 호출.
 batch = client.batch_read(keys)
-for br in batch.batch_records:
-    if br.record:
-        key, meta, bins = br.record
-        print(f"{key} → {bins}")
+for user_key, bins in batch.items():
+    print(user_key, bins)
 
-# 특정 bin만 읽기
+# 특정 bin
 batch = client.batch_read(keys, bins=["name", "age"])
 
-# 존재 여부만 확인
+# 존재만 확인
 batch = client.batch_read(keys, bins=[])
-for br in batch.batch_records:
-    print(f"{br.key}: exists={br.record is not None}")
 ```
 
   </TabItem>
-  <TabItem value="async" label="Async Client">
+  <TabItem value="async" label="Async">
 
 ```python
-keys = [("test", "demo", f"user_{i}") for i in range(10)]
-
-# 모든 bin 읽기
-batch = await client.batch_read(keys)
-for br in batch.batch_records:
-    if br.record:
-        key, meta, bins = br.record
-        print(f"{key} → {bins}")
-
-# 특정 bin만 읽기
+# sync path 와 동일한 `LazyBatchRecords`; dict-style iteration 은
+# cached `to_dict()` materialisation 으로 backed.
 batch = await client.batch_read(keys, bins=["name", "age"])
-
-# 존재 여부만 확인
-batch = await client.batch_read(keys, bins=[])
-for br in batch.batch_records:
-    print(f"{br.key}: exists={br.record is not None}")
+for user_key, bins in batch.items():
+    print(user_key, bins)
 ```
 
   </TabItem>
 </Tabs>
 
-## Best Practices
+## 팁
 
-- **배치 크기**: 배치 크기를 적절하게 유지하세요 (100-5000 keys). 매우 큰 배치는 타임아웃이 발생할 수 있습니다.
-- **타임아웃**: 대규모 배치 작업에 대해 policy를 통해 적절한 타임아웃을 설정하세요.
-- **오류 처리**: 배치 내의 개별 record는 독립적으로 실패할 수 있습니다. 각 결과의 bin이 `None`인지 확인하세요.
+- **Batch size**: batch 당 100-5,000 key 가 최적. 너무 크면 timeout 가능.
+- **Timeout**: 큰 batch operation 의 경우 `total_timeout` 증가.
+- **Error handling**: 개별 batch record 는 독립적으로 실패 가능. `br.record` 가 `None` 인지 항상 확인.
