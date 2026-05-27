@@ -1,165 +1,106 @@
 ---
-title: Query
+title: Query API
 sidebar_label: Query
-sidebar_position: 2
-description: Query 클래스 API 레퍼런스
+sidebar_position: 5
+description: Query and AsyncQuery class reference with predicates.
 ---
 
-## Query
+## Query / AsyncQuery
 
-`Query`는 Secondary Index 쿼리를 수행하여 특정 기준에 맞는 레코드를 찾습니다.
-
-### Creating a Query
+`client.query(namespace, set_name)` 로 생성. `where()` 로 predicate, `select()` 로 bin 선택 후 `results()` 또는 `foreach()` 로 실행.
 
 ```python
+from aerospike_py import predicates
+
 query = client.query("test", "demo")
+query.select("name", "age")
+query.where(predicates.between("age", 20, 30))
+records = query.results()  # 또는: await query.results()
 ```
 
 ### `select(*bins)`
 
-반환할 특정 빈을 선택합니다.
-
-```python
-query.select("name", "age")
-```
+반환할 특정 bin 선택.
 
 ### `where(predicate)`
 
-필터 조건을 추가합니다. 해당 빈에 Secondary Index가 필요합니다.
+predicate filter 설정. bin 에 secondary index 가 필요.
 
-```python
-from aerospike_py import predicates
+### `results(policy=None) -> list[Record]`
 
-query.where(predicates.equals("name", "Alice"))
-query.where(predicates.between("age", 20, 30))
-```
-
-### `results(policy=None)`
-
-쿼리를 실행하고 일치하는 모든 레코드를 반환합니다.
-
-```python
-records = query.results()
-for key, meta, bins in records:
-    print(bins)
-```
+실행하고 매칭되는 모든 record 반환.
 
 ### `foreach(callback, policy=None)`
 
-쿼리를 실행하고 각 레코드에 대해 `callback`을 호출합니다.
+실행하고 각 결과에 대해 `callback(record)` 호출. 조기 종료 위해 `False` 반환.
 
 ```python
-def process(record):
-    key, meta, bins = record
-    print(bins)
+def process(record: Record) -> None:
+    print(record.bins)
 
 query.foreach(process)
 ```
 
-콜백에서 `False`를 반환하면 반복을 중지합니다:
+---
 
-```python
-count = 0
-def limited(record):
-    nonlocal count
-    count += 1
-    if count >= 10:
-        return False
-
-query.foreach(limited)
-```
-
-## Predicates
-
-`aerospike.predicates` 모듈은 쿼리를 위한 필터 함수를 제공합니다.
-
-### `equals(bin_name, val)`
-
-`bin_name == val`인 레코드를 매칭합니다.
+## Predicate
 
 ```python
 from aerospike_py import predicates
-
-# 문자열 동등 비교
-predicates.equals("name", "Alice")
-
-# 정수 동등 비교
-predicates.equals("age", 30)
 ```
 
-### `between(bin_name, min_val, max_val)`
+| Function | 설명 | Example |
+|----------|-------------|---------|
+| `equals(bin, val)` | equality | `equals("name", "Alice")` |
+| `between(bin, min, max)` | 범위 (inclusive) | `between("age", 20, 30)` |
+| `contains(bin, idx_type, val)` | list/map contains | `contains("tags", INDEX_TYPE_LIST, "py")` |
+| `geo_within_geojson_region(bin, geojson)` | 영역 안의 point | 아래 참조 |
+| `geo_within_radius(bin, lat, lng, radius)` | circle 안의 point (m) | 아래 참조 |
+| `geo_contains_geojson_point(bin, geojson)` | point 를 포함하는 region | 아래 참조 |
 
-`min_val <= bin_name <= max_val`인 레코드를 매칭합니다.
+### Geospatial
 
 ```python
-predicates.between("age", 20, 30)
+# polygon 안의 point
+region = '{"type":"Polygon","coordinates":[[[126.9,37.5],[126.9,37.6],[127.0,37.6],[127.0,37.5],[126.9,37.5]]]}'
+query.where(predicates.geo_within_geojson_region("location", region))
+
+# 반경 안의 point
+query.where(predicates.geo_within_radius("location", 37.5665, 126.978, 5000.0))
+
+# point 를 포함하는 region
+point = '{"type":"Point","coordinates":[126.978, 37.5665]}'
+query.where(predicates.geo_contains_geojson_point("coverage", point))
 ```
 
-### `contains(bin_name, index_type, val)`
+---
 
-리스트/맵 빈에 `val`이 포함된 레코드를 매칭합니다.
-
-```python
-predicates.contains("tags", aerospike.INDEX_TYPE_LIST, "python")
-predicates.contains("props", aerospike.INDEX_TYPE_MAPKEYS, "color")
-```
-
-### `geo_within_geojson_region(bin_name, geojson)`
-
-GeoJSON 영역 내에 지리 좌표가 포함된 레코드를 매칭합니다.
-
-```python
-region = '{"type": "Polygon", "coordinates": [[[0,0],[0,1],[1,1],[1,0],[0,0]]]}'
-predicates.geo_within_geojson_region("location", region)
-```
-
-### `geo_within_radius(bin_name, lat, lng, radius)`
-
-특정 좌표로부터 반경(미터) 내의 레코드를 매칭합니다.
-
-```python
-predicates.geo_within_radius("location", 37.7749, -122.4194, 1000.0)
-```
-
-### `geo_contains_geojson_point(bin_name, geojson)`
-
-GeoJSON 포인트를 포함하는 지리 영역이 있는 레코드를 매칭합니다.
-
-```python
-point = '{"type": "Point", "coordinates": [0.5, 0.5]}'
-predicates.geo_contains_geojson_point("region", point)
-```
-
-## Complete Query Example
+## 전체 예제
 
 ```python
 import aerospike_py as aerospike
-from aerospike_py import predicates
+from aerospike_py import predicates, Record
 
-client = aerospike.client({
-    "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
-}).connect()
+client = aerospike.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 
-# 테스트 데이터 삽입
+# 데이터 insert
 for i in range(100):
     client.put(("test", "users", f"user_{i}"), {
         "name": f"User {i}",
         "age": 20 + (i % 40),
     })
 
-# Secondary Index 생성
+# index 생성
 client.index_integer_create("test", "users", "age", "users_age_idx")
 
-# 쿼리: 25-35세 사용자 찾기
+# Query
 query = client.query("test", "users")
 query.select("name", "age")
 query.where(predicates.between("age", 25, 35))
-records = query.results()
+records: list[Record] = query.results()
 
-print(f"Found {len(records)} users aged 25-35")
-for _, _, bins in records:
-    print(f"  {bins['name']}: age {bins['age']}")
+for record in records:
+    print(f"{record.bins['name']}: age {record.bins['age']}")
 
 # 정리
 client.index_remove("test", "users_age_idx")

@@ -2,85 +2,61 @@
 title: Types
 sidebar_label: Types
 sidebar_position: 2
-description: aerospike-py의 NamedTuple 반환 타입과 TypedDict 입력 타입 레퍼런스
+description: NamedTuple return types and TypedDict input types.
 ---
 
-aerospike-py는 반환값에 **NamedTuple** 클래스를, 입력 파라미터에 **TypedDict** 클래스를 사용합니다.
-모든 타입은 최상위 패키지 또는 `aerospike_py.types`에서 import할 수 있습니다.
+모든 타입은 `aerospike_py` 또는 `aerospike_py.types` 에서 import 가능.
 
 ```python
 from aerospike_py import Record, ExistsResult, ReadPolicy, WritePolicy, WriteMeta
-# 또는
-from aerospike_py.types import Record, ExistsResult, ReadPolicy, WritePolicy, WriteMeta
 ```
 
-## 반환 타입 (NamedTuple)
+## Return Type (NamedTuple)
 
-NamedTuple 반환 타입은 속성 접근과 튜플 언패킹을 모두 지원합니다 (하위 호환성).
+모든 return type 이 attribute access 와 tuple unpacking 둘 다 지원.
 
 ### `Record`
 
-읽기 및 operate 메서드가 반환하는 전체 레코드입니다.
+반환자: `get()`, `select()`, `operate()`, `Query.results()`
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `key` | `AerospikeKey \| None` | 레코드 키 (`POLICY_KEY_DIGEST`이면 `None`) |
-| `meta` | `RecordMetadata \| None` | 레코드 메타데이터 |
-| `bins` | `dict[str, Any] \| None` | 빈 이름-값 쌍 |
-
-**반환하는 메서드**: `get()`, `select()`, `operate()`, `Query.results()`
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `key` | `AerospikeKey \| None` | record key |
+| `meta` | `RecordMetadata \| None` | generation 과 TTL |
+| `bins` | `dict[str, Any] \| None` | bin value |
 
 ```python
 record: Record = client.get(key)
-print(record.meta.gen)   # 속성 접근
-print(record.bins)       # {"name": "Alice", "age": 30}
-
-key, meta, bins = record  # 튜플 언패킹 (하위 호환)
+print(record.bins)         # attribute access
+_, meta, bins = record     # tuple unpacking
 ```
 
 ### `RecordMetadata`
 
-generation과 TTL을 포함하는 레코드 메타데이터입니다.
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `gen` | `int` | 레코드 generation (낙관적 잠금 버전) |
-| `ttl` | `int` | 레코드 TTL (초 단위) |
-
-```python
-record = client.get(key)
-print(record.meta.gen)  # 1
-print(record.meta.ttl)  # 2591998
-```
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `gen` | `int` | generation (optimistic lock 버전) |
+| `ttl` | `int` | time-to-live (초) |
 
 ### `AerospikeKey`
 
-서버가 반환하는 레코드 키입니다.
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `namespace` | `str` | 네임스페이스 이름 |
-| `set_name` | `str` | 세트 이름 |
-| `user_key` | `str \| int \| bytes \| None` | 사용자 제공 기본 키 (`POLICY_KEY_DIGEST`이면 `None`) |
-| `digest` | `bytes` | 20바이트 RIPEMD-160 다이제스트 |
-
-```python
-record = client.get(key, policy={"key": aerospike_py.POLICY_KEY_SEND})
-print(record.key.namespace)   # "test"
-print(record.key.set_name)    # "demo"
-print(record.key.user_key)    # "user1"
-```
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `namespace` | `str` | namespace |
+| `set_name` | `str` | set 이름 |
+| `user_key` | `str \| int \| bytes \| None` | primary key (`POLICY_KEY_DIGEST` 시 `None`) |
+| `digest` | `bytes` | 20-byte RIPEMD-160 digest |
 
 ### `BatchRecord`
 
-배치 작업 내의 개별 레코드 결과입니다 (`BatchWriteResult.batch_records` 내부).
+반환자: batch operation (`BatchWriteResult.batch_records` 내부)
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `key` | `AerospikeKey \| None` | 레코드 키 |
-| `result` | `int` | 개별 레코드 결과 코드 (0 = 성공) |
-| `record` | `Record \| None` | 레코드 데이터 (작업 실패 시 `None`) |
-| `in_doubt` | `bool` | 일시적 전송 오류 후에도 쓰기가 완료됐을 수 있는지 (기본값 `False`). PR-374에서 추가됨 — 기존의 `key, result, record = br` 위치 언패킹 코드는 깨지므로 속성 접근(`br.in_doubt`)으로 마이그레이션. |
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `key` | `AerospikeKey \| None` | record key |
+| `result` | `int` | per-record result code (0 = success) |
+| `record` | `Record \| None` | record 데이터 (operation 실패 시 `None`) |
+| `in_doubt` | `bool` | transient error 에도 불구하고 write 가 완료되었을 수 있는지 (default `False`) |
 
 ```python
 results = client.batch_operate(keys, ops)
@@ -91,396 +67,395 @@ for br in results.batch_records:
 
 ### `BatchWriteResult`
 
-배치 쓰기 작업의 전체 결과를 담는 NamedTuple 컨테이너입니다.
+반환자: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **와** async). Sync 와 async `batch_read()` 는 [`LazyBatchRecords`](#lazybatchrecords) 반환.
 
-**반환하는 메서드**: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_numpy()` (sync **및** async). sync 및 async `batch_read()`는 [`LazyBatchRecords`](#lazybatchrecords)를 반환합니다.
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `batch_records` | `list[BatchRecord]` | 개별 레코드 결과 리스트 |
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `batch_records` | `list[BatchRecord]` | per-record 결과 |
 
 ### `BatchRecords`
 
-`TypeAlias = dict[UserKey, AerospikeRecord]`. import-compat 용도로 유지되는 historical alias. PR-374에서 `batch_read()`는 [`LazyBatchRecords`](#lazybatchrecords)를 반환하도록 바뀌었고, 해당 핸들에서 `.to_dict()`를 호출하면 이 alias가 지칭하는 dict shape와 동일한 결과를 얻습니다. 현재 어떤 메서드도 이 alias를 직접 반환하지 않습니다.
+`TypeAlias = dict[UserKey, AerospikeRecord]`. import 호환성을 위해 유지되는 historical alias. PR-374 가 `batch_read()` 를 [`LazyBatchRecords`](#lazybatchrecords) 로 전환; 동일 dict shape 가 필요하면 그 handle 에 `.to_dict()` 호출. 현재 어떤 method 도 이 alias 를 반환하지 않음.
 
 ### `LazyBatchRecords`
 
-**반환하는 메서드**: sync 및 async `batch_read()` — raw Rust 결과를 zero-conversion으로 감싼 핸들. Materialise는 명시적 메서드 호출(또는 dict-style Mapping dunder — lazy + cached `to_dict()` view 위에서 동작)로 지연됩니다.
+반환자: sync **와** async `batch_read()` — raw Rust 결과의 zero-conversion wrapper. Materialisation 은 명시 method 호출 (또는 lazy + cached `to_dict()` 를 proxy 하는 dict-like Mapping dunder) 까지 지연됨.
 
-| 메서드 / 속성 | 타입 | 설명 |
-|---------------|------|------|
-| `to_dict()` | `dict[UserKey, dict[str, Any]]` | `dict[user_key, bins_dict]`로 materialise. digest-only 및 실패한 record는 제외됨. |
-| `to_numpy(dtype)` | `NumpyBatchRecords` | 구조화 배열로 materialise. `dtype`은 **`np.dtype` 객체여야** 합니다 (예: `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). 각 dtype field 이름은 동일 이름의 bin에 매핑됩니다 — list-of-tuples shorthand나 단일 field string은 auto-promote 되지 않으니 `np.dtype(...)`으로 감싸세요. per-record fill loop은 `py.detach`로 GIL을 release하므로 sibling 작업(torch 추론, 다른 asyncio task)이 fill 중에도 GIL을 잡을 수 있습니다. **실패/missing reads (`result_code != 0`)는 dtype의 zero value로 남으므로, downstream 연산 전 `result_codes`로 마스킹하세요.** |
-| `batch_records` | `list[BatchRecord]` | Compat 경로: lazy NamedTuple 변환. |
-| `found_count()` | `int` | 성공 record 수 (변환 없음). |
-| `keys()` | `dict_keys` | dict-style keys view — `to_dict().keys()`와 동일 (missing/실패 제외). |
-| `all_user_keys()` | `list[UserKey \| None]` | 모든 batch record의 `user_key`를 request 순서대로 — `batch_records` / `NumpyBatchRecords` data array와 positional 정렬됨. digest-only 요청 슬롯은 `None`이 들어가 `zip(handle.all_user_keys(), handle.batch_records)`가 모든 record를 그 요청 키 (또는 `None`)와 짝지을 수 있습니다. |
-| `iter_records()` | `Iterator[BatchRecord]` | 모든 record (digest-only 및 실패 포함)를 삽입 순서로 순회. |
-| `items()` / `values()` / `__iter__` | dict views | dict-like 하위 호환 — cached `to_dict()`와 동일 시맨틱. |
+| Method / Property | Type | 설명 |
+|-------------------|------|-------------|
+| `to_dict()` | `dict[UserKey, dict[str, Any]]` | `dict[user_key, bins_dict]` 로 materialise. digest-only 와 failed record 제외. |
+| `to_numpy(dtype)` | `NumpyBatchRecords` | structured array 로 materialise. `dtype` **은 `np.dtype` object 여야 함** (예: `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). structured dtype 의 각 field name 이 동명 bin 으로 매핑; list-of-tuples shorthand 와 single-field string 은 auto-promote 안 됨 — 먼저 `np.dtype(...)` 로 wrap. per-record fill loop 가 GIL 해제 (`py.detach`) 상태로 실행되어 sibling 작업 (torch inference, 다른 asyncio task) 이 buffer fill 중 GIL 보유 가능. **실패/missing read (`result_code != 0`) 는 row 가 dtype zero value 로 남음 — downstream math 전에 항상 `result_codes` 로 mask.** |
+| `batch_records` | `list[BatchRecord]` | 호환 path: lazy NamedTuple 변환. |
+| `found_count()` | `int` | 성공 record 수 (변환 불필요). |
+| `keys()` | `dict_keys` | dict-style key view, `to_dict().keys()` 와 mirror (missing/failed record 제외). |
+| `all_user_keys()` | `list[UserKey \| None]` | 모든 batch record 의 `user_key` 를 request 순서로 — `batch_records` 와 `NumpyBatchRecords` data array 와 positional align. digest-only request (`user_key` element 없음) 는 slot 에 `None` yield, 그래서 `zip(handle.all_user_keys(), handle.batch_records)` 가 항상 모든 record 를 requested key 와 pair. |
+| `iter_records()` | `Iterator[BatchRecord]` | 모든 record (digest-only 와 failed 포함) 를 삽입 순서로 순회. |
+| `items()` / `values()` / `__iter__` | dict views | dict-like backward-compat — cached `to_dict()` 와 동일 의미. |
 | `lazy_records[user_key]` | `dict[str, Any]` | dict-style item 접근 (`__getitem__`). |
-| `user_key in lazy_records` | `bool` | dict-style 멤버십 (`__contains__`). |
-| `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | dict-style `get` — `dict.get` 시맨틱 동일. |
-| `len(lazy_records)` | `int` | Dict-view cardinality — `len(lazy_records.to_dict())` 일치 (user_key + record body 있는 성공 read만). 빠름: 순수 Rust filter+count로 PyDict 할당 없음. raw record 수 (missing/실패 포함)는 `len(lazy_records.batch_records)` 사용. |
-| `release_cache()` | `None` | 첫 Mapping 접근 / `to_dict()`에서 build된 cached `PyDict`를 drop. raw Rust records(따라서 `batch_records`, `iter_records()`, `all_user_keys()`, `found_count()`, `to_numpy(dtype)`)는 유지. 후속 Mapping 접근은 lazy하게 cache를 재build. 큰 배치 materialise 후 더이상 dict가 필요하지 않을 때 유용. |
+| `user_key in lazy_records` | `bool` | dict-style membership (`__contains__`). |
+| `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | dict-style `get`, 선택적 default; `dict.get` 의미 mirror. |
+| `len(lazy_records)` | `int` | dict-view cardinality — `len(lazy_records.to_dict())` 와 매칭 (성공한 read, `user_key` 와 `record` body 보유). 빠름: pure-Rust filter+count, PyDict 할당 없음. raw record 수 (missing read / per-record failure 포함) 는 `len(lazy_records.batch_records)`. |
+| `release_cache()` | `None` | 첫 Mapping 접근 / `to_dict()` 가 빌드한 cached `PyDict` 를 drop, raw Rust record 는 유지 (그래서 `batch_records`, `iter_records()`, `all_user_keys()`, `found_count()`, `to_numpy(dtype)` 가 계속 동작). 이후 Mapping 접근이 cache 를 lazy 하게 rebuild. 더 이상 필요 없는 대형 batch materialisation 후 유용. |
 
 ### `ExistsResult`
 
-존재 여부 확인 결과입니다.
+반환자: `exists()`
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `key` | `AerospikeKey \| None` | 레코드 키 |
-| `meta` | `RecordMetadata \| None` | 메타데이터 (레코드가 없으면 `None`) |
-
-**반환하는 메서드**: `exists()`
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `key` | `AerospikeKey \| None` | record key |
+| `meta` | `RecordMetadata \| None` | record 없으면 `None` |
 
 ```python
 result: ExistsResult = client.exists(key)
 if result.meta is not None:
     print(f"gen={result.meta.gen}")
-
-_, meta = result  # 튜플 언패킹
 ```
 
 ### `InfoNodeResult`
 
-클러스터 노드별 info 명령 결과입니다.
+반환자: `info_all()`
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `node_name` | `str` | 클러스터 노드 이름 |
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `node_name` | `str` | cluster node 이름 |
 | `error_code` | `int` | 성공 시 0 |
-| `response` | `str` | Info 응답 문자열 |
-
-**반환하는 메서드**: `info_all()`
-
-```python
-results: list[InfoNodeResult] = client.info_all("namespaces")
-for result in results:
-    print(f"{result.node_name}: {result.response}")
-```
+| `response` | `str` | info response string |
 
 ### `OperateOrderedResult`
 
-`operate_ordered()`의 순서 보존 결과입니다.
+반환자: `operate_ordered()`
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `key` | `AerospikeKey \| None` | 레코드 키 |
-| `meta` | `RecordMetadata \| None` | 레코드 메타데이터 |
-| `ordered_bins` | `list[BinTuple]` | 순서가 보존된 연산 결과 |
-
-**반환하는 메서드**: `operate_ordered()`
-
-```python
-result: OperateOrderedResult = client.operate_ordered(key, ops)
-for bin_tuple in result.ordered_bins:
-    print(f"{bin_tuple.name} = {bin_tuple.value}")
-```
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `key` | `AerospikeKey \| None` | record key |
+| `meta` | `RecordMetadata \| None` | record metadata |
+| `ordered_bins` | `list[BinTuple]` | 순서 보존된 operation 결과 |
 
 ### `BinTuple`
 
-순서 보존 결과에서 사용되는 단일 빈 이름-값 쌍입니다.
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `name` | `str` | bin 이름 |
+| `value` | `Any` | bin value |
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `name` | `str` | 빈 이름 |
-| `value` | `Any` | 빈 값 |
+### Return Type 빠른 참조
 
-## API → 반환 타입 빠른 참조
-
-| 메서드 | 반환 타입 |
-|--------|-----------|
+| Method | Return Type |
+|--------|-------------|
 | `get()`, `select()` | `Record` |
 | `exists()` | `ExistsResult` |
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` (sync 및 async) | `LazyBatchRecords` (→ `.to_dict()` 또는 `.to_numpy(dtype)`로 materialise) |
+| `batch_read()` (sync 와 async) | `LazyBatchRecords` — `.to_dict()` 또는 `.to_numpy(dtype)` 로 materialise |
 | `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchWriteResult` (`batch_records: list[BatchRecord]`) |
 | `batch_write_numpy()` | `BatchWriteResult` |
 | `Query.results()` | `list[Record]` |
 
 ---
 
-## 입력 타입 (TypedDict)
+## Input Type (TypedDict)
 
-TypedDict 입력 타입은 `policy` 및 `meta` 파라미터에 대한 IDE 자동완성과 타입 체크를 제공합니다.
-모든 필드는 선택적(`total=False`)입니다.
+모든 field 는 선택적 (`total=False`).
 
 ### `ClientConfig`
 
-클라이언트 생성을 위한 설정 딕셔너리입니다.
+사용자: `aerospike_py.client(config)`, `AsyncClient(config)`
 
-**사용하는 메서드**: `aerospike_py.client(config)`, `AsyncClient(config)`
-
-| 필드 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `hosts` | `list[tuple[str, int]]` | *필수* | 클러스터 시드 노드 |
-| `cluster_name` | `str \| None` | | 예상 클러스터 이름. `None`은 필드를 생략한 것과 동일하게 처리됩니다. |
-| `auth_mode` | `int` | `AUTH_INTERNAL` | 인증 모드 (`AUTH_INTERNAL`, `AUTH_EXTERNAL`, `AUTH_PKI`) |
-| `user` | `str` | | 인증 사용자명 |
-| `password` | `str` | | 인증 비밀번호 |
-| `timeout` | `int` | `1000` | 연결 타임아웃 (ms) |
-| `idle_timeout` | `int` | | 연결 유휴 타임아웃 (ms) |
-| `max_conns_per_node` | `int` | | 노드당 최대 연결 수 |
-| `min_conns_per_node` | `int` | | 노드당 최소 연결 수 |
-| `tend_interval` | `int` | | 클러스터 tend 간격 (ms) |
-| `use_services_alternate` | `bool` | `False` | 대체 서비스 주소 사용 |
-
-```python
-config: ClientConfig = {
-    "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
-    "timeout": 5000,
-}
-client = aerospike_py.client(config).connect()
-```
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `hosts` | `list[tuple[str, int]]` | *required* | seed node |
+| `cluster_name` | `str \| None` | | 예상 cluster name. `None` 은 field 생략과 동일 처리. |
+| `auth_mode` | `int` | `AUTH_INTERNAL` | `AUTH_INTERNAL`, `AUTH_EXTERNAL`, `AUTH_PKI` |
+| `user` | `str` | | auth username |
+| `password` | `str` | | auth password |
+| `timeout` | `int` | `1000` | connection timeout (ms) |
+| `idle_timeout` | `int` | | connection idle timeout (ms) |
+| `max_conns_per_node` | `int` | `100` | node 당 최대 connection |
+| `min_conns_per_node` | `int` | `0` | pre-warm connection |
+| `tend_interval` | `int` | `1000` | cluster tend interval (ms) |
+| `use_services_alternate` | `bool` | `false` | alternate service address 사용 |
 
 ### `ReadPolicy`
 
-읽기 작업을 위한 정책입니다.
+사용자: `get()`, `select()`, `exists()`
 
-**사용하는 메서드**: `get()`, `select()`, `exists()`
-
-| 필드 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
-| `total_timeout` | `int` | `1000` | 전체 트랜잭션 타임아웃 (ms) |
-| `max_retries` | `int` | `2` | 최대 재시도 횟수 |
-| `sleep_between_retries` | `int` | `0` | 재시도 간 대기 시간 (ms) |
-| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). 소켓을 비우고 재사용된 연결에서 오래된 응답을 읽지 않도록 합니다. |
-| `filter_expression` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
-| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | 레플리카 알고리즘 |
-| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP 읽기 일관성 수준 |
-
-```python
-policy: ReadPolicy = {
-    "total_timeout": 5000,
-    "max_retries": 3,
-}
-record = client.get(key, policy=policy)
-```
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | socket timeout (ms) |
+| `total_timeout` | `int` | `1000` | 총 transaction timeout (ms) |
+| `max_retries` | `int` | `2` | 최대 retry |
+| `sleep_between_retries` | `int` | `0` | retry 간 sleep (ms) |
+| `timeout_delay` | `int` | `0` | deadline 이후 request timeout 까지의 delay (ms). 재사용 connection 이 stale response 를 보지 않도록 socket drain. |
+| `filter_expression` | `Any` | | `aerospike_py.exp` 로 빌드된 expression filter. |
+| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | replica 선택 알고리즘. |
+| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP namespace read consistency. `aerospike-core` `ConsistencyLevel` 로 매핑. |
+| `read_touch_ttl_percent` | `int` | `0` | original write TTL 의 N% 이내일 때 read 시 TTL reset (server v8+). `0` = server default, `-1` = reset 안 함, `1..=100` = percent. |
 
 ### `WritePolicy`
 
-쓰기 작업을 위한 정책입니다.
+사용자: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`, `remove_bin()`, `operate()`, `operate_ordered()`
 
-**사용하는 메서드**: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`, `remove_bin()`, `operate()`, `operate_ordered()`
-
-| 필드 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
-| `total_timeout` | `int` | `1000` | 전체 트랜잭션 타임아웃 (ms) |
-| `max_retries` | `int` | `0` | 최대 재시도 횟수 |
-| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). |
-| `durable_delete` | `bool` | `False` | 영구 삭제 사용 (Enterprise 전용) |
-| `key` | `int` | `POLICY_KEY_DIGEST` | 키 전송 정책 (`POLICY_KEY_DIGEST`, `POLICY_KEY_SEND`) |
-| `exists` | `int` | `POLICY_EXISTS_IGNORE` | 존재 정책 (`POLICY_EXISTS_*`) |
-| `gen` | `int` | `POLICY_GEN_IGNORE` | Generation 정책 (`POLICY_GEN_IGNORE`, `POLICY_GEN_EQ`, `POLICY_GEN_GT`) |
-| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | 커밋 수준 (`POLICY_COMMIT_LEVEL_ALL`, `POLICY_COMMIT_LEVEL_MASTER`) |
-| `ttl` | `int` | `0` | 레코드 TTL (초) |
-| `filter_expression` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
-
-```python
-policy: WritePolicy = {
-    "key": aerospike_py.POLICY_KEY_SEND,
-    "exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY,
-}
-client.put(key, bins, policy=policy)
-```
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | socket timeout (ms) |
+| `total_timeout` | `int` | `1000` | 총 transaction timeout (ms) |
+| `max_retries` | `int` | `0` | 최대 retry |
+| `sleep_between_retries` | `int` | `0` | retry 간 sleep (ms) |
+| `timeout_delay` | `int` | `0` | deadline 이후 request timeout 까지의 delay (ms). |
+| `durable_delete` | `bool` | `false` | durable delete (Enterprise) |
+| `key` | `int` | `POLICY_KEY_DIGEST` | key send policy |
+| `exists` | `int` | `POLICY_EXISTS_IGNORE` | existence policy |
+| `gen` | `int` | `POLICY_GEN_IGNORE` | generation policy |
+| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | commit level |
+| `ttl` | `int` | `0` | record TTL (초) |
+| `filter_expression` | `Any` | | expression filter (`aerospike_py.exp`). |
+| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | read-after-write `operate()` op 의 AP read consistency. |
+| `read_touch_ttl_percent` | `int` | `0` | write TTL 의 N% 이내 read 시 TTL reset (server v8+). |
 
 ### `BatchPolicy`
 
-배치 작업을 위한 정책입니다.
+사용자: `batch_read()`, `batch_operate()`, `batch_write()`, `batch_remove()`
 
-**사용하는 메서드**: `batch_read()`, `batch_operate()`, `batch_remove()`
+#### Transport / batch-level field
 
-| 필드 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
-| `total_timeout` | `int` | `1000` | 전체 트랜잭션 타임아웃 (ms) |
-| `max_retries` | `int` | `2` | 최대 재시도 횟수 |
-| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). |
-| `concurrency` | `int` | `BATCH_CONCURRENCY_PARALLEL` | 노드별 분산 모드. `BATCH_CONCURRENCY_SEQUENTIAL`(노드 순차) 또는 `BATCH_CONCURRENCY_PARALLEL`(전체 병렬, 기본값). [Batch Concurrency 상수](constants.md#batch-concurrency) 참조. 다른 값은 `ValueError`를 발생시킵니다. |
-| `filter_expression` | `Any` | | Expression 필터 |
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | socket timeout (ms) |
+| `total_timeout` | `int` | `1000` | 총 transaction timeout (ms) |
+| `max_retries` | `int` | `2` | 최대 retry |
+| `sleep_between_retries` | `int` | `0` | retry 간 sleep (ms) |
+| `timeout_delay` | `int` | `0` | deadline 이후 request timeout 까지의 delay (ms). |
+| `concurrency` | `int` | `BATCH_CONCURRENCY_PARALLEL` | per-node dispatch mode: `BATCH_CONCURRENCY_SEQUENTIAL` (한 번에 한 node) 또는 `BATCH_CONCURRENCY_PARALLEL` (모든 node 병렬 — default). [Batch Concurrency constants](constants.md#batch-concurrency) 참조. 다른 값은 `ValueError`. |
+| `filter_expression` | `Any` | | expression filter |
+| `allow_inline` | `bool` | `true` | 수신 thread 에서 server inline 처리 허용 |
+| `allow_inline_ssd` | `bool` | `false` | SSD namespace 의 inline 처리 허용 |
+| `respond_all_keys` | `bool` | `true` | per-record error 와 관계없이 모든 key 시도 |
+| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | replica 선택. |
+| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | `batch_read` 의 AP read consistency. |
+| `read_touch_ttl_percent` | `int` | `0` | write TTL 의 N% 이내 read 시 TTL reset (server v8+). |
 
-```python
-policy: BatchPolicy = {"total_timeout": 10000}
-batch = client.batch_read(keys, policy=policy)
-```
+#### Write default (`batch_write` 가 사용)
+
+이 field 들은 `batch_write()` 호출의 모든 record 에 적용. Per-record [`WriteMeta`](#writemeta) 가 override — [precedence rule](#write-field-precedence-batch_write) 참조.
+
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `key` | `int` | `POLICY_KEY_DIGEST` | key send policy. server-side 에 user key 저장하려면 `POLICY_KEY_SEND`. |
+| `exists` | `int` | `POLICY_EXISTS_UPDATE` | existence policy (`UPDATE`, `CREATE_ONLY`, `REPLACE` 등). |
+| `gen` | `int` | `POLICY_GEN_IGNORE` | generation policy. 참고: batch-level 에선 `POLICY_GEN_*` enum index. Per-record `WriteMeta["gen"]` 은 예상 generation 값. |
+| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | commit level (`ALL` 또는 `MASTER`). |
+| `durable_delete` | `bool` | `false` | durable delete (Enterprise 3.10+). |
+| `ttl` | `int` | `0` | record TTL (초) (`0` = namespace default, `-1` = 영원, `-2` = update 안 함). |
 
 ### `QueryPolicy`
 
-쿼리 작업을 위한 정책입니다.
+사용자: `Query.results()`, `Query.foreach()`
 
-**사용하는 메서드**: `Query.results()`, `Query.foreach()`
-
-| 필드 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
-| `total_timeout` | `int` | `0` | 전체 트랜잭션 타임아웃 (0 = 제한 없음) |
-| `max_retries` | `int` | `2` | 최대 재시도 횟수 |
-| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). |
-| `max_records` | `int` | `0` | 최대 반환 레코드 수 (0 = 전부) |
-| `records_per_second` | `int` | `0` | 속도 제한 (0 = 무제한) |
-| `filter_expression` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
-
-```python
-policy: QueryPolicy = {"max_records": 100}
-records = query.results(policy=policy)
-```
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | socket timeout (ms) |
+| `total_timeout` | `int` | `0` | 총 timeout (0 = 무제한) |
+| `max_retries` | `int` | `2` | 최대 retry |
+| `sleep_between_retries` | `int` | `0` | retry 간 sleep (ms) |
+| `timeout_delay` | `int` | `0` | deadline 이후 request timeout 까지의 delay (ms). |
+| `max_records` | `int` | `0` | 최대 record (0 = 전체) |
+| `records_per_second` | `int` | `0` | node 당 rate limit (0 = 무제한). |
+| `max_concurrent_nodes` | `int` | `0` | 병렬 node query 제한 (0 = 무제한). |
+| `record_queue_size` | `int` | `1024` | record 결과의 buffer capacity. |
+| `filter_expression` | `Any` | | expression filter. |
+| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | replica 선택. |
+| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP read consistency. |
+| `read_touch_ttl_percent` | `int` | `0` | write TTL 의 N% 이내 read 시 TTL reset (server v8+). |
+| `expected_duration` | `int` | `QUERY_DURATION_LONG` | query duration 에 대한 server hint (`QUERY_DURATION_LONG` / `_SHORT` / `_LONG_RELAX_AP`). |
+| `include_bin_data` | `bool` | `true` | 결과에 bin payload 포함. key/metadata 만 fetch 하려면 `False`. |
+| `partition_filter` | `PartitionFilter` | (전체 4096) | query/scan 을 partition subset 으로 제한. `aerospike_py.partition_filter_*()` helper 사용. |
 
 ### `ScanPolicy`
 
-스캔 작업을 위한 정책입니다. 공식 Aerospike Python C 클라이언트의 `ScanPolicy`를 미러링합니다.
+사용자: `where()` predicate 없는 `client.scan()` 과 `client.query()` 호출. 공식 Python C client 의 `ScanPolicy` mirror. 현재 Rust layer 가 scan 호출을 `QueryPolicy` parser 로 routing — `aerospike-core` 가 별도 `ScanPolicy` struct 를 노출하면 user-facing type 변경 없이 scan path 가 전용 parser 로 전환. [issue #316](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/316) 참조.
 
-`aerospike-core` 2.0 크레이트는 아직 별도의 `ScanPolicy` 구조체를 노출하지 않으므로, 현재 스캔 호출은 `QueryPolicy` 파서를 경유합니다. 향후 `aerospike-core`에 전용 `ScanPolicy`가 추가되면 사용자 측 타입 변경 없이 내부에서 새 파서로 전환됩니다. [issue #316](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/316) 참조.
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `socket_timeout` | `int` | `30000` | socket timeout (ms). |
+| `total_timeout` | `int` | `0` | 총 timeout (0 = 무제한). |
+| `max_retries` | `int` | `2` | 최대 retry. |
+| `sleep_between_retries` | `int` | `0` | retry 간 sleep (ms). |
+| `timeout_delay` | `int` | `0` | deadline 이후 request timeout 까지의 delay (ms). |
+| `filter_expression` | `Any` | | expression filter. |
+| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | replica 선택. |
+| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP read consistency. |
+| `records_per_second` | `int` | `0` | node 당 rate limit (0 = 무제한; server 4.7+). |
+| `max_records` | `int` | `0` | 대략적 최대 반환 record (0 = 전체; server 6.0+). |
+| `durable_delete` | `bool` | `false` | background scan-write durable delete (Enterprise 3.10+). |
+| `ttl` | `int` | `0` | background scan-write 의 default TTL. |
+| `partition_filter` | `PartitionFilter` | (전체 4096) | scan 을 partition subset 으로 제한. |
 
-**사용하는 메서드**: `client.scan()` 및 predicate 없는 `client.query()`
+### `BatchReadPolicy`
 
-| 필드 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `socket_timeout` | `int` | `30000` | 소켓 유휴 타임아웃 (ms) |
-| `total_timeout` | `int` | `0` | 전체 트랜잭션 타임아웃 (0 = 제한 없음) |
-| `max_retries` | `int` | `2` | 최대 재시도 횟수 |
-| `timeout_delay` | `int` | `0` | 데드라인을 지난 요청을 타임아웃 처리하기 전 대기 시간 (ms). |
-| `filter_expression` | `Any` | | `aerospike_py.exp`로 빌드한 Expression 필터 |
-| `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | 레플리카 알고리즘 |
-| `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP 읽기 일관성 수준 |
-| `records_per_second` | `int` | `0` | 노드당 속도 제한 (0 = 무제한; 서버 4.7+) |
-| `max_records` | `int` | `0` | 최대 반환 레코드 수 근사값 (0 = 전부; 서버 6.0+) |
-| `durable_delete` | `bool` | `False` | 백그라운드 스캔-쓰기에서 영구 삭제 사용 (Enterprise 3.10+) |
-| `ttl` | `int` | `0` | 백그라운드 스캔-쓰기의 기본 TTL |
-| `partition_filter` | `PartitionFilter` | (4096개 전부) | 스캔할 파티션 부분집합. `aerospike_py.partition_filter_*()` 헬퍼로 생성. |
+사용자: `batch_read()` 의 per-record policy.
+
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `read_touch_ttl_percent` | `int` | `0` | write TTL 의 N% 이내 read 시 TTL reset (server v8+). `0` = server default, `-1` = reset 안 함, `1..=100` = percent. |
+| `filter_expression` | `Any` | | expression filter. 실패한 record 는 `BatchRecord.result == FILTERED_OUT` 반환. |
+
+### `BatchDeletePolicy`
+
+사용자: `batch_remove()` 의 batch-level policy. Per-record override 는 [`BatchDeleteMeta`](#batchdeletemeta).
+
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `gen` | `int` | `POLICY_GEN_IGNORE` | generation policy enum (`POLICY_GEN_*`). |
+| `key` | `int` | `POLICY_KEY_DIGEST` | delete 와 함께 user key send (XDR-friendly). |
+| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | commit level. |
+| `durable_delete` | `bool` | `false` | tombstone 남기기 (Enterprise 3.10+). |
+| `filter_expression` | `Any` | | expression filter. |
+
+### `BatchDeleteMeta`
+
+`batch_remove()` 의 per-record meta. `keys` 인자의 `(key, meta)` tuple 두 번째 element 로 전달. `gen` 설정 시 CAS-style "generation 일치 시에만 delete" 의미 활성화 — generation 이 advance 했으면 server 가 per-record `GENERATION_ERROR` 반환.
+
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `gen` | `int` | 예상 generation. 이 설정 시 `POLICY_GEN_EQ` 가 함의됨. |
+| `key` | `int` | key send policy (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
+| `commit_level` | `int` | commit level (`POLICY_COMMIT_LEVEL_ALL` / `_MASTER`). |
+| `durable_delete` | `bool` | durable delete (Enterprise 3.10+). |
+
+```python
+# CAS delete: generation 이 여전히 3 일 때만 user_1 delete.
+client.batch_remove([
+    (("test", "demo", "user_1"), {"gen": 3}),
+    ("test", "demo", "user_2"),  # bare key, CAS 없음
+])
+```
 
 ### `BatchUDFPolicy`
 
-`batch_apply()`를 위한 배치-레벨 UDF 정책입니다. 레코드 단위 오버라이드는 [`BatchUDFMeta`](#batchudfmeta)에 둡니다. 전송-레벨 옵션(타임아웃, 재시도, `concurrency` 등)은 [`BatchPolicy`](#batchpolicy)에 위치하며, `batch_apply()`에 전달하는 동일한 정책 딕셔너리에 머지됩니다.
+사용자: [`batch_apply()`](client.md#batch_applykeys-module-function-argsnone-policynone) 의 batch-level UDF policy. Per-record override 는 [`BatchUDFMeta`](#batchudfmeta). Transport-level option (timeout, retry, `concurrency` 등) 은 [`BatchPolicy`](#batchpolicy) 에 있으며 `batch_apply()` 에 전달하는 같은 policy dict 로 merge.
 
-**사용하는 메서드**: `batch_apply()`
-
-| 필드 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | 커밋 수준 (`POLICY_COMMIT_LEVEL_ALL` / `_MASTER`) |
-| `ttl` | `int` | `0` | 레코드 TTL (초). `0` = 네임스페이스 기본, `-1` = 만료 안 함, `-2` = 업데이트 안 함 |
-| `key` | `int` | `POLICY_KEY_DIGEST` | 키 전송 정책 (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`) |
-| `durable_delete` | `bool` | `False` | UDF가 레코드를 삭제할 때 영구 삭제 (Enterprise 3.10+) |
-| `filter_expression` | `Any` | | 각 레코드에 적용되는 Expression 필터. 필터에 걸린 레코드는 `BatchRecord.result == FILTERED_OUT`을 반환합니다. |
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `commit_level` | `int` | `POLICY_COMMIT_LEVEL_ALL` | commit level (`POLICY_COMMIT_LEVEL_ALL` / `_MASTER`). |
+| `ttl` | `int` | `0` | record TTL (초) (`0` = namespace default, `-1` = 영원, `-2` = update 안 함). |
+| `key` | `int` | `POLICY_KEY_DIGEST` | key send policy (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
+| `durable_delete` | `bool` | `false` | record delete UDF 의 durable delete (Enterprise 3.10+). |
+| `filter_expression` | `Any` | | 각 record 에 적용되는 expression filter. 필터 실패한 record 는 `BatchRecord.result == FILTERED_OUT` 반환. |
 
 ### `BatchUDFMeta`
 
-`batch_apply()`의 레코드 단위 메타입니다. `keys` 인자에서 `(key, meta)` 튜플의 두 번째 요소로 전달합니다. `BatchDeleteMeta`와 동일한 단일 평면 dict 형태이며, UDF 호출 형태와 정책 필드를 동시에 오버라이드할 수 있습니다.
+`batch_apply()` 의 per-record meta. `keys` 인자의 `(key, meta)` tuple 두 번째 element 로 전달. 특정 record 에 대해 UDF 호출 shape 와 policy field 둘 다 override 가능한 single flat dict ([`BatchDeleteMeta`](#batchdeletemeta) 매칭).
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `module` | `str` | 이 레코드의 UDF 모듈명 오버라이드. 미지정 시 `batch_apply()`의 `module` 인자 사용. |
-| `function` | `str` | 이 레코드의 UDF 함수명 오버라이드. |
-| `args` | `list[Any]` | 인자 리스트 오버라이드. `[]`을 명시적으로 전달하면 기본 args를 비웁니다. |
-| `ttl` | `int` | 이 레코드의 TTL 오버라이드 (초; `WriteMeta.ttl`과 동일 시맨틱). |
-| `commit_level` | `int` | 커밋 수준 오버라이드. |
-| `key` | `int` | 키 전송 정책 오버라이드 (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
-| `durable_delete` | `bool` | 영구 삭제 오버라이드. |
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `module` | `str` | 이 record 의 UDF module 이름 override. `batch_apply()` 의 `module` 인자가 fallback. |
+| `function` | `str` | 이 record 의 UDF function 이름 override. |
+| `args` | `list[Any]` | 인자 list override. `[]` 명시 전달 시 default args clear. |
+| `ttl` | `int` | 이 record 의 TTL (초) override (`WriteMeta.ttl` 과 동일 의미). |
+| `commit_level` | `int` | commit level override. |
+| `key` | `int` | key send policy override (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
+| `durable_delete` | `bool` | durable_delete override. |
 
 :::note
-`filter_expression`은 `BatchUDFMeta`에서 받지 않습니다 — 배치-레벨 [`BatchUDFPolicy`](#batchudfpolicy)에서 설정하세요. (aerospike-core 2.0에서 레코드 단위 `filter_expression`은 와이어링되지 않으며, `BatchDeleteMeta`와 같은 형태입니다.)
+`filter_expression` 은 `BatchUDFMeta` 에 **허용되지 않음** — batch-level [`BatchUDFPolicy`](#batchudfpolicy) 에 설정. (Per-record `filter_expression` 은 aerospike-core 2.0 에서 unwired; [`BatchDeleteMeta`](#batchdeletemeta) shape 와 매칭.)
 :::
 
 ```python
-# 모든 키에 동일한 UDF 적용
+# 다수 key 에 같은 UDF apply.
 keys = [("test", "demo", f"u_{i}") for i in range(10)]
 results = client.batch_apply(keys, "my_udf", "increment_counter", [1])
 
-# 레코드별 오버라이드: 한 레코드만 다른 args/긴 TTL
+# Per-record override: 한 record 에 다른 args / 더 긴 TTL.
 results = client.batch_apply(
     [
-        ("test", "demo", "u_1"),  # 기본 args 사용
+        ("test", "demo", "u_1"),  # default args 사용
         (("test", "demo", "u_2"), {"args": [5], "ttl": 3600}),
     ],
     "my_udf", "increment_counter", args=[1],
 )
 ```
 
-### `AdminPolicy`
+### `PartitionFilter`
 
-관리 작업을 위한 정책입니다.
-
-**사용하는 메서드**: `admin_create_user()`, `admin_drop_user()`, `admin_change_password()`, `admin_grant_roles()`, `admin_revoke_roles()`, `admin_query_user_info()`, `admin_query_users_info()`, `admin_create_role()`, `admin_drop_role()`, `admin_grant_privileges()`, `admin_revoke_privileges()`, `admin_query_role()`, `admin_query_roles()`, `admin_set_whitelist()`, `admin_set_quotas()`
-
-| 필드 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `timeout` | `int` | `1000` | 관리 작업 타임아웃 (ms) |
+query/scan 을 partition subset 으로 scoping 하는 opaque handle (server 6.0+). 모듈 레벨 helper 로 생성:
 
 ```python
-policy: AdminPolicy = {"timeout": 5000}
-client.admin_create_user("user", "pass", ["read-write"], policy=policy)
+import aerospike_py
+
+pf_all   = aerospike_py.partition_filter_all()
+pf_one   = aerospike_py.partition_filter_by_id(42)        # 단일 partition (0..4095)
+pf_range = aerospike_py.partition_filter_by_range(0, 1024) # partition 의 1/4
+records = client.query("test", "demo").results(policy={"partition_filter": pf_range})
 ```
+
+handle 은 mutable internal state (`Arc<Mutex<Vec<PartitionStatus>>>`) 보유. aerospike-py 가 parse 시 내부 filter 를 clone 해 user handle 이 in-flight query state mutation 으로부터 격리됨. 이전 run 이 멈춘 곳부터 scan 을 의도적으로 resume 하려면 같은 handle 을 여러 `results()` 호출에 전달 — v2 cursor 의미는 [issue #318](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/318) 참조.
+
+### `AdminPolicy`
+
+사용자: 모든 `admin_*` method, index operation, `truncate()`
+
+| Field | Type | Default | 설명 |
+|-------|------|---------|-------------|
+| `timeout` | `int` | `1000` | timeout (ms) |
 
 ### `WriteMeta`
 
-쓰기 작업의 메타데이터입니다.
+사용자: `put()`, `remove()`, `touch()`, `operate()` 의 `meta` 파라미터, **그리고 `batch_write()` 에서 per-record** 로 third tuple element `(key, bins, meta)`.
 
-**사용하는 메서드**: `put()`, `remove()`, `touch()`, `append()`, `prepend()`, `increment()`, `remove_bin()`, `operate()`, `operate_ordered()` — `meta` 파라미터로 사용
+`batch_write()` 에서 per-record `WriteMeta` 에 설정된 field 는 대응하는 batch-level [`BatchPolicy`](#batchpolicy) default 를 override — [precedence rule](#write-field-precedence-batch_write) 참조.
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `gen` | `int` | 낙관적 잠금을 위한 예상 generation (`POLICY_GEN_EQ`와 함께 사용) |
-| `ttl` | `int` | 레코드 TTL (초 단위) |
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `gen` | `int` | 예상 generation. 이 설정 시 `POLICY_GEN_EQ` 함의 (CAS-style write). |
+| `ttl` | `int` | record TTL (초). 특수 값: `0` = namespace default, `-1` = 영원, `-2` = update 안 함. |
+| `key` | `int` | key send policy (`POLICY_KEY_DIGEST` / `POLICY_KEY_SEND`). |
+| `exists` | `int` | existence policy (`POLICY_EXISTS_*`). |
+| `commit_level` | `int` | commit level (`POLICY_COMMIT_LEVEL_ALL` / `_MASTER`). |
+| `durable_delete` | `bool` | durable delete (Enterprise 3.10+). |
 
-```python
-# TTL 설정
-meta: WriteMeta = {"ttl": 300}
-client.put(key, bins, meta=meta)
+#### Write field 우선순위 (batch_write) {#write-field-precedence-batch_write}
 
-# 낙관적 잠금
-record = client.get(key)
-meta: WriteMeta = {"gen": record.meta.gen}
-client.put(key, new_bins, meta=meta, policy={"gen": aerospike_py.POLICY_GEN_EQ})
-```
+모든 write field 에 대해 **per-record `WriteMeta` 가 항상 batch-level `BatchPolicy` 보다 우위**:
+
+| Field            | `BatchPolicy` (batch-level) | `WriteMeta` (per-record) | 비고 |
+|------------------|-----------------------------|--------------------------|-------|
+| `ttl`            | ✅                          | ✅                       | 양쪽 의미 동일. |
+| `key`            | ✅                          | ✅                       | server-side 에 user key 저장하려면 `POLICY_KEY_SEND`. |
+| `exists`         | ✅                          | ✅                       | 예: upsert-fail-on-exists 를 위한 `POLICY_EXISTS_CREATE_ONLY`. |
+| `gen`            | ✅ (enum index)             | ✅ (예상 값)             | 비대칭: batch-level = `POLICY_GEN_*` enum index; per-record = `POLICY_GEN_EQ` 를 강제하는 numeric generation. |
+| `commit_level`   | ✅                          | ✅                       | |
+| `durable_delete` | ✅                          | ✅                       | |
 
 ### `Privilege`
 
-관리자 역할 관리를 위한 권한 정의입니다.
+사용자: `admin_create_role()`, `admin_grant_privileges()`, `admin_revoke_privileges()`
 
-**사용하는 메서드**: `admin_create_role()`, `admin_grant_privileges()`, `admin_revoke_privileges()`
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `code` | `int` | 권한 코드 (`PRIV_READ`, `PRIV_WRITE`, `PRIV_READ_WRITE` 등) |
-| `ns` | `str` | 네임스페이스 범위 (빈 문자열이면 글로벌) |
-| `set` | `str` | 세트 범위 (빈 문자열이면 네임스페이스 전체) |
-
-```python
-privilege: Privilege = {
-    "code": aerospike_py.PRIV_READ_WRITE,
-    "ns": "test",
-    "set": "demo",
-}
-client.admin_create_role("custom_role", [privilege])
-```
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `code` | `int \| str` | privilege code constant (`PRIV_READ`, `PRIV_WRITE` 등) 또는 canonical name (`"read"`, `"read-write"` 등) |
+| `ns` | `str` | namespace scope (빈 문자 = global) |
+| `set` | `str` | set scope (빈 문자 = namespace-wide) |
 
 ### `UserInfo`
 
-관리자 쿼리가 반환하는 사용자 정보입니다.
+반환자: `admin_query_user_info()`, `admin_query_users_info()`
 
-**반환하는 메서드**: `admin_query_user_info()`, `admin_query_users_info()`
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `user` | `str` | 사용자명 |
-| `roles` | `list[str]` | 할당된 역할 이름 |
-| `conns_in_use` | `int` | 활성 연결 수 |
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `user` | `str` | username |
+| `roles` | `list[str]` | 할당된 role |
+| `conns_in_use` | `int` | 활성 connection |
 
 ### `RoleInfo`
 
-관리자 쿼리가 반환하는 역할 정보입니다.
+반환자: `admin_query_role()`, `admin_query_roles()`
 
-**반환하는 메서드**: `admin_query_role()`, `admin_query_roles()`
-
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `name` | `str` | 역할 이름 |
-| `privileges` | `list[Privilege]` | 할당된 권한 |
-| `allowlist` | `list[str]` | IP 허용 목록 |
-| `read_quota` | `int` | 읽기 쿼터 |
-| `write_quota` | `int` | 쓰기 쿼터 |
+| Field | Type | 설명 |
+|-------|------|-------------|
+| `name` | `str` | role 이름 |
+| `privileges` | `list[Privilege]` | 할당된 privilege |
+| `allowlist` | `list[str]` | IP allowlist |
+| `read_quota` | `int` | read quota |
+| `write_quota` | `int` | write quota |

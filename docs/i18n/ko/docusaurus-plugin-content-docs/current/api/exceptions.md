@@ -2,17 +2,14 @@
 title: Exceptions
 sidebar_label: Exceptions
 sidebar_position: 3
-description: 예외 계층 구조 및 에러 처리 패턴
+description: Exception hierarchy and error handling patterns.
 ---
 
-모든 예외는 `aerospike` 및 `aerospike.exception`에서 사용할 수 있습니다.
-
 ```python
-import aerospike_py as aerospike
-from aerospike_py.exception import RecordNotFound
+from aerospike_py.exception import RecordNotFound, AerospikeError
 ```
 
-## Exception Hierarchy
+## Hierarchy
 
 ```
 Exception
@@ -41,96 +38,86 @@ Exception
         └── FilteredOut
 ```
 
-## Base Exceptions
+## Reference
+
+### Base
 
 | Exception | 설명 |
 |-----------|-------------|
-| `AerospikeError` | 모든 Aerospike 예외의 기본 클래스 |
-| `ClientError` | 클라이언트 측 오류 (연결, 설정) |
-| `ClusterError` | 클러스터 연결/탐색 오류 |
-| `InvalidArgError` | 메서드에 잘못된 인수가 전달됨 |
-| `AerospikeTimeoutError` | 작업 시간 초과 (alias: `TimeoutError`, deprecated) |
-| `ServerError` | 서버 측 오류 |
-| `RecordError` | 레코드 수준 작업 오류 |
+| `AerospikeError` | 모든 Aerospike exception 의 base |
+| `ClientError` | client-side error (connection, config) |
+| `ClusterError` | cluster 연결/discovery error |
+| `InvalidArgError` | 잘못된 인자 |
+| `AerospikeTimeoutError` | operation timeout |
+| `ServerError` | server-side error |
+| `RecordError` | record-level error |
 
-## Record Exceptions
-
-| Exception | 설명 |
-|-----------|-------------|
-| `RecordNotFound` | 레코드가 존재하지 않음 |
-| `RecordExistsError` | 레코드가 이미 존재함 (CREATE_ONLY 정책) |
-| `RecordGenerationError` | 세대 불일치 (Optimistic Locking) |
-| `RecordTooBig` | 레코드가 크기 제한을 초과함 |
-| `BinNameError` | 잘못된 빈 이름 (너무 길거나 유효하지 않은 문자) |
-| `BinExistsError` | 빈이 이미 존재함 |
-| `BinNotFound` | 빈이 존재하지 않음 |
-| `BinTypeError` | 빈 타입 불일치 |
-| `FilteredOut` | Expression에 의해 레코드가 필터링됨 |
-
-## Server Exceptions
+### Record
 
 | Exception | 설명 |
 |-----------|-------------|
-| `AerospikeIndexError` | Secondary Index 작업 오류 (alias: `IndexError`, deprecated) |
-| `IndexNotFound` | 인덱스가 존재하지 않음 |
-| `IndexFoundError` | 인덱스가 이미 존재함 |
-| `QueryError` | 쿼리 실행 오류 |
-| `QueryAbortedError` | 쿼리가 중단됨 |
-| `AdminError` | 관리 작업 오류 |
-| `UDFError` | UDF 등록/실행 오류 |
+| `RecordNotFound` | record 없음 |
+| `RecordExistsError` | record 이미 존재 (`CREATE_ONLY`) |
+| `RecordGenerationError` | generation mismatch (optimistic lock) |
+| `RecordTooBig` | record 가 크기 한도 초과 |
+| `BinNameError` | 잘못된 bin name |
+| `BinExistsError` | bin 이미 존재 |
+| `BinNotFound` | bin 없음 |
+| `BinTypeError` | bin type mismatch |
+| `FilteredOut` | expression filter 로 제외 |
 
-## Error Handling Examples
+### Server
 
-### Basic Error Handling
+| Exception | 설명 |
+|-----------|-------------|
+| `AerospikeIndexError` | secondary index error |
+| `IndexNotFound` | index 없음 |
+| `IndexFoundError` | index 이미 존재 |
+| `QueryError` | query 실행 error |
+| `QueryAbortedError` | query 중단됨 |
+| `AdminError` | admin operation error |
+| `UDFError` | UDF error |
+
+:::note
+`TimeoutError` 와 `IndexError` 는 Python builtin shadow 방지를 위해 각각 `AerospikeTimeoutError` 와 `AerospikeIndexError` 의 deprecated alias.
+:::
+
+## 예제
 
 ```python
-import aerospike_py as aerospike
-from aerospike_py.exception import RecordNotFound, AerospikeError
+from aerospike_py.exception import (
+    RecordNotFound,
+    RecordExistsError,
+    RecordGenerationError,
+    AerospikeTimeoutError,
+    AerospikeError,
+)
 
+# 기본 error handling
 try:
-    _, meta, bins = client.get(("test", "demo", "nonexistent"))
+    record = client.get(("test", "demo", "nonexistent"))
 except RecordNotFound:
-    print("Record not found")
+    print("Not found")
 except AerospikeError as e:
-    print(f"Aerospike error: {e}")
-```
+    print(f"Error: {e}")
 
-### Optimistic Locking
-
-```python
-from aerospike_py.exception import RecordGenerationError
-
+# Optimistic locking
 try:
-    _, meta, bins = client.get(key)
-    client.put(key, {"val": bins["val"] + 1},
-               meta={"gen": meta.gen},
-               policy={"gen": aerospike.POLICY_GEN_EQ})
+    record = client.get(key)
+    client.put(
+        key,
+        {"val": record.bins["val"] + 1},
+        meta={"gen": record.meta.gen},
+        policy={"gen": aerospike.POLICY_GEN_EQ},
+    )
 except RecordGenerationError:
-    print("Record was modified by another client")
-```
+    print("Concurrent modification detected")
 
-### Create Only
-
-```python
-from aerospike_py.exception import RecordExistsError
-
+# Create-only
 try:
     client.put(key, bins, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
 except RecordExistsError:
-    print("Record already exists")
+    print("Already exists")
 ```
 
-### Connection Errors
-
-```python
-from aerospike_py.exception import ClientError, ClusterError, AerospikeTimeoutError
-
-try:
-    client = aerospike.client(config).connect()
-except ClusterError:
-    print("Cannot connect to cluster")
-except AerospikeTimeoutError:
-    print("Connection timed out")
-except ClientError as e:
-    print(f"Client error: {e}")
-```
+production 패턴은 [Error Handling Guide](../guides/admin/error-handling.md) 참조.
