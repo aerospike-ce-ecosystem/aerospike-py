@@ -1,9 +1,9 @@
 ---
-title: NumPy 배치 쓰기 가이드
-sidebar_label: NumPy 배치 쓰기
+title: NumPy Batch Write Guide
+sidebar_label: NumPy Batch Write
 sidebar_position: 5
 slug: /guides/numpy-batch-write
-description: batch_write_numpy를 사용하여 numpy 구조화 배열에서 직접 Aerospike로 고성능 대량 적재를 수행하는 방법을 안내합니다.
+description: Use batch_write_numpy to write records directly from numpy structured arrays for high-performance bulk ingestion into Aerospike.
 ---
 
 import Tabs from '@theme/Tabs';
@@ -11,16 +11,16 @@ import TabItem from '@theme/TabItem';
 
 ## 개요
 
-`batch_write_numpy()`는 **numpy 구조화 배열**에서 직접 여러 레코드를 Aerospike에 기록합니다. 각 행이 별도의 쓰기 작업이 되며, dtype 필드가 Aerospike bin에 매핑됩니다.
+`batch_write_numpy()` 는 **numpy structured array** 로부터 Aerospike 에 다수 record 를 직접 write. 각 row 가 별도의 write operation 이 되며, dtype field 가 Aerospike bin 으로 매핑됨.
 
-- **배열에서 레코드로 직접 매핑** -- 중간 Python dict나 루프 불필요
-- **키 필드 추출** -- 지정된 dtype 필드(기본값 `_key`)가 레코드의 사용자 키로 사용됨
-- **자동 bin 매핑** -- 밑줄(`_`)로 시작하지 않는 모든 필드가 bin이 됨
-- **배치 실행** -- 모든 행이 단일 배치 호출로 기록됨
+- **Array-to-record 직접 매핑** — 중간 Python dict 나 loop 없음
+- **Key field 추출** — 지정된 dtype field (default `_key`) 가 record 의 user key 로 사용
+- **자동 bin 매핑** — `_` prefix 없는 모든 field 가 bin 이 됨
+- **Batch 실행** — 모든 row 가 single batch 호출로 write
 
-:::tip[사용 시기]
+:::tip[언제 쓰나]
 
-데이터가 이미 numpy 배열에 있을 때(예: ML 피처 스토어, 센서 데이터 파이프라인, 과학 데이터셋) `batch_write_numpy()`를 사용하세요. 일반 Python dict의 경우 `put()` 또는 표준 배치 작업을 대신 사용하세요.
+데이터가 이미 numpy array 일 때 `batch_write_numpy()` 사용 (예: ML feature store, sensor 데이터 pipeline, scientific dataset). 일반 Python dict 의 경우 `put()` 또는 표준 batch operation 사용.
 
 :::
 
@@ -30,7 +30,7 @@ import TabItem from '@theme/TabItem';
 pip install "aerospike-py[numpy]"
 ```
 
-## 빠른 시작
+## Quick Start
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -43,21 +43,21 @@ client = aerospike.client({
     "hosts": [("127.0.0.1", 3000)],
 }).connect()
 
-# 1. 키 필드와 bin 필드로 dtype 정의
+# 1. key field 와 bin field 로 dtype 정의
 dtype = np.dtype([
-    ("_key", "i4"),     # 레코드 키 (int32)
+    ("_key", "i4"),     # record key (int32)
     ("score", "f8"),    # bin: float64
     ("count", "i4"),    # bin: int32
 ])
 
-# 2. 구조화 배열 생성
+# 2. structured array 생성
 data = np.array([
     (1, 0.95, 10),
     (2, 0.87, 20),
     (3, 0.72, 15),
 ], dtype=dtype)
 
-# 3. 배치 쓰기
+# 3. Batch write
 results = client.batch_write_numpy(data, "test", "demo", dtype)
 
 # 4. 결과 확인
@@ -83,21 +83,21 @@ async def main():
     })
     await client.connect()
 
-    # 1. 키 필드와 bin 필드로 dtype 정의
+    # 1. key field 와 bin field 로 dtype 정의
     dtype = np.dtype([
         ("_key", "i4"),
         ("score", "f8"),
         ("count", "i4"),
     ])
 
-    # 2. 구조화 배열 생성
+    # 2. structured array 생성
     data = np.array([
         (1, 0.95, 10),
         (2, 0.87, 20),
         (3, 0.72, 15),
     ], dtype=dtype)
 
-    # 3. 배치 쓰기
+    # 3. Batch write
     results = await client.batch_write_numpy(data, "test", "demo", dtype)
 
     # 4. 결과 확인
@@ -115,10 +115,10 @@ asyncio.run(main())
   </TabItem>
 </Tabs>
 
-## 동작 원리
+## 동작 방식
 
 ```
-numpy 구조화 배열                  Aerospike
+numpy structured array             Aerospike
 ┌──────┬───────┬───────┐
 │ _key │ score │ count │
 ├──────┼───────┼───────┤          ┌──────────────────────┐
@@ -127,29 +127,29 @@ numpy 구조화 배열                  Aerospike
 │  3   │ 0.72  │  15   │  ──────▶ │ key=3 {score, count} │
 └──────┴───────┴───────┘          └──────────────────────┘
         ▲                                  ▲
-   key_field="_key"               bins = 밑줄로 시작하지 않는 필드
+   key_field="_key"               bins = non-underscore field
 ```
 
-1. `key_field`(기본값 `"_key"`) 컬럼이 각 레코드의 사용자 키로 추출됩니다
-2. `_`로 시작하지 **않는** 모든 필드가 Aerospike bin이 됩니다
-3. `_`로 시작하는 필드(키 필드 제외)는 무시됩니다
+1. `key_field` (default `"_key"`) column 이 각 record 의 user key 로 추출됨
+2. `_` 로 prefix 되지 **않은** 모든 field 가 Aerospike bin 이 됨
+3. `_` 로 prefix 된 field (key field 외) 는 무시됨
 
-## 키 필드
+## Key Field
 
-기본적으로 `"_key"`라는 이름의 dtype 필드가 레코드 키로 사용됩니다. `key_field`로 다른 필드를 지정할 수 있습니다:
+기본적으로 `"_key"` 라는 dtype field 가 record key 로 사용. `key_field` 로 다른 field 지정 가능:
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
 ```python
 dtype = np.dtype([
-    ("user_id", "i8"),    # 이 필드를 레코드 키로 사용
+    ("user_id", "i8"),    # 이것을 record key 로 사용
     ("score", "f8"),
 ])
 
 data = np.array([(100, 1.5), (101, 2.5)], dtype=dtype)
 
-# "_key" 대신 "user_id"를 키로 사용
+# "_key" 대신 "user_id" 를 key 로 사용
 results = client.batch_write_numpy(
     data, "test", "demo", dtype, key_field="user_id"
 )
@@ -176,32 +176,32 @@ results = await client.batch_write_numpy(
 
 :::note
 
-커스텀 `key_field`를 사용할 때, 해당 필드를 bin으로도 저장하려면 필드 이름이 `_`로 시작하지 **않아야** 합니다. `_`로 시작하는 필드는 키로만 사용되고 bin으로 기록되지 않습니다.
+custom `key_field` 사용 시 그 field 가 bin 으로도 저장되길 원하면 이름이 `_` 로 시작하면 **안 됨**. `_` 로 시작하면 key 로만 사용되고 bin 으로는 write 안 됨.
 
 :::
 
-## 지원되는 dtype 종류
+## 지원되는 dtype kind
 
-`batch_read()`의 `_dtype`에서 지원되는 것과 동일한 dtype 종류가 쓰기에도 지원됩니다:
+`batch_read().to_numpy(dtype)` 가 지원하는 동일 dtype kind 가 write 에도 지원됨:
 
-| numpy 종류 | 코드 | 예시 | Aerospike 값 |
-|------------|------|------|--------------|
-| 부호 있는 정수 | `i` | `"i1"`, `"i2"`, `"i4"`, `"i8"` | `Int(i64)` |
-| 부호 없는 정수 | `u` | `"u1"`, `"u2"`, `"u4"`, `"u8"` | `Int(i64)` |
-| 부동 소수점 | `f` | `"f4"`, `"f8"` | `Float(f64)` |
-| 고정 바이트 | `S` | `"S8"`, `"S16"` | `Blob(bytes)` 또는 `String` |
-| Void 바이트 | `V` | `"V4"`, `"V16"` | `Blob(bytes)` |
-| 하위 배열 | -- | `("f4", (128,))` | `Blob(bytes)` |
+| numpy Kind | Code | Example | Aerospike Value |
+|------------|------|---------|-----------------|
+| Signed int | `i` | `"i1"`, `"i2"`, `"i4"`, `"i8"` | `Int(i64)` |
+| Unsigned int | `u` | `"u1"`, `"u2"`, `"u4"`, `"u8"` | `Int(i64)` |
+| Float | `f` | `"f4"`, `"f8"` | `Float(f64)` |
+| Fixed bytes | `S` | `"S8"`, `"S16"` | `Blob(bytes)` 또는 `String` |
+| Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` |
+| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` |
 
-:::tip[지원되지 않는 dtype]
+:::tip[지원 안 되는 dtype]
 
-유니코드 문자열(`U`)과 Python 객체(`O`)는 지원되지 않습니다. 문자열 데이터에는 `S`(고정 바이트)를 사용하세요.
+Unicode string (`U`) 과 Python object (`O`) 는 미지원. string 데이터에는 `S` (fixed bytes) 사용.
 
 :::
 
 ## 예제
 
-### 센서 데이터 적재
+### Sensor 데이터 ingestion
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -220,7 +220,7 @@ dtype = np.dtype([
     ("status", "u1"),
 ])
 
-# 1000개의 센서 측정값 생성
+# 1000 개 sensor reading 생성
 n = 1000
 data = np.zeros(n, dtype=dtype)
 data["_key"] = np.arange(n)
@@ -273,9 +273,9 @@ asyncio.run(main())
   </TabItem>
 </Tabs>
 
-### 벡터 임베딩
+### Vector Embedding
 
-ML 임베딩을 바이트 blob으로 저장합니다:
+ML embedding 을 byte blob 으로 저장:
 
 ```python
 import numpy as np
@@ -286,7 +286,7 @@ client = aerospike.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 dim = 128
 dtype = np.dtype([
     ("_key", "i4"),
-    ("embedding", "V" + str(dim * 4)),  # 128 * 4 바이트 = 512바이트 blob
+    ("embedding", "V" + str(dim * 4)),  # 128 * 4 bytes = 512-byte blob
     ("label", "i4"),
 ])
 
@@ -302,9 +302,9 @@ data["label"] = np.random.randint(0, 10, n)
 results = client.batch_write_numpy(data, "test", "vectors", dtype)
 ```
 
-### 쓰기와 읽기 왕복
+### Write 와 Read Roundtrip
 
-`batch_write_numpy()`와 `batch_read()`의 `_dtype`을 조합하여 완전한 numpy 왕복을 수행합니다:
+`batch_write_numpy()` 와 `batch_read().to_numpy(dtype)` 를 결합한 full numpy roundtrip:
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -323,7 +323,7 @@ dtype = np.dtype([
     ("category", "i4"),
 ])
 
-# 쓰기
+# Write
 data = np.array([
     (1, 1.0, 2.0, 0),
     (2, 3.0, 4.0, 1),
@@ -331,12 +331,15 @@ data = np.array([
 ], dtype=dtype)
 client.batch_write_numpy(data, "test", "points", dtype)
 
-# _dtype으로 읽기
+# to_numpy(dtype) 로 read back — buffer fill 동안 GIL release
 read_dtype = np.dtype([("x", "f8"), ("y", "f8"), ("category", "i4")])
 keys = [("test", "points", i) for i in range(1, 4)]
-batch = client.batch_read(keys, policy={"key": aerospike.POLICY_KEY_SEND}).to_numpy(read_dtype)
+batch = client.batch_read(
+    keys,
+    policy={"key": aerospike.POLICY_KEY_SEND},
+).to_numpy(read_dtype)
 
-# 벡터화 분석
+# Vectorised 분석
 print(batch.batch_records["x"].mean())       # 3.0
 print(batch.batch_records["category"].sum())  # 1
 ```
@@ -370,7 +373,8 @@ async def main():
 
     read_dtype = np.dtype([("x", "f8"), ("y", "f8"), ("category", "i4")])
     keys = [("test", "points", i) for i in range(1, 4)]
-    batch = await client.batch_read(keys, policy={"key": aerospike.POLICY_KEY_SEND}).to_numpy(read_dtype)
+    lazy_records = await client.batch_read(keys, policy={"key": aerospike.POLICY_KEY_SEND})
+    batch = lazy_records.to_numpy(read_dtype)
 
     print(batch.batch_records["x"].mean())
     print(batch.batch_records["category"].sum())
@@ -383,9 +387,9 @@ asyncio.run(main())
   </TabItem>
 </Tabs>
 
-### Pandas DataFrame에서 Aerospike로
+### Pandas DataFrame 을 Aerospike 로
 
-pandas DataFrame을 numpy를 통해 Aerospike에 기록합니다:
+numpy 를 거쳐 pandas DataFrame 을 Aerospike 에 write:
 
 ```python
 import numpy as np
@@ -401,7 +405,7 @@ df = pd.DataFrame({
     "level": [10, 20, 15],
 })
 
-# 구조화 배열로 변환
+# structured array 로 변환
 dtype = np.dtype([
     ("_key", "i4"),
     ("score", "f8"),
@@ -416,27 +420,27 @@ data["level"] = df["level"].values
 results = client.batch_write_numpy(data, "test", "users", dtype)
 ```
 
-## 일시적 실패 자동 재시도
+## Transient 실패에 대한 Retry
 
-`retry > 0`이면 일시적 오류(timeout, device overload, key busy, server memory, partition unavailable)로 실패한 레코드를 지수 백오프로 자동 재시도합니다. 영구 오류(key exists, record too big)는 재시도하지 않습니다.
+`retry > 0` 이면 transient error (timeout, device overload, key busy, server memory, partition unavailable) 로 실패한 record 가 exponential backoff 로 자동 재시도. 영구 error (key exists, record too big) 는 절대 retry 안 함.
 
 ```python
-# 일시적 실패 시 최대 3회 재시도
+# transient 실패 시 최대 3회 retry
 results = client.batch_write_numpy(data, "test", "demo", dtype, retry=3)
 
-# 재시도 후에도 실패한 레코드 확인
+# retry 후에도 실패한 record 확인
 for br in results.batch_records:
     if br.result != 0:
         print(f"Write failed for key {br.key} after retries (code={br.result})")
 ```
 
-백오프 간격은 10ms, 20ms, 40ms, ... 최대 500ms입니다. 재시도 시에는 실패한 레코드만 다시 전송하며 전체 배치를 재전송하지 않습니다.
+Backoff 스케줄은 시도 사이 10ms, 20ms, 40ms, ... 로 500ms 에서 cap. 매 retry 마다 실패한 record 만 재제출 (전체 batch 아님).
 
 :::tip
-대량 벌크 적재 시 간헐적 일시 오류가 예상되면 `retry=3`이 적당합니다. 애플리케이션에서 재시도 로직을 직접 제어하려면 `retry=0`(기본값)을 사용하세요.
+간헐적 transient 실패가 예상되는 대형 bulk ingestion 에선 `retry=3` 이 좋은 시작점. application 안에서 retry 로직을 full control 하고 싶을 땐 `retry=0` (default).
 :::
 
-## 오류 처리
+## Error Handling
 
 ```python
 from aerospike_py.exception import AerospikeError
@@ -450,14 +454,14 @@ except AerospikeError as e:
     print(f"Batch write error: {e}")
 ```
 
-## 모범 사례
+## Best Practice
 
-- **dtype을 데이터에 맞추기** -- 메모리와 네트워크 전송량을 줄이기 위해 최소한의 dtype을 사용하세요 (`"f8"` 대신 `"f4"`, `"i8"` 대신 `"i2"`)
-- **배치 크기** -- 최적의 성능을 위해 호출당 100-5,000행을 유지하세요
-- **키 필드 규칙** -- 일관성을 위해 기본 키 필드로 `"_key"`를 사용하세요
-- **밑줄 접두사** -- `_`로 시작하는 필드는 bin에서 제외됩니다. 메타데이터 필드에 활용하세요
-- **batch_read와의 왕복** -- 효율적인 읽기를 위해 동일한 dtype 필드(`_key` 제외)를 `batch_read(...).to_numpy(dtype)`에 사용하세요
-- **대용량 데이터셋** -- 큰 배열을 청크로 분할하여 배치로 기록하세요:
+- **dtype 을 데이터에 맞춤** — 메모리와 네트워크 전송 절감 위해 충분한 최소 dtype 사용 (`"f8"` 대신 `"f4"`, `"i8"` 대신 `"i2"`)
+- **Batch size** — 최적 성능을 위해 호출당 100-5,000 row 유지
+- **Key field 규약** — 컨벤션 일관성 위해 default key field 로 `"_key"` 사용
+- **Underscore prefix** — `_` 로 시작하는 field 는 bin 에서 제외, metadata field 에 활용
+- **batch_read 로 roundtrip** — 효율적 read-back 을 위해 동일 dtype field (`_key` 제외) 로 `batch_read(...).to_numpy(dtype)` 사용 (buffer fill 이 GIL released 상태로 실행)
+- **대형 dataset** — 큰 array 를 chunk 로 나눠 batch 단위 write:
 
 ```python
 chunk_size = 1000
@@ -466,7 +470,7 @@ for i in range(0, len(data), chunk_size):
     client.batch_write_numpy(chunk, "test", "demo", dtype)
 ```
 
-## API 레퍼런스
+## API Reference
 
 ```python
 # Sync
@@ -492,16 +496,16 @@ results: BatchWriteResult = await client.batch_write_numpy(
 )
 ```
 
-| 파라미터 | 타입 | 기본값 | 설명 |
-|----------|------|--------|------|
-| `data` | `np.ndarray` | 필수 | 레코드 데이터가 담긴 구조화 numpy 배열 |
-| `namespace` | `str` | 필수 | 대상 Aerospike namespace |
-| `set_name` | `str` | 필수 | 대상 set 이름 |
-| `_dtype` | `np.dtype` | 필수 | 배열 레이아웃을 설명하는 구조화 dtype |
-| `key_field` | `str` | `"_key"` | 레코드 사용자 키로 사용할 dtype 필드 이름 |
-| `policy` | `dict \| None` | `None` | 선택적 [`BatchPolicy`](/docs/api/types#batchpolicy) 오버라이드 |
-| `retry` | `int` | `0` | 일시적 실패(timeout, device overload, key busy) 최대 재시도 횟수. `0` = 재시도 안 함. |
+| Parameter | Type | Default | 설명 |
+|-----------|------|---------|-------------|
+| `data` | `np.ndarray` | required | record 데이터의 structured numpy array |
+| `namespace` | `str` | required | target Aerospike namespace |
+| `set_name` | `str` | required | target set 이름 |
+| `_dtype` | `np.dtype` | required | array 레이아웃을 describing 하는 structured dtype |
+| `key_field` | `str` | `"_key"` | record user key 로 사용할 dtype field 이름 |
+| `policy` | `dict \| None` | `None` | 선택적 [`BatchPolicy`](/docs/api/types#batchpolicy) override |
+| `retry` | `int` | `0` | transient 실패 (timeout, device overload, key busy) 의 최대 retry. `0` = retry 없음. |
 
-**반환값:** `BatchWriteResult` -- `batch_records: list[BatchRecord]`를 포함하며, 각 `BatchRecord`는 `key`, `result` (0=성공), `record` (`Record` 또는 `None`), `in_doubt` (transport-level ambiguity 여부)를 가집니다.
+**Returns:** `BatchWriteResult` — `batch_records: list[BatchRecord]` 를 가진 NamedTuple. 각 `BatchRecord` 가 `key`, `result` (0=success), `record` (`Record` 또는 `None`), `in_doubt` (transport-ambiguity flag) carry.
 
-**참고:** numpy 배열로 레코드를 읽어오려면 [NumPy 배치 읽기 가이드](./numpy-batch.md)를 참조하세요.
+**See also:** numpy array 로 record read back 하려면 [NumPy Batch Read Guide](./numpy-batch.md) 참조.

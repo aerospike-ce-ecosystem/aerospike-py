@@ -1,110 +1,81 @@
 ---
 title: Contributing
-sidebar_label: 기여하기
+sidebar_label: Contributing
 sidebar_position: 100
-description: 개발 환경 설정, 빌드, 테스트, 코드 스타일 가이드
+description: Development setup, build, test, and code style guidelines.
 ---
 
-aerospike-py에 기여해 주셔서 감사합니다!
-
-## Development Setup
-
-### Prerequisites
-
-- Python 3.10+
-- Rust 툴체인 ([rustup](https://rustup.rs/))
-- Docker (테스트용 Aerospike 서버)
-
-### Setup
+## Setup
 
 ```bash
-git clone https://github.com/KimSoungRyoul/aerospike-py.git
+git clone https://github.com/aerospike-ce-ecosystem/aerospike-py.git
 cd aerospike-py
-
-python -m venv .venv
-source .venv/bin/activate
-
-# 개발 의존성 설치
-pip install maturin pytest pytest-asyncio ruff
-
-# Rust 확장 빌드
-maturin develop
+make install          # uv sync --all-groups
+make build            # uv run maturin develop --release
 ```
 
-### Start Aerospike Server
+## Aerospike 시작
 
 ```bash
-docker run -d --name aerospike \
-  -p 3000:3000 -p 3001:3001 -p 3002:3002 \
-  -e "NAMESPACE=test" \
-  -e "CLUSTER_NAME=docker" \
-  aerospike/aerospike-server
+make run-aerospike-ce   # port 18710 의 Aerospike CE
 ```
 
-## Running Tests
+## Build
 
 ```bash
-# 전체 테스트
-pytest
-
-# 특정 테스트 파일
-pytest tests/test_client.py
-
-# 특정 테스트
-pytest tests/test_client.py::test_put_get -v
+make build                    # Release build (권장)
+maturin develop               # Debug build (컴파일 더 빠름)
+maturin build --release       # wheel 빌드
 ```
 
-## Code Style
-
-프로젝트는 Python 코드에 [Ruff](https://docs.astral.sh/ruff/)를 사용합니다.
+## Test
 
 ```bash
-# Lint
-ruff check .
-
-# 포맷
-ruff format .
+make test-unit          # 서버 불필요
+make test-integration   # 서버 필요
+make test-all           # 전체 테스트
 ```
 
-Rust 코드:
+## Lint & Format
 
 ```bash
-cd rust
-cargo fmt
-cargo clippy
+make lint     # ruff check + cargo clippy
+make fmt      # ruff format + cargo fmt
+```
+
+## Pre-commit
+
+```bash
+pip install pre-commit
+pre-commit install
 ```
 
 ## Project Structure
 
 ```
 aerospike-py/
-├── rust/src/              # PyO3 Rust Bindings
-│   ├── client.rs          # Sync Client
-│   ├── async_client.rs    # Async Client
-│   ├── query.rs           # Query
-│   ├── operations.rs      # 연산 매핑 (CDT list/map 포함)
-│   ├── expressions.rs     # Expression 필터 컴파일
-│   ├── errors.rs          # Error → Exception 매핑
-│   ├── constants.rs       # 130+ 상수
-│   ├── types/             # 타입 변환기
-│   └── policy/            # 정책 파서
-├── src/aerospike_py/      # Python 패키지
-│   ├── __init__.py        # Re-exports, Client 래퍼
-│   ├── exp.py             # Expression 필터 빌더
-│   ├── list_operations.py # List CDT 연산 헬퍼
-│   ├── map_operations.py  # Map CDT 연산 헬퍼
-│   ├── exception.py       # Exception 계층
-│   └── predicates.py      # 쿼리 Predicates
-└── tests/                 # 단위 + 통합 테스트
+├── rust/src/               # PyO3 Rust bindings
+│   ├── client.rs           # Sync Client
+│   ├── async_client.rs     # Async Client
+│   ├── errors.rs           # Error → Exception
+│   ├── types/              # Type converter
+│   └── policy/             # Policy parser
+├── src/aerospike_py/       # Python package
+├── tests/                  # unit/ integration/ concurrency/ compatibility/
+├── docs/                   # Docusaurus
+└── benchmark/              # Benchmark
 ```
 
-## Pull Request Guidelines
+## 변경 가이드
 
-1. 기존 코드 스타일을 따라주세요
-2. 새 기능에 대한 테스트를 추가해 주세요
-3. 모든 테스트가 통과하는지 확인해 주세요
-4. PR 설명에 변경 사항을 명확히 기술해 주세요
+1. **Rust** (`rust/src/`): 편집 후 `maturin develop` 으로 재빌드
+2. **Python** (`src/aerospike_py/`): 변경 즉시 반영
+3. **Tests**: `tests/unit/` 또는 `tests/integration/` 에 추가
+4. **Docs**: `docs/docs/` 편집, `cd docs && npm start` 로 미리보기
 
-## Reporting Issues
+## 아키텍처 노트
 
-버그 리포트나 기능 요청은 [GitHub Issues](https://github.com/KimSoungRyoul/aerospike-py/issues)에 올려주세요.
+- **Sync Client**: 전역 Tokio runtime, `py.allow_threads(|| RUNTIME.block_on(...))` 가 GIL release
+- **Async Client**: `pyo3_async_runtimes::tokio::future_into_py()` 가 Python coroutine 반환
+- **Type conversion**: `types/value.rs` 안에서 Python ↔ Rust `Value` enum
+- **Error mapping**: `errors.rs` 안에서 `aerospike_core::Error` → Python exception
