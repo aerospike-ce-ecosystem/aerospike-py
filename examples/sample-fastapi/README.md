@@ -171,7 +171,7 @@ uv run --project examples/sample-fastapi pytest
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `APP_AEROSPIKE_HOST` | `127.0.0.1` | Aerospike host |
-| `APP_AEROSPIKE_PORT` | `3000` | Aerospike port |
+| `APP_AEROSPIKE_PORT` | `18710` | Aerospike port |
 | `APP_AEROSPIKE_NAMESPACE` | `test` | Namespace to use |
 | `APP_AEROSPIKE_SET` | `users` | Set name to use |
 
