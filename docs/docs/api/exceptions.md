@@ -85,6 +85,7 @@ Exception
 ## Examples
 
 ```python
+import aerospike_py as aerospike
 from aerospike_py.exception import (
     RecordNotFound,
     RecordExistsError,
