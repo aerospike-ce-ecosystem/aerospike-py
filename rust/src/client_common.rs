@@ -576,8 +576,10 @@ pub fn prepare_batch_remove_args(
         //   - Key      ::= (str, str, user_key[, digest])  — len in {3, 4}, [0]=str
         //   - (K,meta) ::= (tuple, dict)                    — len == 2, [0]=tuple, [1]=dict
         // The `tuple.len() == 2 && [0] is tuple && [1] is dict` test is precise
-        // because a Key is never length-2 (always >= 3).
-        let is_key_meta_pair = if let Ok(tuple) = item.cast::<PyTuple>() {
+        // because a Key is never length-2 (always >= 3). We bind the downcast
+        // result here so the (Key, meta) branch never needs a second cast +
+        // `unwrap()` — any future refactor stays panic-free by construction.
+        let key_meta_tuple = item.cast::<PyTuple>().ok().filter(|tuple| {
             tuple.len() == 2
                 && tuple
                     .get_item(0)
@@ -587,12 +589,9 @@ pub fn prepare_batch_remove_args(
                     .get_item(1)
                     .map(|x| x.is_instance_of::<PyDict>())
                     .unwrap_or(false)
-        } else {
-            false
-        };
+        });
 
-        if is_key_meta_pair {
-            let tuple = item.cast::<PyTuple>().unwrap();
+        if let Some(tuple) = key_meta_tuple {
             let key_obj = tuple.get_item(0)?;
             let meta_obj = tuple.get_item(1)?;
             let meta_dict = meta_obj
@@ -697,8 +696,9 @@ pub fn prepare_batch_apply_args(
     for item in keys.iter() {
         // Disambiguate Key vs (Key, meta): same rule as prepare_batch_remove_args.
         // A bare Key tuple is len >= 3; the (Key, meta) pair is exactly len 2 with
-        // [0] = tuple (Key) and [1] = dict (meta).
-        let is_key_meta_pair = if let Ok(tuple) = item.cast::<PyTuple>() {
+        // [0] = tuple (Key) and [1] = dict (meta). Bind the downcast result so
+        // the (Key, meta) branch never needs a second cast + `unwrap()`.
+        let key_meta_tuple = item.cast::<PyTuple>().ok().filter(|tuple| {
             tuple.len() == 2
                 && tuple
                     .get_item(0)
@@ -708,12 +708,9 @@ pub fn prepare_batch_apply_args(
                     .get_item(1)
                     .map(|x| x.is_instance_of::<PyDict>())
                     .unwrap_or(false)
-        } else {
-            false
-        };
+        });
 
-        if is_key_meta_pair {
-            let tuple = item.cast::<PyTuple>().unwrap();
+        if let Some(tuple) = key_meta_tuple {
             let key_obj = tuple.get_item(0)?;
             let meta_obj = tuple.get_item(1)?;
             let meta_dict = meta_obj
