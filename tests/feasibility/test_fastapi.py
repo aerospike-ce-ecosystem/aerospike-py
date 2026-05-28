@@ -150,15 +150,29 @@ def _create_app() -> FastAPI:
         keys = [_key(k["ns"], k["set"], k["key"]) for k in body["keys"]]
         bins = body.get("bins")
         results = await app.state.client.batch_read(keys, bins=bins)
+        # ``batch_read`` returns a ``LazyBatchRecords`` Mapping view that
+        # EXCLUDES not-found records (see rust/src/batch_types.rs:282-307
+        # and examples/sample-fastapi/app/routers/batch.py). Iterate the
+        # input keys so the response preserves order and length even when
+        # some keys are missing.
         sanitized = []
-        for user_key, bins_data in results.items():
-            sanitized.append(
-                {
-                    "key": user_key,
-                    "meta": None,
-                    "bins": bins_data,
-                }
-            )
+        for ns, set_name, user_key in keys:
+            if user_key in results:
+                sanitized.append(
+                    {
+                        "key": [ns, set_name, user_key],
+                        "meta": None,
+                        "bins": results[user_key],
+                    }
+                )
+            else:
+                sanitized.append(
+                    {
+                        "key": [ns, set_name, user_key],
+                        "meta": None,
+                        "bins": None,
+                    }
+                )
         return {"batch_records": sanitized}
 
     @app.post("/batch/operate")
