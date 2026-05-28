@@ -51,7 +51,7 @@ class ClusterError(AerospikeError):
 class AerospikeTimeoutError(AerospikeError):
     """Raised when an operation exceeds its timeout threshold."""
 
-class TimeoutError(AerospikeError):
+class TimeoutError(AerospikeTimeoutError):
     """Deprecated: use ``AerospikeTimeoutError`` instead.
 
     Accessing this name emits a ``DeprecationWarning``.
@@ -110,7 +110,7 @@ class FilteredOut(RecordError):
 class AerospikeIndexError(ServerError):
     """Base exception for secondary index errors."""
 
-class IndexError(ServerError):
+class IndexError(AerospikeIndexError):
     """Deprecated: use ``AerospikeIndexError`` instead.
 
     Accessing this name emits a ``DeprecationWarning``.
