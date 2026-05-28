@@ -1020,6 +1020,15 @@ class Client:
                 "test_udf", "add", args=[1, 1],
             )
             ```
+
+        Note:
+            ``batch_apply`` does **not** accept a ``retry`` parameter
+            (unlike :meth:`batch_write`, which accepts ``retry: int = 0``).
+            Passing ``retry=`` to this method raises ``TypeError``.
+            UDF batches are not idempotent in the general case, so retries
+            must be driven by the caller. For per-record control over the
+            UDF call shape and policy fields, use ``(key, meta)`` tuples
+            with a ``BatchUDFMeta`` payload in ``keys``.
         """
         ...
 
@@ -2012,6 +2021,13 @@ class AsyncClient:
         See :meth:`Client.batch_apply` for full description. Per-record
         ``BatchUDFMeta`` overrides may change the UDF call shape
         (``module``/``function``/``args``) or policy fields per record.
+
+        Note:
+            ``batch_apply`` does **not** accept a ``retry`` parameter
+            (unlike :meth:`batch_write`, which accepts ``retry: int = 0``).
+            Passing ``retry=`` raises ``TypeError``. UDF batches are not
+            idempotent in the general case, so retries must be driven by
+            the caller.
         """
         ...
 
