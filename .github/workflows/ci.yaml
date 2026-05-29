@@ -46,7 +46,7 @@ env:
   # (not job level) so it is available inside `name:` expressions; using
   # `${{ env.MSRV }}` in `jobs.<id>.name` is evaluated before job-level
   # `env:` is in scope and causes "Unrecognized named-value: 'env'".
-  MSRV: "1.80"
+  MSRV: "1.85"
 
 jobs:
   lint:
@@ -91,7 +91,7 @@ jobs:
     # is not available during workflow parsing). The version below is the
     # display string; the actual MSRV is read from `env.MSRV` defined at
     # the workflow level, and the drift-gate step below keeps them in sync.
-    name: MSRV cargo check (Rust 1.80)
+    name: MSRV cargo check (Rust 1.85)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -128,7 +128,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # `cargo check` (not `cargo build` / `cargo test`) is enough to surface
-      # an MSRV regression: any item stabilised after 1.80 used by either the
+      # an MSRV regression: any item stabilised after the MSRV used by either the
       # crate code or its `#[cfg(test)]` modules will fail to resolve here
       # while the @stable jobs still build, mirroring what a downstream
       # `pip install --no-binary` / `cargo install` user would hit.
