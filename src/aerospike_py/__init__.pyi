@@ -2074,6 +2074,9 @@ class AsyncClient:
             index_name: Name for the new index.
             policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
+        Raises:
+            IndexFoundError: An index with that name already exists.
+
         Example:
             ```python
             await client.index_integer_create("test", "demo", "age", "age_idx")
@@ -2098,6 +2101,9 @@ class AsyncClient:
             index_name: Name for the new index.
             policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
 
+        Raises:
+            IndexFoundError: An index with that name already exists.
+
         Example:
             ```python
             await client.index_string_create("test", "demo", "name", "name_idx")
@@ -2121,6 +2127,9 @@ class AsyncClient:
             bin_name: Bin to index (must contain GeoJSON values).
             index_name: Name for the new index.
             policy: Optional [`AdminPolicy`](types.md#adminpolicy) dict.
+
+        Raises:
+            IndexFoundError: An index with that name already exists.
 
         Example:
             ```python
