@@ -76,22 +76,22 @@ def map_set_order(bin: str, map_order: int) -> Operation:
 
 def map_put(bin: str, key: Any, val: Any, policy: Optional[MapPolicy] = None) -> Operation:
     """Put a key/value pair into a map bin."""
-    return _build_op(_OP_MAP_PUT, bin, map_key=key, val=val, map_policy=policy or _UNSET)
+    return _build_op(_OP_MAP_PUT, bin, map_key=key, val=val, map_policy=policy if policy is not None else _UNSET)
 
 
 def map_put_items(bin: str, items: dict[str, Any], policy: Optional[MapPolicy] = None) -> Operation:
     """Put multiple key/value pairs into a map bin."""
-    return _build_op(_OP_MAP_PUT_ITEMS, bin, val=items, map_policy=policy or _UNSET)
+    return _build_op(_OP_MAP_PUT_ITEMS, bin, val=items, map_policy=policy if policy is not None else _UNSET)
 
 
 def map_increment(bin: str, key: Any, incr: Any, policy: Optional[MapPolicy] = None) -> Operation:
     """Increment a value in a map by key."""
-    return _build_op(_OP_MAP_INCREMENT, bin, map_key=key, val=incr, map_policy=policy or _UNSET)
+    return _build_op(_OP_MAP_INCREMENT, bin, map_key=key, val=incr, map_policy=policy if policy is not None else _UNSET)
 
 
 def map_decrement(bin: str, key: Any, decr: Any, policy: Optional[MapPolicy] = None) -> Operation:
     """Decrement a value in a map by key."""
-    return _build_op(_OP_MAP_DECREMENT, bin, map_key=key, val=decr, map_policy=policy or _UNSET)
+    return _build_op(_OP_MAP_DECREMENT, bin, map_key=key, val=decr, map_policy=policy if policy is not None else _UNSET)
 
 
 def map_clear(bin: str) -> Operation:

@@ -79,22 +79,24 @@ _OP_LIST_SET_ORDER = 1031
 
 def list_append(bin: str, val: Any, policy: Optional[ListPolicy] = None) -> Operation:
     """Append a value to a list bin."""
-    return _build_op(_OP_LIST_APPEND, bin, val=val, list_policy=policy or _UNSET)
+    return _build_op(_OP_LIST_APPEND, bin, val=val, list_policy=policy if policy is not None else _UNSET)
 
 
 def list_append_items(bin: str, values: list[Any], policy: Optional[ListPolicy] = None) -> Operation:
     """Append multiple values to a list bin."""
-    return _build_op(_OP_LIST_APPEND_ITEMS, bin, val=values, list_policy=policy or _UNSET)
+    return _build_op(_OP_LIST_APPEND_ITEMS, bin, val=values, list_policy=policy if policy is not None else _UNSET)
 
 
 def list_insert(bin: str, index: int, val: Any, policy: Optional[ListPolicy] = None) -> Operation:
     """Insert a value at the given index."""
-    return _build_op(_OP_LIST_INSERT, bin, index=index, val=val, list_policy=policy or _UNSET)
+    return _build_op(_OP_LIST_INSERT, bin, index=index, val=val, list_policy=policy if policy is not None else _UNSET)
 
 
 def list_insert_items(bin: str, index: int, values: list[Any], policy: Optional[ListPolicy] = None) -> Operation:
     """Insert multiple values at the given index."""
-    return _build_op(_OP_LIST_INSERT_ITEMS, bin, index=index, val=values, list_policy=policy or _UNSET)
+    return _build_op(
+        _OP_LIST_INSERT_ITEMS, bin, index=index, val=values, list_policy=policy if policy is not None else _UNSET
+    )
 
 
 def list_pop(bin: str, index: int) -> Operation:
@@ -243,7 +245,9 @@ def list_remove_by_rank_range(bin: str, rank: int, return_type: int, count: Opti
 
 def list_increment(bin: str, index: int, val: int, policy: Optional[ListPolicy] = None) -> Operation:
     """Increment the value at the given index."""
-    return _build_op(_OP_LIST_INCREMENT, bin, index=index, val=val, list_policy=policy or _UNSET)
+    return _build_op(
+        _OP_LIST_INCREMENT, bin, index=index, val=val, list_policy=policy if policy is not None else _UNSET
+    )
 
 
 def list_sort(bin: str, sort_flags: int = 0) -> Operation:
