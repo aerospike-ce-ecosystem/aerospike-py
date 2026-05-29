@@ -21,6 +21,15 @@ def _shell_escape(s: str) -> str:
     return s.replace("'", "'\\''")
 
 
+def _sanitize_for_title(s: str) -> str:
+    """Collapse all whitespace (incl. newlines) into single spaces.
+
+    Mirrors the Rust-side ``sanitize_for_title`` so the gh issue title stays
+    on a single line.
+    """
+    return " ".join(s.split())
+
+
 def log_unexpected_error(context: str, exc: BaseException) -> None:
     """Log an unexpected error with a gh issue create command.
 
@@ -33,7 +42,7 @@ def log_unexpected_error(context: str, exc: BaseException) -> None:
     exc_msg = str(exc)
     tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
 
-    title = f"Unexpected error: {exc_type}: {exc_msg[:80]}"
+    title = _sanitize_for_title(f"Unexpected error: {exc_type}: {exc_msg}")[:80]
     body = (
         f"aerospike-py version: {__version__}\n"
         f"Python: {sys.version}\n"

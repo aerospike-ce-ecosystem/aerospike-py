@@ -454,6 +454,56 @@ class TestListMapByValueFacadeRequiresVal:
             func("mybin", return_type=0)  # type: ignore[call-arg]
 
 
+class TestEmptyPolicyPreserved:
+    """Regression: an empty ``{}`` policy must be forwarded, not dropped.
+
+    The facade uses ``policy if policy is not None else _UNSET`` so that an
+    explicit empty-dict policy is treated as a real (default-valued) policy
+    rather than being elided like ``None``. The earlier ``policy or _UNSET``
+    form wrongly treated ``{}`` as unset because empty dicts are falsy.
+    """
+
+    @pytest.mark.parametrize(
+        "func,args,expected_op",
+        [
+            (list_append, ("mybin", 42), 1001),
+            (list_append_items, ("mybin", [1, 2]), 1002),
+            (list_insert, ("mybin", 0, "x"), 1003),
+            (list_increment, ("mybin", 0, 5), 1029),
+        ],
+        ids=["list_append", "list_append_items", "list_insert", "list_increment"],
+    )
+    def test_list_empty_policy_preserved(self, func, args, expected_op):
+        op = func(*args, policy={})
+        assert op["op"] == expected_op
+        assert "list_policy" in op
+        assert op["list_policy"] == {}
+
+    @pytest.mark.parametrize(
+        "func,args,expected_op",
+        [
+            (map_put, ("mybin", "k", "v"), 2002),
+            (map_put_items, ("mybin", {"a": 1}), 2003),
+            (map_increment, ("mybin", "c", 5), 2004),
+            (map_decrement, ("mybin", "c", 3), 2005),
+        ],
+        ids=["map_put", "map_put_items", "map_increment", "map_decrement"],
+    )
+    def test_map_empty_policy_preserved(self, func, args, expected_op):
+        op = func(*args, policy={})
+        assert op["op"] == expected_op
+        assert "map_policy" in op
+        assert op["map_policy"] == {}
+
+    def test_list_none_policy_omitted(self):
+        op = list_append("mybin", 42, policy=None)
+        assert "list_policy" not in op
+
+    def test_map_none_policy_omitted(self):
+        op = map_put("mybin", "k", "v", policy=None)
+        assert "map_policy" not in op
+
+
 class TestModuleAccess:
     """Test that modules are accessible from the package."""
 

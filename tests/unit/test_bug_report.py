@@ -52,6 +52,39 @@ class TestLogUnexpectedError:
         assert "This error may be a bug in aerospike-py" in msg
 
 
+class TestTitleSingleLine:
+    """The gh-issue title must be a single line (no embedded newlines)."""
+
+    def _title_from_log(self, caplog):
+        # The logged message embeds: --title '<title>' --body '<body>'.
+        # Extract the single-quoted title argument.
+        import re
+
+        msg = caplog.records[0].message
+        m = re.search(r"--title '(.*?)' --body", msg, re.DOTALL)
+        assert m is not None, msg
+        return m.group(1)
+
+    def test_multiline_message_is_collapsed(self, caplog):
+        exc = ValueError("line one\nline two\r\nline three")
+        with caplog.at_level(logging.ERROR, logger="aerospike_py"):
+            log_unexpected_error("Client.get", exc)
+
+        title = self._title_from_log(caplog)
+        assert "\n" not in title
+        assert "\r" not in title
+        assert "line one line two line three" in title
+
+    def test_title_truncated_to_80_chars(self, caplog):
+        exc = ValueError("x" * 200)
+        with caplog.at_level(logging.ERROR, logger="aerospike_py"):
+            log_unexpected_error("Client.get", exc)
+
+        title = self._title_from_log(caplog)
+        assert len(title) <= 80
+        assert "\n" not in title
+
+
 class TestCatchUnexpectedSync:
     """Tests for catch_unexpected decorator with sync functions."""
 

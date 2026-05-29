@@ -23,6 +23,11 @@ from aerospike_py._aerospike import shutdown_tracing as _shutdown_tracing
 
 logger = logging.getLogger("aerospike_py")
 
+# Register the numeric TRACE level (5) so TRACE-level records render as
+# "TRACE" instead of the default "Level 5".
+_TRACE_LEVEL = 5
+logging.addLevelName(_TRACE_LEVEL, "TRACE")
+
 
 _LEVEL_MAP: dict[int, int] = {
     -1: logging.CRITICAL + 1,  # OFF
@@ -30,7 +35,7 @@ _LEVEL_MAP: dict[int, int] = {
     1: logging.WARNING,
     2: logging.INFO,
     3: logging.DEBUG,
-    4: 5,  # TRACE
+    4: _TRACE_LEVEL,  # TRACE
 }
 """Map aerospike LOG_LEVEL_* constants to Python logging levels."""
 
@@ -52,8 +57,18 @@ def set_log_level(level: int) -> None:
 
         aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
         ```
+
+    Raises:
+        ValueError: If ``level`` is not one of the ``LOG_LEVEL_*`` constants.
     """
-    py_level = _LEVEL_MAP.get(level, level)
+    if level not in _LEVEL_MAP:
+        raise ValueError(
+            f"Invalid log level: {level!r}. Expected one of the LOG_LEVEL_* "
+            "constants: LOG_LEVEL_OFF (-1), LOG_LEVEL_ERROR (0), "
+            "LOG_LEVEL_WARN (1), LOG_LEVEL_INFO (2), LOG_LEVEL_DEBUG (3), "
+            "LOG_LEVEL_TRACE (4)."
+        )
+    py_level = _LEVEL_MAP[level]
     logging.getLogger("aerospike_py").setLevel(py_level)
     logging.getLogger("_aerospike").setLevel(py_level)
     logging.getLogger("aerospike_core").setLevel(py_level)
