@@ -85,8 +85,8 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
         }
         "between" => {
             ensure_predicate_min_len(pred, "between", 4)?;
-            let min: i64 = pred.get_item(2)?.extract()?;
-            let max: i64 = pred.get_item(3)?.extract()?;
+            let min = extract_range_bound(pred, 2, "begin")?;
+            let max = extract_range_bound(pred, 3, "end")?;
             Ok(Predicate::Between { bin, min, max })
         }
         "contains" => {
@@ -142,6 +142,33 @@ fn ensure_predicate_min_len(pred: &Bound<'_, PyTuple>, kind: &str, min_len: usiz
         )));
     }
     Ok(())
+}
+
+/// Extract one bound of a `between` range predicate as an `i64`.
+///
+/// Aerospike secondary-index range filters are integer-only (see
+/// `aerospike_core::query::Filter::range`). A non-integer bound — a common
+/// mistake such as `predicates.between("score", 1.5, 9.5)` or passing a numeric
+/// string — previously surfaced PyO3's opaque, context-free conversion error
+/// (e.g. `'float' object cannot be interpreted as an integer`). That gave the
+/// caller no hint about which predicate or which argument was at fault, nor
+/// that the range must be integral. This raises a precise `InvalidArgError`
+/// instead, matching the descriptive style of the other predicate guards.
+///
+/// `bound` is the human-facing label for the offending argument (`"begin"` or
+/// `"end"`).
+fn extract_range_bound(pred: &Bound<'_, PyTuple>, index: usize, bound: &str) -> PyResult<i64> {
+    let item = pred.get_item(index)?;
+    item.extract::<i64>().map_err(|_| {
+        crate::errors::InvalidArgError::new_err(format!(
+            "Predicate 'between' requires integer bounds; the '{bound}' value {} \
+             is not an integer. Aerospike secondary-index range queries support \
+             integers only.",
+            item.repr()
+                .map(|r| r.to_string())
+                .unwrap_or_else(|_| "<unrepresentable>".to_string()),
+        ))
+    })
 }
 
 /// Build an `aerospike_core::Statement` from namespace, set, bins, and predicates.
@@ -400,6 +427,73 @@ mod tests {
                     let msg = err.to_string();
                     assert!(msg.contains("InvalidArgError"));
                     assert!(msg.contains("between"));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn parse_predicate_accepts_integer_between_bounds() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Heterogeneous tuple (str, str, int, int): build via a Python list
+            // and convert to a tuple, since PyTuple::new wants a uniform slice.
+            let list = pyo3::types::PyList::new(py, ["between", "age"]).unwrap();
+            list.append(18i64).unwrap();
+            list.append(65i64).unwrap();
+            let pred = PyTuple::new(py, list.iter()).unwrap();
+            parse_predicate(&pred).expect("integer between bounds must parse");
+        });
+    }
+
+    #[test]
+    fn parse_predicate_rejects_non_integer_between_bounds() {
+        Python::initialize();
+        Python::attach(|py| {
+            // float bounds — the most common mistake
+            let list = pyo3::types::PyList::new(py, ["between", "score"]).unwrap();
+            list.append(1.5f64).unwrap();
+            list.append(9.5f64).unwrap();
+            let pred = PyTuple::new(py, list.iter()).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("float between bounds must be rejected"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(
+                        msg.contains("InvalidArgError"),
+                        "expected InvalidArgError, got: {msg}"
+                    );
+                    assert!(
+                        msg.contains("between") && msg.contains("integer"),
+                        "error must name the predicate and the integer constraint: {msg}"
+                    );
+                    assert!(
+                        msg.contains("begin"),
+                        "error must identify the offending 'begin' bound: {msg}"
+                    );
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn parse_predicate_rejects_non_integer_between_end_bound() {
+        Python::initialize();
+        Python::attach(|py| {
+            // valid begin, invalid (string) end — error must point at 'end'
+            let list = pyo3::types::PyList::new(py, ["between", "age"]).unwrap();
+            list.append(18i64).unwrap();
+            list.append("oops").unwrap();
+            let pred = PyTuple::new(py, list.iter()).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("string end bound must be rejected"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("InvalidArgError"), "got: {msg}");
+                    assert!(
+                        msg.contains("end"),
+                        "error must identify the offending 'end' bound: {msg}"
+                    );
                 }
             }
         });
