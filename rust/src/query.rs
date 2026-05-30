@@ -76,6 +76,7 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
     }
     let kind: String = pred.get_item(0)?.extract()?;
     let bin: String = pred.get_item(1)?.extract()?;
+    validate_bin_name(&bin)?;
     trace!("Parsing predicate: kind={} bin={}", kind, bin);
 
     match kind.as_str() {
@@ -253,6 +254,25 @@ fn validate_collection_index_type(val: i32) -> PyResult<()> {
     }
 }
 
+/// Reject an empty bin name client-side.
+///
+/// An empty string was previously accepted by the predicate/query/expression
+/// builders and only failed deep in the server with an opaque
+/// `AEROSPIKE_ERR_PARAMETER`/bin-name error that gave the caller no hint about
+/// which builder call produced it. Surfacing it here fails loudly and early,
+/// matching the existing empty-bin-name guard in `py_dict_to_bins` and the
+/// other client-side predicate guards (#392/#393/#395). Shared (`pub(crate)`)
+/// so the query/predicate and expression builders apply one consistent rule.
+pub(crate) fn validate_bin_name(name: &str) -> PyResult<()> {
+    if name.is_empty() {
+        Err(crate::errors::InvalidArgError::new_err(
+            "Bin name must not be empty.",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Execute a query/scan, collect all records, with metrics and OTel span.
 #[allow(unused, clippy::too_many_arguments)]
 fn execute_query_collect(
@@ -426,7 +446,7 @@ impl PyQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_predicate;
+    use super::{parse_predicate, validate_bin_name};
     use pyo3::prelude::*;
     use pyo3::types::PyTuple;
 
@@ -608,6 +628,77 @@ mod tests {
             }
         });
     }
+
+    /// An empty bin name must be rejected client-side for every predicate kind
+    /// (equals/between/contains), instead of being forwarded to the server which
+    /// fails far from the call site with an opaque parameter/bin-name error.
+    #[test]
+    fn parse_predicate_rejects_empty_bin_name() {
+        Python::initialize();
+        Python::attach(|py| {
+            // equals: ("equals", "", value)
+            let pred = PyTuple::new(py, ["equals", "", "v"]).unwrap();
+            assert_empty_bin_rejected(&pred, "equals");
+
+            // between: ("between", "", begin, end) — heterogeneous, build via list
+            let list = pyo3::types::PyList::new(py, ["between", ""]).unwrap();
+            list.append(1i64).unwrap();
+            list.append(9i64).unwrap();
+            let pred = PyTuple::new(py, list.iter()).unwrap();
+            assert_empty_bin_rejected(&pred, "between");
+
+            // contains: ("contains", "", index_type, value)
+            let list = pyo3::types::PyList::new(py, ["contains", ""]).unwrap();
+            list.append(0i64).unwrap();
+            list.append("x").unwrap();
+            let pred = PyTuple::new(py, list.iter()).unwrap();
+            assert_empty_bin_rejected(&pred, "contains");
+        });
+    }
+
+    /// A non-empty bin name still parses successfully (the guard does not reject
+    /// legitimate predicates).
+    #[test]
+    fn parse_predicate_accepts_non_empty_bin_name() {
+        Python::initialize();
+        Python::attach(|py| {
+            let pred = PyTuple::new(py, ["equals", "age", "30"]).unwrap();
+            parse_predicate(&pred).expect("non-empty bin name must parse");
+        });
+    }
+
+    /// The shared `validate_bin_name` guard — used by `Query::select()` as well
+    /// as the predicate and expression builders — rejects empty names and
+    /// accepts non-empty ones.
+    #[test]
+    fn validate_bin_name_rejects_empty_accepts_non_empty() {
+        Python::initialize();
+        Python::attach(|_py| {
+            let err = validate_bin_name("").expect_err("empty bin name must be rejected");
+            let msg = err.to_string();
+            assert!(msg.contains("InvalidArgError"), "got: {msg}");
+            assert!(msg.contains("Bin name"), "got: {msg}");
+
+            validate_bin_name("score").expect("non-empty bin name must be accepted");
+        });
+    }
+
+    fn assert_empty_bin_rejected(pred: &Bound<'_, PyTuple>, kind: &str) {
+        match parse_predicate(pred) {
+            Ok(_) => panic!("empty bin name must be rejected for '{kind}'"),
+            Err(err) => {
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("InvalidArgError"),
+                    "'{kind}' empty bin error must be InvalidArgError: {msg}"
+                );
+                assert!(
+                    msg.contains("Bin name"),
+                    "'{kind}' empty bin error must mention the bin name: {msg}"
+                );
+            }
+        }
+    }
 }
 
 #[pymethods]
@@ -616,7 +707,9 @@ impl PyQuery {
     #[pyo3(signature = (*bins))]
     fn select(&mut self, bins: &Bound<'_, PyTuple>) -> PyResult<()> {
         for bin in bins.iter() {
-            self.bins.push(bin.extract::<String>()?);
+            let name = bin.extract::<String>()?;
+            validate_bin_name(&name)?;
+            self.bins.push(name);
         }
         Ok(())
     }
