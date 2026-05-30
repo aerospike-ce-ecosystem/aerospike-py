@@ -81,7 +81,9 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
 
     match kind.as_str() {
         "equals" => {
-            let val = py_to_value(&pred.get_item(2)?)?;
+            let item = pred.get_item(2)?;
+            let val = py_to_value(&item)?;
+            validate_equals_value(&val, &item)?;
             Ok(Predicate::Equals { bin, val })
         }
         "between" => {
@@ -176,6 +178,35 @@ fn extract_range_bound(pred: &Bound<'_, PyTuple>, index: usize, bound: &str) -> 
                 .unwrap_or_else(|_| "<unrepresentable>".to_string()),
         ))
     })
+}
+
+/// Reject an `equals` predicate value whose type the server cannot index on.
+///
+/// Aerospike secondary-index equality filters only accept integer, string, or
+/// blob (`bytes`) values — see `aerospike_core::query::EqFilterValue`. The
+/// underlying `Filter::equal(..)` builder *asserts* this at construction time,
+/// so a common mistake such as `predicates.equals("score", 1.5)` (a float) or
+/// `predicates.equals("flag", True)` (a bool) used to trip that assertion and
+/// **panic** while building the statement — outside the query execution
+/// panic-safety net, so it unwound straight through the PyO3 boundary instead
+/// of producing a catchable Python exception. This validates the value up front
+/// and raises a precise `InvalidArgError`, matching the descriptive style of the
+/// other predicate guards (#392/#393/#395).
+///
+/// `item` is the original Python object, used only to echo its repr in the
+/// error message.
+fn validate_equals_value(val: &Value, item: &Bound<'_, PyAny>) -> PyResult<()> {
+    match val {
+        Value::Int(_) | Value::String(_) | Value::Blob(_) => Ok(()),
+        _ => Err(crate::errors::InvalidArgError::new_err(format!(
+            "Predicate 'equals' value {} has an unsupported type. Aerospike \
+             secondary-index equality filters accept only integers, strings, or \
+             bytes.",
+            item.repr()
+                .map(|r| r.to_string())
+                .unwrap_or_else(|_| "<unrepresentable>".to_string()),
+        ))),
+    }
 }
 
 /// Build an `aerospike_core::Statement` from namespace, set, bins, and predicates.
@@ -664,6 +695,63 @@ mod tests {
         Python::attach(|py| {
             let pred = PyTuple::new(py, ["equals", "age", "30"]).unwrap();
             parse_predicate(&pred).expect("non-empty bin name must parse");
+        });
+    }
+
+    /// `equals` with an integer or string value parses (the common, supported
+    /// case the guard must not break).
+    #[test]
+    fn parse_predicate_accepts_integer_and_string_equals_value() {
+        Python::initialize();
+        Python::attach(|py| {
+            // ("equals", "age", 30) — integer value
+            let list = pyo3::types::PyList::new(py, ["equals", "age"]).unwrap();
+            list.append(30i64).unwrap();
+            let pred = PyTuple::new(py, list.iter()).unwrap();
+            parse_predicate(&pred).expect("integer equals value must parse");
+
+            // ("equals", "name", "alice") — string value
+            let pred = PyTuple::new(py, ["equals", "name", "alice"]).unwrap();
+            parse_predicate(&pred).expect("string equals value must parse");
+        });
+    }
+
+    /// `equals` with a float or bool value used to panic deep in
+    /// `Filter::equal`'s assertion (outside the execution panic-safety net). It
+    /// must instead be rejected loudly with an `InvalidArgError`.
+    #[test]
+    fn parse_predicate_rejects_unsupported_equals_value() {
+        Python::initialize();
+        Python::attach(|py| {
+            // float value — a common mistake
+            let list = pyo3::types::PyList::new(py, ["equals", "score"]).unwrap();
+            list.append(1.5f64).unwrap();
+            let pred = PyTuple::new(py, list.iter()).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("float equals value must be rejected"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("InvalidArgError"), "got: {msg}");
+                    assert!(
+                        msg.contains("equals") && msg.contains("unsupported type"),
+                        "error must name the predicate and the type constraint: {msg}"
+                    );
+                }
+            }
+
+            // bool value — note: must be checked *before* int, since Python
+            // bool is a subclass of int but maps to Value::Bool.
+            let list = pyo3::types::PyList::new(py, ["equals", "flag"]).unwrap();
+            list.append(true).unwrap();
+            let pred = PyTuple::new(py, list.iter()).unwrap();
+            match parse_predicate(&pred) {
+                Ok(_) => panic!("bool equals value must be rejected"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("InvalidArgError"), "got: {msg}");
+                    assert!(msg.contains("equals"), "got: {msg}");
+                }
+            }
         });
     }
 

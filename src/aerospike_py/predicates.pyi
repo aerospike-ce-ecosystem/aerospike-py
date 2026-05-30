@@ -12,9 +12,10 @@ Pass the returned tuple to ``query.where()``::
 from typing import Any
 
 def equals(bin_name: str, val: Any) -> tuple[str, str, Any]:
-    """Filter records where *bin_name* equals *val* (integer or string).
+    """Filter records where *bin_name* equals *val* (integer, string, or bytes).
 
-    Requires a secondary index on the bin.
+    Requires a secondary index on the bin. Other value types (e.g. ``float`` or
+    ``bool``) are rejected with ``InvalidArgError`` when the query is built.
 
     Example::
 
