@@ -92,6 +92,12 @@ fn parse_predicate(pred: &Bound<'_, PyTuple>) -> PyResult<Predicate> {
         "contains" => {
             ensure_predicate_min_len(pred, "contains", 4)?;
             let col_type: i32 = pred.get_item(2)?.extract()?;
+            // Validate the collection index type up front. A typo or an
+            // accidentally-passed constant from another namespace (e.g. a
+            // `LIST_RETURN_*`/`MAP_RETURN_*` value) used to be silently coerced
+            // to `CollectionIndexType::Default`, querying the wrong index type
+            // and returning wrong/empty results with no error.
+            validate_collection_index_type(col_type)?;
             let val_any = pred.get_item(3)?;
             if let Ok(v) = val_any.extract::<i64>() {
                 Ok(Predicate::ContainsInteger {
@@ -214,12 +220,36 @@ fn build_statement(
 }
 
 /// Map a Python integer to a [`CollectionIndexType`] for contains-predicates.
+///
+/// Callers must validate `val` via [`validate_collection_index_type`] first;
+/// any value outside `0..=3` falls back to [`CollectionIndexType::Default`].
 fn int_to_collection_index_type(val: i32) -> CollectionIndexType {
     match val {
         1 => CollectionIndexType::List,
         2 => CollectionIndexType::MapKeys,
         3 => CollectionIndexType::MapValues,
         _ => CollectionIndexType::Default,
+    }
+}
+
+/// Reject an out-of-range collection index type for a `contains` predicate.
+///
+/// Valid values are the `INDEX_TYPE_*` constants: `0` (DEFAULT), `1` (LIST),
+/// `2` (MAPKEYS), `3` (MAPVALUES). Any other value is a caller mistake — a
+/// typo, or a constant borrowed from another namespace such as
+/// `LIST_RETURN_*`/`MAP_RETURN_*`, which overlap this small integer range.
+/// Previously such values were silently coerced to `DEFAULT`, so the query ran
+/// against the wrong index type and returned wrong or empty results with no
+/// error. Surfacing it here fails loudly, matching the other predicate guards.
+fn validate_collection_index_type(val: i32) -> PyResult<()> {
+    if (0..=3).contains(&val) {
+        Ok(())
+    } else {
+        Err(crate::errors::InvalidArgError::new_err(format!(
+            "Predicate 'contains' index_type {val} is invalid; expected one of \
+             INDEX_TYPE_DEFAULT (0), INDEX_TYPE_LIST (1), INDEX_TYPE_MAPKEYS (2), \
+             or INDEX_TYPE_MAPVALUES (3)."
+        )))
     }
 }
 
@@ -510,6 +540,54 @@ mod tests {
                     let msg = err.to_string();
                     assert!(msg.contains("InvalidArgError"));
                     assert!(msg.contains("contains"));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn parse_predicate_accepts_valid_contains_index_types() {
+        Python::initialize();
+        Python::attach(|py| {
+            // 0..=3 are the valid INDEX_TYPE_* constants. Each must parse for
+            // both an integer value and a string value.
+            for col_type in [0i64, 1, 2, 3] {
+                let list = pyo3::types::PyList::new(py, ["contains", "tags"]).unwrap();
+                list.append(col_type).unwrap();
+                list.append("python").unwrap();
+                let pred = PyTuple::new(py, list.iter()).unwrap();
+                parse_predicate(&pred)
+                    .unwrap_or_else(|e| panic!("index_type {col_type} must parse: {e}"));
+            }
+        });
+    }
+
+    #[test]
+    fn parse_predicate_rejects_invalid_contains_index_type() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Typos and constants borrowed from other namespaces (negative,
+            // or above the 0..=3 range) must be rejected loudly rather than
+            // silently coerced to INDEX_TYPE_DEFAULT.
+            for bad in [-1i64, 4, 5, 99] {
+                let list = pyo3::types::PyList::new(py, ["contains", "tags"]).unwrap();
+                list.append(bad).unwrap();
+                list.append("python").unwrap();
+                let pred = PyTuple::new(py, list.iter()).unwrap();
+                match parse_predicate(&pred) {
+                    Ok(_) => panic!("index_type {bad} must be rejected"),
+                    Err(err) => {
+                        let msg = err.to_string();
+                        assert!(msg.contains("InvalidArgError"), "got: {msg}");
+                        assert!(
+                            msg.contains("contains") && msg.contains("index_type"),
+                            "error must name the predicate and index_type: {msg}"
+                        );
+                        assert!(
+                            msg.contains(&bad.to_string()),
+                            "error must echo the offending value {bad}: {msg}"
+                        );
+                    }
                 }
             }
         });
