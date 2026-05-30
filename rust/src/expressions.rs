@@ -164,8 +164,10 @@ fn convert_binary_comparison(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Exp
 /// produces a structurally invalid expression: the underlying `aerospike-core`
 /// builders emit an empty argument sequence that the server rejects with an
 /// opaque parse error far from the call site. Reject it eagerly here with a
-/// precise message, mirroring the arity guards already applied to unary
-/// (`convert_unary_op`) and binary-pair (`convert_binary_pair_op`) operations.
+/// precise message, in the same spirit as the arity guards already applied to
+/// unary (`convert_unary_op`) and binary-pair (`convert_binary_pair_op`)
+/// operations — using the more specific `InvalidArgError` for this
+/// argument-validation failure (those siblings raise a plain `ValueError`).
 fn convert_variadic_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
     let exprs = parse_sub_expr_list(dict, "exprs")?;
     if exprs.is_empty() {
