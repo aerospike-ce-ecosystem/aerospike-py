@@ -652,6 +652,8 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
+                For an ``OPERATOR_INCR`` op the ``"val"`` must be an ``int`` or
+                ``float`` (a non-numeric ``val`` raises ``TypeError``).
             meta: Optional [`WriteMeta`](types.md#writemeta) dict.
             policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
@@ -687,6 +689,8 @@ class Client:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
+                For an ``OPERATOR_INCR`` op the ``"val"`` must be an ``int`` or
+                ``float`` (a non-numeric ``val`` raises ``TypeError``).
             meta: Optional [`WriteMeta`](types.md#writemeta) dict.
             policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
@@ -1750,6 +1754,8 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
+                For an ``OPERATOR_INCR`` op the ``"val"`` must be an ``int`` or
+                ``float`` (a non-numeric ``val`` raises ``TypeError``).
             meta: Optional [`WriteMeta`](types.md#writemeta) dict.
             policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
@@ -1785,6 +1791,8 @@ class AsyncClient:
         Args:
             key: Record key as ``(namespace, set, primary_key)`` tuple.
             ops: List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys.
+                For an ``OPERATOR_INCR`` op the ``"val"`` must be an ``int`` or
+                ``float`` (a non-numeric ``val`` raises ``TypeError``).
             meta: Optional [`WriteMeta`](types.md#writemeta) dict.
             policy: Optional [`WritePolicy`](types.md#writepolicy) dict.
 
