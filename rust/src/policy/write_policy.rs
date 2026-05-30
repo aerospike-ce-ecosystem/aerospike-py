@@ -17,19 +17,24 @@ pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePoli
 
 /// Convert a TTL integer value to an [`Expiration`] enum.
 ///
-/// Special values: `0` = namespace default, `-1` = never expire, `-2` = don't update.
+/// Special values: `0` = namespace default, `-1` = never expire, `-2` = don't update,
+/// `-3` = client default (degrades to namespace default).
 pub(crate) fn parse_ttl(ttl_val: i64) -> PyResult<Expiration> {
     match ttl_val {
         0 => Ok(Expiration::NamespaceDefault),
         -1 => Ok(Expiration::Never),
         -2 => Ok(Expiration::DontUpdate),
+        // TTL_CLIENT_DEFAULT (-3) degrades to the namespace default: aerospike-py
+        // exposes no client-level default-TTL config and aerospike-core's Expiration
+        // enum has no ClientDefault variant, so there is nothing else to fall back to.
+        -3 => Ok(Expiration::NamespaceDefault),
         t if t > 0 && t <= u32::MAX as i64 => Ok(Expiration::Seconds(t as u32)),
         t if t > u32::MAX as i64 => Err(crate::errors::InvalidArgError::new_err(format!(
             "ttl out of range: {t} (max: {})",
             u32::MAX
         ))),
         t => Err(crate::errors::InvalidArgError::new_err(format!(
-            "ttl out of range: {t} (only 0, -1, -2, or positive seconds are valid)"
+            "ttl out of range: {t} (only 0, -1, -2, -3, or positive seconds are valid)"
         ))),
     }
 }
@@ -150,6 +155,14 @@ mod tests {
             let p = parse_write_policy(Some(&d), None).unwrap();
             assert_eq!(p.base_policy.sleep_between_retries, 250);
         });
+    }
+
+    #[test]
+    fn parse_ttl_accepts_client_default_sentinel() {
+        assert!(matches!(
+            parse_ttl(-3).expect("TTL_CLIENT_DEFAULT should parse"),
+            Expiration::NamespaceDefault
+        ));
     }
 
     #[test]
