@@ -119,6 +119,7 @@ pub fn py_to_expression(obj: &Bound<'_, PyAny>) -> PyResult<Expression> {
 /// Convert bin accessor operations that all take a single "name" field.
 fn convert_bin_accessor(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
     let name: String = get_required(dict, "name")?;
+    crate::query::validate_bin_name(&name)?;
     match op {
         "int_bin" => Ok(expressions::int_bin(name)),
         "float_bin" => Ok(expressions::float_bin(name)),
@@ -408,6 +409,45 @@ mod tests {
                 vec![int_val_dict(py, 1), int_val_dict(py, 2)],
             );
             py_to_expression(dict.as_any()).expect("non-empty num_add should convert");
+        });
+    }
+
+    /// Build a bin-accessor dict `{"__expr__": op, "name": name}`.
+    fn bin_accessor_dict<'py>(py: Python<'py>, op: &str, name: &str) -> Bound<'py, PyDict> {
+        let dict = PyDict::new(py);
+        dict.set_item("__expr__", op).unwrap();
+        dict.set_item("name", name).unwrap();
+        dict
+    }
+
+    /// A bin-accessor expression with an empty bin name must be rejected
+    /// client-side with `InvalidArgError`, instead of being forwarded to the
+    /// server where it fails far from the call site.
+    #[test]
+    fn bin_accessor_rejects_empty_bin_name() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = bin_accessor_dict(py, "int_bin", "");
+            let err = py_to_expression(dict.as_any())
+                .expect_err("empty bin name must be rejected for int_bin");
+            assert!(
+                err.is_instance_of::<crate::errors::InvalidArgError>(py),
+                "empty bin name must raise InvalidArgError, got {err:?}"
+            );
+            assert!(
+                err.to_string().contains("Bin name"),
+                "error must mention the bin name: {err:?}"
+            );
+        });
+    }
+
+    /// A bin-accessor expression with a non-empty bin name still converts.
+    #[test]
+    fn bin_accessor_accepts_non_empty_bin_name() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = bin_accessor_dict(py, "int_bin", "age");
+            py_to_expression(dict.as_any()).expect("non-empty bin name must convert");
         });
     }
 }
