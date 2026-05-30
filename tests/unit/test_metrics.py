@@ -1,5 +1,6 @@
 """Unit tests for metrics module (no Aerospike server required)."""
 
+import logging
 import re
 import socket
 import threading
@@ -8,6 +9,7 @@ import urllib.request
 import pytest
 
 import aerospike_py
+from aerospike_py import _observability
 
 
 class TestGetMetrics:
@@ -211,3 +213,65 @@ class TestMetricsServerRestart:
         finally:
             occupied.close()
             aerospike_py.stop_metrics_server()
+
+    def test_same_port_rebind_failure_leaves_no_server(self, monkeypatch):
+        """If the same-port re-bind raises OSError after the old server is torn
+        down, the module globals must reflect a consistent 'no server running'
+        state (not a dangling reference to the dead server)."""
+        port = _find_free_port()
+        aerospike_py.start_metrics_server(port=port)
+        assert _observability._metrics_server is not None
+
+        # Force the re-bind to fail after the old server has been closed.
+        def _boom(*args, **kwargs):
+            raise OSError("simulated bind failure")
+
+        monkeypatch.setattr(_observability, "HTTPServer", _boom)
+
+        try:
+            with pytest.raises(OSError):
+                aerospike_py.start_metrics_server(port=port)
+
+            # Old server was torn down before the failed re-bind, so globals
+            # must not point at the dead server.
+            assert _observability._metrics_server is None
+            assert _observability._metrics_server_thread is None
+        finally:
+            monkeypatch.undo()
+            aerospike_py.stop_metrics_server()
+
+
+class TestSetLogLevel:
+    @pytest.fixture(autouse=True)
+    def _restore_level(self):
+        loggers = ["aerospike_py", "_aerospike", "aerospike_core", "aerospike"]
+        saved = {name: logging.getLogger(name).level for name in loggers}
+        yield
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
+
+    def test_invalid_level_raises_value_error(self):
+        with pytest.raises(ValueError, match="Invalid log level"):
+            aerospike_py.set_log_level(99)
+
+    def test_invalid_negative_level_raises_value_error(self):
+        with pytest.raises(ValueError, match="Invalid log level"):
+            aerospike_py.set_log_level(-2)
+
+    @pytest.mark.parametrize(
+        "constant",
+        [
+            aerospike_py.LOG_LEVEL_OFF,
+            aerospike_py.LOG_LEVEL_ERROR,
+            aerospike_py.LOG_LEVEL_WARN,
+            aerospike_py.LOG_LEVEL_INFO,
+            aerospike_py.LOG_LEVEL_DEBUG,
+            aerospike_py.LOG_LEVEL_TRACE,
+        ],
+    )
+    def test_each_valid_constant_maps(self, constant):
+        # Each valid LOG_LEVEL_* constant should apply without raising and set
+        # the aerospike_py logger to the mapped Python level.
+        aerospike_py.set_log_level(constant)
+        expected = _observability._LEVEL_MAP[constant]
+        assert logging.getLogger("aerospike_py").level == expected

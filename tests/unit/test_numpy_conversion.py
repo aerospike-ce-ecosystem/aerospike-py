@@ -733,6 +733,47 @@ class TestTypeConversionErrors:
         assert "bad_key" in msg
         assert "index 0" in msg
 
+    def test_strict_mode_error_message_includes_primary_key(self):
+        """In strict mode, a type-conversion failure must still report the
+        primary key computed for the record (the loop ``pk``, not a re-extracted
+        value)."""
+        dtype = np.dtype([("count", "i4")])
+        batch = _make_batch_records(
+            [
+                _make_batch_record(
+                    ("test", "demo", "strict_pk"),
+                    0,
+                    (None, {"gen": 1, "ttl": 0}, {"count": "not_a_number"}),
+                ),
+            ]
+        )
+        with pytest.raises((ValueError, TypeError)) as exc_info:
+            _batch_records_to_numpy(batch, dtype, [("test", "demo", "strict_pk")], strict=True)
+        msg = str(exc_info.value)
+        assert "strict_pk" in msg
+        assert "count" in msg
+
+    def test_error_message_uses_index_fallback_for_malformed_key(self):
+        """When the record key is malformed, the conversion-error message must
+        reference the same index-fallback primary key the loop computed."""
+        dtype = np.dtype([("count", "i4")])
+        batch = _make_batch_records(
+            [
+                _make_batch_record(
+                    None,  # malformed key → pk falls back to integer index 0
+                    0,
+                    (None, {"gen": 1, "ttl": 0}, {"count": "not_a_number"}),
+                ),
+            ]
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with pytest.raises((ValueError, TypeError)) as exc_info:
+                _batch_records_to_numpy(batch, dtype, [None])
+        msg = str(exc_info.value)
+        assert "key=0" in msg
+        assert "index 0" in msg
+
 
 # ── NumpyBatchRecords protocol method tests ────────────────────
 
