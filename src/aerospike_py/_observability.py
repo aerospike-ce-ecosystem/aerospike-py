@@ -51,15 +51,15 @@ def set_log_level(level: int) -> None:
             ``LOG_LEVEL_WARN`` (1), ``LOG_LEVEL_INFO`` (2),
             ``LOG_LEVEL_DEBUG`` (3), ``LOG_LEVEL_TRACE`` (4).
 
+    Raises:
+        ValueError: If ``level`` is not a valid ``LOG_LEVEL_*`` constant.
+
     Example:
         ```python
         import aerospike_py
 
         aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
         ```
-
-    Raises:
-        ValueError: If ``level`` is not one of the ``LOG_LEVEL_*`` constants.
     """
     if level not in _LEVEL_MAP:
         raise ValueError(
@@ -231,6 +231,11 @@ def start_metrics_server(port: int = 9464) -> None:
                     )
             old_server = None
             old_thread = None
+            # The old server is fully torn down; publish a consistent
+            # "no server running" state so a failed re-bind below does not
+            # leave module globals pointing at the dead server.
+            _metrics_server = None
+            _metrics_server_thread = None
 
         # Bind the new port — if this raises OSError (port in use by another
         # process), the existing server on a different port remains untouched.

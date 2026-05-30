@@ -154,7 +154,6 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
                         try:
                             data[i][field] = val
                         except (ValueError, TypeError, OverflowError) as exc:
-                            pk = br.key[2] if br.key and len(br.key) >= 3 else i
                             raise type(exc)(
                                 f"Failed to assign value {val!r} to field '{field}' "
                                 f"(dtype={dtype[field]}) for record at index {i} (key={pk!r}): {exc}"
