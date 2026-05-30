@@ -3,19 +3,20 @@ name = "aerospike-py-native"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-# MSRV: 1.85 is the floor that the *dependency tree* requires. The
-# resolved lock graph pulls in `block-buffer 0.12.0` (via `digest 0.11`),
-# whose manifest declares `edition = "2024"`; Cargo cannot even parse
-# that manifest before 1.85 (edition 2024 was stabilised in Rust 1.85),
-# so older toolchains fail with `feature 'edition2024' is required`.
-# This dependency constraint subsumes the older 1.80 floor that the
-# crate's own code needed (a handful of std items stabilised in
+# MSRV: 1.87 is the floor that the *dependency tree* requires. The
+# resolved lock graph pulls in `aerospike-rt 2.0.0`, whose manifest
+# declares `rust-version = "1.87"`, so cargo refuses to build the graph
+# on older toolchains with `aerospike-rt@2.0.0 requires rustc 1.87`.
+# This 1.87 floor subsumes the intermediate 1.85 requirement from
+# `block-buffer 0.12.0` (via `digest 0.11`), whose manifest declares
+# `edition = "2024"` (stabilised in Rust 1.85), and the older 1.80 floor
+# the crate's own code needed (a handful of std items stabilised in
 # 1.77 / 1.80, plus `Mutex::clear_poison()` (1.74+) used by
 # `PyLazyBatchRecords::release_cache` in PR #374).
-# Pinning this here gives cargo a clear "package requires 1.85" error
-# on older toolchains instead of a cryptic parse failure during a
+# Pinning this here gives cargo a clear "package requires 1.87" error
+# on older toolchains instead of a cryptic resolver failure during a
 # `pip install --no-binary` / `cargo install` build.
-rust-version = "1.85"
+rust-version = "1.87"
 
 [lib]
 name = "_aerospike"

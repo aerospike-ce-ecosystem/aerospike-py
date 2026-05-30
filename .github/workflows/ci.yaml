@@ -46,7 +46,7 @@ env:
   # (not job level) so it is available inside `name:` expressions; using
   # `${{ env.MSRV }}` in `jobs.<id>.name` is evaluated before job-level
   # `env:` is in scope and causes "Unrecognized named-value: 'env'".
-  MSRV: "1.85"
+  MSRV: "1.87"
 
 jobs:
   lint:
@@ -91,14 +91,14 @@ jobs:
     # is not available during workflow parsing). The version below is the
     # display string; the actual MSRV is read from `env.MSRV` defined at
     # the workflow level, and the drift-gate step below keeps them in sync.
-    name: MSRV cargo check (Rust 1.85)
+    name: MSRV cargo check (Rust 1.87)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
       # Drift gate: refuse to run cargo check on a fictitious MSRV.
-      # If a future PR bumps `rust-version = "1.85"` in rust/Cargo.toml
+      # If a future PR bumps `rust-version = "1.87"` in rust/Cargo.toml
       # but forgets to update `MSRV: "..."` above (or vice versa), this
       # step fails *before* the check job runs, surfacing the drift
       # rather than silently pinning a stale toolchain.
