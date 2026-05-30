@@ -355,6 +355,24 @@ fn parse_increment_value(val: &Option<Value>) -> PyResult<i64> {
     }
 }
 
+/// Resolve the `val` of a top-level `increment` (`OP_INCR`) op to a numeric value.
+///
+/// Mirrors the `client.increment()` guard (`parse_increment_offset` in
+/// `client_common.rs`): the documented `val` for an increment op is an `int` or
+/// `float`. A missing or `Nil` `val` defaults to `+1`. Without this guard a
+/// non-numeric `val` (string, list, dict, bytes, …) went through the generic
+/// `py_to_value` and was shipped to the server, which fails the `add` operation
+/// with an opaque `BinTypeError` instead of a clear client-side error.
+fn parse_incr_value(val: Option<Value>) -> PyResult<Value> {
+    match val {
+        None | Some(Value::Nil) => Ok(Value::Int(1)),
+        Some(v @ (Value::Int(_) | Value::Float(_))) => Ok(v),
+        Some(other) => Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "increment 'val' must be an int or float, got {other:?}"
+        ))),
+    }
+}
+
 /// Parse an operation flag value that should be a small integer (i32).
 ///
 /// Missing/None values default to `0`.
@@ -417,7 +435,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
             OP_INCR => {
                 let name = require_bin(&bin_name, "Increment")?;
-                let v = val.unwrap_or(Value::Int(1));
+                let v = parse_incr_value(val)?;
                 let bin = Bin::new(name, v);
                 operations::add(&bin)
             }
@@ -1150,7 +1168,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
 
 #[cfg(test)]
 mod tests {
-    use super::{get_resize_flags, parse_i32_flag, parse_increment_value};
+    use super::{get_resize_flags, parse_i32_flag, parse_incr_value, parse_increment_value};
     use aerospike_core::operations::bitwise::BitwiseResizeFlags;
     use aerospike_core::Value;
     use pyo3::types::PyDict;
@@ -1282,6 +1300,54 @@ mod tests {
                 .expect_err("non-int value should raise instead of defaulting to +1");
             Python::attach(|py| {
                 assert!(err.is_instance_of::<PyValueError>(py));
+            });
+        }
+    }
+
+    #[test]
+    fn parse_incr_value_defaults_to_one_for_missing_or_nil() {
+        assert!(matches!(
+            parse_incr_value(None).expect("None should default to +1"),
+            Value::Int(1)
+        ));
+        assert!(matches!(
+            parse_incr_value(Some(Value::Nil)).expect("Nil should default to +1"),
+            Value::Int(1)
+        ));
+    }
+
+    #[test]
+    fn parse_incr_value_accepts_int_and_float() {
+        assert!(matches!(
+            parse_incr_value(Some(Value::Int(5))).expect("int should be accepted"),
+            Value::Int(5)
+        ));
+        assert!(matches!(
+            parse_incr_value(Some(Value::Float(aerospike_core::FloatValue::from(
+                0.5_f64
+            ))))
+            .expect("float should be accepted"),
+            Value::Float(_)
+        ));
+    }
+
+    #[test]
+    fn parse_incr_value_rejects_non_numeric() {
+        Python::initialize();
+        for bad in [
+            Value::String("5".to_string()),
+            Value::Bool(true),
+            Value::List(vec![Value::Int(1)]),
+        ] {
+            let err: PyErr = parse_incr_value(Some(bad))
+                .expect_err("non-numeric val should raise instead of reaching the server");
+            Python::attach(|py| {
+                assert!(err.is_instance_of::<PyTypeError>(py));
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("increment") && msg.contains("val"),
+                    "error should mention 'increment' and 'val', got: {msg}"
+                );
             });
         }
     }
