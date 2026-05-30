@@ -243,9 +243,13 @@ class TestBinNameEdgeCases:
             c.put(("test", "demo", "key1"), {"\u00e9": "value"})
 
     def test_empty_bin_name(self):
-        """Empty bin name should be accepted at the Python/Rust parsing level."""
+        """An empty bin name should raise ValueError at the client level.
+
+        Aerospike rejects empty bin names server-side with an opaque parameter
+        error; validating client-side surfaces the malformed bin immediately.
+        """
         c = _make_client()
-        with pytest.raises(aerospike_py.ClientError):
+        with pytest.raises(ValueError, match="must not be empty"):
             c.put(("test", "demo", "key1"), {"": "value"})
 
     def test_multiple_bins(self):
