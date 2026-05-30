@@ -158,8 +158,23 @@ fn convert_binary_comparison(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Exp
 }
 
 /// Convert variadic operations that take a Vec<Expression> from "exprs".
+///
+/// Every operation in this group requires at least one operand. An empty
+/// `exprs` list (e.g. from a no-argument `exp.and_()` / `exp.num_add()` call)
+/// produces a structurally invalid expression: the underlying `aerospike-core`
+/// builders emit an empty argument sequence that the server rejects with an
+/// opaque parse error far from the call site. Reject it eagerly here with a
+/// precise message, in the same spirit as the arity guards already applied to
+/// unary (`convert_unary_op`) and binary-pair (`convert_binary_pair_op`)
+/// operations — using the more specific `InvalidArgError` for this
+/// argument-validation failure (those siblings raise a plain `ValueError`).
 fn convert_variadic_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
     let exprs = parse_sub_expr_list(dict, "exprs")?;
+    if exprs.is_empty() {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "Expression '{op}' requires at least one operand, got an empty 'exprs' list"
+        )));
+    }
     match op {
         "and" => Ok(expressions::and(exprs)),
         "or" => Ok(expressions::or(exprs)),
@@ -323,5 +338,76 @@ pub fn is_expression(obj: &Bound<'_, PyAny>) -> bool {
         dict.get_item("__expr__").ok().flatten().is_some()
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a `{"__expr__": op, "exprs": [...]}` dict from a list of operand
+    /// expression dicts.
+    fn variadic_dict<'py>(
+        py: Python<'py>,
+        op: &str,
+        operands: Vec<Bound<'py, PyDict>>,
+    ) -> Bound<'py, PyDict> {
+        let dict = PyDict::new(py);
+        dict.set_item("__expr__", op).unwrap();
+        let list = PyList::empty(py);
+        for o in operands {
+            list.append(o).unwrap();
+        }
+        dict.set_item("exprs", list).unwrap();
+        dict
+    }
+
+    /// A simple `int_val` leaf operand to populate variadic operand lists.
+    fn int_val_dict(py: Python<'_>, n: i64) -> Bound<'_, PyDict> {
+        let dict = PyDict::new(py);
+        dict.set_item("__expr__", "int_val").unwrap();
+        dict.set_item("val", n).unwrap();
+        dict
+    }
+
+    /// Every variadic op with an empty `exprs` list must raise `InvalidArgError`
+    /// instead of constructing a malformed expression that the server rejects
+    /// far from the call site.
+    #[test]
+    fn empty_variadic_exprs_raise_invalid_arg() {
+        Python::initialize();
+        Python::attach(|py| {
+            for op in [
+                "and", "or", "xor", "num_add", "num_sub", "num_mul", "num_div", "min", "max",
+                "int_and", "int_or", "int_xor", "cond", "let",
+            ] {
+                let dict = variadic_dict(py, op, vec![]);
+                let err = py_to_expression(dict.as_any())
+                    .expect_err(&format!("empty '{op}' must be rejected"));
+                assert!(
+                    err.is_instance_of::<crate::errors::InvalidArgError>(py),
+                    "empty '{op}' must raise InvalidArgError, got {err:?}"
+                );
+                assert!(
+                    err.to_string().contains("at least one operand"),
+                    "empty '{op}' error must mention the arity requirement"
+                );
+            }
+        });
+    }
+
+    /// A non-empty variadic op still converts successfully (the guard does not
+    /// reject legitimate expressions).
+    #[test]
+    fn non_empty_variadic_exprs_convert() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = variadic_dict(
+                py,
+                "num_add",
+                vec![int_val_dict(py, 1), int_val_dict(py, 2)],
+            );
+            py_to_expression(dict.as_any()).expect("non-empty num_add should convert");
+        });
     }
 }
