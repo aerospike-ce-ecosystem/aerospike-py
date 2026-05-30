@@ -3,7 +3,7 @@
 use aerospike_core::Value;
 use log::warn;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
+use pyo3::types::{PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
 use std::collections::HashMap;
 
 /// Maximum recursion depth for nested list/dict values to prevent stack overflow.
@@ -51,6 +51,13 @@ fn py_to_value_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
     }
     if let Ok(b) = obj.cast::<PyBytes>() {
         return Ok(Value::Blob(b.as_bytes().to_vec()));
+    }
+    if let Ok(b) = obj.cast::<PyByteArray>() {
+        // `bytearray` is the mutable counterpart of `bytes`; several public
+        // signatures (e.g. `bit_operations.bit_insert(value: Union[bytes,
+        // bytearray])`) advertise it. `to_vec()` snapshots the current contents,
+        // which is safe even though the underlying buffer can be mutated later.
+        return Ok(Value::Blob(b.to_vec()));
     }
     if let Ok(list) = obj.cast::<PyList>() {
         let mut values = Vec::with_capacity(list.len());
@@ -156,6 +163,48 @@ mod tests {
                     Value::Int(v) => assert_eq!(v as u64, u, "bit-reinterpretation round-trip"),
                     other => panic!("expected Value::Int, got {other:?}"),
                 }
+            }
+        });
+    }
+
+    /// `bytes` convert to a `Value::Blob`.
+    #[test]
+    fn py_to_value_accepts_bytes() {
+        Python::initialize();
+        Python::attach(|py| {
+            let obj = PyBytes::new(py, b"\x00\x01\xff");
+            match py_to_value(&obj.into_any()).expect("bytes should convert") {
+                Value::Blob(b) => assert_eq!(b, vec![0u8, 1, 255]),
+                other => panic!("expected Value::Blob, got {other:?}"),
+            }
+        });
+    }
+
+    /// `bytearray` (the mutable counterpart of `bytes`, advertised by several
+    /// public signatures such as `bit_operations.bit_insert`) converts to the
+    /// same `Value::Blob` as the equivalent `bytes`, instead of raising
+    /// `TypeError: Unsupported type for Aerospike value: bytearray`.
+    #[test]
+    fn py_to_value_accepts_bytearray() {
+        Python::initialize();
+        Python::attach(|py| {
+            let obj = PyByteArray::new(py, b"\x00\x01\xff");
+            match py_to_value(&obj.into_any()).expect("bytearray should convert") {
+                Value::Blob(b) => assert_eq!(b, vec![0u8, 1, 255]),
+                other => panic!("expected Value::Blob, got {other:?}"),
+            }
+        });
+    }
+
+    /// An empty `bytearray` round-trips to an empty `Value::Blob`.
+    #[test]
+    fn py_to_value_accepts_empty_bytearray() {
+        Python::initialize();
+        Python::attach(|py| {
+            let obj = PyByteArray::new(py, b"");
+            match py_to_value(&obj.into_any()).expect("empty bytearray should convert") {
+                Value::Blob(b) => assert!(b.is_empty()),
+                other => panic!("expected Value::Blob, got {other:?}"),
             }
         });
     }
