@@ -36,8 +36,9 @@ def contains(bin_name: str, index_type: int, val: Any) -> tuple[str, str, int, A
 
     Args:
         bin_name: Name of the bin holding a list or map.
-        index_type: One of ``INDEX_TYPE_LIST``, ``INDEX_TYPE_MAPKEYS``,
-            or ``INDEX_TYPE_MAPVALUES``.
+        index_type: One of ``INDEX_TYPE_DEFAULT``, ``INDEX_TYPE_LIST``,
+            ``INDEX_TYPE_MAPKEYS``, or ``INDEX_TYPE_MAPVALUES``. Any other
+            value is rejected with ``InvalidArgError`` when the query is built.
         val: The value to search for within the collection.
 
     Example::
