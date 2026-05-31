@@ -113,34 +113,54 @@ fn get_val_end(dict: &Bound<'_, PyDict>) -> PyResult<Value> {
 }
 
 /// Map a Python integer to a [`ListReturnType`] enum variant.
-fn int_to_list_return_type(v: i32) -> ListReturnType {
+///
+/// An out-of-range or wrong-family `return_type` (e.g. passing the map-only
+/// `KEY` (6) / `KEY_VALUE` (8) constant to a list op, or a typo) previously
+/// hit the catch-all arm and silently collapsed to `None` ("return nothing"):
+/// the op then produced an empty result with no error — silent data loss the
+/// caller could not distinguish from a genuinely empty match. Reject unknown
+/// codes loudly instead. `0`/`NONE` stays valid (no change for correct callers).
+fn int_to_list_return_type(v: i32) -> PyResult<ListReturnType> {
     match v {
-        0 => ListReturnType::None,
-        1 => ListReturnType::Index,
-        2 => ListReturnType::ReverseIndex,
-        3 => ListReturnType::Rank,
-        4 => ListReturnType::ReverseRank,
-        5 => ListReturnType::Count,
-        7 => ListReturnType::Values,
-        13 => ListReturnType::Exists,
-        _ => ListReturnType::None,
+        0 => Ok(ListReturnType::None),
+        1 => Ok(ListReturnType::Index),
+        2 => Ok(ListReturnType::ReverseIndex),
+        3 => Ok(ListReturnType::Rank),
+        4 => Ok(ListReturnType::ReverseRank),
+        5 => Ok(ListReturnType::Count),
+        7 => Ok(ListReturnType::Values),
+        13 => Ok(ListReturnType::Exists),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "list operation 'return_type' must be one of \
+             0=NONE, 1=INDEX, 2=REVERSE_INDEX, 3=RANK, 4=REVERSE_RANK, \
+             5=COUNT, 7=VALUE, 13=EXISTS; got {other}"
+        ))),
     }
 }
 
 /// Map a Python integer to a [`MapReturnType`] enum variant.
-fn int_to_map_return_type(v: i32) -> MapReturnType {
+///
+/// Same silent-`None` failure mode as [`int_to_list_return_type`]: an unknown
+/// or wrong-family `return_type` used to collapse to `None`, producing an empty
+/// result with no error. Reject unknown codes loudly instead. `0`/`NONE` stays
+/// valid (no change for correct callers).
+fn int_to_map_return_type(v: i32) -> PyResult<MapReturnType> {
     match v {
-        0 => MapReturnType::None,
-        1 => MapReturnType::Index,
-        2 => MapReturnType::ReverseIndex,
-        3 => MapReturnType::Rank,
-        4 => MapReturnType::ReverseRank,
-        5 => MapReturnType::Count,
-        6 => MapReturnType::Key,
-        7 => MapReturnType::Value,
-        8 => MapReturnType::KeyValue,
-        13 => MapReturnType::Exists,
-        _ => MapReturnType::None,
+        0 => Ok(MapReturnType::None),
+        1 => Ok(MapReturnType::Index),
+        2 => Ok(MapReturnType::ReverseIndex),
+        3 => Ok(MapReturnType::Rank),
+        4 => Ok(MapReturnType::ReverseRank),
+        5 => Ok(MapReturnType::Count),
+        6 => Ok(MapReturnType::Key),
+        7 => Ok(MapReturnType::Value),
+        8 => Ok(MapReturnType::KeyValue),
+        13 => Ok(MapReturnType::Exists),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "map operation 'return_type' must be one of \
+             0=NONE, 1=INDEX, 2=REVERSE_INDEX, 3=RANK, 4=REVERSE_RANK, \
+             5=COUNT, 6=KEY, 7=VALUE, 8=KEY_VALUE, 13=EXISTS; got {other}"
+        ))),
     }
 }
 
@@ -545,19 +565,19 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_LIST_GET_BY_VALUE => {
                 let name = require_bin(&bin_name, "list_get_by_value")?;
                 let v = require_hll_value(val, "list_get_by_value")?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::get_by_value(&name, v, rt)
             }
             OP_LIST_GET_BY_INDEX => {
                 let name = require_bin(&bin_name, "list_get_by_index")?;
                 let index = get_index(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::get_by_index(&name, index, rt)
             }
             OP_LIST_GET_BY_INDEX_RANGE => {
                 let name = require_bin(&bin_name, "list_get_by_index_range")?;
                 let index = get_index(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 match get_count(dict)? {
                     Some(count) => list_ops::get_by_index_range_count(&name, index, count, rt),
                     None => list_ops::get_by_index_range(&name, index, rt),
@@ -566,13 +586,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_LIST_GET_BY_RANK => {
                 let name = require_bin(&bin_name, "list_get_by_rank")?;
                 let rank = get_rank(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::get_by_rank(&name, rank, rt)
             }
             OP_LIST_GET_BY_RANK_RANGE => {
                 let name = require_bin(&bin_name, "list_get_by_rank_range")?;
                 let rank = get_rank(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 match get_count(dict)? {
                     Some(count) => list_ops::get_by_rank_range_count(&name, rank, count, rt),
                     None => list_ops::get_by_rank_range(&name, rank, rt),
@@ -581,45 +601,45 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_LIST_GET_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "list_get_by_value_list")?;
                 let v = require_hll_value(val, "list_get_by_value_list")?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::get_by_value_list(&name, values_from_list(&v), rt)
             }
             OP_LIST_GET_BY_VALUE_RANGE => {
                 let name = require_bin(&bin_name, "list_get_by_value_range")?;
                 let begin = val.unwrap_or(Value::Nil);
                 let end = get_val_end(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::get_by_value_range(&name, begin, end, rt)
             }
             OP_LIST_REMOVE_BY_VALUE => {
                 let name = require_bin(&bin_name, "list_remove_by_value")?;
                 let v = require_hll_value(val, "list_remove_by_value")?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::remove_by_value(&name, v, rt)
             }
             OP_LIST_REMOVE_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "list_remove_by_value_list")?;
                 let v = require_hll_value(val, "list_remove_by_value_list")?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::remove_by_value_list(&name, values_from_list(&v), rt)
             }
             OP_LIST_REMOVE_BY_VALUE_RANGE => {
                 let name = require_bin(&bin_name, "list_remove_by_value_range")?;
                 let begin = val.unwrap_or(Value::Nil);
                 let end = get_val_end(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::remove_by_value_range(&name, rt, begin, end)
             }
             OP_LIST_REMOVE_BY_INDEX => {
                 let name = require_bin(&bin_name, "list_remove_by_index")?;
                 let index = get_index(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::remove_by_index(&name, index, rt)
             }
             OP_LIST_REMOVE_BY_INDEX_RANGE => {
                 let name = require_bin(&bin_name, "list_remove_by_index_range")?;
                 let index = get_index(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 match get_count(dict)? {
                     Some(count) => list_ops::remove_by_index_range_count(&name, index, count, rt),
                     None => list_ops::remove_by_index_range(&name, index, rt),
@@ -628,13 +648,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_LIST_REMOVE_BY_RANK => {
                 let name = require_bin(&bin_name, "list_remove_by_rank")?;
                 let rank = get_rank(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 list_ops::remove_by_rank(&name, rank, rt)
             }
             OP_LIST_REMOVE_BY_RANK_RANGE => {
                 let name = require_bin(&bin_name, "list_remove_by_rank_range")?;
                 let rank = get_rank(dict)?;
-                let rt = int_to_list_return_type(get_return_type(dict)?);
+                let rt = int_to_list_return_type(get_return_type(dict)?)?;
                 match get_count(dict)? {
                     Some(count) => list_ops::remove_by_rank_range_count(&name, rank, count, rt),
                     None => list_ops::remove_by_rank_range(&name, rank, rt),
@@ -724,51 +744,51 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_MAP_REMOVE_BY_KEY => {
                 let name = require_bin(&bin_name, "map_remove_by_key")?;
                 let key = get_map_key(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::remove_by_key(&name, key, rt)
             }
             OP_MAP_REMOVE_BY_KEY_LIST => {
                 let name = require_bin(&bin_name, "map_remove_by_key_list")?;
                 let v = val.unwrap_or(Value::Nil);
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::remove_by_key_list(&name, values_from_list(&v), rt)
             }
             OP_MAP_REMOVE_BY_KEY_RANGE => {
                 let name = require_bin(&bin_name, "map_remove_by_key_range")?;
                 let begin = val.unwrap_or(Value::Nil);
                 let end = get_val_end(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::remove_by_key_range(&name, begin, end, rt)
             }
             OP_MAP_REMOVE_BY_VALUE => {
                 let name = require_bin(&bin_name, "map_remove_by_value")?;
                 let v = require_hll_value(val, "map_remove_by_value")?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::remove_by_value(&name, v, rt)
             }
             OP_MAP_REMOVE_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "map_remove_by_value_list")?;
                 let v = require_hll_value(val, "map_remove_by_value_list")?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::remove_by_value_list(&name, values_from_list(&v), rt)
             }
             OP_MAP_REMOVE_BY_VALUE_RANGE => {
                 let name = require_bin(&bin_name, "map_remove_by_value_range")?;
                 let begin = val.unwrap_or(Value::Nil);
                 let end = get_val_end(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::remove_by_value_range(&name, begin, end, rt)
             }
             OP_MAP_REMOVE_BY_INDEX => {
                 let name = require_bin(&bin_name, "map_remove_by_index")?;
                 let index = get_index(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::remove_by_index(&name, index, rt)
             }
             OP_MAP_REMOVE_BY_INDEX_RANGE => {
                 let name = require_bin(&bin_name, "map_remove_by_index_range")?;
                 let index = get_index(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 // An omitted `count` means "to the end of the map" — use the
                 // open-ended variant rather than silently collapsing to count=1.
                 match get_count(dict)? {
@@ -779,13 +799,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_MAP_REMOVE_BY_RANK => {
                 let name = require_bin(&bin_name, "map_remove_by_rank")?;
                 let rank = get_rank(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::remove_by_rank(&name, rank, rt)
             }
             OP_MAP_REMOVE_BY_RANK_RANGE => {
                 let name = require_bin(&bin_name, "map_remove_by_rank_range")?;
                 let rank = get_rank(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 // An omitted `count` means "to the last ranked item" — use the
                 // open-ended variant rather than silently collapsing to count=1.
                 match get_count(dict)? {
@@ -800,39 +820,39 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_MAP_GET_BY_KEY => {
                 let name = require_bin(&bin_name, "map_get_by_key")?;
                 let key = get_map_key(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::get_by_key(&name, key, rt)
             }
             OP_MAP_GET_BY_KEY_RANGE => {
                 let name = require_bin(&bin_name, "map_get_by_key_range")?;
                 let begin = val.unwrap_or(Value::Nil);
                 let end = get_val_end(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::get_by_key_range(&name, begin, end, rt)
             }
             OP_MAP_GET_BY_VALUE => {
                 let name = require_bin(&bin_name, "map_get_by_value")?;
                 let v = require_hll_value(val, "map_get_by_value")?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::get_by_value(&name, v, rt)
             }
             OP_MAP_GET_BY_VALUE_RANGE => {
                 let name = require_bin(&bin_name, "map_get_by_value_range")?;
                 let begin = val.unwrap_or(Value::Nil);
                 let end = get_val_end(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::get_by_value_range(&name, begin, end, rt)
             }
             OP_MAP_GET_BY_INDEX => {
                 let name = require_bin(&bin_name, "map_get_by_index")?;
                 let index = get_index(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::get_by_index(&name, index, rt)
             }
             OP_MAP_GET_BY_INDEX_RANGE => {
                 let name = require_bin(&bin_name, "map_get_by_index_range")?;
                 let index = get_index(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 // An omitted `count` means "to the end of the map" — use the
                 // open-ended variant rather than silently collapsing to count=1.
                 match get_count(dict)? {
@@ -843,13 +863,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_MAP_GET_BY_RANK => {
                 let name = require_bin(&bin_name, "map_get_by_rank")?;
                 let rank = get_rank(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::get_by_rank(&name, rank, rt)
             }
             OP_MAP_GET_BY_RANK_RANGE => {
                 let name = require_bin(&bin_name, "map_get_by_rank_range")?;
                 let rank = get_rank(dict)?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 // An omitted `count` means "to the last ranked item" — use the
                 // open-ended variant rather than silently collapsing to count=1.
                 match get_count(dict)? {
@@ -860,13 +880,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_MAP_GET_BY_KEY_LIST => {
                 let name = require_bin(&bin_name, "map_get_by_key_list")?;
                 let v = val.unwrap_or(Value::Nil);
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::get_by_key_list(&name, values_from_list(&v), rt)
             }
             OP_MAP_GET_BY_VALUE_LIST => {
                 let name = require_bin(&bin_name, "map_get_by_value_list")?;
                 let v = require_hll_value(val, "map_get_by_value_list")?;
-                let rt = int_to_map_return_type(get_return_type(dict)?);
+                let rt = int_to_map_return_type(get_return_type(dict)?)?;
                 map_ops::get_by_value_list(&name, values_from_list(&v), rt)
             }
 
@@ -1168,7 +1188,10 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
 
 #[cfg(test)]
 mod tests {
-    use super::{get_resize_flags, parse_i32_flag, parse_incr_value, parse_increment_value};
+    use super::{
+        get_resize_flags, int_to_list_return_type, int_to_map_return_type, parse_i32_flag,
+        parse_incr_value, parse_increment_value,
+    };
     use aerospike_core::operations::bitwise::BitwiseResizeFlags;
     use aerospike_core::Value;
     use pyo3::types::PyDict;
@@ -1906,5 +1929,153 @@ mod tests {
             "map_get_by_value_list",
         );
         assert_by_value_list_op_with_val_succeeds(super::OP_MAP_GET_BY_VALUE_LIST);
+    }
+
+    // ── CDT list/map return_type: unknown/wrong-family codes must error ────
+    //
+    // Regression for the bug where int_to_list_return_type /
+    // int_to_map_return_type had a catch-all `_ => ReturnType::None` arm. An
+    // out-of-range or wrong-family return_type integer (e.g. passing the
+    // map-only KEY (6) / KEY_VALUE (8) constant to a list op, or a typo)
+    // silently collapsed to `None` ("return nothing"): the op produced an
+    // empty result with no error — silent data loss the caller could not tell
+    // apart from a genuinely empty match. The helpers now return PyResult and
+    // reject unknown codes with a ValueError listing the valid codes. The 0
+    // (NONE) code stays valid, so correct callers are unaffected.
+
+    #[test]
+    fn list_return_type_accepts_known_codes() {
+        // Every documented list return_type code converts without error.
+        // 6 (KEY) and 8 (KEY_VALUE) are intentionally excluded — they are
+        // map-only and must be rejected for list ops (see below).
+        for code in [0, 1, 2, 3, 4, 5, 7, 13] {
+            int_to_list_return_type(code)
+                .unwrap_or_else(|_| panic!("list return_type {code} should be valid"));
+        }
+    }
+
+    #[test]
+    fn list_return_type_rejects_unknown_or_map_only_codes() {
+        Python::initialize();
+        Python::attach(|py| {
+            // 6 == KEY, 8 == KEY_VALUE are map-only; 99 is out of range; -1 is
+            // a typo. All must error instead of silently returning nothing.
+            for bad in [6, 8, 99, -1] {
+                let err = int_to_list_return_type(bad)
+                    .expect_err("unknown/map-only list return_type must be rejected");
+                assert!(err.is_instance_of::<PyValueError>(py));
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("return_type") && msg.contains(&bad.to_string()),
+                    "error should name 'return_type' and the bad code {bad}, got: {msg}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn map_return_type_accepts_known_codes() {
+        // Every documented map return_type code converts without error,
+        // including the map-only KEY (6) / KEY_VALUE (8) codes.
+        for code in [0, 1, 2, 3, 4, 5, 6, 7, 8, 13] {
+            int_to_map_return_type(code)
+                .unwrap_or_else(|_| panic!("map return_type {code} should be valid"));
+        }
+    }
+
+    #[test]
+    fn map_return_type_rejects_unknown_codes() {
+        Python::initialize();
+        Python::attach(|py| {
+            // 9 sits between the valid KEY_VALUE (8) and EXISTS (13); 99 is out
+            // of range; -1 is a typo. All must error.
+            for bad in [9, 99, -1] {
+                let err = int_to_map_return_type(bad)
+                    .expect_err("unknown map return_type must be rejected");
+                assert!(err.is_instance_of::<PyValueError>(py));
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("return_type") && msg.contains(&bad.to_string()),
+                    "error should name 'return_type' and the bad code {bad}, got: {msg}"
+                );
+            }
+        });
+    }
+
+    /// Build a single list/map BY_INDEX op dict with a given `return_type`.
+    /// BY_INDEX needs only bin + index + return_type, so it is the simplest
+    /// arm to exercise the return_type guard end-to-end via `py_ops_to_rust`.
+    fn build_by_index_op_dict(py: Python<'_>, op_code: i32, return_type: i32) -> Bound<'_, PyDict> {
+        let dict = PyDict::new(py);
+        dict.set_item("op", op_code).unwrap();
+        dict.set_item("bin", "mybin").unwrap();
+        dict.set_item("index", 0i64).unwrap();
+        dict.set_item("return_type", return_type).unwrap();
+        dict
+    }
+
+    #[test]
+    fn list_op_with_map_only_return_type_raises_end_to_end() {
+        Python::initialize();
+        Python::attach(|py| {
+            // return_type=6 (map-only KEY) on a list op must raise, not collapse
+            // to None and silently return an empty result.
+            let dict = build_by_index_op_dict(py, super::OP_LIST_GET_BY_INDEX, 6);
+            let ops = PyList::new(py, [dict]).unwrap();
+            let err = super::py_ops_to_rust(&ops)
+                .expect_err("list op with map-only return_type must raise");
+            assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+
+    #[test]
+    fn list_op_with_out_of_range_return_type_raises_end_to_end() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = build_by_index_op_dict(py, super::OP_LIST_GET_BY_INDEX, 99);
+            let ops = PyList::new(py, [dict]).unwrap();
+            let err = super::py_ops_to_rust(&ops)
+                .expect_err("list op with out-of-range return_type must raise");
+            assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+
+    #[test]
+    fn map_op_with_invalid_return_type_raises_end_to_end() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = build_by_index_op_dict(py, super::OP_MAP_GET_BY_INDEX, 99);
+            let ops = PyList::new(py, [dict]).unwrap();
+            let err = super::py_ops_to_rust(&ops)
+                .expect_err("map op with invalid return_type must raise");
+            assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+
+    #[test]
+    fn list_and_map_ops_with_valid_return_type_succeed_end_to_end() {
+        Python::initialize();
+        Python::attach(|py| {
+            // return_type=1 (INDEX) is valid for both families; conversion must
+            // still succeed after the guard tightening (no behavior change for
+            // correct callers).
+            let list_dict = build_by_index_op_dict(py, super::OP_LIST_GET_BY_INDEX, 1);
+            let list_ops = PyList::new(py, [list_dict]).unwrap();
+            assert_eq!(
+                super::py_ops_to_rust(&list_ops)
+                    .expect("valid list return_type must convert")
+                    .len(),
+                1
+            );
+
+            let map_dict = build_by_index_op_dict(py, super::OP_MAP_GET_BY_INDEX, 1);
+            let map_ops = PyList::new(py, [map_dict]).unwrap();
+            assert_eq!(
+                super::py_ops_to_rust(&map_ops)
+                    .expect("valid map return_type must convert")
+                    .len(),
+                1
+            );
+        });
     }
 }
