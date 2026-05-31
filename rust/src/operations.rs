@@ -311,11 +311,24 @@ fn get_overflow_action(dict: &Bound<'_, PyDict>) -> PyResult<BitwiseOverflowActi
         .map(|v| v.extract())
         .transpose()?
         .unwrap_or(0);
-    Ok(match action {
-        2 => BitwiseOverflowActions::Saturate,
-        4 => BitwiseOverflowActions::Wrap,
-        _ => BitwiseOverflowActions::Fail,
-    })
+    // Valid codes are 0=FAIL, 2=SATURATE, 4=WRAP (the BIT_OVERFLOW_* constants).
+    // The catch-all arm previously collapsed any other value (a typo, or the
+    // out-of-range `1`/`3`) to `Fail` — silently flipping the requested
+    // overflow semantics from "saturate"/"wrap" to "abort the op on overflow".
+    // The caller could not distinguish that from having genuinely asked for
+    // FAIL, so a mistyped `action` changed bit_add/bit_subtract behavior with
+    // no signal. Reject unknown codes loudly instead (mirrors the strictness of
+    // `get_resize_flags`). `0`/FAIL stays valid — no change for correct callers.
+    match action {
+        0 => Ok(BitwiseOverflowActions::Fail),
+        2 => Ok(BitwiseOverflowActions::Saturate),
+        4 => Ok(BitwiseOverflowActions::Wrap),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "bit add/subtract 'action' must be one of \
+             0=BIT_OVERFLOW_FAIL, 2=BIT_OVERFLOW_SATURATE, 4=BIT_OVERFLOW_WRAP; \
+             got {other}"
+        ))),
+    }
 }
 
 fn get_resize_flags(dict: &Bound<'_, PyDict>) -> PyResult<Option<BitwiseResizeFlags>> {
@@ -1189,10 +1202,10 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
 #[cfg(test)]
 mod tests {
     use super::{
-        get_resize_flags, int_to_list_return_type, int_to_map_return_type, parse_i32_flag,
-        parse_incr_value, parse_increment_value,
+        get_overflow_action, get_resize_flags, int_to_list_return_type, int_to_map_return_type,
+        parse_i32_flag, parse_incr_value, parse_increment_value,
     };
-    use aerospike_core::operations::bitwise::BitwiseResizeFlags;
+    use aerospike_core::operations::bitwise::{BitwiseOverflowActions, BitwiseResizeFlags};
     use aerospike_core::Value;
     use pyo3::types::PyDict;
     use pyo3::{exceptions::PyTypeError, exceptions::PyValueError, PyErr, Python};
@@ -1239,6 +1252,54 @@ mod tests {
                 d.set_item("resize_flags", bad).unwrap();
                 let err = get_resize_flags(&d)
                     .expect_err("composed/unknown resize flag must be rejected");
+                assert!(err.is_instance_of::<PyValueError>(py));
+            }
+        });
+    }
+
+    #[test]
+    fn get_overflow_action_defaults_to_fail_and_accepts_known_codes() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Missing key -> FAIL (the documented default).
+            let empty = PyDict::new(py);
+            assert_eq!(
+                std::mem::discriminant(
+                    &get_overflow_action(&empty).expect("missing action is fine")
+                ),
+                std::mem::discriminant(&BitwiseOverflowActions::Fail),
+            );
+
+            for (raw, expected) in [
+                (0, BitwiseOverflowActions::Fail),
+                (2, BitwiseOverflowActions::Saturate),
+                (4, BitwiseOverflowActions::Wrap),
+            ] {
+                let d = PyDict::new(py);
+                d.set_item("action", raw).unwrap();
+                let got = get_overflow_action(&d).expect("known action should parse");
+                // BitwiseOverflowActions is not PartialEq; compare via discriminant.
+                assert_eq!(
+                    std::mem::discriminant(&got),
+                    std::mem::discriminant(&expected),
+                    "action {raw} should map to the matching overflow behavior"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn get_overflow_action_rejects_unknown_codes() {
+        Python::initialize();
+        Python::attach(|py| {
+            // 1 and 3 are out-of-range, 99 is a typo. Each previously collapsed
+            // to FAIL silently, flipping the requested overflow semantics with no
+            // signal to the caller. Must be rejected loudly now.
+            for bad in [1, 3, 5, 6, 99, -1] {
+                let d = PyDict::new(py);
+                d.set_item("action", bad).unwrap();
+                let err =
+                    get_overflow_action(&d).expect_err("unknown overflow action must be rejected");
                 assert!(err.is_instance_of::<PyValueError>(py));
             }
         });
