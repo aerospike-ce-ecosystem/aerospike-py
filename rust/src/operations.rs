@@ -138,6 +138,26 @@ fn int_to_list_return_type(v: i32) -> PyResult<ListReturnType> {
     }
 }
 
+/// Map a Python integer to a [`ListSortFlags`] enum variant.
+///
+/// Same silent-default failure mode the project has already removed from
+/// `return_type` ([`int_to_list_return_type`]) and the bit overflow `action`
+/// ([`get_overflow_action`]): an unknown `sort_flags` value (a typo, or the
+/// non-existent `1`) used to hit the catch-all arm and silently collapse to
+/// `Default`, dropping the requested `DROP_DUPLICATES` behavior with no signal
+/// to the caller. Only the two documented constants (`LIST_SORT_DEFAULT` = 0,
+/// `LIST_SORT_DROP_DUPLICATES` = 2) are valid; reject anything else loudly.
+fn int_to_list_sort_flags(v: i32) -> PyResult<ListSortFlags> {
+    match v {
+        0 => Ok(ListSortFlags::Default),
+        2 => Ok(ListSortFlags::DropDuplicates),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "list_sort 'sort_flags' must be one of \
+             0=LIST_SORT_DEFAULT, 2=LIST_SORT_DROP_DUPLICATES; got {other}"
+        ))),
+    }
+}
+
 /// Map a Python integer to a [`MapReturnType`] enum variant.
 ///
 /// Same silent-`None` failure mode as [`int_to_list_return_type`]: an unknown
@@ -683,10 +703,7 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             OP_LIST_SORT => {
                 let name = require_bin(&bin_name, "list_sort")?;
                 let flags = parse_i32_flag(&val, "list_sort", "val")?;
-                let sort_flags = match flags {
-                    2 => ListSortFlags::DropDuplicates,
-                    _ => ListSortFlags::Default,
-                };
+                let sort_flags = int_to_list_sort_flags(flags)?;
                 list_ops::sort(&name, sort_flags)
             }
             OP_LIST_SET_ORDER => {
@@ -1202,10 +1219,11 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
 #[cfg(test)]
 mod tests {
     use super::{
-        get_overflow_action, get_resize_flags, int_to_list_return_type, int_to_map_return_type,
-        parse_i32_flag, parse_incr_value, parse_increment_value,
+        get_overflow_action, get_resize_flags, int_to_list_return_type, int_to_list_sort_flags,
+        int_to_map_return_type, parse_i32_flag, parse_incr_value, parse_increment_value,
     };
     use aerospike_core::operations::bitwise::{BitwiseOverflowActions, BitwiseResizeFlags};
+    use aerospike_core::operations::lists::ListSortFlags;
     use aerospike_core::Value;
     use pyo3::types::PyDict;
     use pyo3::{exceptions::PyTypeError, exceptions::PyValueError, PyErr, Python};
@@ -1300,6 +1318,38 @@ mod tests {
                 d.set_item("action", bad).unwrap();
                 let err =
                     get_overflow_action(&d).expect_err("unknown overflow action must be rejected");
+                assert!(err.is_instance_of::<PyValueError>(py));
+            }
+        });
+    }
+
+    #[test]
+    fn int_to_list_sort_flags_accepts_known_codes() {
+        for (raw, expected) in [
+            (0, ListSortFlags::Default),
+            (2, ListSortFlags::DropDuplicates),
+        ] {
+            let got = int_to_list_sort_flags(raw).expect("known sort flag should parse");
+            // ListSortFlags is not PartialEq; compare via discriminant.
+            assert_eq!(
+                std::mem::discriminant(&got),
+                std::mem::discriminant(&expected),
+                "sort_flags {raw} should map to the matching flag"
+            );
+        }
+    }
+
+    #[test]
+    fn int_to_list_sort_flags_rejects_unknown_codes() {
+        Python::initialize();
+        Python::attach(|py| {
+            // 1 is the non-existent middle value, 3 is DEFAULT|DROP_DUPLICATES,
+            // and 99/-1 are typos. Each previously collapsed to Default silently,
+            // dropping the requested DROP_DUPLICATES behavior with no signal to
+            // the caller. Must be rejected loudly now.
+            for bad in [1, 3, 4, 5, 99, -1] {
+                let err =
+                    int_to_list_sort_flags(bad).expect_err("unknown sort flag must be rejected");
                 assert!(err.is_instance_of::<PyValueError>(py));
             }
         });
