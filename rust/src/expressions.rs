@@ -169,11 +169,40 @@ fn convert_binary_comparison(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Exp
 /// unary (`convert_unary_op`) and binary-pair (`convert_binary_pair_op`)
 /// operations — using the more specific `InvalidArgError` for this
 /// argument-validation failure (those siblings raise a plain `ValueError`).
+///
+/// `cond` and `let` additionally carry a structural operand shape (an odd
+/// `cond` chain of `(condition, action)` pairs plus a default; a `let` body of
+/// definitions plus a scope expression) that is likewise validated here.
 fn convert_variadic_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
     let exprs = parse_sub_expr_list(dict, "exprs")?;
     if exprs.is_empty() {
         return Err(crate::errors::InvalidArgError::new_err(format!(
             "Expression '{op}' requires at least one operand, got an empty 'exprs' list"
+        )));
+    }
+    // `cond` and `let` are not simple "one or more operands" ops: they carry a
+    // structural shape that the underlying `aerospike-core` builder does not
+    // validate, so a malformed operand count is only rejected later by the
+    // server with an opaque parse error far from the call site.
+    //
+    // `cond(bool1, action1, ..., default)` requires pairs of (condition,
+    // action) followed by a single default action — i.e. an odd count of at
+    // least 3. An even count leaves a dangling condition with no action; a
+    // count of 1 is a bare default with no condition.
+    if op == "cond" && (exprs.len() < 3 || exprs.len() % 2 == 0) {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "Expression 'cond' requires an odd number of operands (>= 3): pairs of \
+             (condition, action) followed by a default action, got {} operand(s)",
+            exprs.len()
+        )));
+    }
+    // `let(def1, def2, ..., scope_expr)` requires at least one variable
+    // definition followed by a scope expression — i.e. at least 2 operands.
+    if op == "let" && exprs.len() < 2 {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "Expression 'let' requires at least 2 operands: one or more variable \
+             definitions followed by a scope expression, got {} operand(s)",
+            exprs.len()
         )));
     }
     match op {
@@ -409,6 +438,76 @@ mod tests {
                 vec![int_val_dict(py, 1), int_val_dict(py, 2)],
             );
             py_to_expression(dict.as_any()).expect("non-empty num_add should convert");
+        });
+    }
+
+    /// `cond` requires an odd number of operands (>= 3): pairs of
+    /// `(condition, action)` followed by a default action. A count of 1, or any
+    /// even count, is structurally malformed and must be rejected client-side.
+    #[test]
+    fn cond_rejects_non_odd_or_too_few_operands() {
+        Python::initialize();
+        Python::attach(|py| {
+            // 1 operand (bare default, no condition) and 2/4 operands (dangling
+            // condition with no action) are all invalid.
+            for n in [1usize, 2, 4] {
+                let operands: Vec<_> = (0..n).map(|i| int_val_dict(py, i as i64)).collect();
+                let dict = variadic_dict(py, "cond", operands);
+                let err = py_to_expression(dict.as_any())
+                    .expect_err(&format!("cond with {n} operand(s) must be rejected"));
+                assert!(
+                    err.is_instance_of::<crate::errors::InvalidArgError>(py),
+                    "cond with {n} operand(s) must raise InvalidArgError, got {err:?}"
+                );
+                assert!(
+                    err.to_string().contains("odd number of operands"),
+                    "cond arity error must mention the odd-count requirement: {err:?}"
+                );
+            }
+        });
+    }
+
+    /// A well-formed `cond` (odd count >= 3) still converts successfully.
+    #[test]
+    fn cond_accepts_odd_operand_count() {
+        Python::initialize();
+        Python::attach(|py| {
+            for n in [3usize, 5] {
+                let operands: Vec<_> = (0..n).map(|i| int_val_dict(py, i as i64)).collect();
+                let dict = variadic_dict(py, "cond", operands);
+                py_to_expression(dict.as_any())
+                    .unwrap_or_else(|e| panic!("cond with {n} operands should convert: {e:?}"));
+            }
+        });
+    }
+
+    /// `let` requires at least 2 operands: one or more variable definitions
+    /// followed by a scope expression. A single operand is malformed.
+    #[test]
+    fn let_rejects_single_operand() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = variadic_dict(py, "let", vec![int_val_dict(py, 1)]);
+            let err = py_to_expression(dict.as_any())
+                .expect_err("let with a single operand must be rejected");
+            assert!(
+                err.is_instance_of::<crate::errors::InvalidArgError>(py),
+                "single-operand let must raise InvalidArgError, got {err:?}"
+            );
+            assert!(
+                err.to_string().contains("at least 2 operands"),
+                "let arity error must mention the 2-operand requirement: {err:?}"
+            );
+        });
+    }
+
+    /// A well-formed `let` (>= 2 operands) still converts successfully.
+    #[test]
+    fn let_accepts_two_or_more_operands() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = variadic_dict(py, "let", vec![int_val_dict(py, 1), int_val_dict(py, 2)]);
+            py_to_expression(dict.as_any()).expect("two-operand let should convert");
         });
     }
 

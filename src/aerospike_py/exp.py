@@ -558,7 +558,13 @@ def geo_compare(left: Expr, right: Expr) -> Expr:
 
 
 def cond(*exprs: Expr) -> Expr:
-    """Create conditional expression: cond(bool1, action1, bool2, action2, ..., default)."""
+    """Create conditional expression: cond(bool1, action1, bool2, action2, ..., default).
+
+    Pass one or more ``(condition, action)`` pairs followed by a single default
+    action — i.e. an **odd** number of arguments, at least 3. An even count
+    (a dangling condition with no action) or a lone default is rejected with
+    ``InvalidArgError`` when the expression is built.
+    """
     return _cmd("cond", exprs=list(exprs))
 
 
@@ -573,5 +579,11 @@ def def_(name: str, value: Expr) -> Expr:
 
 
 def let_(*exprs: Expr) -> Expr:
-    """Create let binding expression: let_(def_("x", ...), def_("y", ...), scope_expr)."""
+    """Create let binding expression: let_(def_("x", ...), def_("y", ...), scope_expr).
+
+    Pass one or more ``def_(...)`` variable definitions followed by a scope
+    expression — i.e. at least 2 arguments. A lone definition (or a lone scope
+    expression) is rejected with ``InvalidArgError`` when the expression is
+    built.
+    """
     return _cmd("let", exprs=list(exprs))
