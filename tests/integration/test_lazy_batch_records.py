@@ -373,3 +373,68 @@ class TestLazyBatchRecordsMerge:
         from aerospike_py import LazyBatchRecords
 
         assert LazyBatchRecords.merge_to_dict([]) == []
+
+
+class TestLazyBatchRecordsToList:
+    """``to_list()`` — positional bulk conversion (`list[bins | None]`)."""
+
+    async def test_to_list_positional_order(self, async_client, _seed_records):
+        keys = _seed_records
+        result = (await async_client.batch_read(keys)).to_list()
+        assert isinstance(result, list)
+        assert len(result) == len(keys)
+        for i, bins in enumerate(result):
+            assert bins is not None
+            assert bins["name"] == f"user_{i}"
+            assert bins["score"] == i * 10
+
+    async def test_to_list_missing_records_are_none_slots(self, async_client, _seed_records):
+        """to_dict 는 miss 를 제외하지만 to_list 는 None 슬롯으로 위치를 보존한다."""
+        keys = list(_seed_records)
+        keys.insert(2, (NS, SET, "to_list_missing_1"))
+        keys.append((NS, SET, "to_list_missing_2"))
+        result = (await async_client.batch_read(keys)).to_list()
+        assert len(result) == len(keys)
+        assert result[2] is None
+        assert result[-1] is None
+        assert result[0]["name"] == "user_0"
+        assert result[3]["name"] == "user_2"  # insert 로 한 칸 밀림
+
+    async def test_to_list_duplicate_user_key_across_sets_no_collision(
+        self, async_client, async_cleanup
+    ):
+        """같은 user_key 가 서로 다른 set 에 동시에 batch 될 때 dict 뷰는 한쪽을
+        잃지만 to_list 는 양쪽 모두 위치대로 보존한다 (feature-store 시나리오)."""
+        set_b = f"{SET}_b"
+        shared = "dup_key_1"
+        ka = (NS, SET, shared)
+        kb = (NS, set_b, shared)
+        async_cleanup.append(ka)
+        async_cleanup.append(kb)
+        await async_client.put(ka, {"src": "set_a", "a_only": 1})
+        await async_client.put(kb, {"src": "set_b", "b_only": 2})
+
+        handle = await async_client.batch_read([ka, kb])
+        result = handle.to_list()
+        assert len(result) == 2
+        assert result[0]["src"] == "set_a"
+        assert result[1]["src"] == "set_b"
+        # dict 뷰는 user_key 충돌로 하나만 남는다 (비교 기준)
+        assert len(handle.to_dict()) == 1
+
+    async def test_to_list_fresh_not_cached(self, async_client, _seed_records):
+        """반환 리스트/내부 bins 는 호출마다 fresh — 변형이 다음 호출에 안 보임."""
+        handle = await async_client.batch_read(_seed_records)
+        first = handle.to_list()
+        first[0]["name"] = "mutated"
+        second = handle.to_list()
+        assert second[0]["name"] == "user_0"
+
+    async def test_to_list_empty_keys(self, async_client):
+        assert (await async_client.batch_read([])).to_list() == []
+
+    async def test_to_list_sync_client(self, client, _seed_records):
+        """sync Client.batch_read 핸들에서도 동일 동작."""
+        result = client.batch_read(_seed_records).to_list()
+        assert len(result) == 5
+        assert result[4]["score"] == 40

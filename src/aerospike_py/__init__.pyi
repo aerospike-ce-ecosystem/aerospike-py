@@ -90,6 +90,21 @@ class LazyBatchRecords:
         """Materialise as ``dict[user_key, bins_dict]`` (cached)."""
         ...
 
+    def to_list(self) -> list[dict[str, Any] | None]:
+        """Materialise as ``list[bins_dict | None]`` in request order.
+
+        Positional bulk conversion: one Rust pass (same cost shape as
+        ``to_dict``) returning a list aligned 1:1 with the request keys.
+        Failed reads, not-found records and digest-only entries are
+        ``None`` at their position. Key-agnostic, so batches that read
+        the same ``user_key`` from multiple sets do not collide (the
+        dict views keep only one of the colliding records).
+
+        Not cached — every call materialises a fresh list, and the
+        returned bins dicts can be mutated freely.
+        """
+        ...
+
     def to_numpy(self, dtype: "np.dtype") -> NumpyBatchRecords:
         """Materialise as a NumPy structured array.
 
