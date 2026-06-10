@@ -400,9 +400,7 @@ class TestLazyBatchRecordsToList:
         assert result[0]["name"] == "user_0"
         assert result[3]["name"] == "user_2"  # insert 로 한 칸 밀림
 
-    async def test_to_list_duplicate_user_key_across_sets_no_collision(
-        self, async_client, async_cleanup
-    ):
+    async def test_to_list_duplicate_user_key_across_sets_no_collision(self, async_client, async_cleanup):
         """같은 user_key 가 서로 다른 set 에 동시에 batch 될 때 dict 뷰는 한쪽을
         잃지만 to_list 는 양쪽 모두 위치대로 보존한다 (feature-store 시나리오)."""
         set_b = f"{SET}_b"
