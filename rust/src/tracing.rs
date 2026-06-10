@@ -188,6 +188,30 @@ pub(crate) mod otel_impl {
         global::tracer(INSTRUMENTATION_NAME)
     }
 
+    /// W3C `traceparent` 의 trace-flags 를 SAMPLED(0x01) 비트만 남기고 마스킹.
+    ///
+    /// opentelemetry-rust <= 0.31 의 `TraceContextPropagator` 는 version 00 에서
+    /// flags > 0x02 인 traceparent (예: opentelemetry-python 이 내보내는
+    /// 0x03 = SAMPLED | RANDOM, W3C Trace Context Level 2) 를 통째로 거부해
+    /// 부모 컨텍스트가 유실된다 (스팬이 고아 root 로 빠짐). upstream 은 main 에서
+    /// 해당 체크를 제거했으므로, otel crate 를 그 버전으로 올리면 이 마스킹은
+    /// 제거 가능하다.
+    pub(crate) fn sanitize_traceparent(value: &str) -> Option<String> {
+        let parts: Vec<&str> = value.trim().split('-').collect();
+        if parts.len() != 4 {
+            return None;
+        }
+        let flags = u8::from_str_radix(parts[3], 16).ok()?;
+        let masked = flags & 0x01;
+        if masked == flags {
+            return None; // 변경 불필요
+        }
+        Some(format!(
+            "{}-{}-{}-{:02x}",
+            parts[0], parts[1], parts[2], masked
+        ))
+    }
+
     /// Extract W3C TraceContext from the Python `opentelemetry` context.
     ///
     /// Must be called **while the GIL is held** (before `py.detach()` / `future_into_py`).
@@ -226,7 +250,12 @@ pub(crate) mod otel_impl {
         })();
 
         match result {
-            Ok(carrier) if !carrier.is_empty() => {
+            Ok(mut carrier) if !carrier.is_empty() => {
+                if let Some(tp) = carrier.get("traceparent") {
+                    if let Some(fixed) = sanitize_traceparent(tp) {
+                        carrier.insert("traceparent".to_string(), fixed);
+                    }
+                }
                 static PROPAGATOR: LazyLock<TraceContextPropagator> =
                     LazyLock::new(TraceContextPropagator::new);
                 PROPAGATOR.extract(&carrier)
@@ -506,4 +535,51 @@ macro_rules! traced_exists_op {
             $body
         }
     }};
+}
+
+#[cfg(all(test, feature = "otel"))]
+mod tests {
+    use super::otel_impl::sanitize_traceparent;
+
+    #[test]
+    fn masks_w3c_level2_random_flag() {
+        // opentelemetry-python 이 내보내는 SAMPLED|RANDOM(0x03) → SAMPLED(0x01)
+        assert_eq!(
+            sanitize_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03"),
+            Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string())
+        );
+    }
+
+    #[test]
+    fn masks_unsampled_random_flag() {
+        assert_eq!(
+            sanitize_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-02"),
+            Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00".to_string())
+        );
+    }
+
+    #[test]
+    fn passthrough_when_already_clean() {
+        // 변경 불필요 → None (재할당 회피)
+        assert_eq!(
+            sanitize_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+            None
+        );
+        assert_eq!(
+            sanitize_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"),
+            None
+        );
+    }
+
+    #[test]
+    fn malformed_inputs_left_untouched() {
+        // 형식이 다르면 건드리지 않고 propagator 의 자체 검증에 맡긴다
+        assert_eq!(sanitize_traceparent("garbage"), None);
+        assert_eq!(sanitize_traceparent("00-abc-def"), None);
+        assert_eq!(
+            sanitize_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-zz"),
+            None
+        );
+        assert_eq!(sanitize_traceparent(""), None);
+    }
 }
