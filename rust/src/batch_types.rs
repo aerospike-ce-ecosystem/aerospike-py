@@ -415,6 +415,48 @@ impl PyLazyBatchRecords {
         })
     }
 
+    /// Positional bulk conversion: returns `list[bins_dict | None]` aligned
+    /// 1:1 with the request key order (`len(result) == number of records`).
+    ///
+    /// Failed reads (non-OK result code, e.g. `FilteredOut`) and records
+    /// without a body (not-found) yield `None` at their position. Slots are
+    /// identified purely by position — **key-agnostic** — so it stays
+    /// correct when the same `user_key` appears in multiple sets within one
+    /// batch (the dict views collide on such keys; positional access does
+    /// not), and **digest-only requests that succeed return their bins**
+    /// (the dict views must skip them for lack of a `user_key`).
+    ///
+    /// Check misses with `is None` — a found record whose selected bins are
+    /// empty (e.g. `bins=[]` header-only reads) is `{}`, not `None`. `None`
+    /// folds together not-found and per-record errors; callers that must
+    /// distinguish them should inspect `handle.batch_records[i].result`.
+    /// Conversion happens in a single Rust pass like `to_dict` — skipping
+    /// `BatchRecord` wrappers, key tuples and meta dicts.
+    ///
+    /// This is the recommended conversion for feature-store style callers
+    /// that need request-order alignment: it replaces the
+    /// `for br in handle.batch_records: br.record` pattern, which pays a
+    /// lazy per-record conversion several times slower than one bulk pass.
+    ///
+    /// **Returned list is freshly materialised on every call** (no cache):
+    /// callers can mutate the returned bins dicts freely without affecting
+    /// the dict views or later `to_list()` calls.
+    fn to_list<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        // ── (D) event loop resume delay: into_pyobject → to_list call ──
+        if let Some(t) = self.into_pyobject_at {
+            crate::metrics::record_internal_stage_unchecked(
+                "event_loop_resume_delay",
+                "batch_read",
+                t.elapsed().as_secs_f64(),
+            );
+        }
+
+        // ── Stage: to_list (GIL held in event loop coroutine) ──
+        crate::stage_timer!("to_list", "batch_read", {
+            batch_to_list_py(py, &self.inner)
+        })
+    }
+
     /// Convert the batch read result into a `NumpyBatchRecords` structured
     /// array. The fill loop runs under `Python::detach`, so the GIL is
     /// released while raw Aerospike values are written into the NumPy
@@ -754,6 +796,41 @@ pub fn batch_to_dict_py<'py>(
     }
 
     Ok(dict)
+}
+
+/// Positional bulk conversion backing [`PyLazyBatchRecords::to_list`].
+///
+/// One pass over the raw Rust batch results producing
+/// `list[bins_dict | None]` of the same length, preserving request order.
+/// No `user_key` extraction or dict hashing — slots are identified purely
+/// by position, so multi-set batches that repeat the same user key cannot
+/// collide (the dict views lose one of the colliding records).
+pub fn batch_to_list_py<'py>(
+    py: Python<'py>,
+    results: &[BatchRecord],
+) -> PyResult<Bound<'py, PyList>> {
+    use crate::types::value::value_to_py;
+
+    let out = PyList::empty(py);
+    for br in results {
+        // Per-record errors (e.g. FilteredOut, RecordTooBig) → None slot.
+        if !matches!(&br.result_code, None | Some(ResultCode::Ok)) {
+            out.append(py.None())?;
+            continue;
+        }
+        match &br.record {
+            Some(record) => {
+                let bins = PyDict::new(py);
+                for (name, value) in &record.bins {
+                    bins.set_item(name, value_to_py(py, value)?)?;
+                }
+                out.append(bins)?;
+            }
+            // Not-found / digest-only without body → None slot.
+            None => out.append(py.None())?,
+        }
+    }
+    Ok(out)
 }
 
 /// Convert each `BatchRecord`'s `user_key` to a Python object, preserving

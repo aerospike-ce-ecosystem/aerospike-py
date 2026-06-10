@@ -91,6 +91,7 @@ through a lazy + cached `to_dict()`).
 | Method / Property | Type | Description |
 |-------------------|------|-------------|
 | `to_dict()` | `dict[UserKey, dict[str, Any]]` | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. |
+| `to_list()` | `list[dict[str, Any] \| None]` | Positional bulk conversion: one Rust pass returning bins dicts aligned 1:1 with the request key order. Failed reads and not-found records are `None` at their position; successful digest-only reads **do** return bins (key-agnostic — no `user_key` collisions, unlike the dict views). Check misses with `is None` (`{}` = found with no selected bins). Not cached — every call returns a fresh, freely mutable list. |
 | `to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a `np.dtype` object** (e.g. `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). Each field name in the structured dtype maps to the bin of the same name; list-of-tuples shorthand and single-field strings are not auto-promoted — wrap them in `np.dtype(...)` first. The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. **Failed / missing reads (`result_code != 0`) leave their row at the dtype's zero value — always mask with `result_codes` before downstream math.** |
 | `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. |
 | `found_count()` | `int` | Count of successful records (no conversion needed). |
@@ -155,7 +156,7 @@ Returned by: `operate_ordered()`
 | `operate()` | `Record` |
 | `operate_ordered()` | `OperateOrderedResult` |
 | `info_all()` | `list[InfoNodeResult]` |
-| `batch_read()` (sync and async) | `LazyBatchRecords` — call `.to_dict()` or `.to_numpy(dtype)` to materialise |
+| `batch_read()` (sync and async) | `LazyBatchRecords` — call `.to_dict()`, `.to_list()` or `.to_numpy(dtype)` to materialise |
 | `batch_write()`, `batch_operate()`, `batch_remove()` | `BatchWriteResult` (`batch_records: list[BatchRecord]`) |
 | `batch_write_numpy()` | `BatchWriteResult` |
 | `Query.results()` | `list[Record]` |
