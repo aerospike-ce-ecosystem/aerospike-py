@@ -129,9 +129,157 @@ pub fn key_to_py(py: Python<'_>, key: &Key) -> PyResult<Py<PyAny>> {
     Ok(tuple.into_any().unbind())
 }
 
+/// Parsed key parts awaiting digest computation (no Python objects inside,
+/// so the digest pass can run with the GIL released).
+enum PendingKey {
+    /// Explicit digest supplied — nothing left to compute.
+    Ready(Key),
+    /// RIPEMD-160 over the serialized user key (`Key::new` path).
+    Hash {
+        namespace: String,
+        set_name: String,
+        user_key: Value,
+    },
+    /// Bytes key — STRING-particle digest for C-client compatibility
+    /// (`compute_bytes_key_digest` path).
+    HashBytes {
+        namespace: String,
+        set_name: String,
+        blob: Vec<u8>,
+    },
+}
+
+/// Pointer-memoised extraction of a `str` tuple element.
+///
+/// Batch callers (feature stores, ORMs) typically build every key tuple from
+/// the *same* Python `str` objects for namespace/set, so comparing the object
+/// pointer against the previous element skips the `PyString` cast, UTF-8
+/// validation and `to_str` for all but the first occurrence.
+#[inline]
+fn extract_str_memo(
+    item: &Bound<'_, PyAny>,
+    memo: &mut Option<(*mut pyo3::ffi::PyObject, String)>,
+) -> PyResult<String> {
+    if let Some((ptr, cached)) = memo {
+        if *ptr == item.as_ptr() {
+            return Ok(cached.clone());
+        }
+    }
+    let s = item.cast::<PyString>()?.to_str()?.to_owned();
+    *memo = Some((item.as_ptr(), s.clone()));
+    Ok(s)
+}
+
+/// Parse one key tuple into a [`PendingKey`] — Python-object access only,
+/// digest computation deferred. Mirrors [`py_to_key`]'s validation exactly.
+fn py_to_pending_key(
+    key_tuple: &Bound<'_, PyAny>,
+    memo_ns: &mut Option<(*mut pyo3::ffi::PyObject, String)>,
+    memo_set: &mut Option<(*mut pyo3::ffi::PyObject, String)>,
+) -> PyResult<PendingKey> {
+    let tuple = key_tuple.cast::<PyTuple>()?;
+
+    if tuple.len() < 3 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "Key tuple must have at least 3 elements: (namespace, set, key)",
+        ));
+    }
+    if tuple.len() > 4 {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Key tuple must have 3 or 4 elements (namespace, set, key[, digest]), got {}",
+            tuple.len()
+        )));
+    }
+
+    let namespace = extract_str_memo(&tuple.get_item(0)?, memo_ns)?;
+    let set_name = extract_str_memo(&tuple.get_item(1)?, memo_set)?;
+    let key_item = tuple.get_item(2)?;
+    let explicit_digest = extract_explicit_digest(tuple)?;
+
+    if let Ok(b) = key_item.cast::<PyBytes>() {
+        let bytes_data = b.as_bytes();
+        return Ok(match explicit_digest {
+            Some(digest) => PendingKey::Ready(Key {
+                namespace,
+                set_name,
+                user_key: Some(Value::Blob(bytes_data.to_vec())),
+                digest,
+            }),
+            None => PendingKey::HashBytes {
+                namespace,
+                set_name,
+                blob: bytes_data.to_vec(),
+            },
+        });
+    }
+
+    let user_key = py_to_value(&key_item)?;
+
+    if let Some(digest) = explicit_digest {
+        return Ok(PendingKey::Ready(Key {
+            namespace,
+            set_name,
+            user_key: match &user_key {
+                Value::Nil => None,
+                _ => Some(user_key),
+            },
+            digest,
+        }));
+    }
+
+    Ok(PendingKey::Hash {
+        namespace,
+        set_name,
+        user_key,
+    })
+}
+
 /// Convert a Python list of key tuples to a `Vec<Key>`.
-pub fn py_to_keys(keys: &Bound<'_, PyList>) -> PyResult<Vec<Key>> {
-    keys.iter().map(|k| py_to_key(&k)).collect()
+///
+/// Two-pass batch conversion:
+/// 1. **GIL pass** — Python-object extraction with `(namespace, set)`
+///    pointer memoisation (batch callers reuse the same `str` objects
+///    across keys, so the `PyString` cast + UTF-8 validation runs once
+///    per distinct object instead of once per key).
+/// 2. **Detached pass** — RIPEMD-160 digest computation for every key
+///    runs under [`Python::detach`], so other Python threads (e.g. the
+///    asyncio event loop) keep running while the batch is hashed.
+pub fn py_to_keys(py: Python<'_>, keys: &Bound<'_, PyList>) -> PyResult<Vec<Key>> {
+    let mut pending = Vec::with_capacity(keys.len());
+    let mut memo_ns: Option<(*mut pyo3::ffi::PyObject, String)> = None;
+    let mut memo_set: Option<(*mut pyo3::ffi::PyObject, String)> = None;
+    for k in keys.iter() {
+        pending.push(py_to_pending_key(&k, &mut memo_ns, &mut memo_set)?);
+    }
+
+    py.detach(move || {
+        pending
+            .into_iter()
+            .map(|p| match p {
+                PendingKey::Ready(key) => Ok(key),
+                PendingKey::Hash {
+                    namespace,
+                    set_name,
+                    user_key,
+                } => Key::new(namespace, set_name, user_key).map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!("Invalid key: {e}"))
+                }),
+                PendingKey::HashBytes {
+                    namespace,
+                    set_name,
+                    blob,
+                } => {
+                    let digest = compute_bytes_key_digest(&set_name, &blob);
+                    Ok(Key {
+                        namespace,
+                        set_name,
+                        user_key: Some(Value::Blob(blob)),
+                        digest,
+                    })
+                }
+            })
+            .collect()
+    })
 }
 
 #[cfg(test)]
