@@ -472,7 +472,7 @@ pub fn prepare_batch_read_args(
         }
     };
 
-    let rust_keys = py_to_keys(keys)?;
+    let rust_keys = py_to_keys(py, keys)?;
 
     let (batch_ns, batch_set) = rust_keys
         .first()
@@ -519,7 +519,7 @@ pub fn prepare_batch_operate_args(
 ) -> PyResult<BatchOperateArgs> {
     let batch_policy = parse_batch_policy(policy)?;
     let rust_ops = py_ops_to_rust(ops)?;
-    let rust_keys = py_to_keys(keys)?;
+    let rust_keys = py_to_keys(py, keys)?;
 
     let (batch_ns, batch_set) = rust_keys
         .first()
