@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [Unreleased]: https://github.com/KimSoungRyoul/aerospike-py/compare/v0.0.1.beta2...HEAD
 
+### Added
+- `LazyBatchRecords.to_list()` — positional bulk conversion returning `list[bins_dict | None]` aligned 1:1 with the request key order, materialised in a single Rust pass (same cost shape as `to_dict()`, no per-record lazy `BatchRecord.record` conversion). Slots are identified purely by position, so batches that read the same `user_key` from multiple sets do not collide (the dict views keep only one of the colliding records), and successful digest-only reads return their bins instead of being skipped. Failed reads and not-found records are `None` at their position; misses should be checked with `is None` (`{}` means found with no selected bins). On a 720-key production-shaped batch the conversion cost drops from 2.86 ms (`batch_records` loop) to 0.51 ms.
+
 ### Changed
 - `Privilege.code` (used by `admin_create_role` / `admin_grant_privileges` / `admin_revoke_privileges`) now accepts the canonical asadm-style string name in addition to the int constant. Both `{"code": aerospike_py.PRIV_READ}` and `{"code": "read"}` are valid; recognised names are `read`, `read-write`, `read-write-udf`, `write`, `truncate`, `user-admin`, `sys-admin`, `data-admin`, `udf-admin`, `sindex-admin`. Names are case-insensitive and `_` is treated as a synonym for `-`. Removes the need for downstream consumers receiving privilege codes from a wire format (HTTP forms, JSON) to maintain a name → int translation table. Closes #326.
 

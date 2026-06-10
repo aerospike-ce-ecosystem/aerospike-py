@@ -418,13 +418,20 @@ impl PyLazyBatchRecords {
     /// Positional bulk conversion: returns `list[bins_dict | None]` aligned
     /// 1:1 with the request key order (`len(result) == number of records`).
     ///
-    /// Failed reads (non-OK result code), not-found records and digest-only
-    /// entries yield `None` at their position. Conversion happens in a
-    /// single Rust pass like `to_dict` — skipping `BatchRecord` wrappers,
-    /// key tuples and meta dicts — but is **key-agnostic**, so it stays
+    /// Failed reads (non-OK result code, e.g. `FilteredOut`) and records
+    /// without a body (not-found) yield `None` at their position. Slots are
+    /// identified purely by position — **key-agnostic** — so it stays
     /// correct when the same `user_key` appears in multiple sets within one
     /// batch (the dict views collide on such keys; positional access does
-    /// not).
+    /// not), and **digest-only requests that succeed return their bins**
+    /// (the dict views must skip them for lack of a `user_key`).
+    ///
+    /// Check misses with `is None` — a found record whose selected bins are
+    /// empty (e.g. `bins=[]` header-only reads) is `{}`, not `None`. `None`
+    /// folds together not-found and per-record errors; callers that must
+    /// distinguish them should inspect `handle.batch_records[i].result`.
+    /// Conversion happens in a single Rust pass like `to_dict` — skipping
+    /// `BatchRecord` wrappers, key tuples and meta dicts.
     ///
     /// This is the recommended conversion for feature-store style callers
     /// that need request-order alignment: it replaces the

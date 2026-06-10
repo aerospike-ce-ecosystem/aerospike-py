@@ -95,10 +95,17 @@ class LazyBatchRecords:
 
         Positional bulk conversion: one Rust pass (same cost shape as
         ``to_dict``) returning a list aligned 1:1 with the request keys.
-        Failed reads, not-found records and digest-only entries are
-        ``None`` at their position. Key-agnostic, so batches that read
-        the same ``user_key`` from multiple sets do not collide (the
-        dict views keep only one of the colliding records).
+        Failed reads (non-OK result code) and records without a body
+        (not-found) are ``None`` at their position. Key-agnostic, so
+        batches that read the same ``user_key`` from multiple sets do
+        not collide (the dict views keep only one of the colliding
+        records), and digest-only requests that succeed return their
+        bins (the dict views must skip them for lack of a user key).
+
+        Check misses with ``is None`` — a found record whose selected
+        bins are empty (e.g. ``bins=[]`` header-only reads) is ``{}``,
+        not ``None``. To distinguish not-found from per-record errors,
+        inspect ``handle.batch_records[i].result``.
 
         Not cached — every call materialises a fresh list, and the
         returned bins dicts can be mutated freely.

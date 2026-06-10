@@ -436,3 +436,55 @@ class TestLazyBatchRecordsToList:
         result = client.batch_read(_seed_records).to_list()
         assert len(result) == 5
         assert result[4]["score"] == 40
+
+
+class TestLazyBatchRecordsToListEdgeCases:
+    """to_list() 의 result_code / digest-only / 빈 bins 경계 동작."""
+
+    async def test_to_list_filtered_out_is_none_slot(self, async_client, _seed_records):
+        """filter_expression 으로 일부만 통과시키면 탈락 슬롯은 None, 위치 보존.
+
+        result_code 비-OK 분기 (record 본문 없이 에러 코드만 오는 경로) 를 고정한다.
+        """
+        from aerospike_py import exp
+
+        keys = _seed_records  # score = 0,10,20,30,40
+        expr = exp.gt(exp.int_bin("score"), exp.int_val(15))
+        result = (await async_client.batch_read(keys, policy={"filter_expression": expr})).to_list()
+        assert len(result) == len(keys)
+        assert result[0] is None  # score=0 filtered
+        assert result[1] is None  # score=10 filtered
+        assert result[2] is not None and result[2]["score"] == 20
+        assert result[3] is not None and result[3]["score"] == 30
+        assert result[4] is not None and result[4]["score"] == 40
+
+    async def test_to_list_digest_only_key_returns_bins(self, async_client, _seed_records):
+        """digest-only 키 (ns, set, None, digest) 도 성공 read 면 bins 반환.
+
+        dict 뷰는 user_key 가 없어 skip 하지만 positional 은 위치로 식별하므로
+        레코드를 잃지 않는다 — to_list 의 의도된 차별 동작.
+        """
+        keys = _seed_records
+        handle = await async_client.batch_read(keys)
+        # batch_records[i].key = (ns, set, user_key, digest)
+        digest = handle.batch_records[1].key[3]
+        assert isinstance(digest, bytes) and len(digest) == 20
+
+        digest_only_key = (NS, SET, None, digest)
+        h2 = await async_client.batch_read([keys[0], digest_only_key])
+        result = h2.to_list()
+        assert len(result) == 2
+        assert result[0]["name"] == "user_0"
+        assert result[1] is not None and result[1]["name"] == "user_1"  # digest-only 성공
+        # 대조: dict 뷰는 digest-only 를 담지 못한다
+        assert len(h2.to_dict()) == 1
+
+    async def test_to_list_header_only_read_is_empty_dict_not_none(self, async_client, _seed_records):
+        """bins=[] (header-only) 읽기: found 슬롯은 {} — None(miss) 과 구분된다."""
+        keys = list(_seed_records[:2])
+        keys.append((NS, SET, "to_list_header_missing"))
+        result = (await async_client.batch_read(keys, bins=[])).to_list()
+        assert len(result) == 3
+        assert result[0] == {} and result[0] is not None
+        assert result[1] == {}
+        assert result[2] is None
