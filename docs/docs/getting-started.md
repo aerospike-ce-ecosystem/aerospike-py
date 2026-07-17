@@ -16,10 +16,10 @@ pip install aerospike-py
 
 **Requirements:** Python 3.10+ (CPython)
 
-From a source checkout, start the local Aerospike CE container with
-`make run-aerospike-ce`; it listens on `127.0.0.1:18710`. If you start
-Aerospike manually on the default service port, use `3000` in the examples
-below instead.
+If you work from a source checkout, run `make run-aerospike-ce` to start the
+local Aerospike CE container on `127.0.0.1:18710`. If you start Aerospike
+manually on its default service port, replace `18710` with `3000` in the
+examples below.
 
 ## Quick Start
 

@@ -9,7 +9,7 @@ description: Atomic server-side List (31 ops) and Map (27 ops) collection data t
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-`client.operate()` 를 통한 atomic server-side collection data type (CDT) operation.
+`client.operate()`로 서버에서 원자적으로 실행하는 collection data type(CDT) operation을 설명합니다.
 
 ```python
 from aerospike_py import list_operations as list_ops
@@ -22,7 +22,7 @@ import aerospike_py as aerospike
 
 ## List CDT Operations
 
-각 `list_ops.*` function 은 `client.operate()` 또는 `client.operate_ordered()` 에 전달할 operation dict 를 반환:
+각 `list_ops.*` 함수는 `client.operate()` 또는 `client.operate_ordered()`에 전달할 operation dict를 반환합니다.
 
 ```python
 ops = [

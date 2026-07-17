@@ -11,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 ## Key
 
-모든 record 는 key tuple `(namespace, set, primary_key)` 로 식별:
+모든 record는 `(namespace, set, primary_key)` key tuple로 식별합니다.
 
 ```python
 key = ("test", "demo", "user1")      # string PK
@@ -64,7 +64,7 @@ if result.meta is not None:
 
 ## Batch Read
 
-다수 record 를 단일 네트워크 호출로 read.
+여러 record를 한 번의 network call로 읽습니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -104,6 +104,6 @@ for user_key, bins in batch.items():
 
 ## 팁
 
-- **Batch size**: batch 당 100-5,000 key 가 최적. 너무 크면 timeout 가능.
-- **Timeout**: 큰 batch operation 의 경우 `total_timeout` 증가.
-- **Error handling**: 개별 batch record 는 독립적으로 실패 가능. `br.record` 가 `None` 인지 항상 확인.
+- **Batch size**: batch당 100–5,000개 key를 권장합니다. Batch가 너무 크면 timeout이 발생할 수 있습니다.
+- **Timeout**: 큰 batch operation에는 더 긴 `total_timeout`을 사용하세요.
+- **Error handling**: 각 batch record는 독립적으로 실패할 수 있습니다. 항상 `br.record`가 `None`인지 확인하세요.

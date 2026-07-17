@@ -11,16 +11,16 @@ import TabItem from '@theme/TabItem';
 
 ## 개요
 
-`batch_write_numpy()` 는 **numpy structured array** 로부터 Aerospike 에 다수 record 를 직접 write. 각 row 가 별도의 write operation 이 되며, dtype field 가 Aerospike bin 으로 매핑됨.
+`batch_write_numpy()`는 **NumPy structured array**에서 Aerospike로 record를 직접 씁니다. 각 row는 하나의 write operation이 되고, 각 dtype field는 Aerospike bin에 매핑됩니다.
 
-- **Array-to-record 직접 매핑** — 중간 Python dict 나 loop 없음
-- **Key field 추출** — 지정된 dtype field (default `_key`) 가 record 의 user key 로 사용
-- **자동 bin 매핑** — `_` prefix 없는 모든 field 가 bin 이 됨
-- **Batch 실행** — 모든 row 가 single batch 호출로 write
+- **Array-to-record 직접 매핑** — 중간 Python dict나 loop를 만들지 않습니다.
+- **Key field 추출** — 지정한 dtype field(기본값 `_key`)를 record의 user key로 사용합니다.
+- **자동 bin 매핑** — 이름이 `_`로 시작하지 않는 모든 field가 bin이 됩니다.
+- **Batch 실행** — 모든 row를 한 번의 batch call로 씁니다.
 
 :::tip[언제 쓰나]
 
-데이터가 이미 numpy array 일 때 `batch_write_numpy()` 사용 (예: ML feature store, sensor 데이터 pipeline, scientific dataset). 일반 Python dict 의 경우 `put()` 또는 표준 batch operation 사용.
+데이터가 이미 NumPy array에 있다면 `batch_write_numpy()`를 사용하세요. ML feature store, sensor data pipeline, scientific dataset이 대표적인 예입니다. Python dict를 쓸 때는 `put()`이나 표준 batch operation을 사용합니다.
 
 :::
 
@@ -131,7 +131,7 @@ numpy structured array             Aerospike
 ```
 
 1. `key_field` (default `"_key"`) column 이 각 record 의 user key 로 추출됨
-2. `_` 로 prefix 되지 **않은** 모든 field 가 Aerospike bin 이 됨
+2. `_`로 시작하지 **않은** 나머지 field는 Aerospike bin이 됩니다.
 3. `_` 로 prefix 된 field (key field 외) 는 무시됨
 
 ## Key Field
@@ -422,7 +422,7 @@ results = client.batch_write_numpy(data, "test", "users", dtype)
 
 ## Transient 실패에 대한 Retry
 
-`retry > 0` 이면 transient error (timeout, device overload, key busy, server memory, partition unavailable) 로 실패한 record 가 exponential backoff 로 자동 재시도. 영구 error (key exists, record too big) 는 절대 retry 안 함.
+`retry > 0`이면 transient error(timeout, device overload, key busy, server memory, partition unavailable)가 발생한 record를 exponential backoff로 자동 재시도합니다. Key exists나 record too big 같은 영구 error는 재시도하지 않습니다.
 
 ```python
 # transient 실패 시 최대 3회 retry
@@ -434,10 +434,10 @@ for br in results.batch_records:
         print(f"Write failed for key {br.key} after retries (code={br.result})")
 ```
 
-Backoff 스케줄은 시도 사이 10ms, 20ms, 40ms, ... 로 500ms 에서 cap. 매 retry 마다 실패한 record 만 재제출 (전체 batch 아님).
+Retry 간격은 10 ms에서 시작해 20 ms, 40 ms 순으로 늘어나며 최대 500 ms입니다. 매 retry에서는 전체 batch가 아니라 실패한 record만 다시 보냅니다.
 
 :::tip
-간헐적 transient 실패가 예상되는 대형 bulk ingestion 에선 `retry=3` 이 좋은 시작점. application 안에서 retry 로직을 full control 하고 싶을 땐 `retry=0` (default).
+대규모 bulk ingestion에서 간헐적인 transient failure가 예상된다면 `retry=3`부터 시작하세요. Application에서 retry logic을 직접 제어하려면 기본값인 `retry=0`을 사용합니다.
 :::
 
 ## Error Handling
@@ -456,11 +456,11 @@ except AerospikeError as e:
 
 ## Best Practice
 
-- **dtype 을 데이터에 맞춤** — 메모리와 네트워크 전송 절감 위해 충분한 최소 dtype 사용 (`"f8"` 대신 `"f4"`, `"i8"` 대신 `"i2"`)
-- **Batch size** — 최적 성능을 위해 호출당 100-5,000 row 유지
-- **Key field 규약** — 컨벤션 일관성 위해 default key field 로 `"_key"` 사용
+- **dtype을 데이터에 맞추기** — 메모리 사용량과 네트워크 전송량을 줄이려면 데이터를 표현할 수 있는 가장 작은 dtype을 사용하세요(`"f8"` 대신 `"f4"`, `"i8"` 대신 `"i2"`).
+- **Batch size** — 호출 하나에 100~5,000개 row를 넣을 때 성능이 가장 좋습니다.
+- **Key field 규칙** — 일관성을 위해 기본 key field인 `"_key"`를 사용하세요.
 - **Underscore prefix** — `_` 로 시작하는 field 는 bin 에서 제외, metadata field 에 활용
-- **batch_read 로 roundtrip** — 효율적 read-back 을 위해 동일 dtype field (`_key` 제외) 로 `batch_read(...).to_numpy(dtype)` 사용 (buffer fill 이 GIL released 상태로 실행)
+- **`batch_read`로 다시 읽기** — 같은 dtype에서 `_key`를 제외한 field를 사용해 `batch_read(...).to_numpy(dtype)`를 호출하세요. GIL을 해제한 상태에서 buffer를 채우므로 효율적입니다.
 - **대형 dataset** — 큰 array 를 chunk 로 나눠 batch 단위 write:
 
 ```python

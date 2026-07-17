@@ -8,7 +8,7 @@ description: TL;DR — measured latency, throughput, and Python 3.14t gains for 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-Measured benchmarks comparing **aerospike-py** (Rust/PyO3, native async) against the **official `aerospike` Python client** (C extension wrapped with `loop.run_in_executor`).
+These benchmarks compare **aerospike-py** (Rust, PyO3, and native async) with the **official `aerospike` Python client** (a C extension wrapped with `loop.run_in_executor`).
 
 :::tip TL;DR — cumulative effect on DLRM-serving p95
 **324 ms → 97 ms (−70%)** by stacking 3 actions: switch client → batch_read consolidation → Python 3.14t.
@@ -37,12 +37,12 @@ Setup: FastAPI + DLRM + Aerospike CE, k6 10 VUs × 60s, 2 replicas (4 CPU / 4 Gi
 
 ## Pick your environment (Python 3.11 + GIL)
 
-The thinner the surrounding stack, the larger the gap. Tail-latency advantage survives even in production-shaped workloads.
+A thinner application stack makes the client-level difference easier to see. The tail-latency advantage remains visible in production-shaped workloads.
 
 <Tabs>
   <TabItem value="dlrm" label="C — uvicorn + DLRM (real serving)" default>
 
-Full HTTP → batch_read → DLRM CPU inference → response. Closest to a real recsys serving pod.
+This environment covers the full path from HTTP through `batch_read` and DLRM CPU inference to the response. It most closely resembles a recommendation-serving pod.
 
 | Metric | aerospike-py | official | aerospike-py advantage |
 |---|---:|---:|---:|
@@ -67,7 +67,7 @@ FastAPI + uvicorn around `batch_read`, no model inference. The "REST API in fron
   </TabItem>
   <TabItem value="pure" label="A — Pure DB client (no HTTP/ML)">
 
-Python loop drives `batch_read` directly. Largest gap — surrounding stack is as thin as possible.
+A Python loop calls `batch_read` directly. With no HTTP or ML layers, this environment shows the largest client-level difference.
 
 | Metric | aerospike-py | official | advantage |
 |---|---:|---:|---:|
@@ -85,7 +85,7 @@ Python loop drives `batch_read` directly. Largest gap — surrounding stack is a
 | Page | When to read it |
 |---|---|
 | **[Isolated Benchmark](./isolated-benchmark)** | "How much of the gap belongs to the client library itself?" — 5 scenarios (s1..s5) on a local podman/oha harness, response serialisation stripped out. Each scenario isolates one materialisation path (dict / `to_numpy` zero-copy / gather vs single / lazy subset). Includes a 3.14t section. |
-| **[Production Benchmark](./production-benchmark)** | "What do real serving pods see?" — FastAPI + DLRM + Aerospike CE on k8s, k6 load, response body serialised, two replicas. The headline 324→189→97 ms cumulative-gain story. Includes a 3.14t section. |
+| **[Production Benchmark](./production-benchmark)** | "What do real serving pods see?" — FastAPI + DLRM + Aerospike CE on k8s, k6 load, response body serialised, and two replicas. Shows how the measured p95 falls from 324 to 189 to 97 ms as the changes accumulate. Includes a 3.14t section. |
 | **[Bottleneck Analysis](./bottleneck-analysis)** | Internal stage profiling and recipes (`gather→single`, etc.). Currently being re-measured on the new isolated harness. |
 
 To reproduce locally, see `benchmark/README.md`.

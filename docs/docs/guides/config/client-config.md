@@ -66,14 +66,14 @@ config: ClientConfig = {
 }
 ```
 
-- `max_conns_per_node`: Match to expected concurrent requests per node
-- `min_conns_per_node`: Avoid cold-start latency
-- `conn_pools_per_node`: Number of connection pools per node. Machines with 8 or fewer CPU cores typically need only 1. On machines with more cores, increasing this value reduces lock contention on pooled connections
-- `idle_timeout`: Keep below server `proto-fd-idle-ms` (default 60s)
+- `max_conns_per_node`: Match this to the expected number of concurrent requests per node.
+- `min_conns_per_node`: Pre-warm connections to avoid cold-start latency.
+- `conn_pools_per_node`: Use one pool on machines with eight or fewer CPU cores. On larger machines, additional pools can reduce connection-pool lock contention.
+- `idle_timeout`: Keep this below the server's `proto-fd-idle-ms` value, which defaults to 60 seconds.
 
 ## Backpressure
 
-When running many concurrent operations (e.g., `asyncio.gather` with hundreds of tasks), the upstream connection pool can be exhausted, causing `NoMoreConnections` errors. Backpressure limits how many operations are in-flight simultaneously:
+Hundreds of concurrent operations, such as a large `asyncio.gather`, can exhaust the connection pool and raise `NoMoreConnections`. Backpressure prevents this by limiting the number of in-flight operations:
 
 ```python
 config: ClientConfig = {
@@ -147,7 +147,7 @@ async def health():
     return {"status": "ok" if ok else "degraded"}
 ```
 
-The background **tend** process (configured via `tend_interval`, default 1000 ms) automatically monitors cluster membership and connection health. `ping()` complements this by providing on-demand verification.
+The background **tend** process monitors cluster membership and connection health. It runs every 1,000 ms by default, as configured by `tend_interval`. Use `ping()` when you also need an immediate liveness check.
 
 ## Sync vs Async
 
@@ -189,5 +189,6 @@ finally:
   </TabItem>
 </Tabs>
 
-**Use async for:** High-concurrency web servers, fan-out reads, mixed I/O.
-**Sync is fine for:** Scripts, batch jobs, sequential pipelines.
+**Use async for:** high-concurrency web servers, fan-out reads, and mixed I/O.
+
+**Use sync for:** scripts, batch jobs, and sequential pipelines.

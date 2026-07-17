@@ -6,7 +6,7 @@ slug: /guides/admin
 description: User and role management for security-enabled Aerospike clusters.
 ---
 
-Requires a security-enabled Aerospike server.
+These operations require an Aerospike server with security enabled.
 
 ## User Management
 

@@ -68,7 +68,7 @@ from aerospike_py.exception import RecordNotFound, RecordExistsError
 ```
 
 :::note[Exception Rename]
-Python builtin shadow 방지를 위해 `TimeoutError` → `AerospikeTimeoutError`, `IndexError` → `AerospikeIndexError`. 옛 이름은 deprecated alias 로 동작.
+Python built-in 이름과 겹치지 않도록 `TimeoutError`는 `AerospikeTimeoutError`로, `IndexError`는 `AerospikeIndexError`로 바뀌었습니다. 이전 이름도 deprecated alias로 동작합니다.
 :::
 
 ## CDT, Expressions, Query — 호환
@@ -92,7 +92,7 @@ records = query.results()
 
 ## Async Client (신규)
 
-공식 client 에 없는 기능:
+공식 client에는 없는 기능입니다.
 
 ```python
 import asyncio

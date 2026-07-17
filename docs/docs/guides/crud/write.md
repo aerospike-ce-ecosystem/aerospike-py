@@ -141,7 +141,7 @@ result = await client.operate_ordered(key, ops)
 
 ## Batch Write
 
-Write multiple records with **per-record bins** in a single batch call. This is the batch version of `put()` — each record can have different bin names and values.
+Use one batch call to write multiple records with **per-record bins**. Like `put()`, each record may use different bin names and values.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -226,7 +226,7 @@ results = await client.batch_write(records_with_ttl)
   </TabItem>
 </Tabs>
 
-**Retry with auto-recovery:** Records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff:
+**Automatic retries:** Set `retry` to retry transient failures such as timeouts, device overload, or busy keys with exponential backoff:
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -248,7 +248,7 @@ results = await client.batch_write(records, retry=5)
 </Tabs>
 
 :::tip[in_doubt flag]
-When `br.in_doubt` is `True`, the write may have completed on the server despite the error (e.g., timeout after the write was sent). Check `in_doubt` before retrying to avoid duplicate writes on non-idempotent operations.
+When `br.in_doubt` is `True`, the server may have completed the write before the error occurred. A timeout after sending the write is one example. Check `in_doubt` before retrying a non-idempotent operation so you do not apply it twice.
 :::
 
 ## Batch Operate / Remove

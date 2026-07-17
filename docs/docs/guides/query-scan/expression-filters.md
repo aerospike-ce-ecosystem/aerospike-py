@@ -6,7 +6,7 @@ slug: /guides/expression-filters
 description: Server-side record filtering with 104+ composable expression functions.
 ---
 
-Server-side filtering during read, write, and query operations. The server evaluates the expression and only returns (or modifies) matching records.
+Expression filters apply to read, write, and query operations. The server evaluates each expression and returns or modifies only matching records.
 
 :::note[Server Requirement]
 Expression filters require Aerospike Server **5.2+**.

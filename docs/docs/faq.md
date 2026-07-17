@@ -6,11 +6,11 @@ description: Frequently asked questions about aerospike-py.
 
 ## Why is aerospike-py written in Rust?
 
-aerospike-py wraps the [Aerospike Rust Client](https://github.com/aerospike/aerospike-client-rust) using [PyO3](https://pyo3.rs/) bindings, which gives several advantages over a pure-Python or C-extension approach:
+aerospike-py uses [PyO3](https://pyo3.rs/) to expose the [Aerospike Rust Client](https://github.com/aerospike/aerospike-client-rust) to Python. This design offers several advantages over a pure-Python client or a C extension:
 
 - **Performance** -- Rust compiles to native code. Benchmarks show throughput on par with (or better than) the official C-based client, especially for batch and async workloads.
 - **Memory safety** -- Rust's ownership model eliminates whole classes of bugs (use-after-free, buffer overflows, data races) without a garbage collector.
-- **Native async** -- The underlying client is built on Tokio, a production-grade async runtime. This makes the `AsyncClient` a first-class citizen rather than an afterthought.
+- **Native async** -- The underlying client runs on Tokio. `AsyncClient` therefore uses native async I/O instead of wrapping synchronous calls.
 - **Zero Python dependencies** -- The base install (`pip install aerospike-py`) has no external Python dependencies. NumPy and OpenTelemetry are optional extras.
 
 ## How does GIL handling work?
@@ -22,7 +22,7 @@ aerospike-py releases the Python Global Interpreter Lock (GIL) during all databa
 | **Sync `Client`** | `py.detach()` releases the GIL, then `RUNTIME.block_on()` runs the async Rust operation on the internal Tokio runtime. The GIL is re-acquired when the result is returned. |
 | **Async `AsyncClient`** | `future_into_py()` returns a Python awaitable. The actual work runs on the Tokio runtime without holding the GIL. When the future completes, `Python::attach()` re-acquires the GIL to hand the result back. |
 
-In both cases, the GIL is **not held** while the request travels to the Aerospike cluster, which means Python threads (or other async tasks) are free to run concurrently.
+In both cases, the request travels to the Aerospike cluster without holding the GIL. Other Python threads or async tasks can run concurrently.
 
 ## Is aerospike-py thread-safe?
 
@@ -52,7 +52,7 @@ client.close()
 
 Yes. aerospike-py builds and runs on the experimental free-threaded CPython (PEP 703). CI runs unit tests **and** concurrency stress tests on Python 3.14t to verify correctness without the GIL.
 
-Because the core logic lives in Rust -- which has its own memory safety guarantees -- the library is inherently safe even when the GIL is removed entirely.
+The core logic runs in Rust and relies on Rust's memory-safety guarantees. It remains safe when Python removes the GIL entirely.
 
 ## Is NumPy required?
 
@@ -66,11 +66,11 @@ pip install aerospike-py
 pip install aerospike-py[numpy]
 ```
 
-When NumPy is installed, you gain access to `LazyBatchRecords.to_numpy(dtype)` (the `batch_read()` return value), which produces a `NumpyBatchRecords` backed by a NumPy structured array — the buffer fill runs with the GIL released, so the result hands straight to `torch.from_numpy(...)` zero-copy. `batch_write_numpy()` performs the inverse direction for bulk writes from structured arrays. All other functionality works identically without NumPy.
+With NumPy installed, call `LazyBatchRecords.to_numpy(dtype)` on the value returned by `batch_read()`. It produces `NumpyBatchRecords` backed by a NumPy structured array. The client fills the buffer with the GIL released, and you can pass the result directly to `torch.from_numpy(...)` without copying it. Use `batch_write_numpy()` for bulk writes from structured arrays. All other features work without NumPy.
 
 ## Can I migrate from the official C client?
 
-Yes. aerospike-py is designed as a near-drop-in replacement. The import alias pattern makes the transition straightforward:
+Yes. aerospike-py is designed as a near-drop-in replacement. Start by changing the import:
 
 ```python
 # Before
@@ -136,4 +136,4 @@ Open an issue on the GitHub repository:
 - **Bug reports:** [github.com/aerospike-ce-ecosystem/aerospike-py/issues/new](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/new)
 - **Feature requests:** Same link -- use the "Feature Request" template if available.
 
-Please include your Python version, OS, aerospike-py version (`aerospike_py.__version__`), and a minimal reproduction when reporting bugs.
+For a bug report, include your Python version, operating system, aerospike-py version (`aerospike_py.__version__`), and a minimal reproduction.

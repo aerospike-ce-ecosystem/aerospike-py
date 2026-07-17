@@ -6,7 +6,7 @@ slug: /guides/admin
 description: User and role management for security-enabled Aerospike clusters.
 ---
 
-security-enabled Aerospike server 가 필요합니다.
+이 기능을 사용하려면 security가 활성화된 Aerospike server가 필요합니다.
 
 ## User Management
 
@@ -65,8 +65,8 @@ client.admin_drop_role("data_reader")
 
 ## Privilege Code
 
-`code` 는 int 상수 또는 canonical string 이름 (asadm 스타일) 둘 다 허용.
-이름은 case-insensitive 로 매칭, `_` 는 `-` 의 동의어
+`code`에는 int 상수 또는 asadm에서 사용하는 표준 string 이름을 지정할 수 있습니다.
+이름은 대소문자를 구분하지 않으며 `_`와 `-`를 같은 문자로 처리합니다.
 (`"sys_admin"` == `"sys-admin"`).
 
 | Constant | Name | 설명 |

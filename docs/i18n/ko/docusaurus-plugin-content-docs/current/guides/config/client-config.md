@@ -42,7 +42,7 @@ client = aerospike.client(config).connect()
 
 ## Multi-Node Cluster
 
-client 는 도달 가능한 어떤 seed 에서든 모든 node 를 discover:
+Client는 연결할 수 있는 seed 하나를 통해 cluster의 모든 node를 찾습니다.
 
 ```python
 config: ClientConfig = {
@@ -66,14 +66,14 @@ config: ClientConfig = {
 }
 ```
 
-- `max_conns_per_node`: node 당 예상 동시 request 수에 맞춤
-- `min_conns_per_node`: cold-start latency 회피
-- `conn_pools_per_node`: node 당 connection pool 수. 8 이하 CPU core 머신은 보통 1 로 충분. 더 많은 core 머신은 값을 늘리면 pooled connection 의 lock contention 감소
-- `idle_timeout`: server `proto-fd-idle-ms` (default 60s) 보다 낮게 유지
+- `max_conns_per_node`: node당 예상 동시 request 수에 맞춥니다.
+- `min_conns_per_node`: connection을 미리 열어 cold-start latency를 줄입니다.
+- `conn_pools_per_node`: CPU core가 8개 이하인 machine에서는 보통 1이면 충분합니다. Core가 더 많다면 값을 늘려 connection pool의 lock contention을 줄일 수 있습니다.
+- `idle_timeout`: server의 `proto-fd-idle-ms`보다 낮게 설정합니다. 기본값은 60초입니다.
 
 ## Backpressure
 
-다수의 concurrent operation 을 실행할 때 (예: 수백 task 의 `asyncio.gather`) upstream connection pool 이 exhaust 되어 `NoMoreConnections` error 발생 가능. Backpressure 는 동시 in-flight operation 수를 제한:
+수백 개 task를 `asyncio.gather`로 실행하면 connection pool이 고갈되어 `NoMoreConnections`가 발생할 수 있습니다. Backpressure는 동시에 실행할 수 있는 operation 수를 제한해 이를 방지합니다.
 
 ```python
 config: ClientConfig = {
@@ -130,10 +130,10 @@ version: str = client.info_random_node("build")
 
 ## Health Check
 
-client 가 cluster health 를 확인하는 두 가지 방법 제공:
+Client는 두 가지 방법으로 cluster health를 확인합니다.
 
 - **`is_connected()`** — 로컬 상태만 확인 (I/O 없음). 빠르지만 cluster 가 일시적으로 도달 불가여도 `True` 반환 가능.
-- **`ping()`** — 임의 node 에 가벼운 `info("build")` command 전송. liveness 검증 위해 실제 네트워크 round-trip 수행. node 응답 시 `True`, 아니면 `False` 반환 (raise 안 함).
+- **`ping()`** — 임의의 node에 가벼운 `info("build")` command를 보내 실제 network round trip으로 liveness를 확인합니다. Node가 응답하면 `True`, 응답하지 않으면 exception 대신 `False`를 반환합니다.
 
 ```python
 # Kubernetes readiness probe / load-balancer health check
@@ -147,7 +147,7 @@ async def health():
     return {"status": "ok" if ok else "degraded"}
 ```
 
-백그라운드 **tend** 프로세스 (`tend_interval` 로 설정, default 1000 ms) 가 cluster membership 과 connection health 를 자동 모니터링. `ping()` 은 on-demand 검증으로 이를 보완.
+백그라운드 **tend** process는 cluster membership과 connection health를 자동으로 확인합니다. `tend_interval`의 기본값은 1,000 ms입니다. 즉시 상태를 확인해야 할 때는 `ping()`을 함께 사용하세요.
 
 ## Sync vs Async
 
@@ -189,5 +189,6 @@ finally:
   </TabItem>
 </Tabs>
 
-**Async 사용 적합:** 고동시성 web server, fan-out read, 혼합 I/O.
-**Sync 도 충분:** script, batch job, sequential pipeline.
+**Async가 적합한 경우:** 동시성이 높은 web server, fan-out read, 여러 종류의 I/O를 함께 처리하는 workload.
+
+**Sync가 적합한 경우:** script, batch job, 순차 pipeline.

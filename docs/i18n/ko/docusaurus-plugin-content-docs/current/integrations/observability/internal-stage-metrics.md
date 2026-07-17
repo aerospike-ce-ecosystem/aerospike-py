@@ -5,11 +5,11 @@ sidebar_position: 4
 description: Fine-grained per-stage timing for debugging aerospike-py latency, with zero production overhead when disabled.
 ---
 
-aerospike-py 는 `db_client_operation_duration_seconds` 옆에 두 번째, 더 세분화된 histogram 을 노출합니다:
+`db_client_operation_duration_seconds`와 함께 더 세밀한 timing을 제공하는 두 번째 histogram도 사용할 수 있습니다.
 
 **`db_client_internal_stage_seconds`** — 단일 `batch_read` 를 내부 stage 별로 쪼개는 histogram (key parsing, Tokio scheduling, I/O, `to_dict` / `to_numpy` 변환, event-loop resume 등).
 
-운영용 metric 은 항상 켜져 있지만, internal stage profiling 은 **기본 off**. 비활성 상태에서는 모든 stage timer 호출 지점이 `Instant::now()` 를 완전히 skip — 비활성 path 비용은 batch 당 single atomic load (~1ns) 수준.
+운영 metric은 항상 활성화되지만 internal stage profiling은 **기본적으로 꺼져 있습니다**. 비활성 path에서는 각 timer가 `Instant::now()`를 건너뛰고 atomic load 한 번만 실행합니다. Batch당 비용은 약 1 ns입니다.
 
 ## Quick Start
 
@@ -38,7 +38,7 @@ with aerospike_py.internal_stage_profiling():
 | `aerospike_py.set_internal_stage_metrics_enabled(True)` | 애플리케이션 코드에서 런타임 토글. |
 | `with aerospike_py.internal_stage_profiling(): ...` | 일시적 — exit 시 이전 상태 복원. |
 
-env var 는 native module init 시 1회 읽음. 런타임 호출이 env var 보다 우선.
+Native module은 초기화할 때 env var를 한 번 읽습니다. 이후 runtime call을 사용하면 env var 값을 덮어씁니다.
 
 ## `db_client_internal_stage_seconds`
 
@@ -80,7 +80,7 @@ Stage profiling 은 측정 가능한 latency 를 추가합니다: 각 `batch_rea
 | p95 | 4.67 ms | 7.61 ms | +2.94 ms |
 | p99 | 4.93 ms | 9.51 ms | +4.58 ms |
 
-production 에선 **off** 로 두고 latency regression 을 능동적으로 추적할 때만 flip on.
+Production에서는 **꺼 둡니다**. Latency regression을 조사할 때만 활성화하세요.
 
 ## Scraping 과 Visualization
 
@@ -95,7 +95,7 @@ histogram_quantile(
 )
 ```
 
-모든 stage 의 stacked timeseries 로 각 `batch_read` 가 시간을 어디 쓰는지 한눈에 파악:
+모든 stage를 stacked time series로 표시하면 `batch_read`가 어느 단계에서 시간을 쓰는지 바로 확인할 수 있습니다.
 
 ```promql
 sum by (stage, db_operation_name) (
@@ -113,7 +113,7 @@ sum by (stage, db_operation_name) (
 [aerospike-py] internal_stage_metrics_enabled=False (AEROSPIKE_PY_INTERNAL_METRICS=None)
 ```
 
-dashboard 가시성을 위해 본인 앱에서 Prometheus gauge 로 publish 도 가능:
+Dashboard에서 확인하려면 애플리케이션이 이 값을 Prometheus gauge로 내보내도록 구성할 수도 있습니다.
 
 ```python
 from prometheus_client import Gauge
@@ -127,7 +127,7 @@ g.set(1 if aerospike_py.is_internal_stage_metrics_enabled() else 0)
 ## Troubleshooting
 
 **`db_client_internal_stage_seconds` 가 `/metrics` 에는 보이는데 sample 이 없음**
-`# HELP` / `# TYPE` header 는 항상 등록됨; sample 은 toggle 이 ON 이고 **그리고** `batch_read` 가 실제로 완료된 후에만 나타남.
+`# HELP`와 `# TYPE` header는 항상 등록됩니다. Sample은 toggle을 켠 상태에서 `batch_read`가 한 번 이상 끝난 뒤에 나타납니다.
 
 **context-manager block 에서 exception 발생 — flag 가 아직 ON?**
 아니요. `internal_stage_profiling()` 이 `finally` 로 이전 상태 복원, `contextlib.contextmanager` 의미와 동일.

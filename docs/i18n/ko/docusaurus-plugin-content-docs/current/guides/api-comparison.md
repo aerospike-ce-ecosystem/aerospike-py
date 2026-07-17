@@ -6,7 +6,7 @@ slug: /guides/api-comparison
 description: Side-by-side API comparison between the official C-based client and aerospike-py.
 ---
 
-**공식 C-based client** (PyPI `aerospike`) 와 **aerospike-py** (Rust-based) 의 포괄 비교. Migration 단계는 [Migration Guide](/docs/guides/migration) 참조.
+이 문서는 **공식 C 기반 client**(PyPI의 `aerospike`)와 Rust 기반 **aerospike-py**를 비교합니다. 단계별 이전 방법은 [Migration Guide](/docs/guides/migration)를 참고하세요.
 
 ## Connection
 
@@ -44,8 +44,8 @@ description: Side-by-side API comparison between the official C-based client and
 | Batch get | `client.get_many(keys)` | `client.batch_read(keys)` | **Method 명 변경**; sync 와 async 둘 다 `LazyBatchRecords` 반환 — materialise 하려면 `.to_dict()` 또는 `.to_numpy(dtype)` 호출 |
 | Batch exists | `client.exists_many(keys)` | `client.batch_read(keys, bins=[])` | existence check 용으로 빈 `bins` list |
 | Batch select | `client.select_many(keys, bins)` | `client.batch_read(keys, bins=bins)` | `batch_read` 로 통합 |
-| Batch operate | `client.batch_operate(keys, ops)` | `client.batch_operate(keys, ops)` | 동일; 공식 client 는 `aerospike_helpers` 사용 |
-| Batch remove | `client.batch_remove(keys)` | `client.batch_remove(keys)` | 동일; 공식 client 는 `aerospike_helpers` 사용 |
+| Batch operate | `client.batch_operate(keys, ops)` | `client.batch_operate(keys, ops)` | API는 같지만 공식 client는 `aerospike_helpers` 사용 |
+| Batch remove | `client.batch_remove(keys)` | `client.batch_remove(keys)` | API는 같지만 공식 client는 `aerospike_helpers` 사용 |
 | Batch read (NumPy) | N/A | `client.batch_read(keys).to_numpy(dt)` | **aerospike-py 신규** |
 | Batch write (NumPy) | N/A | `client.batch_write_numpy(data, ...)` | **aerospike-py 신규** |
 

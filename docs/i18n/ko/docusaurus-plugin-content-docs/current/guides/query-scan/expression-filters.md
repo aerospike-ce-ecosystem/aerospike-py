@@ -6,10 +6,10 @@ slug: /guides/expression-filters
 description: Server-side record filtering with 104+ composable expression functions.
 ---
 
-read, write, query operation 동안 server-side filtering. server 가 expression 을 평가하여 매칭되는 record 만 반환 (또는 수정).
+Expression filter는 read, write, query operation에 적용할 수 있습니다. Server가 expression을 평가해 조건에 맞는 record만 반환하거나 수정합니다.
 
 :::note[서버 요구사항]
-Expression filter 는 Aerospike Server **5.2+** 필요.
+Expression filter를 사용하려면 Aerospike Server **5.2 이상**이 필요합니다.
 :::
 
 ## Import

@@ -5,7 +5,7 @@ sidebar_position: 1
 description: Rust-to-Python logging bridge for observing Aerospike client internals.
 ---
 
-Built-in **Rust-to-Python logging bridge** that forwards all internal Rust logs to Python's `logging` module. Initialized automatically on import.
+aerospike-py includes a **Rust-to-Python logging bridge**. It forwards internal Rust logs to Python's `logging` module and initializes automatically when you import the package.
 
 ## Quick Start
 
@@ -124,7 +124,7 @@ for name in ["aerospike_core", "aerospike_py"]:
 
 ## Shutdown Fallback
 
-When the Python GIL is unavailable (e.g., during interpreter shutdown), the logging bridge cannot forward messages to Python. In this case:
+The logging bridge cannot forward messages when the Python GIL is unavailable, such as during interpreter shutdown. In that case:
 
 - **WARN and ERROR** messages are emitted to **stderr** so critical diagnostics are not lost
 - **INFO, DEBUG, TRACE** messages are silently dropped

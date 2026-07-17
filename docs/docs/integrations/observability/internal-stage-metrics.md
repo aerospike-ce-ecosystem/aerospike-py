@@ -5,11 +5,11 @@ sidebar_position: 4
 description: Fine-grained per-stage timing for debugging aerospike-py latency, with zero production overhead when disabled.
 ---
 
-aerospike-py exposes a second, more granular histogram alongside `db_client_operation_duration_seconds`:
+Alongside `db_client_operation_duration_seconds`, aerospike-py exposes a second histogram with finer-grained timing:
 
 **`db_client_internal_stage_seconds`** — a histogram that breaks a single `batch_read` down into its internal stages (key parsing, Tokio scheduling, I/O, `to_dict` / `to_numpy` conversion, event-loop resume, etc.).
 
-Unlike operational metrics which are always on, internal stage profiling is **off by default**. When disabled, every stage timer call site skips `Instant::now()` entirely — the disabled path costs a single atomic load (~1ns per batch).
+Operational metrics are always enabled, but internal stage profiling is **off by default**. In the disabled path, each timer skips `Instant::now()` and performs only one atomic load, which costs about 1 ns per batch.
 
 ## Quick Start
 
@@ -38,7 +38,7 @@ with aerospike_py.internal_stage_profiling():
 | `aerospike_py.set_internal_stage_metrics_enabled(True)` | Runtime toggle from application code. |
 | `with aerospike_py.internal_stage_profiling(): ...` | Temporary — restores the previous state on exit. |
 
-The env var is read once during native module init. Runtime calls win over the env var.
+The native module reads the environment variable once during initialization. A later runtime call overrides that value.
 
 ## `db_client_internal_stage_seconds`
 
@@ -80,7 +80,7 @@ Stage profiling adds measurable latency: each `batch_read` pays ~10× `Instant::
 | p95 | 4.67 ms | 7.61 ms | +2.94 ms |
 | p99 | 4.93 ms | 9.51 ms | +4.58 ms |
 
-Leave it **off in production**, and flip it on only when you are actively hunting a latency regression.
+Leave profiling **off in production**. Enable it only while investigating a latency regression.
 
 ## Scraping and Visualization
 
@@ -95,7 +95,7 @@ histogram_quantile(
 )
 ```
 
-A stacked timeseries of all stages gives you a quick view of where each `batch_read` is spending its time:
+A stacked time series of all stages shows where each `batch_read` spends its time:
 
 ```promql
 sum by (stage, db_operation_name) (

@@ -9,12 +9,12 @@ description: Use batch_read with numpy structured arrays for high-performance co
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-`batch_read(...).to_numpy(dtype)` returns a **numpy structured array** instead of Python objects:
+`batch_read(...).to_numpy(dtype)` materializes batch results as a **NumPy structured array** instead of per-record Python objects:
 
-- **Zero-copy columnar access** -- `batch.batch_records["temperature"]` returns a numpy array; pair with `torch.from_numpy(...)` for an O(1) tensor hand-off
-- **GIL released during fill** -- the per-record `Value → buffer` writes happen with the GIL dropped, so other asyncio tasks / threads can run concurrently
-- **Vectorized computation** -- use numpy/pandas directly on results
-- **Memory efficiency** -- Rust writes directly into numpy buffer, bypassing Python objects
+- **Zero-copy column access** -- `batch.batch_records["temperature"]` returns a NumPy array. Pass it to `torch.from_numpy(...)` for an O(1) tensor handoff.
+- **GIL-free buffer fill** -- The client writes each `Value` to the buffer with the GIL released, so other asyncio tasks and threads can run.
+- **Vectorized computation** -- Use NumPy or pandas directly on the results.
+- **Lower object overhead** -- Rust writes into the NumPy buffer without creating a Python object for every value.
 
 :::tip[Performance]
 For 10K records with 5 bins, this eliminates ~60K intermediate Python objects compared to materialising via `lazy_records.to_dict()`.
@@ -116,11 +116,11 @@ asyncio.run(main())
 
 ## NumpyBatchRecords
 
-Call `.to_numpy(dtype)` on the `LazyBatchRecords` that `batch_read()` returns to get a `NumpyBatchRecords` object. The structured-array fill runs with the GIL released so the result hands directly to `torch.from_numpy(...)` zero-copy:
+Call `.to_numpy(dtype)` on the `LazyBatchRecords` returned by `batch_read()` to create a `NumpyBatchRecords` object. Because the client fills the structured array with the GIL released, you can pass its arrays directly to `torch.from_numpy(...)` without copying them:
 
 :::warning[Missing reads silently zero-fill]
 
-Rows whose `result_codes[i] != 0` (including `RecordNotFound`) leave their data and meta entries at the dtype's zero value — the buffer alone cannot tell them apart from a record whose bins are genuinely zero. Always mask downstream math with `batch.result_codes == 0` (or check `lazy_records.found_count()`) before averaging, summing, or feeding into inference.
+Rows with `result_codes[i] != 0`, including `RecordNotFound`, keep the dtype's zero value in both data and metadata. The buffer alone cannot distinguish these rows from records whose bins really contain zero. Before aggregating values or running inference, mask the array with `batch.result_codes == 0` or check `lazy_records.found_count()`.
 
 :::
 
@@ -391,11 +391,10 @@ lazy_records: LazyBatchRecords = await client.batch_read(
 batch: NumpyBatchRecords = lazy_records.to_numpy(dtype)
 ```
 
-The `LazyBatchRecords.to_numpy(dtype)` call performs the structured-array
-materialisation with the GIL released — the per-record fill loop is a
-sequence of raw `ptr::write_unaligned` writes, so sibling Python work
-(other asyncio tasks, torch inference threads) can hold the GIL while
-the buffer fills.
+`LazyBatchRecords.to_numpy(dtype)` materializes the structured array with the
+GIL released. Its per-record loop uses raw `ptr::write_unaligned` writes, so
+other Python work, such as asyncio tasks or PyTorch inference threads, can
+hold the GIL while the buffer fills.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|

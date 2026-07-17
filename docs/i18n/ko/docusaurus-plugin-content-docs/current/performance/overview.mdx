@@ -8,7 +8,7 @@ description: aerospike-py vs 공식 C client 의 latency · throughput · Python
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-**aerospike-py** (Rust/PyO3, native async) 와 **공식 `aerospike` Python client** (C extension + `loop.run_in_executor` 래핑) 의 측정 결과를 비교합니다.
+이 문서는 **aerospike-py**(Rust, PyO3, native async)와 **공식 `aerospike` Python client**(C extension을 `loop.run_in_executor`로 실행)를 비교합니다.
 
 :::tip TL;DR — DLRM 서빙 p95 누적 효과
 **324 ms → 97 ms (−70%)** — 세 단계 누적: 클라이언트 교체 → batch_read 통합 → Python 3.14t.
@@ -37,12 +37,12 @@ import TabItem from '@theme/TabItem';
 
 ## 환경별 격차 (Python 3.11 + GIL)
 
-주변 스택이 얇을수록 격차가 큼. 실제 서빙 환경에선 비율이 줄지만 tail latency 우위는 유지.
+Application stack이 단순할수록 client 자체의 차이가 크게 보입니다. 실제 serving workload에서도 비율은 줄지만 tail latency의 이점은 유지됩니다.
 
 <Tabs>
   <TabItem value="dlrm" label="C — uvicorn + DLRM (실 서빙)" default>
 
-HTTP → batch_read → DLRM CPU 추론 → 응답. 실제 recsys 서빙 pod 와 가장 가까움.
+HTTP 요청부터 `batch_read`, DLRM CPU inference, 응답까지 전체 경로를 측정합니다. 실제 recommendation serving pod와 가장 비슷한 환경입니다.
 
 | 지표 | aerospike-py | 공식 | aerospike-py 우위 |
 |---|---:|---:|---:|
@@ -67,7 +67,7 @@ FastAPI + uvicorn + `batch_read`, 모델 추론 없음. "Key-value 조회 앞단
   </TabItem>
   <TabItem value="pure" label="A — 순수 DB client (HTTP/ML 없음)">
 
-Python 루프가 `batch_read` 직접 호출. 주변 스택이 가장 얇아 격차가 가장 큼.
+Python loop가 `batch_read`를 직접 호출합니다. HTTP나 ML layer가 없어 client 자체의 차이가 가장 크게 나타납니다.
 
 | 지표 | aerospike-py | 공식 | 우위 |
 |---|---:|---:|---:|

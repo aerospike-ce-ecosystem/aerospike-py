@@ -6,7 +6,7 @@ slug: /guides/numpy-integration
 description: High-performance batch operations using NumPy structured arrays.
 ---
 
-NumPy structured array 를 사용한 고성능 batch read/write. 데이터가 Rust 를 통해 Aerospike 와 NumPy buffer 사이를 직접 흘러, per-element Python object 생성을 우회.
+NumPy structured array로 batch read와 write의 성능을 높일 수 있습니다. Rust client는 Aerospike와 NumPy buffer 사이에서 데이터를 직접 옮기므로 element마다 Python object를 만들지 않습니다.
 
 :::note[Requirement]
 `numpy >= 2.0` 필요. 설치: `pip install aerospike-py[numpy]`
@@ -26,7 +26,7 @@ NumPy structured array 를 사용한 고성능 batch read/write. 데이터가 Ru
 
 ### dtype 정의
 
-dtype 의 각 field 가 Aerospike bin name 으로 매핑:
+dtype의 각 field는 이름이 같은 Aerospike bin에 매핑됩니다.
 
 ```python
 import numpy as np
@@ -103,7 +103,7 @@ results = client.batch_write_numpy(data, "test", "demo", dtype)
 
 - 기본 key field: `"_key"` (`key_field` 파라미터로 설정 가능)
 - `_` 로 prefix 된 field 는 bin 에서 제외 (record key 로는 `_key` 만 사용)
-- 다른 모든 field 가 Aerospike bin 이 됨
+- 나머지 모든 field는 Aerospike bin이 됩니다.
 
 ```python
 # 사용자 정의 key field 이름
@@ -175,15 +175,15 @@ result = client.batch_read(keys, bins=["score", "count"]).to_numpy(dtype)
 | `batch_records` | bin 데이터의 structured numpy array |
 | `meta` | `(gen, ttl)` structured array |
 | `result_codes` | `int32` array (0 = success) |
-| `get(key)` | primary key 로 단일 record 가져오기 |
+| `get(key)` | primary key로 record 하나 읽기 |
 | `len(result)` | record 수 |
 | `key in result` | primary key 존재 여부 |
 | `for r in result` | record 순회 |
 
 ## Performance 팁
 
-1. **dtype 사전 할당** — dtype 을 한 번 정의하고 호출 간 재사용
-2. **dtype 을 데이터에 맞춤** — 충분한 최소 타입 사용 (`i4` vs `i8`, `f4` vs `f8`)
+1. **dtype 미리 정의하기** — dtype을 한 번 정의한 뒤 여러 호출에서 재사용하세요.
+2. **dtype을 데이터에 맞추기** — 데이터를 표현할 수 있는 가장 작은 타입을 사용하세요(`i4` 대 `i8`, `f4` 대 `f8`).
 3. **Batch size** — 최적 범위: 호출당 500–5000 record
 4. **fixed-length string 사용** — `S16` 이 가변 길이 대안보다 훨씬 빠름
 5. **server-side filter** — expression filter 와 결합해 데이터 전송 줄이기

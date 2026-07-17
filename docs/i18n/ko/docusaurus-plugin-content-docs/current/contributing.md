@@ -68,14 +68,14 @@ aerospike-py/
 
 ## 변경 가이드
 
-1. **Rust** (`rust/src/`): 편집 후 `maturin develop` 으로 재빌드
-2. **Python** (`src/aerospike_py/`): 변경 즉시 반영
-3. **Tests**: `tests/unit/` 또는 `tests/integration/` 에 추가
-4. **Docs**: `docs/docs/` 편집, `cd docs && npm start` 로 미리보기
+1. **Rust** (`rust/src/`): 파일을 수정한 뒤 `maturin develop`로 다시 빌드합니다.
+2. **Python** (`src/aerospike_py/`): 변경 사항이 즉시 반영됩니다.
+3. **Tests**: `tests/unit/` 또는 `tests/integration/`에 테스트를 추가합니다.
+4. **Docs**: `docs/docs/`를 수정하고 `cd docs && npm start`로 미리 봅니다.
 
 ## 아키텍처 노트
 
-- **Sync Client**: 전역 Tokio runtime, `py.allow_threads(|| RUNTIME.block_on(...))` 가 GIL release
-- **Async Client**: `pyo3_async_runtimes::tokio::future_into_py()` 가 Python coroutine 반환
-- **Type conversion**: `types/value.rs` 안에서 Python ↔ Rust `Value` enum
-- **Error mapping**: `errors.rs` 안에서 `aerospike_core::Error` → Python exception
+- **Sync Client**: 전역 Tokio runtime을 사용합니다. `py.allow_threads(|| RUNTIME.block_on(...))`가 GIL을 해제합니다.
+- **Async Client**: `pyo3_async_runtimes::tokio::future_into_py()`가 Python coroutine을 반환합니다.
+- **Type conversion**: `types/value.rs`에서 Python 값과 Rust `Value` enum을 서로 변환합니다.
+- **Error mapping**: `errors.rs`에서 `aerospike_core::Error`를 Python exception으로 변환합니다.
