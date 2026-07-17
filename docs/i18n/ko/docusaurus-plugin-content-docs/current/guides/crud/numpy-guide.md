@@ -1,9 +1,9 @@
 ---
-title: NumPy Integration Guide
-sidebar_label: NumPy Integration
+title: NumPy 연동 가이드
+sidebar_label: NumPy 연동
 sidebar_position: 6
 slug: /guides/numpy-integration
-description: High-performance batch operations using NumPy structured arrays.
+description: NumPy 구조화 배열을 사용하는 고성능 Batch 작업
 ---
 
 NumPy structured array로 batch read와 write의 성능을 높일 수 있습니다. Rust client는 Aerospike와 NumPy buffer 사이에서 데이터를 직접 옮기므로 element마다 Python object를 만들지 않습니다.

@@ -34,7 +34,7 @@
 }
 
 .faster {
-  color: var(--ifm-color-success-darkest, #2e7d32);
+  color: var(--ifm-color-primary);
   font-weight: 700;
 }
 

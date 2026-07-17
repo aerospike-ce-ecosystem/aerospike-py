@@ -1,8 +1,8 @@
 ---
-title: Contributing
-sidebar_label: Contributing
+title: 기여 가이드
+sidebar_label: 기여 가이드
 sidebar_position: 100
-description: Development setup, build, test, and code style guidelines.
+description: 개발 환경 설정, 빌드, 테스트 및 코드 스타일 가이드
 ---
 
 ## Setup

@@ -11,7 +11,7 @@
 
 .metricCard:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(230, 74, 25, 0.12);
+  box-shadow: 0 4px 12px rgba(11, 31, 51, 0.12);
 }
 
 [data-theme='dark'] .metricCard {
@@ -19,7 +19,7 @@
 }
 
 [data-theme='dark'] .metricCard:hover {
-  box-shadow: 0 4px 12px rgba(230, 74, 25, 0.25);
+  box-shadow: 0 4px 12px rgba(255, 199, 44, 0.2);
 }
 
 .metricValue {
@@ -33,7 +33,7 @@
 }
 
 .metricValueSuccess {
-  color: var(--ifm-color-success-darkest, #2e7d32);
+  color: var(--ifm-color-primary);
 }
 
 .metricValueWarning {
@@ -136,8 +136,8 @@
 }
 
 .speedupFaster {
-  background: rgba(46, 125, 50, 0.12);
-  color: var(--ifm-color-success-darkest, #2e7d32);
+  background: var(--apy-color-yellow-soft);
+  color: var(--ifm-color-primary);
 }
 
 .speedupSlower {
@@ -170,5 +170,11 @@
 @media (max-width: 768px) {
   .comparisonGrid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metricCard:hover {
+    transform: none;
   }
 }

@@ -1,8 +1,8 @@
 ---
-title: Constants
-sidebar_label: Constants
+title: 상수
+sidebar_label: 상수
 sidebar_position: 4
-description: All constants used across the aerospike-py API.
+description: aerospike-py API에서 사용하는 모든 상수
 ---
 
 ```python

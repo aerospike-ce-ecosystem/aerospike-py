@@ -15,7 +15,7 @@ Expression filters require Aerospike Server **5.2+**.
 ## Import
 
 ```python
-from aerospike_py import exp
+from aerospike_py import exp, predicates
 ```
 
 ## Basic Usage

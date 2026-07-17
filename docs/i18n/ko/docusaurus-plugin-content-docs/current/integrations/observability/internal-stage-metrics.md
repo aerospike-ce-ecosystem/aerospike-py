@@ -1,8 +1,8 @@
 ---
-title: Internal Stage Profiling
-sidebar_label: Internal Stage Profiling
+title: 내부 단계 프로파일링
+sidebar_label: 내부 단계 프로파일링
 sidebar_position: 4
-description: Fine-grained per-stage timing for debugging aerospike-py latency, with zero production overhead when disabled.
+description: aerospike-py 지연 시간을 디버깅하는 단계별 정밀 시간 측정. 비활성화하면 운영 오버헤드가 없습니다.
 ---
 
 `db_client_operation_duration_seconds`와 함께 더 세밀한 timing을 제공하는 두 번째 histogram도 사용할 수 있습니다.

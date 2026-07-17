@@ -1,9 +1,9 @@
 ---
-title: Migration from Official Client
-sidebar_label: Migration Guide
+title: 공식 Client에서 마이그레이션
+sidebar_label: 마이그레이션 가이드
 sidebar_position: 3
 slug: /guides/migration
-description: Migrate from aerospike-client-python (C-based) to aerospike-py (Rust-based).
+description: C 기반 aerospike-client-python에서 Rust 기반 aerospike-py로 마이그레이션하는 방법
 ---
 
 ## Installation

@@ -1,13 +1,13 @@
 ---
 sidebar_position: 1
-title: Architecture
-description: How aerospike-py works under the hood — layers, GIL handling, data flow, and batch operations.
+title: 아키텍처
+description: aerospike-py의 내부 동작 구조 — 계층, GIL 처리, 데이터 흐름 및 Batch 작업
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Architecture
+# 아키텍처
 
 aerospike-py는 [PyO3](https://pyo3.rs)를 사용해 [Aerospike Rust Client](https://github.com/aerospike/aerospike-client-rust)를 native Python extension으로 제공합니다. Python application은 type annotation을 갖춘 익숙한 API를 사용하고, Rust core가 Aerospike I/O를 처리합니다.
 
@@ -133,7 +133,10 @@ record.key.user_key  # "user1"
 
 ### batch_read
 
-각 user key 를 그 bin 으로 매핑하는 `dict[UserKey, dict]` 반환. 성공한 read 만 포함 — missing 또는 failed key 는 dict 에 없음.
+`LazyBatchRecords` handle을 반환합니다. Mapping interface는 성공한 user-key read를
+`user_key → bins` 형태로 제공합니다. Plain dictionary가 필요할 때만 `to_dict()`를
+호출하세요. Missing과 failed read를 포함한 모든 per-record result가 필요하다면
+`batch_records` 또는 `iter_records()`를 확인합니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -186,7 +189,10 @@ results = client.batch_write(records, policy={"ttl": 86400})  # default: 1일
 
 **TTL 우선순위:** per-record `{"ttl": N}` > batch-level `policy={"ttl": N}` > namespace default.
 
-**Retry:** 실패한 record (timeout, device overload, key busy) 는 exponential backoff 로 자동 재시도. elapsed time 이 `total_timeout` 에 근접하면 retry 조기 종료.
+**Retry:** 기본값 `retry=0`은 실패한 record를 재시도하지 않습니다. Timeout, device
+overload, key busy 같은 eligible failure를 exponential backoff로 재시도하려면
+`retry`를 0보다 크게 지정하세요. Elapsed time이 `total_timeout`에 가까워지면
+retry를 일찍 중단합니다.
 
 ```python
 results = client.batch_write(records, retry=3)

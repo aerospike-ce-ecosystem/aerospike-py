@@ -44,7 +44,7 @@
     "description": "The label of the link targeting the tag list page"
   },
   "theme.colorToggle.ariaLabel.mode.system": {
-    "message": "system mode",
+    "message": "시스템 모드",
     "description": "The name for the system color mode"
   },
   "theme.colorToggle.ariaLabel.mode.light": {
@@ -179,7 +179,7 @@
     "description": "The ARIA label to collapse the sidebar category"
   },
   "theme.IconExternalLink.ariaLabel": {
-    "message": "(opens in new tab)",
+    "message": "(새 탭에서 열림)",
     "description": "The ARIA label for the external link icon"
   },
   "theme.NavBar.navAriaLabel": {
@@ -259,11 +259,11 @@
     "description": "The ARIA label for hamburger menu button of mobile navigation"
   },
   "theme.navbar.mobileDropdown.collapseButton.expandAriaLabel": {
-    "message": "Expand the dropdown",
+    "message": "드롭다운 펼치기",
     "description": "The ARIA label of the button to expand the mobile dropdown navbar item"
   },
   "theme.navbar.mobileDropdown.collapseButton.collapseAriaLabel": {
-    "message": "Collapse the dropdown",
+    "message": "드롭다운 접기",
     "description": "The ARIA label of the button to collapse the mobile dropdown navbar item"
   },
   "theme.docs.sidebar.expandButtonTitle": {
@@ -325,5 +325,101 @@
   "theme.tags.tagsPageTitle": {
     "message": "태그",
     "description": "The title of the tag list page"
+  },
+  "homepage.install.copied": {
+    "message": "복사됨"
+  },
+  "homepage.install.copyError": {
+    "message": "복사 실패"
+  },
+  "homepage.install.copy": {
+    "message": "복사"
+  },
+  "homepage.install.copyAriaLabel": {
+    "message": "설치 명령 복사"
+  },
+  "homepage.hero.badge": {
+    "message": "Rust + PyO3 기반"
+  },
+  "homepage.hero.title": {
+    "message": "가장 {fastest} Aerospike Python Client"
+  },
+  "homepage.hero.fastest": {
+    "message": "빠른"
+  },
+  "homepage.hero.subtitle": {
+    "message": "Rust로 구현한 고성능 Aerospike Python client — native 성능, 추가 Python dependency 없음, 완전한 Sync 및 Async 지원."
+  },
+  "homepage.hero.getStarted": {
+    "message": "시작하기"
+  },
+  "homepage.hero.viewBenchmarks": {
+    "message": "벤치마크 보기"
+  },
+  "homepage.stats.faster": {
+    "message": "공식 client 대비 빠름"
+  },
+  "homepage.stats.dependencies": {
+    "message": "Python dependency"
+  },
+  "homepage.stats.apis": {
+    "message": "두 API 지원"
+  },
+  "homepage.stats.binding": {
+    "message": "Native Rust binding"
+  },
+  "homepage.meta.title": {
+    "message": "Aerospike Python client"
+  },
+  "homepage.meta.description": {
+    "message": "PyO3와 Rust로 구현한 고성능 Aerospike Python client — 2배 빠른 성능, 추가 dependency 없음, Sync 및 Async 지원."
+  },
+  "homepage.feature.rust.title": {
+    "message": "Rust 성능"
+  },
+  "homepage.feature.rust.description": {
+    "message": "PyO3 native binary를 사용해 성능이 중요한 경로에서 Python overhead를 없앴습니다."
+  },
+  "homepage.feature.async.title": {
+    "message": "Sync 및 Async"
+  },
+  "homepage.feature.async.description": {
+    "message": "Client와 AsyncClient를 모두 제공합니다. FastAPI, Django, Gunicorn 등에서 사용할 수 있습니다."
+  },
+  "homepage.feature.dependencies.title": {
+    "message": "추가 Python dependency 없음"
+  },
+  "homepage.feature.dependencies.description": {
+    "message": "Compiled wheel로 배포하므로 native C extension을 따로 설치할 필요가 없습니다."
+  },
+  "homepage.feature.types.title": {
+    "message": "완전한 type hints"
+  },
+  "homepage.feature.types.description": {
+    "message": "PEP 561을 준수하는 .pyi stub을 포함해 IDE 자동 완성을 지원합니다."
+  },
+  "homepage.feature.numpy.title": {
+    "message": "NumPy 지원"
+  },
+  "homepage.feature.numpy.description": {
+    "message": "Batch result를 NumPy array로 바로 변환할 수 있어 analytics workload에 적합합니다."
+  },
+  "homepage.feature.title": {
+    "message": "왜 aerospike-py인가?"
+  },
+  "homepage.feature.subtitle": {
+    "message": "매 millisecond가 중요한 production workload를 위해 설계했습니다."
+  },
+  "homepage.api.title": {
+    "message": "Sync 및 Async 지원"
+  },
+  "homepage.api.description": {
+    "message": "동기식 workload에는 Client를, FastAPI, Starlette, Django Channels 같은 async framework에는 AsyncClient를 사용하세요. 두 client는 같은 API를 지원합니다."
+  },
+  "homepage.api.syncTab": {
+    "message": "Sync"
+  },
+  "homepage.api.asyncTab": {
+    "message": "Async"
   }
 }

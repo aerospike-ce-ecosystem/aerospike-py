@@ -32,7 +32,7 @@ Yes. A single `Client` instance can be shared safely across multiple threads. In
 import threading
 import aerospike_py
 
-client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()  # port varies by deployment
+client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 
 def worker(thread_id: int) -> None:
     key = ("test", "demo", f"thread_{thread_id}")
@@ -66,7 +66,12 @@ pip install aerospike-py
 pip install aerospike-py[numpy]
 ```
 
-With NumPy installed, call `LazyBatchRecords.to_numpy(dtype)` on the value returned by `batch_read()`. It produces `NumpyBatchRecords` backed by a NumPy structured array. The client fills the buffer with the GIL released, and you can pass the result directly to `torch.from_numpy(...)` without copying it. Use `batch_write_numpy()` for bulk writes from structured arrays. All other features work without NumPy.
+With NumPy installed, call `LazyBatchRecords.to_numpy(dtype)` on the value
+returned by `batch_read()`. It produces `NumpyBatchRecords` backed by a NumPy
+structured array. Select a numeric field before passing it to PyTorch, for
+example `torch.from_numpy(result.batch_records["score"])`; PyTorch does not
+accept the structured array itself. Use `batch_write_numpy()` for bulk writes
+from structured arrays. All other features work without NumPy.
 
 ## Can I migrate from the official C client?
 
@@ -96,7 +101,7 @@ import aerospike_py
 # Initialize before creating the client
 aerospike_py.init_tracing()
 
-client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()  # port varies by deployment
+client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 # ... all operations are traced automatically ...
 client.close()
 
@@ -116,7 +121,7 @@ import aerospike_py
 # Start metrics server on port 9464
 aerospike_py.start_metrics_server(9464)
 
-client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()  # port varies by deployment
+client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 # ... operations are metered automatically ...
 client.close()
 
@@ -127,7 +132,11 @@ Scrape `http://localhost:9464/metrics` from Prometheus. Operation latency histog
 
 ## What Aerospike server versions are supported?
 
-aerospike-py is tested against **Aerospike Server 6.x and 7.x** (Community and Enterprise). It is built on the Aerospike Rust Client v2.0.0-alpha.9.
+CI runs the integration suite against the current
+`aerospike/aerospike-server:latest` image, while the local Compose examples pin
+Aerospike CE 8.1.0.3. The package uses Aerospike Rust Client 2.0.0. If you need
+to support an older server release, run the integration suite against that
+version before deploying.
 
 ## How do I report a bug or request a feature?
 

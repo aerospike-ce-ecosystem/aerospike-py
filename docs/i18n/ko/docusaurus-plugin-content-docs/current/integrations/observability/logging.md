@@ -1,8 +1,8 @@
 ---
-title: Logging
-sidebar_label: Logging
+title: 로깅
+sidebar_label: 로깅
 sidebar_position: 1
-description: Rust-to-Python logging bridge for observing Aerospike client internals.
+description: Aerospike Client 내부를 관찰하기 위한 Rust-Python 로깅 브리지
 ---
 
 aerospike-py에는 **Rust-to-Python logging bridge**가 내장되어 있습니다. 내부 Rust log를 Python `logging` module로 전달하며 package를 import할 때 자동으로 초기화됩니다.

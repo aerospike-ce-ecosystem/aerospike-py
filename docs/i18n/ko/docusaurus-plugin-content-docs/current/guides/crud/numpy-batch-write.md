@@ -1,9 +1,9 @@
 ---
-title: NumPy Batch Write Guide
-sidebar_label: NumPy Batch Write
+title: NumPy Batch 쓰기 가이드
+sidebar_label: NumPy Batch 쓰기
 sidebar_position: 5
 slug: /guides/numpy-batch-write
-description: Use batch_write_numpy to write records directly from numpy structured arrays for high-performance bulk ingestion into Aerospike.
+description: batch_write_numpy를 사용해 NumPy 구조화 배열의 Record를 Aerospike에 직접 대량 적재하는 방법
 ---
 
 import Tabs from '@theme/Tabs';

@@ -32,51 +32,23 @@ client = aerospike_py.client({
 }).connect()
 ```
 
-### `set_log_level(level)`
+### `async_client(config)`
 
-Set the aerospike_py log level.
-
-Accepts ``LOG_LEVEL_*`` constants. Controls both Rust-internal
-and Python-side logging.
+Create a new async Aerospike client instance.
 
 | Parameter | Description |
 |-----------|-------------|
-| `level` | One of ``LOG_LEVEL_OFF`` (-1), ``LOG_LEVEL_ERROR`` (0), ``LOG_LEVEL_WARN`` (1), ``LOG_LEVEL_INFO`` (2), ``LOG_LEVEL_DEBUG`` (3), ``LOG_LEVEL_TRACE`` (4). |
+| `config` | [`ClientConfig`](types.md#clientconfig) dictionary. Must contain a ``"hosts"`` key with a list of ``(host, port)`` tuples. |
+
+**Returns:** A new ``AsyncClient`` instance (not yet connected).
 
 ```python
 import aerospike_py
 
-aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
-```
-
-### `get_metrics()`
-
-Return collected metrics in Prometheus text format.
-
-**Returns:** A string in Prometheus exposition format.
-
-```python
-print(aerospike_py.get_metrics())
-```
-
-### `start_metrics_server(port=9464)`
-
-Start a background HTTP server serving ``/metrics`` for Prometheus.
-
-| Parameter | Description |
-|-----------|-------------|
-| `port` | TCP port to listen on (default ``9464``). |
-
-```python
-aerospike_py.start_metrics_server(port=9464)
-```
-
-### `stop_metrics_server()`
-
-Stop the background metrics HTTP server.
-
-```python
-aerospike_py.stop_metrics_server()
+client = aerospike_py.async_client({
+    "hosts": [("127.0.0.1", 3000)],
+})
+await client.connect()
 ```
 
 ## Connection
@@ -144,6 +116,40 @@ if client.is_connected():
 ```python
 if client.is_connected():
     print("Connected")
+```
+
+  </TabItem>
+</Tabs>
+
+### `ping()`
+
+Lightweight health check that verifies cluster liveness.
+
+Sends an ``info("build")`` command to a random cluster node and
+returns whether the node responded successfully. Unlike
+``is_connected()`` which only checks local state, this method
+performs an actual network round-trip.
+
+Useful for Kubernetes readiness probes, load-balancer health
+checks, and connection-pool validation.
+
+**Returns:** ``True`` if a cluster node responded, ``False`` otherwise
+(including when the client is not connected).
+
+<Tabs>
+  <TabItem value="sync" label="Sync Client" default>
+
+```python
+if client.ping():
+    print("Cluster is reachable")
+```
+
+  </TabItem>
+  <TabItem value="async" label="Async Client">
+
+```python
+if await client.ping():
+    print("Cluster is reachable")
 ```
 
   </TabItem>
@@ -400,7 +406,7 @@ Check whether a record exists.
 | `policy` | Optional [`ReadPolicy`](types.md#readpolicy) dict. |
 
 **Returns:** An ``ExistsResult`` NamedTuple with ``key``, ``meta`` fields.
-    ``meta`` is ``None`` if the record does not exist.
+``meta`` is ``None`` if the record does not exist.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -626,7 +632,7 @@ Execute multiple operations atomically on a single record.
 | Parameter | Description |
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
-| `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. |
+| `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. For an ``OPERATOR_INCR`` op the ``"val"`` must be an ``int`` or ``float`` (a non-numeric ``val`` raises ``TypeError``). |
 | `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
 | `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
@@ -673,12 +679,12 @@ the operation order.
 | Parameter | Description |
 |-----------|-------------|
 | `key` | Record key as ``(namespace, set, primary_key)`` tuple. |
-| `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. |
+| `ops` | List of operation dicts with ``"op"``, ``"bin"``, ``"val"`` keys. For an ``OPERATOR_INCR`` op the ``"val"`` must be an ``int`` or ``float`` (a non-numeric ``val`` raises ``TypeError``). |
 | `meta` | Optional [`WriteMeta`](types.md#writemeta) dict. |
 | `policy` | Optional [`WritePolicy`](types.md#writepolicy) dict. |
 
 **Returns:** An ``OperateOrderedResult`` NamedTuple with ``key``, ``meta``,
-    ``ordered_bins`` fields.
+``ordered_bins`` fields.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -720,7 +726,7 @@ result = await client.operate_ordered(
 Read multiple records in a single batch call.
 
 Returns a [`LazyBatchRecords`](types.md#lazybatchrecords) — a zero-conversion
-wrapper around the raw Rust results. Call one of its methods
+wrapper around the raw Rust results. Call one of the handle methods
 to materialise the result:
 
 * ``lazy_records.to_dict()`` → ``dict[UserKey, AerospikeRecord]``
@@ -778,7 +784,7 @@ keys), each record can have different bins.
 Write fields can be set at two levels and follow a uniform precedence
 rule — **per-record meta always overrides the batch-level policy**.
 The fields below mirror the corresponding [`WritePolicy`](types.md#writepolicy)
-keys used by :meth:`put`:
+keys used by `put()`:
 
 | Field            | Batch-level (``policy``) | Per-record (``meta``) | Notes                                            |
 |------------------|--------------------------|-----------------------|--------------------------------------------------|
@@ -793,10 +799,10 @@ keys used by :meth:`put`:
 |-----------|-------------|
 | `records` | List of ``(key, bins)`` or ``(key, bins, meta)`` tuples. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. Accepts the write fields above plus standard batch transport keys (``socket_timeout``, ``total_timeout``, ``max_retries``, ``filter_expression``, ``allow_inline``, ``allow_inline_ssd``, ``respond_all_keys``). |
-| `retry` | Maximum number of retries for failed records (default ``0``). When > 0, records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff (Full Jitter, max 500ms). Retries stop early if the elapsed time approaches ``total_timeout``.  **Note:** If a transport error occurs during retry, retries stop and partial results are returned. Always check each ``BatchRecord.result`` code. Total wall-clock time may exceed ``total_timeout`` by up to one additional timeout window. |
+| `retry` | Maximum number of retries for failed records (default ``0``). When > 0, records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff (Full Jitter, max 500ms). Retries stop early if the elapsed time approaches ``total_timeout``. **Note:** If a transport error occurs during retry, retries stop and partial results are returned. Always check each ``BatchRecord.result`` code. Total wall-clock time may exceed ``total_timeout`` by up to one additional timeout window. |
 
 **Returns:** A ``BatchWriteResult`` containing per-record result codes in
-    ``batch_records: list[BatchRecord]``.
+``batch_records: list[BatchRecord]``.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -868,7 +874,7 @@ results = await client.batch_write(records_with_meta)
   </TabItem>
 </Tabs>
 
-### `batch_write_numpy(data, namespace, set_name, _dtype, key_field=_key, policy=None, retry=0)`
+### `batch_write_numpy(data, namespace, set_name, _dtype, key_field='_key', policy=None, retry=0)`
 
 Write multiple records from a numpy structured array.
 
@@ -884,10 +890,10 @@ Remaining non-underscore-prefixed fields become bins.
 | `_dtype` | numpy dtype describing the array layout. |
 | `key_field` | Name of the dtype field to use as the user key (default ``"_key"``). |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
-| `retry` | Maximum number of retries for failed records (default ``0``). When > 0, records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff (Full Jitter, max 500ms). Retries stop early if the elapsed time approaches ``total_timeout``.  **Note:** If a transport error occurs during retry, retries stop and partial results are returned. Always check each ``BatchRecord.result`` code. Total wall-clock time may exceed ``total_timeout`` by up to one additional timeout window. |
+| `retry` | Maximum number of retries for failed records (default ``0``). When > 0, records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff (Full Jitter, max 500ms). Retries stop early if the elapsed time approaches ``total_timeout``. **Note:** If a transport error occurs during retry, retries stop and partial results are returned. Always check each ``BatchRecord.result`` code. Total wall-clock time may exceed ``total_timeout`` by up to one additional timeout window. |
 
 **Returns:** A ``BatchWriteResult`` with per-record result codes in
-    ``batch_records: list[BatchRecord]``.
+``batch_records: list[BatchRecord]``.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -931,9 +937,9 @@ Execute operations on multiple records in a single batch call.
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
 **Returns:** A ``BatchWriteResult`` with per-record result codes in
-    ``batch_records: list[BatchRecord]``.
-    Each ``BatchRecord`` also includes an ``in_doubt`` flag
-    (see :meth:`batch_write` for details).
+``batch_records: list[BatchRecord]``.
+Each ``BatchRecord`` also includes an ``in_doubt`` flag
+(see `batch_write()` for details).
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -976,9 +982,9 @@ Delete multiple records in a single batch call.
 | `policy` | Optional dict combining a transport-level [`BatchPolicy`](types.md#batchpolicy) with batch-level [`BatchDeletePolicy`](types.md#batchdeletepolicy) defaults: ``gen``, ``key`` (send_key), ``commit_level``, ``durable_delete``, ``filter_expression``. |
 
 **Returns:** A ``BatchWriteResult`` with per-record result codes in
-    ``batch_records: list[BatchRecord]``.
-    Each ``BatchRecord`` also includes an ``in_doubt`` flag
-    (see :meth:`batch_write` for details).
+``batch_records: list[BatchRecord]``.
+Each ``BatchRecord`` also includes an ``in_doubt`` flag
+(see `batch_write()` for details).
 
 ```python
 # Legacy: bare keys.
@@ -1006,9 +1012,21 @@ Execute a UDF on multiple records in a single batch call.
 | `policy` | Optional dict combining a transport-level [`BatchPolicy`](types.md#batchpolicy) with batch-level [`BatchUDFPolicy`](types.md#batchudfpolicy) defaults: ``commit_level``, ``ttl``, ``key`` (send_key), ``durable_delete``, ``filter_expression``. |
 
 **Returns:** A ``BatchWriteResult`` with per-record result codes in
-    ``batch_records: list[BatchRecord]``. UDF return values are
-    stored in the per-record bin map under the Lua-convention
-    ``"SUCCESS"`` key when the call succeeded.
+``batch_records: list[BatchRecord]``. UDF return values are
+stored in the per-record bin map under the Lua-convention
+``"SUCCESS"`` key when the call succeeded.
+
+:::note
+
+``batch_apply`` does **not** accept a ``retry`` parameter
+(unlike `batch_write()`, which accepts ``retry: int = 0``).
+Passing ``retry=`` to this method raises ``TypeError``.
+UDF batches are not idempotent in the general case, so retries
+must be driven by the caller. For per-record control over the
+UDF call shape and policy fields, use ``(key, meta)`` tuples
+with a ``BatchUDFMeta`` payload in ``keys``.
+
+:::
 
 ```python
 # Apply the same UDF to many keys.
@@ -1025,7 +1043,7 @@ results = client.batch_apply(
 )
 ```
 
-## Query & Scan
+## Query
 
 ### `query(namespace, set_name)`
 
@@ -1037,7 +1055,7 @@ Create a Query object for secondary index queries.
 | `set_name` | The set to query. |
 
 **Returns:** A ``Query`` object. Use ``where()`` to set a predicate filter
-    and ``results()`` or ``foreach()`` to execute.
+and ``results()`` or ``foreach()`` to execute.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -1329,13 +1347,80 @@ result = await client.apply(
   </TabItem>
 </Tabs>
 
-## Query Object
+## User Administration
+
+### `admin_create_user(username, password, roles, policy=None)`
+
+Create a user with the supplied password and roles.
+
+### `admin_drop_user(username, policy=None)`
+
+Delete a user.
+
+### `admin_change_password(username, password, policy=None)`
+
+Change a user's password.
+
+### `admin_grant_roles(username, roles, policy=None)`
+
+Grant roles to a user.
+
+### `admin_revoke_roles(username, roles, policy=None)`
+
+Revoke roles from a user.
+
+### `admin_query_user_info(username, policy=None)`
+
+Return information about one user.
+
+### `admin_query_users_info(policy=None)`
+
+Return information about all users.
+
+## Role Administration
+
+### `admin_create_role(role, privileges, policy=None, whitelist=None, read_quota=0, write_quota=0)`
+
+Create a role with privileges and optional access limits.
+
+### `admin_drop_role(role, policy=None)`
+
+Delete a role.
+
+### `admin_grant_privileges(role, privileges, policy=None)`
+
+Grant privileges to a role.
+
+### `admin_revoke_privileges(role, privileges, policy=None)`
+
+Revoke privileges from a role.
+
+### `admin_query_role(role, policy=None)`
+
+Return information about one role.
+
+### `admin_query_roles(policy=None)`
+
+Return information about all roles.
+
+### `admin_set_whitelist(role, whitelist, policy=None)`
+
+Set the network allowlist for a role.
+
+### `admin_set_quotas(role, read_quota=0, write_quota=0, policy=None)`
+
+Set read and write quotas for a role.
+
+## Query and AsyncQuery Objects
 
 Secondary index query object.
 
 Created via ``Client.query(namespace, set_name)``. Use ``where()``
 to set a predicate filter, ``select()`` to choose bins, then
 ``results()`` or ``foreach()`` to execute.
+
+<Tabs>
+  <TabItem value="query" label="Query" default>
 
 ```python
 from aerospike_py import predicates
@@ -1346,9 +1431,28 @@ query.where(predicates.between("age", 20, 30))
 records = query.results()
 ```
 
-### `select()`
+  </TabItem>
+  <TabItem value="async-query" label="AsyncQuery">
+
+```python
+from aerospike_py import predicates
+
+query = client.query("test", "demo")
+query.select("name", "age")
+query.where(predicates.between("age", 20, 30))
+records = await query.results()
+```
+
+  </TabItem>
+</Tabs>
+
+### `select(*bins)`
 
 Select specific bins to return in query results.
+
+| Parameter | Description |
+|-----------|-------------|
+| `*bins` | Bin names to include in the results. |
 
 ```python
 query = client.query("test", "demo")
@@ -1382,11 +1486,26 @@ Execute the query and return all matching records.
 
 **Returns:** A list of ``Record`` NamedTuples.
 
+<Tabs>
+  <TabItem value="sync" label="Query" default>
+
 ```python
 records = query.results()
 for record in records:
     print(record.bins)
 ```
+
+  </TabItem>
+  <TabItem value="async" label="AsyncQuery">
+
+```python
+records = await query.results()
+for record in records:
+    print(record.bins)
+```
+
+  </TabItem>
+</Tabs>
 
 ### `foreach(callback, policy=None)`
 
@@ -1400,9 +1519,202 @@ from the callback to stop iteration early.
 | `callback` | Function called with each record. Return ``False`` to stop. |
 | `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
 
+<Tabs>
+  <TabItem value="sync" label="Query" default>
+
 ```python
 def process(record):
     print(record.bins)
 
 query.foreach(process)
+```
+
+  </TabItem>
+  <TabItem value="async" label="AsyncQuery">
+
+```python
+def process(record):
+    print(record.bins)
+
+await query.foreach(process)
+```
+
+  </TabItem>
+</Tabs>
+
+## Partition Filter Helpers
+
+### `partition_filter_all()`
+
+Build a `PartitionFilter` covering all 4096 partitions.
+
+Equivalent to omitting ``partition_filter`` from the policy entirely.
+
+### `partition_filter_by_id(partition_id)`
+
+Build a `PartitionFilter` targeting a single partition.
+
+| Parameter | Description |
+|-----------|-------------|
+| `partition_id` | Partition index in ``[0, 4095]``. |
+
+:::note
+
+Raises `ValueError` If ``partition_id`` is outside the valid range.
+
+:::
+
+### `partition_filter_by_range(begin, count)`
+
+Build a `PartitionFilter` targeting ``count`` partitions from ``begin``.
+
+| Parameter | Description |
+|-----------|-------------|
+| `begin` | First partition (``[0, 4095]``). |
+| `count` | Number of partitions; ``begin + count <= 4096``. ``0`` is allowed and yields an empty filter. |
+
+:::note
+
+Raises `ValueError` If the range overflows 4096.
+
+:::
+
+## Logging
+
+### `set_log_level(level)`
+
+Set the aerospike_py log level.
+
+Accepts ``LOG_LEVEL_*`` constants. Controls both Rust-internal
+and Python-side logging.
+
+| Parameter | Description |
+|-----------|-------------|
+| `level` | One of ``LOG_LEVEL_OFF`` (-1), ``LOG_LEVEL_ERROR`` (0), ``LOG_LEVEL_WARN`` (1), ``LOG_LEVEL_INFO`` (2), ``LOG_LEVEL_DEBUG`` (3), ``LOG_LEVEL_TRACE`` (4). |
+
+```python
+import aerospike_py
+
+aerospike_py.set_log_level(aerospike_py.LOG_LEVEL_DEBUG)
+```
+
+### `dropped_log_count()`
+
+Return the number of log messages dropped because the GIL was unavailable.
+
+When the Rust logging bridge cannot acquire the Python GIL (e.g. during
+interpreter shutdown), log messages are counted as dropped. WARN and ERROR
+level messages are still emitted to stderr as a fallback.
+
+**Returns:** Count of dropped messages since process start.
+
+## Metrics
+
+### `get_metrics()`
+
+Return collected metrics in Prometheus text format.
+
+**Returns:** A string in Prometheus exposition format.
+
+```python
+print(aerospike_py.get_metrics())
+```
+
+### `set_metrics_enabled(enabled)`
+
+Enable or disable Prometheus metrics collection.
+
+When disabled, operation timers are skipped entirely (~1ns atomic check).
+Useful for benchmarking without metrics overhead.
+
+| Parameter | Description |
+|-----------|-------------|
+| `enabled` | ``True`` to enable (default), ``False`` to disable. |
+
+```python
+aerospike_py.set_metrics_enabled(False)   # disable for benchmark
+aerospike_py.set_metrics_enabled(True)     # re-enable
+```
+
+### `is_metrics_enabled()`
+
+Check if Prometheus metrics collection is currently enabled.
+
+**Returns:** ``True`` if metrics are enabled (default), ``False`` otherwise.
+
+```python
+if aerospike_py.is_metrics_enabled():
+    print(aerospike_py.get_metrics())
+```
+
+### `set_internal_stage_metrics_enabled(enabled)`
+
+Enable or disable internal stage profiling metrics.
+
+Controls the ``db_client_internal_stage_seconds`` histogram that captures
+fine-grained timing per batch_read stage. Disabled by default — zero
+overhead when off. Set ``AEROSPIKE_PY_INTERNAL_METRICS=1`` to enable at
+process start.
+
+| Parameter | Description |
+|-----------|-------------|
+| `enabled` | ``True`` to enable, ``False`` to disable (default). |
+
+### `is_internal_stage_metrics_enabled()`
+
+Check if internal stage profiling metrics are currently enabled.
+
+**Returns:** ``True`` if stage profiling is on, ``False`` otherwise (default).
+
+### `internal_stage_profiling()`
+
+Context manager that scopes internal stage profiling to a code block.
+
+Enables profiling on entry and restores the previous state on exit.
+
+```python
+with aerospike_py.internal_stage_profiling():
+    lazy_records = await client.batch_read(keys)
+```
+
+### `start_metrics_server(port=9464)`
+
+Start a background HTTP server serving ``/metrics`` for Prometheus.
+
+| Parameter | Description |
+|-----------|-------------|
+| `port` | TCP port to listen on (default ``9464``). |
+
+```python
+aerospike_py.start_metrics_server(port=9464)
+```
+
+### `stop_metrics_server()`
+
+Stop the background metrics HTTP server.
+
+```python
+aerospike_py.stop_metrics_server()
+```
+
+## Tracing
+
+### `init_tracing()`
+
+Initialize OpenTelemetry tracing.
+
+Reads standard ``OTEL_*`` environment variables for configuration.
+
+```python
+aerospike_py.init_tracing()
+```
+
+### `shutdown_tracing()`
+
+Shut down the tracer provider, flushing pending spans.
+
+Call before process exit to ensure all spans are exported.
+
+```python
+aerospike_py.shutdown_tracing()
 ```

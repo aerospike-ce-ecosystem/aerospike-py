@@ -1,10 +1,10 @@
 ---
 sidebar_position: 10
-title: Troubleshooting
-description: Common problems and solutions when using aerospike-py.
+title: 문제 해결
+description: aerospike-py 사용 중 발생하는 일반적인 문제와 해결 방법
 ---
 
-# Troubleshooting
+# 문제 해결
 
 이 문서에서는 자주 발생하는 aerospike-py error의 원인을 확인하고 해결 방법을 안내합니다.
 
@@ -45,7 +45,7 @@ aerospike_py.ClusterError: Failed to connect to host(s)
 
 3. Aerospike를 container에서 실행한다면 service port가 올바르게 mapping되었고 host에서 접근할 수 있는지 확인하세요.
 
-### TimeoutError
+### AerospikeTimeoutError
 
 **증상:**
 
@@ -60,20 +60,18 @@ aerospike_py.AerospikeTimeoutError: Operation timed out
 
 **해결책:**
 
-1. 관련 policy 에서 timeout 증가:
+1. Timeout이 필요한 호출에 operation policy를 지정합니다.
    ```python
-   # Per-operation timeout
-   record = client.get(key, policy={"timeout": 5000})  # 5초
-
-   # Client-wide default
-   client = aerospike_py.client({
-       "hosts": [("127.0.0.1", 3000)],
-       "policies": {
-           "read": {"timeout": 5000},
-           "write": {"timeout": 5000},
-       },
-   }).connect()
+   read_policy = {
+       "socket_timeout": 5_000,
+       "total_timeout": 5_000,
+   }
+   record = client.get(key, policy=read_policy)
    ```
+
+   `ClientConfig.timeout`은 최초 connection timeout을 제어합니다. Read와 write
+   timeout은 각 operation의 policy에 지정해야 하며, `ClientConfig`에는 전역
+   `policies` field가 없습니다.
 
 2. server 상태 확인:
    ```python

@@ -1,7 +1,7 @@
 ---
 sidebar_position: 99
-title: FAQ
-description: Frequently asked questions about aerospike-py.
+title: 자주 묻는 질문(FAQ)
+description: aerospike-py에 대해 자주 묻는 질문
 ---
 
 ## aerospike-py 는 왜 Rust 로 작성되었나요?
@@ -32,7 +32,7 @@ aerospike-py는 모든 database I/O 중에 Python GIL(Global Interpreter Lock)�
 import threading
 import aerospike_py
 
-client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()  # port varies by deployment
+client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 
 def worker(thread_id: int) -> None:
     key = ("test", "demo", f"thread_{thread_id}")
@@ -66,7 +66,13 @@ pip install aerospike-py
 pip install aerospike-py[numpy]
 ```
 
-NumPy를 설치하면 `batch_read()`가 반환한 `LazyBatchRecords`에서 `to_numpy(dtype)`를 호출할 수 있습니다. 이 메서드는 NumPy structured array를 사용하는 `NumpyBatchRecords`를 만듭니다. Client가 GIL을 해제한 상태에서 buffer를 채우므로 결과를 복사하지 않고 `torch.from_numpy(...)`에 바로 전달할 수 있습니다. Structured array를 bulk write할 때는 `batch_write_numpy()`를 사용합니다. 그 밖의 기능은 NumPy 없이도 동일하게 동작합니다.
+NumPy를 설치하면 `batch_read()`가 반환한 `LazyBatchRecords`에서
+`to_numpy(dtype)`를 호출할 수 있습니다. 이 메서드는 NumPy structured array를
+사용하는 `NumpyBatchRecords`를 만듭니다. PyTorch에는 structured array 전체가
+아니라 `torch.from_numpy(result.batch_records["score"])`처럼 numeric field를
+선택해 전달해야 합니다. Structured array를 bulk write할 때는
+`batch_write_numpy()`를 사용합니다. 그 밖의 기능은 NumPy 없이도 동일하게
+동작합니다.
 
 ## 공식 C client 에서 migrate 가능한가요?
 
@@ -96,7 +102,7 @@ import aerospike_py
 # client 생성 전 초기화
 aerospike_py.init_tracing()
 
-client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()  # port varies by deployment
+client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 # ... 모든 operation 이 자동으로 traced ...
 client.close()
 
@@ -116,7 +122,7 @@ import aerospike_py
 # port 9464 에서 metrics server 시작
 aerospike_py.start_metrics_server(9464)
 
-client = aerospike_py.client({"hosts": [("127.0.0.1", 18710)]}).connect()  # port varies by deployment
+client = aerospike_py.client({"hosts": [("127.0.0.1", 3000)]}).connect()
 # ... operation 이 자동으로 metered ...
 client.close()
 
@@ -127,7 +133,11 @@ Prometheus에서 `http://localhost:9464/metrics`를 scrape하세요. Operation t
 
 ## 어떤 Aerospike server 버전을 지원하나요?
 
-aerospike-py는 **Aerospike Server 6.x와 7.x**의 Community 및 Enterprise edition을 대상으로 테스트합니다. 내부적으로 Aerospike Rust Client v2.0.0-alpha.9를 사용합니다.
+CI는 현재 `aerospike/aerospike-server:latest` image를 대상으로 integration
+suite를 실행하고, 로컬 Compose 예제는 Aerospike CE 8.1.0.3을 고정해서
+사용합니다. Package는 Aerospike Rust Client 2.0.0을 사용합니다. 더 오래된
+server release를 지원해야 한다면 배포 전에 해당 version으로 integration suite를
+실행하세요.
 
 ## bug 신고 또는 기능 요청은 어떻게 하나요?
 

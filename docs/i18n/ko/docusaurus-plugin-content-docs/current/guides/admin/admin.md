@@ -1,9 +1,9 @@
 ---
-title: Admin Guide
-sidebar_label: User & Role Management
+title: 사용자 및 역할 관리 가이드
+sidebar_label: 사용자 및 역할 관리
 sidebar_position: 1
 slug: /guides/admin
-description: User and role management for security-enabled Aerospike clusters.
+description: 보안이 활성화된 Aerospike 클러스터의 사용자 및 역할 관리
 ---
 
 이 기능을 사용하려면 security가 활성화된 Aerospike server가 필요합니다.

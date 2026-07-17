@@ -1,86 +1,96 @@
 import type {ReactNode} from 'react';
-import Heading from '@theme/Heading';
+import {translate} from '@docusaurus/Translate';
 import CodeBlock from '@theme/CodeBlock';
-import Tabs from '@theme/Tabs';
+import Heading from '@theme/Heading';
 import TabItem from '@theme/TabItem';
+import Tabs from '@theme/Tabs';
 import styles from './HomepageFeatures.module.css';
 
-/* ── Feature Card Data ───────────────────────────────────── */
-const FEATURE_CARDS = [
-  {
-    icon: '🦀',
-    title: 'Rust Performance',
-    desc: 'Native binary via PyO3 — zero Python overhead on the hot path.',
-  },
-  {
-    icon: '⚡',
-    title: 'Sync & Async',
-    desc: 'Both Client and AsyncClient. Works with FastAPI, Django, Gunicorn, and more.',
-  },
-  {
-    icon: '📦',
-    title: 'Zero Python Deps',
-    desc: 'Ships as a compiled wheel. No native C extensions to install separately.',
-  },
-  {
-    icon: '🔍',
-    title: 'Full Type Hints',
-    desc: 'PEP 561 compliant with bundled .pyi stubs. First-class IDE auto-complete.',
-  },
-  {
-    icon: '🔢',
-    title: 'NumPy Support',
-    desc: 'Batch results directly as NumPy arrays — ideal for analytics workloads.',
-  },
-];
-
-/* ── Code Snippets ───────────────────────────────────────── */
 const CODE_SYNC = `from aerospike_py import Client
 
-client = Client({'hosts': [('localhost', 3000)]})
-client.connect()
-
-client.put(('test','demo','key1'), {'name': 'Alice', 'age': 30})
-_, _, bins = client.get(('test','demo','key1'))
-print(bins)  # {'name': 'Alice', 'age': 30}
-
-client.close()`;
+with Client({"hosts": [("127.0.0.1", 3000)]}).connect() as client:
+    key = ("test", "users", "ada")
+    client.put(key, {"name": "Ada", "active": True})
+    record = client.get(key)
+    print(record.bins)`;
 
 const CODE_ASYNC = `import asyncio
 from aerospike_py import AsyncClient
 
-async def main():
-    client = AsyncClient({'hosts': [('localhost', 3000)]})
-    await client.connect()
-
-    await client.put(('test','demo','key1'), {'name': 'Alice', 'age': 30})
-    _, _, bins = await client.get(('test','demo','key1'))
-    print(bins)  # {'name': 'Alice', 'age': 30}
-
-    await client.close()
+async def main() -> None:
+    async with AsyncClient({"hosts": [("127.0.0.1", 3000)]}) as client:
+        await client.connect()
+        key = ("test", "users", "ada")
+        await client.put(key, {"name": "Ada", "active": True})
+        record = await client.get(key)
+        print(record.bins)
 
 asyncio.run(main())`;
 
-/* ── Feature Cards Section ───────────────────────────────── */
 function FeatureCardsSection() {
+  const cards = [
+    {
+      key: 'rust',
+      title: translate({id: 'homepage.feature.rust.title', message: 'Rust Performance'}),
+      description: translate({
+        id: 'homepage.feature.rust.description',
+        message: 'Native binary via PyO3 — zero Python overhead on the hot path.',
+      }),
+    },
+    {
+      key: 'sync-async',
+      title: translate({id: 'homepage.feature.async.title', message: 'Sync & Async'}),
+      description: translate({
+        id: 'homepage.feature.async.description',
+        message: 'Both Client and AsyncClient. Works with FastAPI, Django, Gunicorn, and more.',
+      }),
+    },
+    {
+      key: 'dependencies',
+      title: translate({id: 'homepage.feature.dependencies.title', message: 'Zero Python Deps'}),
+      description: translate({
+        id: 'homepage.feature.dependencies.description',
+        message: 'Ships as a compiled wheel. No native C extensions to install separately.',
+      }),
+    },
+    {
+      key: 'types',
+      title: translate({id: 'homepage.feature.types.title', message: 'Full Type Hints'}),
+      description: translate({
+        id: 'homepage.feature.types.description',
+        message: 'PEP 561 compliant with bundled .pyi stubs. First-class IDE auto-complete.',
+      }),
+    },
+    {
+      key: 'numpy',
+      title: translate({id: 'homepage.feature.numpy.title', message: 'NumPy Support'}),
+      description: translate({
+        id: 'homepage.feature.numpy.description',
+        message: 'Batch results directly as NumPy arrays — ideal for analytics workloads.',
+      }),
+    },
+  ];
+
   return (
     <section className={styles.featureCardsSection}>
       <div className="container">
         <div className={styles.sectionHeader}>
           <Heading as="h2" className={styles.sectionTitle}>
-            Why aerospike-py?
+            {translate({id: 'homepage.feature.title', message: 'Why aerospike-py?'})}
           </Heading>
           <p className={styles.sectionSubtitle}>
-            Built for production workloads where every millisecond counts
+            {translate({
+              id: 'homepage.feature.subtitle',
+              message: 'Built for production workloads where every millisecond counts',
+            })}
           </p>
         </div>
         <div className={styles.featureCardsGrid}>
-          {FEATURE_CARDS.map((card) => (
-            <div key={card.title} className={styles.featureCard}>
-              <span className={styles.featureCardIcon}>{card.icon}</span>
-              <div className={styles.featureCardTitle}>{card.title}</div>
-              <p className={styles.featureCardDesc}>{card.desc}</p>
-            </div>
+          {cards.map((card) => (
+            <article key={card.key} className={styles.featureCard}>
+              <Heading as="h3" className={styles.featureCardTitle}>{card.title}</Heading>
+              <p className={styles.featureCardDesc}>{card.description}</p>
+            </article>
           ))}
         </div>
       </div>
@@ -88,7 +98,6 @@ function FeatureCardsSection() {
   );
 }
 
-/* ── Sync & Async Section ────────────────────────────────── */
 function SyncAsyncSection() {
   return (
     <section className={styles.section}>
@@ -96,25 +105,22 @@ function SyncAsyncSection() {
         <div className={styles.twoColLayout}>
           <div className={styles.twoColText}>
             <Heading as="h2">
-              Sync &amp; Async Support
+              {translate({id: 'homepage.api.title', message: 'Sync & Async Support'})}
             </Heading>
             <p>
-              Use <code>Client</code> for synchronous workloads or{' '}
-              <code>AsyncClient</code> for async frameworks like FastAPI,
-              Starlette, and Django Channels — same API, both fully supported.
+              {translate({
+                id: 'homepage.api.description',
+                message: 'Use Client for synchronous workloads or AsyncClient for async frameworks like FastAPI, Starlette, and Django Channels — same API, both fully supported.',
+              })}
             </p>
           </div>
-          <div>
+          <div className={styles.codeTabs}>
             <Tabs>
-              <TabItem value="sync" label="SyncClient" default>
-                <CodeBlock language="python">
-                  {CODE_SYNC}
-                </CodeBlock>
+              <TabItem value="sync" label={translate({id: 'homepage.api.syncTab', message: 'Sync'})} default>
+                <CodeBlock language="python">{CODE_SYNC}</CodeBlock>
               </TabItem>
-              <TabItem value="async" label="AsyncClient">
-                <CodeBlock language="python">
-                  {CODE_ASYNC}
-                </CodeBlock>
+              <TabItem value="async" label={translate({id: 'homepage.api.asyncTab', message: 'Async'})}>
+                <CodeBlock language="python">{CODE_ASYNC}</CodeBlock>
               </TabItem>
             </Tabs>
           </div>
@@ -124,7 +130,6 @@ function SyncAsyncSection() {
   );
 }
 
-/* ── Main Export ─────────────────────────────────────────── */
 export default function HomepageFeatures(): ReactNode {
   return (
     <>

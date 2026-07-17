@@ -16,11 +16,13 @@ import aerospike_py as aerospike
 from aerospike_py.types import ClientConfig
 
 config: ClientConfig = {
-    "hosts": [("127.0.0.1", 18710)],
-    "cluster_name": "docker",
+    "hosts": [("127.0.0.1", 3000)],
 }
 client = aerospike.client(config).connect()
 ```
+
+Set `cluster_name` only when you want the client to reject a server whose
+configured cluster name does not match the expected value.
 
 ## All Fields
 

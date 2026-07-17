@@ -1,8 +1,8 @@
 ---
-title: Distributed Tracing
-sidebar_label: Tracing
+title: 분산 추적
+sidebar_label: 추적
 sidebar_position: 3
-description: OpenTelemetry distributed tracing for Aerospike operations.
+description: Aerospike 작업을 위한 OpenTelemetry 분산 추적
 ---
 
 aerospike-py는 모든 data operation을 위한 **OpenTelemetry tracing**을 제공합니다. Span은 [Database Client Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/database/)를 따르며 **OTLP gRPC**로 export됩니다.

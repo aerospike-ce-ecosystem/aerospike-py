@@ -1,91 +1,67 @@
-/* ============================================================
-   Feature Cards Section
-   ============================================================ */
 .featureCardsSection {
-  padding: 4rem 0 2rem;
+  padding: 4rem 0 2.5rem;
   background: var(--ifm-background-color);
+}
+
+.sectionHeader {
+  max-width: 720px;
+  margin: 0 auto 2rem;
+  text-align: center;
+}
+
+.sectionTitle {
+  margin-bottom: 0.6rem;
+  font-size: 1.85rem;
+  line-height: 1.25;
+}
+
+.sectionSubtitle {
+  margin: 0;
+  color: var(--ifm-color-emphasis-700);
+  font-size: 1rem;
+  line-height: 1.7;
 }
 
 .featureCardsGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.25rem;
-  margin-top: 2.5rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
 }
 
 .featureCard {
   padding: 1.5rem;
-  border-radius: 10px;
-  border: 1px solid var(--ifm-color-emphasis-200);
+  border: 1px solid var(--apy-color-line);
+  border-radius: 0.65rem;
   background: var(--ifm-background-color);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
 
 .featureCard:hover {
   border-color: var(--ifm-color-primary);
-  box-shadow: 0 4px 20px rgba(230, 74, 25, 0.1);
-  transform: translateY(-2px);
-}
-
-[data-theme='dark'] .featureCard {
-  background: var(--ifm-background-surface-color);
-}
-
-[data-theme='dark'] .featureCard:hover {
-  box-shadow: 0 4px 20px rgba(255, 138, 101, 0.12);
-}
-
-.featureCardIcon {
-  font-size: 2rem;
-  margin-bottom: 0.75rem;
-  display: block;
+  background: var(--apy-color-yellow-soft);
 }
 
 .featureCardTitle {
-  font-size: 1rem;
-  font-weight: 700;
-  margin-bottom: 0.4rem;
-  font-family: var(--ifm-heading-font-family);
+  margin-bottom: 0.45rem;
+  font-size: 1.05rem;
+  line-height: 1.35;
 }
 
 .featureCardDesc {
-  font-size: 0.875rem;
+  margin: 0;
   color: var(--ifm-color-emphasis-700);
-  line-height: 1.6;
-  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.65;
 }
 
-/* ============================================================
-   2-Column Sections (Drop-in + Sync/Async)
-   ============================================================ */
 .section {
-  padding: 3rem 0;
-}
-
-.section + .section {
-  padding-top: 0;
-}
-
-.sectionHeader {
-  text-align: center;
-  margin-bottom: 2rem;
-}
-
-.sectionTitle {
-  font-size: 1.8rem;
-  margin-bottom: 0.5rem;
-  font-family: var(--ifm-heading-font-family);
-}
-
-.sectionSubtitle {
-  color: var(--ifm-color-emphasis-600);
-  font-size: 1.05rem;
-  margin: 0;
+  padding: 3rem 0 4.5rem;
+  background: var(--ifm-background-color);
 }
 
 .twoColLayout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
   gap: 2.5rem;
   align-items: start;
 }
@@ -95,44 +71,62 @@
 }
 
 .twoColText h2 {
-  font-size: 1.7rem;
-  font-family: var(--ifm-heading-font-family);
   margin-bottom: 0.75rem;
+  font-size: 1.75rem;
+  line-height: 1.25;
 }
 
-.twoColText p {
+.twoColText > p:last-child {
+  margin: 0;
   color: var(--ifm-color-emphasis-700);
   line-height: 1.7;
-  margin-bottom: 0;
 }
 
-/* Single-column fallbacks */
-.dropInBlock {
-  max-width: 720px;
-  margin: 0 auto;
+.codeTabs {
+  min-width: 0;
 }
 
-.tabsSection {
-  max-width: 720px;
-  margin: 0 auto;
+.codeTabs :global(.tabs) {
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--apy-color-line);
 }
 
-/* ============================================================
-   Responsive
-   ============================================================ */
+.codeTabs :global(.tabs__item) {
+  min-width: 6rem;
+  text-align: center;
+}
+
 @media screen and (max-width: 996px) {
   .featureCardsGrid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .twoColLayout {
     grid-template-columns: 1fr;
     gap: 1.5rem;
   }
+
+  .twoColText {
+    max-width: 700px;
+  }
 }
 
 @media screen and (max-width: 640px) {
+  .featureCardsSection {
+    padding: 3rem 0 2rem;
+  }
+
   .featureCardsGrid {
     grid-template-columns: 1fr;
+  }
+
+  .section {
+    padding: 2.5rem 0 3.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .featureCard {
+    transition: none;
   }
 }

@@ -1,9 +1,9 @@
 ---
-title: UDF Guide
+title: UDF 가이드
 sidebar_label: UDF (Lua)
 sidebar_position: 2
 slug: /guides/udf
-description: Register, execute, and remove Lua UDFs on the Aerospike server.
+description: Aerospike 서버에서 Lua UDF를 등록·실행·제거하는 방법
 ---
 
 User-Defined Function(UDF)은 Lua 스크립트입니다. Aerospike는 대상 record를 소유한 server node에서 스크립트를 실행합니다.

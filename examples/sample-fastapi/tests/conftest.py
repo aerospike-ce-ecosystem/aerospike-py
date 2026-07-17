@@ -171,7 +171,6 @@ def aerospike_client(aerospike_container):
     container, port = aerospike_container
     config = {
         "hosts": [("127.0.0.1", port)],
-        "policies": {"key": aerospike_py.POLICY_KEY_SEND},
     }
     # Only set cluster_name when using the managed container (cluster-name "docker").
     if container is not None:
@@ -198,7 +197,6 @@ def client(aerospike_container):
 
         ac_config = {
             "hosts": [("127.0.0.1", port)],
-            "policies": {"key": aerospike_py.POLICY_KEY_SEND},
         }
         # Only set cluster_name when using the managed container.
         if container is not None:
@@ -206,10 +204,12 @@ def client(aerospike_container):
         ac = aerospike_py.AsyncClient(ac_config)
         await ac.connect()
         a.state.aerospike = ac
-        yield
-        await ac.close()
-        aerospike_py.shutdown_tracing()
-        a.state.tracing_enabled = False
+        try:
+            yield
+        finally:
+            await ac.close()
+            aerospike_py.shutdown_tracing()
+            a.state.tracing_enabled = False
 
     original_lifespan = app.router.lifespan_context
     app.router.lifespan_context = _test_lifespan

@@ -1,9 +1,9 @@
 ---
 sidebar_position: 8
-title: API Comparison
-sidebar_label: API Comparison
+title: API 비교
+sidebar_label: API 비교
 slug: /guides/api-comparison
-description: Side-by-side API comparison between the official C-based client and aerospike-py.
+description: 공식 C 기반 Client와 aerospike-py의 API를 나란히 비교
 ---
 
 이 문서는 **공식 C 기반 client**(PyPI의 `aerospike`)와 Rust 기반 **aerospike-py**를 비교합니다. 단계별 이전 방법은 [Migration Guide](/docs/guides/migration)를 참고하세요.

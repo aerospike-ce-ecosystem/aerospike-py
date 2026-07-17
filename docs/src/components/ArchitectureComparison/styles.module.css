@@ -6,14 +6,14 @@
   --arch-text: #1e293b;
   --arch-text-dim: #64748b;
   --arch-text-muted: #94a3b8;
-  --arch-rust: #f97316;
-  --arch-rust-dim: rgba(249, 115, 22, 0.1);
-  --arch-c-async: #6366f1;
-  --arch-c-async-dim: rgba(99, 102, 241, 0.1);
-  --arch-c-sync: #8b5cf6;
-  --arch-c-sync-dim: rgba(139, 92, 246, 0.1);
-  --arch-green: #10b981;
-  --arch-green-dim: rgba(16, 185, 129, 0.1);
+  --arch-rust: #b98200;
+  --arch-rust-dim: rgba(255, 199, 44, 0.14);
+  --arch-c-async: #2563eb;
+  --arch-c-async-dim: rgba(37, 99, 235, 0.1);
+  --arch-c-sync: #7c3aed;
+  --arch-c-sync-dim: rgba(124, 58, 237, 0.1);
+  --arch-good: #0b5cab;
+  --arch-good-dim: rgba(11, 92, 171, 0.1);
   --arch-red: #ef4444;
   --arch-red-dim: rgba(239, 68, 68, 0.1);
   --arch-yellow: #eab308;
@@ -29,6 +29,8 @@
   --arch-text: #e2e8f0;
   --arch-text-dim: #8892a8;
   --arch-text-muted: #5a6580;
+  --arch-rust: #ffc72c;
+  --arch-good: #60a5fa;
 }
 
 /* ── 3-column grid ───────────────────────────────── */
@@ -95,7 +97,7 @@
   font-weight: 500;
 }
 
-.tagFast { background: var(--arch-green-dim); color: var(--arch-green); }
+.tagFast { background: var(--arch-good-dim); color: var(--arch-good); }
 .tagMid { background: var(--arch-yellow-dim); color: var(--arch-yellow); }
 .tagSlow { background: var(--arch-red-dim); color: var(--arch-red); }
 
@@ -142,7 +144,7 @@
 }
 
 .stepBad { background: var(--arch-red-dim); }
-.stepGood { background: var(--arch-green-dim); }
+.stepGood { background: var(--arch-good-dim); }
 .stepNeutral { background: var(--arch-surface-2); }
 
 .flowArrow {
@@ -204,7 +206,7 @@
 }
 
 .gilHeld { background: var(--arch-red); color: white; }
-.gilFree { background: var(--arch-green-dim); color: var(--arch-green); }
+.gilFree { background: var(--arch-good-dim); color: var(--arch-good); }
 .gilIo { background: var(--arch-surface); color: var(--arch-text-muted); border: 1px dashed var(--arch-border); }
 .gilEmpty { background: transparent; }
 .gilTokio { background: var(--arch-rust-dim); color: var(--arch-rust); border: 1px solid var(--arch-rust); }
@@ -263,7 +265,7 @@
 .barTask { background: var(--arch-rust); }
 .barIdle { background: rgba(90, 101, 128, 0.15); color: var(--arch-text-muted); }
 .barBlocked { background: rgba(239, 68, 68, 0.25); color: var(--arch-red); }
-.barStatusGood { background: var(--arch-green-dim); color: var(--arch-green); }
+.barStatusGood { background: var(--arch-good-dim); color: var(--arch-good); }
 
 /* ── Concurrency slider section ───────────────────── */
 .concurrencyViz {
@@ -468,7 +470,7 @@
 }
 
 .condHeadBench { color: var(--arch-yellow); }
-.condHeadProd { color: var(--arch-green); }
+.condHeadProd { color: var(--arch-good); }
 
 .condCell {
   padding: 7px 12px;
@@ -482,7 +484,7 @@
   color: var(--arch-text);
 }
 
-.condCellHl { color: var(--arch-green); font-weight: 500; }
+.condCellHl { color: var(--arch-good); font-weight: 500; }
 
 /* ── Duo cards (throughput sim) ──────────────────── */
 .duoGrid {

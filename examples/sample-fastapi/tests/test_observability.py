@@ -135,15 +135,16 @@ def test_tracing_spans_sent_to_jaeger(aerospike_container, jaeger_container, aer
             {
                 "hosts": [("127.0.0.1", as_port)],
                 "cluster_name": "docker",
-                "policies": {"key": aerospike_py.POLICY_KEY_SEND},
             }
         )
         await ac.connect()
         a.state.aerospike = ac
-        yield
-        await ac.close()
-        aerospike_py.shutdown_tracing()
-        a.state.tracing_enabled = False
+        try:
+            yield
+        finally:
+            await ac.close()
+            aerospike_py.shutdown_tracing()
+            a.state.tracing_enabled = False
 
     original_lifespan = app.router.lifespan_context
     original_aerospike = getattr(app.state, "aerospike", None)
