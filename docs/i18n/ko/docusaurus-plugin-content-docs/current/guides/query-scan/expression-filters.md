@@ -1,9 +1,9 @@
 ---
-title: Expression Filters
-sidebar_label: Expression Filters
+title: Expression 필터
+sidebar_label: Expression 필터
 sidebar_position: 2
 slug: /guides/expression-filters
-description: Server-side record filtering with 104+ composable expression functions.
+description: 조합 가능한 104개 이상의 expression 함수로 서버에서 Record를 필터링하는 방법
 ---
 
 Expression filter는 read, write, query operation에 적용할 수 있습니다. Server가 expression을 평가해 조건에 맞는 record만 반환하거나 수정합니다.
@@ -15,7 +15,7 @@ Expression filter를 사용하려면 Aerospike Server **5.2 이상**이 필요�
 ## Import
 
 ```python
-from aerospike_py import exp
+from aerospike_py import exp, predicates
 ```
 
 ## 기본 사용

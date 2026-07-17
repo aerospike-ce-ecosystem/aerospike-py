@@ -64,7 +64,8 @@ if result.meta is not None:
 
 ## Batch Read
 
-Read multiple records in a single network call.
+Read multiple records with one batch API call. The client routes each key to the
+node that owns it, so a multi-node batch may use more than one network request.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -106,4 +107,7 @@ for user_key, bins in batch.items():
 
 - **Batch size**: 100-5,000 keys per batch is optimal. Very large batches may timeout.
 - **Timeouts**: Increase `total_timeout` for large batch operations.
-- **Error handling**: Individual batch records can fail independently. Always check `br.record` for `None`.
+- **Error handling**: The mapping view contains successful records that have a
+  user key. Compare the requested user keys with `batch.keys()` to find misses.
+  Use `batch.iter_records()` and inspect each `br.result` when you need to
+  distinguish a missing record from another per-record error.

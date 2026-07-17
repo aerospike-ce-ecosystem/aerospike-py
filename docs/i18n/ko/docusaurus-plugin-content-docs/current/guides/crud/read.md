@@ -1,9 +1,9 @@
 ---
-title: Read Operations
-sidebar_label: Read
+title: 읽기 작업
+sidebar_label: 읽기
 sidebar_position: 1
 slug: /guides/read
-description: Get, select, exists, and batch read operations.
+description: get, select, exists 및 batch read 작업
 ---
 
 import Tabs from '@theme/Tabs';
@@ -64,7 +64,8 @@ if result.meta is not None:
 
 ## Batch Read
 
-여러 record를 한 번의 network call로 읽습니다.
+여러 record를 하나의 batch API call로 읽습니다. Client는 각 key를 소유한 node로
+요청을 보내므로 multi-node batch에서는 network request가 여러 번 발생할 수 있습니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -106,4 +107,7 @@ for user_key, bins in batch.items():
 
 - **Batch size**: batch당 100–5,000개 key를 권장합니다. Batch가 너무 크면 timeout이 발생할 수 있습니다.
 - **Timeout**: 큰 batch operation에는 더 긴 `total_timeout`을 사용하세요.
-- **Error handling**: 각 batch record는 독립적으로 실패할 수 있습니다. 항상 `br.record`가 `None`인지 확인하세요.
+- **Error handling**: Mapping view에는 user key가 있는 성공한 record만 들어 있습니다.
+  요청한 user key와 `batch.keys()`를 비교하면 누락된 key를 찾을 수 있습니다.
+  RecordNotFound와 다른 per-record error를 구분해야 한다면 `batch.iter_records()`를
+  순회하며 각 `br.result`를 확인하세요.

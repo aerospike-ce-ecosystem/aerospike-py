@@ -237,7 +237,7 @@ export function RequestFlow(): React.ReactElement {
             <div className={styles.flowArrow}>&darr;</div>
             <FlowStep num={4} variant="good" label={<>Return Pending &rarr; <b>pyo3 Auto Convert</b></>} />
           </div>
-          <div className={styles.flowFooter} style={{ color: 'var(--arch-green)' }}>
+          <div className={styles.flowFooter} style={{ color: 'var(--arch-good)' }}>
             GIL 1x &middot; 1 Boundary Crossing &middot; No Thread Creation
           </div>
         </div>
@@ -319,7 +319,7 @@ export function GilTimeline(): React.ReactElement {
             </div>
           </div>
           <div className={styles.gilFooter}>
-            GIL <span style={{ color: 'var(--arch-green)' }}>1x</span> &middot; No handoff
+            GIL <span style={{ color: 'var(--arch-good)' }}>1x</span> &middot; No handoff
           </div>
         </div>
       </div>
@@ -416,13 +416,13 @@ export function ConcurrencyViz(): React.ReactElement {
               </div>
             </div>
             <div className={styles.threadRow}>
-              <span className={styles.threadLabel} style={{ color: 'var(--arch-green)' }}>Status</span>
+              <span className={styles.threadLabel} style={{ color: 'var(--arch-good)' }}>Status</span>
               <div className={styles.threadBarCt}>
                 <div className={`${styles.threadBar} ${styles.barStatusGood}`} style={{ left: 0, width: '100%' }}>&#x2713; All 1,000 processed concurrently</div>
               </div>
             </div>
           </div>
-          <div className={styles.panelFooter} style={{ color: 'var(--arch-green)' }}>
+          <div className={styles.panelFooter} style={{ color: 'var(--arch-good)' }}>
             All concurrent with 4 workers &middot; No queue
           </div>
         </div>
@@ -641,7 +641,7 @@ export function ThroughputSim(): React.ReactElement {
             </div>
             <div className={styles.duoRow}>
               <span className={styles.duoRowLabel}>Queued</span>
-              <span className={styles.duoRowValue} style={{ color: 'var(--arch-green)' }}>0</span>
+              <span className={styles.duoRowValue} style={{ color: 'var(--arch-good)' }}>0</span>
             </div>
           </div>
         </div>
@@ -799,49 +799,51 @@ export function GilChart(): React.ReactElement {
     x.fillText('OOM @64', oomX + 3, P.t + 10);
 
     // Area fills
+    // Keep the narrowed context in a non-null binding for the nested draw helpers.
+    const ctx = x;
     function fillArea(pts: number[], color: string) {
-      x.fillStyle = color;
-      x.beginPath();
+      ctx.fillStyle = color;
+      ctx.beginPath();
       pts.forEach((v, i) => {
         const px = xPos(xs[i]), py = yPos(v);
-        i === 0 ? x.moveTo(px, py) : x.lineTo(px, py);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
       });
-      x.lineTo(xPos(xs[pts.length - 1]), yPos(0));
-      x.lineTo(xPos(xs[0]), yPos(0));
-      x.closePath();
-      x.fill();
+      ctx.lineTo(xPos(xs[pts.length - 1]), yPos(0));
+      ctx.lineTo(xPos(xs[0]), yPos(0));
+      ctx.closePath();
+      ctx.fill();
     }
-    fillArea(oP, 'rgba(99,102,241,.06)');
-    fillArea(rP, 'rgba(249,115,22,.06)');
+    fillArea(oP, 'rgba(37,99,235,.06)');
+    fillArea(rP, 'rgba(255,199,44,.08)');
 
     // Lines
     function drawLine(pts: number[], color: string) {
-      x.strokeStyle = color;
-      x.lineWidth = 2.5;
-      x.lineJoin = 'round';
-      x.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
       pts.forEach((v, i) => {
         const px = xPos(xs[i]), py = yPos(v);
-        i === 0 ? x.moveTo(px, py) : x.lineTo(px, py);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
       });
-      x.stroke();
-      x.fillStyle = color;
+      ctx.stroke();
+      ctx.fillStyle = color;
       pts.forEach((v, i) => {
         const px = xPos(xs[i]), py = yPos(v);
-        x.beginPath();
-        x.arc(px, py, 3, 0, Math.PI * 2);
-        x.fill();
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fill();
       });
     }
-    drawLine(oP, '#6366f1');
-    drawLine(rP, '#f97316');
+    drawLine(oP, '#2563eb');
+    drawLine(rP, '#b98200');
 
     // End labels
     x.font = 'bold 10px sans-serif';
     x.textAlign = 'left';
-    x.fillStyle = '#6366f1';
+    x.fillStyle = '#2563eb';
     x.fillText(`${oP[oP.length - 1].toFixed(1)}ms`, xPos(xs[xs.length - 1]) + 6, yPos(oP[oP.length - 1]) + 4);
-    x.fillStyle = '#f97316';
+    x.fillStyle = '#b98200';
     x.fillText(`${rP[rP.length - 1].toFixed(1)}ms`, xPos(xs[xs.length - 1]) + 6, yPos(rP[rP.length - 1]) + 4);
   }, []);
 

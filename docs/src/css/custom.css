@@ -1,202 +1,381 @@
-/* ============================================================
-   Color Theme — aerospike-py Navy / Yellow
-   ============================================================ */
+/* aerospike-py — Aerospike yellow, Python navy, documentation-first layout */
 :root {
-  --ifm-color-primary:          #0B1F33;
-  --ifm-color-primary-dark:     #091C2E;
-  --ifm-color-primary-darker:   #081A2B;
-  --ifm-color-primary-darkest:  #071624;
-  --ifm-color-primary-light:    #23364A;
-  --ifm-color-primary-lighter:  #304357;
-  --ifm-color-primary-lightest: #647283;
-
+  --ifm-color-primary: #0b1f33;
+  --ifm-color-primary-dark: #081b2d;
+  --ifm-color-primary-darker: #071927;
+  --ifm-color-primary-darkest: #05131f;
+  --ifm-color-primary-light: #17334f;
+  --ifm-color-primary-lighter: #21415f;
+  --ifm-color-primary-lightest: #48657e;
+  --ifm-background-color: #ffffff;
+  --ifm-background-surface-color: #f6f8fb;
+  --ifm-navbar-height: 4rem;
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
-
-  /* Custom brand variables */
-  --apy-color-yellow: #FFC72C;
-  --apy-color-navy:   #0B1F33;
-  --apy-color-white:  #FFFFFF;
-  --apy-color-muted:  #647283;
-  --apy-color-code:   #102A43;
-
-  /* Typography */
   --ifm-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
   --ifm-heading-font-family: 'Plus Jakarta Sans', var(--ifm-font-family-base);
   --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
   --ifm-line-height-base: 1.75;
+  --ifm-menu-color-background-active: #fff7d6;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 199, 44, 0.18);
+
+  --apy-color-yellow: #ffc72c;
+  --apy-color-yellow-soft: #fff8df;
+  --apy-color-navy: #0b1f33;
+  --apy-color-ink: #17283a;
+  --apy-color-muted: #5f7183;
+  --apy-color-paper: #f6f8fb;
+  --apy-color-line: #dfe6ed;
+  --apy-color-line-strong: #b9c6d2;
+  --apy-focus-ring: #0b1f33;
+  --apy-chart-sync: #0b1f33;
+  --apy-chart-async: #7a5700;
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary:          #FFC72C;
-  --ifm-color-primary-dark:     #F2B800;
-  --ifm-color-primary-darker:   #E8AE00;
-  --ifm-color-primary-darkest:  #C28F00;
-  --ifm-color-primary-light:    #FFD154;
-  --ifm-color-primary-lighter:  #FFD866;
-  --ifm-color-primary-lightest: #FFE79D;
+  --ifm-color-primary: #ffc72c;
+  --ifm-color-primary-dark: #f2b800;
+  --ifm-color-primary-darker: #e8ae00;
+  --ifm-color-primary-darkest: #c28f00;
+  --ifm-color-primary-light: #ffd154;
+  --ifm-color-primary-lighter: #ffd866;
+  --ifm-color-primary-lightest: #ffe79d;
+  --ifm-background-color: #091827;
+  --ifm-background-surface-color: #102438;
+  --ifm-menu-color-background-active: rgba(255, 199, 44, 0.12);
+  --docusaurus-highlighted-code-line-bg: rgba(255, 199, 44, 0.13);
 
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --apy-color-yellow-soft: rgba(255, 199, 44, 0.09);
+  --apy-color-ink: #e6edf3;
+  --apy-color-muted: #9fb0c0;
+  --apy-color-paper: #0d1d2d;
+  --apy-color-line: #263b4f;
+  --apy-color-line-strong: #3f566c;
+  --apy-focus-ring: #ffc72c;
+  --apy-chart-sync: #7db7ff;
+  --apy-chart-async: #ffc72c;
 }
 
-/* ============================================================
-   Navbar
-   ============================================================ */
+html {
+  scroll-padding-top: calc(var(--ifm-navbar-height) + 1.25rem);
+}
+
+body {
+  color: var(--apy-color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--apy-color-yellow);
+  color: var(--apy-color-navy);
+}
+
+/* Navigation */
 .navbar {
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   border-bottom: 2px solid var(--apy-color-yellow);
+  box-shadow: 0 1px 8px rgba(11, 31, 51, 0.08);
 }
 
 [data-theme='dark'] .navbar {
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.34);
 }
 
-/* ============================================================
-   Footer
-   ============================================================ */
+.navbar__brand {
+  gap: 0.55rem;
+  margin-right: 1.5rem;
+}
+
+.navbar__logo {
+  height: 2rem;
+}
+
+.navbar__title {
+  font-family: var(--ifm-heading-font-family);
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.navbar__link {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.navbar__link:hover,
+.navbar__link--active {
+  color: var(--ifm-color-primary);
+}
+
+/* Documentation canvas */
+.theme-doc-markdown {
+  max-width: 75ch;
+  line-height: 1.75;
+}
+
+.theme-doc-markdown > h1:first-child,
+.theme-doc-markdown header h1 {
+  margin-bottom: 1.4rem;
+  font-size: clamp(2.15rem, 4vw, 2.8rem);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.theme-doc-markdown h2 {
+  margin-top: 2.75rem;
+  margin-bottom: 1.1rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--apy-color-line);
+  font-size: clamp(1.5rem, 2.5vw, 1.8rem);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.theme-doc-markdown h3 {
+  margin-top: 2rem;
+  margin-bottom: 0.8rem;
+  font-size: clamp(1.2rem, 2vw, 1.35rem);
+}
+
+.theme-doc-markdown h4 {
+  margin-top: 1.8rem;
+}
+
+.theme-doc-markdown p,
+.theme-doc-markdown li {
+  text-wrap: pretty;
+}
+
+.theme-doc-markdown p {
+  margin-bottom: 1.25rem;
+}
+
+.theme-doc-markdown li + li {
+  margin-top: 0.35rem;
+}
+
+.theme-doc-markdown :where(p, li, td) > a {
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.theme-doc-markdown :where(p, li, td) > a:hover {
+  text-decoration-color: var(--apy-color-yellow);
+  text-decoration-thickness: 2px;
+}
+
+.theme-doc-breadcrumbs {
+  margin-bottom: 1.4rem;
+  font-size: 0.8rem;
+}
+
+.theme-doc-sidebar-container {
+  background: var(--apy-color-paper);
+}
+
+.menu {
+  padding: 1.25rem 0.75rem 2rem;
+  font-size: 0.9rem;
+}
+
+.menu__list-item-collapsible {
+  border-radius: 0.5rem;
+}
+
+.menu__link {
+  border-radius: 0.45rem;
+  line-height: 1.35;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.menu__link--active:not(.menu__link--sublist) {
+  position: relative;
+  background: var(--ifm-menu-color-background-active);
+  color: var(--apy-color-navy);
+  font-weight: 700;
+}
+
+.menu__link--active:not(.menu__link--sublist)::before {
+  position: absolute;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  left: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--apy-color-yellow);
+  content: '';
+}
+
+[data-theme='dark'] .menu__link--active:not(.menu__link--sublist) {
+  color: var(--apy-color-yellow);
+}
+
+.table-of-contents {
+  border-left-color: var(--apy-color-line);
+  font-size: 0.82rem;
+}
+
+.table-of-contents__link {
+  line-height: 1.45;
+}
+
+.table-of-contents__link--active {
+  color: var(--ifm-color-primary);
+  font-weight: 700;
+}
+
+/* Code and data */
+.theme-code-block,
+.prism-code {
+  border: 1px solid var(--apy-color-line);
+  border-radius: 0.7rem;
+  box-shadow: none;
+}
+
+.prism-code {
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+:not(pre) > code {
+  padding: 0.12rem 0.35rem;
+  border: 1px solid var(--apy-color-line);
+  border-radius: 0.3rem;
+  background: var(--apy-color-paper);
+  color: inherit;
+  font-size: 0.88em;
+}
+
+.theme-doc-markdown table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--apy-color-line);
+  border-radius: 0.65rem;
+}
+
+.theme-doc-markdown table th,
+.theme-doc-markdown table td {
+  padding: 0.75rem 0.85rem;
+  border-color: var(--apy-color-line);
+  vertical-align: top;
+}
+
+.theme-doc-markdown table th {
+  background: var(--apy-color-paper);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.theme-doc-markdown table td code {
+  white-space: nowrap;
+}
+
+.tabs {
+  gap: 0.25rem;
+  border-bottom-color: var(--apy-color-line);
+}
+
+.tabs__item {
+  padding: 0.6rem 1rem;
+  border-radius: 0.45rem 0.45rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.tabs__item--active {
+  border-bottom-color: var(--apy-color-yellow);
+}
+
+.alert,
+.admonition {
+  margin: 1.75rem 0;
+  border-radius: 0.65rem;
+  box-shadow: none;
+}
+
+/* Keep tip admonitions in the Aerospike brand palette. */
+.alert--success {
+  --ifm-alert-background-color: var(--apy-color-yellow-soft);
+  --ifm-alert-background-color-highlight: rgba(255, 199, 44, 0.18);
+  --ifm-alert-foreground-color: var(--apy-color-ink);
+  --ifm-alert-border-color: #b98200;
+}
+
+[data-theme='dark'] .alert--success {
+  --ifm-alert-background-color: rgba(255, 199, 44, 0.09);
+  --ifm-alert-background-color-highlight: rgba(255, 199, 44, 0.16);
+  --ifm-alert-foreground-color: var(--apy-color-ink);
+  --ifm-alert-border-color: var(--apy-color-yellow);
+}
+
+.pagination-nav__link {
+  border-color: var(--apy-color-line);
+  border-radius: 0.7rem;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.pagination-nav__link:hover {
+  border-color: var(--apy-color-yellow);
+  background: var(--apy-color-yellow-soft);
+}
+
 .footer--dark {
   background: var(--apy-color-navy);
 }
 
-/* ============================================================
-   Hero
-   ============================================================ */
-.hero--primary {
-  --ifm-hero-background-color: var(--ifm-color-primary);
-  --ifm-hero-text-color: #ffffff;
+/* Keyboard and motion */
+:where(a, button, [tabindex]):focus-visible {
+  outline: 3px solid var(--apy-focus-ring);
+  outline-offset: 3px;
 }
 
-/* ============================================================
-   Typography
-   ============================================================ */
-.markdown {
-  line-height: 1.75;
-  max-width: 75ch;
+@media screen and (max-width: 996px) {
+  .navbar__brand {
+    margin-right: 0.5rem;
+  }
+
+  .navbar-sidebar .menu {
+    padding-top: 0.75rem;
+  }
+
+  .theme-doc-markdown {
+    max-width: none;
+  }
 }
 
-.markdown p {
-  margin-bottom: 1.25rem;
+@media screen and (max-width: 640px) {
+  .theme-doc-markdown > h1:first-child,
+  .theme-doc-markdown header h1 {
+    font-size: clamp(2rem, 9vw, 2.4rem);
+  }
+
+  .theme-doc-markdown h2 {
+    margin-top: 2.65rem;
+  }
+
+  .prism-code {
+    font-size: 0.78rem;
+  }
+
+  .theme-doc-markdown table th,
+  .theme-doc-markdown table td {
+    padding: 0.65rem 0.7rem;
+  }
 }
 
-.markdown h2 {
-  margin-top: 2.5rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid var(--ifm-toc-border-color);
-  font-family: var(--ifm-heading-font-family);
-}
-
-.markdown h3 {
-  margin-top: 2rem;
-  font-family: var(--ifm-heading-font-family);
-}
-
-/* ============================================================
-   Code Blocks
-   ============================================================ */
-.prism-code {
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  font-size: 0.9rem;
-}
-
-[data-theme='dark'] .prism-code {
-  border-color: rgba(255, 255, 255, 0.1);
-  background-color: var(--apy-color-code) !important;
-}
-
-/* Inline code */
-:not(pre) > code {
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
-  padding: 2px 6px;
-}
-
-[data-theme='dark'] :not(pre) > code {
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-/* ============================================================
-   Tables
-   ============================================================ */
-table {
-  display: block;
-  overflow-x: auto;
-  width: 100%;
-}
-
-table th {
-  background-color: var(--ifm-color-emphasis-100);
-  font-weight: 600;
-}
-
-[data-theme='dark'] table th {
-  background-color: var(--ifm-color-emphasis-200);
-}
-
-table td code {
-  white-space: nowrap;
-}
-
-/* ============================================================
-   Sidebar
-   ============================================================ */
-.menu__link--active:not(.menu__link--sublist) {
-  border-left: 3px solid var(--ifm-color-primary);
-  padding-left: calc(var(--ifm-menu-link-padding-horizontal) - 3px);
-}
-
-.menu__link {
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-/* ============================================================
-   Admonitions
-   ============================================================ */
-.admonition {
-  border-radius: 8px;
-  margin-bottom: 1.5rem;
-}
-
-/* ============================================================
-   Tabs (Sync / Async)
-   ============================================================ */
-.tabs__item {
-  font-size: 0.95rem;
-  padding: 0.6rem 1.2rem;
-}
-
-/* ============================================================
-   Table of Contents
-   ============================================================ */
-.table-of-contents__link--active {
-  font-weight: 600;
-  color: var(--ifm-color-primary);
-}
-
-.table-of-contents {
-  font-size: 0.85rem;
-}
-
-/* ============================================================
-   Feature Cards (Homepage)
-   ============================================================ */
-.feature-card {
-  padding: 1.5rem;
-  border-radius: 8px;
-  border: 1px solid var(--ifm-color-emphasis-200);
-  margin-bottom: 1rem;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-.feature-card:hover {
-  border-color: var(--ifm-color-primary);
-  box-shadow: 0 2px 12px rgba(11, 31, 51, 0.12);
-}
-
-[data-theme='dark'] .feature-card:hover {
-  box-shadow: 0 2px 12px rgba(255, 199, 44, 0.15);
-}
-
-.feature-card h3 {
-  margin-bottom: 0.5rem;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

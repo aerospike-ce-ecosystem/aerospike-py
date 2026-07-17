@@ -1,255 +1,270 @@
-/* ============================================================
-   Hero Section
-   ============================================================ */
 .heroBanner {
-  padding: 6rem 0 5rem;
-  text-align: center;
   position: relative;
   overflow: hidden;
-  background: var(--apy-color-navy, #0B1F33);
+  padding: 5rem 1.5rem 4.5rem;
+  background: var(--apy-color-navy, #0b1f33);
   color: #fff;
+  text-align: center;
 }
 
-/* Single data-line motif */
 .heroBanner::before {
-  content: '';
   position: absolute;
   inset: 0;
   background-image: repeating-linear-gradient(
     0deg,
     transparent 0,
     transparent 39px,
-    rgba(255, 199, 44, 0.07) 39px,
-    rgba(255, 199, 44, 0.07) 40px
+    rgba(255, 199, 44, 0.055) 39px,
+    rgba(255, 199, 44, 0.055) 40px
   );
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), transparent 78%);
+  content: '';
+  mask-image: linear-gradient(to bottom, #000, transparent 82%);
   pointer-events: none;
 }
 
 .heroContent {
   position: relative;
   z-index: 1;
+  max-width: 760px;
+  margin: 0 auto;
 }
 
 .heroLogo {
   display: block;
-  width: 5.5rem;
-  height: 5.5rem;
-  margin: 0 auto 1.25rem;
-  border-radius: 1.15rem;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  width: 4.75rem;
+  height: 4.75rem;
+  margin: 0 auto 1.5rem;
+  border-radius: 1rem;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
 }
 
-/* ============================================================
-   Badge
-   ============================================================ */
 .heroBadge {
   display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: rgba(255, 199, 44, 0.1);
-  border: 1px solid rgba(255, 199, 44, 0.42);
-  border-radius: 100px;
-  padding: 0.3rem 0.9rem;
+  margin-bottom: 1.25rem;
+  padding: 0.3rem 0.85rem;
+  border: 1px solid rgba(255, 199, 44, 0.4);
+  border-radius: 999px;
+  background: rgba(255, 199, 44, 0.09);
+  color: var(--apy-color-yellow, #ffc72c);
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--apy-color-yellow, #FFC72C);
-  letter-spacing: 0.03em;
-  margin-bottom: 1.5rem;
 }
 
-/* ============================================================
-   Title
-   ============================================================ */
 .heroTitle {
-  font-size: clamp(2.2rem, 5vw, 3.5rem);
-  font-weight: 800;
-  line-height: 1.15;
+  margin: 0 0 1rem;
   color: #fff;
-  margin-bottom: 1rem;
-  font-family: 'Plus Jakarta Sans', var(--ifm-heading-font-family, sans-serif);
-}
-
-.heroTitleAccent {
-  color: var(--apy-color-yellow, #FFC72C);
-  position: relative;
+  font-family: var(--ifm-heading-font-family);
+  font-size: clamp(2.25rem, 5vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
 .heroSubtitle {
-  font-size: 1.15rem;
-  color: rgba(255, 255, 255, 0.7);
-  max-width: 560px;
-  margin: 0 auto 2.5rem;
-  line-height: 1.6;
+  max-width: 620px;
+  margin: 0 auto 2rem;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 1.1rem;
+  line-height: 1.65;
 }
 
-/* ============================================================
-   CTA Buttons
-   ============================================================ */
+.heroTitleAccent {
+  color: var(--apy-color-yellow, #ffc72c);
+}
+
 .buttons {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.ctaPrimary,
+.ctaSecondary {
+  min-height: 3rem;
+  border-radius: 0.5rem !important;
+  font-weight: 600;
+  transition: background-color 150ms ease, border-color 150ms ease !important;
 }
 
 .ctaPrimary {
-  background: var(--apy-color-yellow, #FFC72C) !important;
-  border-color: var(--apy-color-yellow, #FFC72C) !important;
-  color: var(--apy-color-navy, #0B1F33) !important;
-  font-weight: 600;
-  transition: background 0.2s, transform 0.15s, box-shadow 0.2s !important;
+  border-color: var(--apy-color-yellow, #ffc72c) !important;
+  background: var(--apy-color-yellow, #ffc72c) !important;
+  color: var(--apy-color-navy, #0b1f33) !important;
 }
 
 .ctaPrimary:hover {
-  background: #FFD154 !important;
-  border-color: #FFD154 !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(255, 199, 44, 0.28) !important;
+  border-color: #ffd154 !important;
+  background: #ffd154 !important;
 }
 
 .ctaSecondary {
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
   background: transparent !important;
-  border-color: rgba(255, 255, 255, 0.4) !important;
-  color: rgba(255, 255, 255, 0.85) !important;
-  font-weight: 600;
-  transition: border-color 0.2s, color 0.2s, transform 0.15s !important;
+  color: #fff !important;
 }
 
 .ctaSecondary:hover {
-  border-color: rgba(255, 255, 255, 0.8) !important;
-  color: #fff !important;
-  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.75) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
 }
 
-/* ============================================================
-   Install Command
-   ============================================================ */
 .installCommand {
   display: inline-flex;
+  max-width: 100%;
+  min-height: 2.75rem;
+  gap: 0.65rem;
   align-items: center;
-  gap: 0.75rem;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 0.6rem 1.5rem;
-  backdrop-filter: blur(4px);
+  padding: 0.35rem 0.4rem 0.35rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.prompt {
+  color: var(--apy-color-yellow, #ffc72c);
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 700;
 }
 
 .installCommand code {
-  color: var(--apy-color-yellow, #FFC72C);
-  font-size: 1rem;
-  font-family: var(--ifm-font-family-monospace, monospace);
-  background: none;
-  border: none;
+  overflow: hidden;
   padding: 0;
+  border: 0;
+  background: transparent;
+  color: #f6f8fa;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .copyButton {
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
-  color: rgba(255, 255, 255, 0.7);
+  min-width: 4.8rem;
+  align-self: stretch;
+  padding: 0.25rem 0.7rem;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0 0.35rem 0.35rem 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.76);
   cursor: pointer;
-  font-size: 1rem;
-  padding: 0.15rem 0.4rem;
-  line-height: 1;
-  transition: all 0.2s;
+  font-size: 0.76rem;
+  font-weight: 600;
 }
 
 .copyButton:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.statsBar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+  background: var(--ifm-background-color);
+}
+
+.statItem {
+  display: flex;
+  min-width: 180px;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.35rem 2.5rem;
+  border-right: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.statItem:last-child {
+  border-right: 0;
+}
+
+.statValue {
+  color: var(--ifm-color-primary);
+  font-family: var(--ifm-heading-font-family);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.statLabel {
+  margin-top: 0.15rem;
+  color: var(--ifm-color-emphasis-600);
+  font-size: 0.78rem;
+  font-weight: 500;
 }
 
 .ctaPrimary:focus-visible,
 .ctaSecondary:focus-visible,
 .copyButton:focus-visible {
-  outline: 3px solid var(--apy-color-yellow, #FFC72C);
+  outline: 3px solid var(--apy-color-yellow, #ffc72c);
   outline-offset: 3px;
 }
 
-/* ============================================================
-   Stats Bar
-   ============================================================ */
-.statsBar {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 0;
-  background: var(--ifm-background-color);
-  border-bottom: 1px solid var(--ifm-color-emphasis-200);
-}
-
-.statItem {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 1.5rem 3rem;
-  border-right: 1px solid var(--ifm-color-emphasis-200);
-}
-
-.statItem:last-child {
-  border-right: none;
-}
-
-.statValue {
-  font-size: 1.75rem;
-  font-weight: 800;
-  color: var(--ifm-color-primary);
-  font-family: 'Plus Jakarta Sans', var(--ifm-heading-font-family, sans-serif);
-  line-height: 1.2;
-}
-
-.statLabel {
-  font-size: 0.8rem;
-  color: var(--ifm-color-emphasis-600);
-  font-weight: 500;
-  margin-top: 0.2rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-@media screen and (max-width: 996px) {
+@media screen and (max-width: 640px) {
   .heroBanner {
-    padding: 4rem 1.5rem 3.5rem;
+    padding: 3.5rem 1rem 3rem;
   }
 
   .heroLogo {
-    width: 4.75rem;
-    height: 4.75rem;
+    width: 4rem;
+    height: 4rem;
+  }
+
+  .heroTitle {
+    font-size: clamp(2.1rem, 10vw, 2.7rem);
+    line-height: 1.18;
+  }
+
+  .heroSubtitle {
+    font-size: 1rem;
+  }
+
+  .buttons {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .buttons a,
+  .installCommand {
+    width: 100%;
+  }
+
+  .installCommand code {
+    flex: 1;
+    font-size: 0.78rem;
   }
 
   .statsBar {
-    flex-direction: column;
-    align-items: stretch;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .statItem {
-    border-right: none;
+    min-width: 0;
+    padding: 1rem 0.5rem;
+    border-right: 1px solid var(--ifm-color-emphasis-200);
     border-bottom: 1px solid var(--ifm-color-emphasis-200);
-    padding: 1rem 2rem;
-    flex-direction: row;
-    justify-content: space-between;
   }
 
-  .statItem:last-child {
-    border-bottom: none;
+  .statItem:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .statItem:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .statValue {
+    font-size: 1.25rem;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ctaPrimary,
-  .ctaSecondary,
-  .copyButton {
+  .ctaSecondary {
     transition: none !important;
-  }
-
-  .ctaPrimary:hover,
-  .ctaSecondary:hover {
-    transform: none;
   }
 }

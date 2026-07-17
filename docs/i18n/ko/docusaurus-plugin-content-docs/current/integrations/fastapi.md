@@ -1,8 +1,8 @@
 ---
-title: FastAPI Integration
-sidebar_label: FastAPI
+title: FastAPI 연동
+sidebar_label: FastAPI 연동
 sidebar_position: 1
-description: AsyncClient with FastAPI lifespan and dependency injection.
+description: FastAPI lifespan과 의존성 주입에서 AsyncClient를 사용하는 방법
 ---
 
 ## Prerequisites
@@ -16,7 +16,6 @@ pip install fastapi uvicorn pydantic-settings aerospike-py
 ```python
 from contextlib import asynccontextmanager
 
-import aerospike_py
 from aerospike_py import AsyncClient
 from fastapi import FastAPI
 
@@ -25,12 +24,13 @@ from fastapi import FastAPI
 async def lifespan(app: FastAPI):
     client = AsyncClient({
         "hosts": [("127.0.0.1", 3000)],
-        "policies": {"key": aerospike_py.POLICY_KEY_SEND},
     })
     await client.connect()
     app.state.aerospike = client
-    yield
-    await client.close()
+    try:
+        yield
+    finally:
+        await client.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -132,8 +132,8 @@ async def delete_user(user_id: str, request: Request):
 
 ```bash
 cd examples/sample-fastapi
-docker compose up -d
-pip install -r requirements.txt
+docker compose -f ../../compose.sample-fastapi.yaml up -d aerospike
+uv sync --all-extras
 uvicorn app.main:app --reload
 # http://localhost:8000/docs 방문
 ```

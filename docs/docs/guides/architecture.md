@@ -133,7 +133,10 @@ record.key.user_key  # "user1"
 
 ### batch_read
 
-Returns a `dict[UserKey, dict]` mapping each user key to its bins. Only successful reads are included — missing or failed keys are absent from the dict.
+Returns a `LazyBatchRecords` handle. Its mapping interface exposes successful
+user-key reads as `user_key → bins`. Call `to_dict()` only when you need a plain
+dictionary, or inspect `batch_records` / `iter_records()` when you need every
+per-record result, including missing and failed reads.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -186,7 +189,10 @@ results = client.batch_write(records, policy={"ttl": 86400})  # default: 1 day
 
 **TTL priority:** per-record `{"ttl": N}` > batch-level `policy={"ttl": N}` > namespace default.
 
-**Retry:** Failed records (timeout, device overload, key busy) are automatically retried with exponential backoff. Retries stop early if the elapsed time approaches `total_timeout`.
+**Retry:** The default `retry=0` does not retry failed records. Set `retry` to a
+value greater than zero to retry eligible failures such as timeout, device
+overload, or key busy with exponential backoff. Retries stop early when the
+elapsed time approaches `total_timeout`.
 
 ```python
 results = client.batch_write(records, retry=3)

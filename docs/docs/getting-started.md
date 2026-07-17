@@ -2,51 +2,64 @@
 title: Getting Started
 sidebar_label: Getting Started
 sidebar_position: 1
-description: Install aerospike-py and connect to an Aerospike cluster in minutes.
+description: Install aerospike-py, connect to a cluster, and read your first record.
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-## Installation
+This guide takes you from installation to your first successful read. You need an
+Aerospike server or cluster that your machine can already reach. `aerospike-py`
+connects to that server; it does not start one for you.
+
+## 1. Install the client
 
 ```bash
 pip install aerospike-py
 ```
 
-**Requirements:** Python 3.10+ (CPython)
+The package supports CPython 3.10 and later. PyPI provides prebuilt wheels for
+supported macOS, Linux, and Windows x64 platforms, so a normal installation does
+not require a local Rust or C toolchain.
 
-Before running the examples, make sure an Aerospike server is available at
-`127.0.0.1:3000`, or replace the host and port with a seed address for your
-cluster.
+## 2. Choose a seed address
 
-## Quick Start
+Start with the host and service port of any reachable node:
+
+```python
+config = {
+    "hosts": [("127.0.0.1", 3000)],
+}
+```
+
+Port `3000` is Aerospike's default service port. If your container, Kubernetes
+Service, or remote cluster exposes a different address, replace both values with
+the address your application can reach.
+
+:::tip[Why only one address?]
+A seed is the first node the client contacts. After connecting, the client
+discovers the other nodes and keeps the cluster view up to date. Production
+configurations can list more than one seed for startup resilience.
+:::
+
+## 3. Write and read one record
+
+Choose the API that matches your application. Both clients use the same key,
+record, and policy types.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
 
 ```python
-import aerospike_py as aerospike
-from aerospike_py import Record
+from aerospike_py import Client
 
-with aerospike.client({
-    "hosts": [("127.0.0.1", 3000)],
-}).connect() as client:
-    key: tuple[str, str, str] = ("test", "demo", "user1")
+config = {"hosts": [("127.0.0.1", 3000)]}
+key = ("test", "users", "ada")
 
-    # Write
-    client.put(key, {"name": "Alice", "age": 30})
-
-    # Read
-    record: Record = client.get(key)
-    print(record.bins)       # {"name": "Alice", "age": 30}
-    print(record.meta.gen)   # 1
-
-    # Update
-    client.increment(key, "age", 1)
-
-    # Delete
-    client.remove(key)
+with Client(config).connect() as client:
+    client.put(key, {"name": "Ada", "active": True})
+    record = client.get(key)
+    print(record.bins)
 ```
 
   </TabItem>
@@ -54,24 +67,17 @@ with aerospike.client({
 
 ```python
 import asyncio
-import aerospike_py as aerospike
-from aerospike_py import AsyncClient, Record
+from aerospike_py import AsyncClient
+
+config = {"hosts": [("127.0.0.1", 3000)]}
+key = ("test", "users", "ada")
 
 async def main() -> None:
-    async with AsyncClient({"hosts": [("127.0.0.1", 3000)]}) as client:
+    async with AsyncClient(config) as client:
         await client.connect()
-        key: tuple[str, str, str] = ("test", "demo", "user1")
-
-        await client.put(key, {"name": "Bob", "age": 25})
-
-        record: Record = await client.get(key)
-        print(record.bins)  # {"name": "Bob", "age": 25}
-
-        # Concurrent writes
-        keys = [("test", "demo", f"item_{i}") for i in range(10)]
-        await asyncio.gather(*(client.put(k, {"idx": i}) for i, k in enumerate(keys)))
-
-        await client.remove(key)
+        await client.put(key, {"name": "Ada", "active": True})
+        record = await client.get(key)
+        print(record.bins)
 
 asyncio.run(main())
 ```
@@ -79,39 +85,52 @@ asyncio.run(main())
   </TabItem>
 </Tabs>
 
-## Policies & Metadata
+Expected output:
 
-```python
-import aerospike_py as aerospike
-
-key = ("test", "demo", "user1")
-
-# TTL (seconds)
-client.put(key, {"val": 1}, meta={"ttl": 300})
-
-# Create only (fail if exists)
-client.put(key, {"val": 1}, policy={"exists": aerospike.POLICY_EXISTS_CREATE_ONLY})
-
-# Optimistic locking
-record = client.get(key)
-client.put(
-    key,
-    {"val": record.bins["val"] + 1},
-    meta={"gen": record.meta.gen},
-    policy={"gen": aerospike.POLICY_GEN_EQ},
-)
+```text
+{'name': 'Ada', 'active': True}
 ```
 
-## Next Steps
+The key has three parts: namespace (`test`), set (`users`), and user key (`ada`).
+Aerospike stores the values in named bins. `record.bins` contains those values,
+while `record.meta` contains metadata such as generation and TTL.
 
-| Topic | Description |
-|-------|-------------|
-| [Read Operations](guides/crud/read.md) | Get, select, exists, batch read |
-| [Write Operations](guides/crud/write.md) | Put, update, delete, operate, batch operate |
-| [CDT Operations](guides/crud/operations.md) | Atomic list & map operations |
-| [NumPy Batch](guides/crud/numpy-batch.md) | Zero-copy columnar batch reads |
-| [Query](guides/query-scan/query-scan.md) | Secondary index queries |
-| [Expression Filters](guides/query-scan/expression-filters.md) | Server-side filtering |
-| [Configuration](guides/config/client-config.md) | Connection, pool, timeouts |
-| [API Reference](api/client.md) | Full method signatures |
-| [Types](api/types.md) | NamedTuple / TypedDict definitions |
+## 4. Update and clean up
+
+<Tabs>
+  <TabItem value="sync-update" label="Sync" default>
+
+```python
+with Client(config).connect() as client:
+    client.increment(key, "login_count", 1)
+    updated = client.get(key)
+    print(updated.bins)
+    client.remove(key)
+```
+
+  </TabItem>
+  <TabItem value="async-update" label="Async">
+
+```python
+async with AsyncClient(config) as client:
+    await client.connect()
+    await client.increment(key, "login_count", 1)
+    updated = await client.get(key)
+    print(updated.bins)
+    await client.remove(key)
+```
+
+  </TabItem>
+</Tabs>
+
+## Where to go next
+
+| If you want to… | Read… |
+|---|---|
+| Set timeouts, pools, and multiple seeds | [Client configuration](guides/config/client-config.md) |
+| Understand records and read policies | [Read operations](guides/crud/read.md) |
+| Use TTL, generation checks, or batch writes | [Write operations](guides/crud/write.md) |
+| Handle failures by exception type | [Error handling](guides/admin/error-handling.md) |
+| Run secondary-index queries | [Query and scan](guides/query-scan/query-scan.md) |
+| Add the async client to a web service | [FastAPI integration](integrations/fastapi.md) |
+| Check every public method and type | [API reference](api/client.md) |

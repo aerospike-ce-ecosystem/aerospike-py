@@ -1,9 +1,9 @@
 ---
-title: Write Operations
-sidebar_label: Write
+title: 쓰기 작업
+sidebar_label: 쓰기
 sidebar_position: 2
 slug: /guides/write
-description: Put, update, delete, operate, batch operate, and optimistic locking.
+description: put, update, delete, operate, batch operate 및 낙관적 잠금 사용법
 ---
 
 import Tabs from '@theme/Tabs';
@@ -291,4 +291,7 @@ except RecordGenerationError:
 
 - **Batch size**: batch 당 100-5,000 key 가 최적. 너무 크면 timeout 가능.
 - **Timeout**: 큰 batch operation 의 경우 `total_timeout` 증가.
-- **Error handling**: Batch 안의 record는 각각 독립적으로 실패할 수 있습니다. 항상 `br.record`가 `None`인지 확인하세요.
+- **Error handling**: Batch 안의 record는 각각 독립적으로 실패할 수 있습니다. 먼저
+  `br.result`를 확인하세요. 값이 0이 아니라면 `br.in_doubt`를 확인해 non-idempotent
+  write를 retry할 때 두 번 적용될 가능성이 있는지 판단합니다. `br.record`는 record를
+  반환하는 operation의 선택적 결과이며 성공 여부를 나타내지 않습니다.

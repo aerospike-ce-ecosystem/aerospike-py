@@ -16,7 +16,6 @@ pip install fastapi uvicorn pydantic-settings aerospike-py
 ```python
 from contextlib import asynccontextmanager
 
-import aerospike_py
 from aerospike_py import AsyncClient
 from fastapi import FastAPI
 
@@ -25,12 +24,13 @@ from fastapi import FastAPI
 async def lifespan(app: FastAPI):
     client = AsyncClient({
         "hosts": [("127.0.0.1", 3000)],
-        "policies": {"key": aerospike_py.POLICY_KEY_SEND},
     })
     await client.connect()
     app.state.aerospike = client
-    yield
-    await client.close()
+    try:
+        yield
+    finally:
+        await client.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -55,7 +55,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     aerospike_host: str = "127.0.0.1"
-    aerospike_port: int = 18710
+    aerospike_port: int = 3000
     aerospike_namespace: str = "test"
     aerospike_set: str = "users"
 

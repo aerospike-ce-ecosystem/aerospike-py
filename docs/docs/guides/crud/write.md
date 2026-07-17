@@ -291,4 +291,7 @@ except RecordGenerationError:
 
 - **Batch size**: 100-5,000 keys per batch is optimal. Very large batches may timeout.
 - **Timeouts**: Increase `total_timeout` for large batch operations.
-- **Error handling**: Individual batch records can fail independently. Always check `br.record` for `None`.
+- **Error handling**: Individual batch records can fail independently. Check
+  `br.result` first. If it is non-zero, use `br.in_doubt` to decide whether a
+  retry could apply a non-idempotent write twice. `br.record` is optional result
+  data for operations that return a record; it is not the success indicator.

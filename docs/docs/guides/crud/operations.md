@@ -381,7 +381,6 @@ from aerospike_py import list_operations as list_ops
 
 with aerospike.client({
     "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
 }).connect() as client:
 
     key = ("test", "demo", "player1")
@@ -757,7 +756,6 @@ from aerospike_py import map_operations as map_ops
 
 with aerospike.client({
     "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
 }).connect() as client:
 
     key = ("test", "demo", "player1")

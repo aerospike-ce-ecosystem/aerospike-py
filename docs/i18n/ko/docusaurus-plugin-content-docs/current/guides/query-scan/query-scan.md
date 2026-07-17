@@ -1,9 +1,9 @@
 ---
-title: Query Guide
+title: Query 가이드
 sidebar_label: Query
 sidebar_position: 1
 slug: /guides/query-scan
-description: Secondary index queries with predicates.
+description: 보조 인덱스 Query에 predicate를 적용하는 방법
 ---
 
 ## Secondary Index Query

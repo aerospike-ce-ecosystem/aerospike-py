@@ -1,8 +1,8 @@
 ---
-title: Exceptions
-sidebar_label: Exceptions
+title: 예외
+sidebar_label: 예외
 sidebar_position: 3
-description: Exception hierarchy and error handling patterns.
+description: 예외 계층 구조와 오류 처리 패턴
 ---
 
 ```python

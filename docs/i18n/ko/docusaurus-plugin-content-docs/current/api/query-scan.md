@@ -1,8 +1,8 @@
 ---
-title: Query API
+title: Query API 레퍼런스
 sidebar_label: Query
 sidebar_position: 5
-description: Query and AsyncQuery class reference with predicates.
+description: predicate를 사용하는 Query 및 AsyncQuery 클래스 레퍼런스
 ---
 
 ## Query / AsyncQuery

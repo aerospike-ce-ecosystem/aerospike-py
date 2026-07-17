@@ -8,46 +8,53 @@ const sidebars: SidebarsConfig = {
       label: 'Guides',
       collapsed: false,
       items: [
-        'guides/architecture',
         {
           type: 'category',
-          label: 'Client Config',
+          label: 'Connection',
           items: [
             'guides/config/client-config',
             'guides/config/performance-tuning',
-            'guides/config/migration',
           ],
         },
         {
           type: 'category',
-          label: 'Read',
-          items: [
-            'guides/crud/read',
-            'guides/query-scan/query-scan',
-            'guides/query-scan/expression-filters',
-            'guides/crud/numpy-batch',
-          ],
-        },
-        {
-          type: 'category',
-          label: 'Write',
+          label: 'Records',
           items: [
             'guides/crud/write',
+            'guides/crud/read',
             'guides/crud/operations',
-            'guides/crud/numpy-batch-write',
           ],
         },
         {
           type: 'category',
-          label: 'Admin',
+          label: 'Query & Scan',
+          items: [
+            'guides/query-scan/query-scan',
+            'guides/query-scan/expression-filters',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Batch & NumPy',
+          items: [
+            'guides/crud/numpy-batch',
+            'guides/crud/numpy-batch-write',
+            'guides/crud/numpy-guide',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Administration',
           items: [
             'guides/admin/admin',
             'guides/admin/udf',
-            'guides/admin/error-handling',
           ],
         },
-        'guides/api-comparison',
         'guides/troubleshooting',
+        'guides/admin/error-handling',
+        'guides/config/migration',
+        'guides/api-comparison',
+        'guides/architecture',
       ],
     },
     {

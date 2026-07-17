@@ -43,7 +43,6 @@ async def lifespan(app: FastAPI):
     # Aerospike client with backpressure config
     config: dict = {
         "hosts": [(settings.aerospike_host, settings.aerospike_port)],
-        "policies": {"key": aerospike_py.POLICY_KEY_SEND},
     }
     if settings.max_concurrent_ops > 0:
         config["max_concurrent_operations"] = settings.max_concurrent_ops
@@ -52,12 +51,12 @@ async def lifespan(app: FastAPI):
     client = AsyncClient(config)
     await client.connect()
     app.state.aerospike = client
-
-    yield
-
-    await client.close()
-    aerospike_py.shutdown_tracing()
-    app.state.tracing_enabled = False
+    try:
+        yield
+    finally:
+        await client.close()
+        aerospike_py.shutdown_tracing()
+        app.state.tracing_enabled = False
 
 
 app = FastAPI(

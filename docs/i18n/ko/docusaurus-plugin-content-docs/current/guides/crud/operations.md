@@ -1,9 +1,9 @@
 ---
-title: List & Map CDT Operations
-sidebar_label: Operations
+title: List 및 Map CDT 작업
+sidebar_label: List·Map CDT
 sidebar_position: 3
 slug: /guides/operations
-description: Atomic server-side List (31 ops) and Map (27 ops) collection data type operations via client.operate().
+description: client.operate()를 통한 서버 측 원자적 List(31개) 및 Map(27개) CDT 작업
 ---
 
 import Tabs from '@theme/Tabs';
@@ -381,7 +381,6 @@ from aerospike_py import list_operations as list_ops
 
 with aerospike.client({
     "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
 }).connect() as client:
 
     key = ("test", "demo", "player1")
@@ -757,7 +756,6 @@ from aerospike_py import map_operations as map_ops
 
 with aerospike.client({
     "hosts": [("127.0.0.1", 3000)],
-    "cluster_name": "docker",
 }).connect() as client:
 
     key = ("test", "demo", "player1")

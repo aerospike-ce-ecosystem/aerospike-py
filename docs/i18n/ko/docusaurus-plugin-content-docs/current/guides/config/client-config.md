@@ -1,9 +1,9 @@
 ---
-title: Client Configuration
-sidebar_label: Connection & Config
+title: Client 설정
+sidebar_label: 연결 및 설정
 sidebar_position: 1
 slug: /guides/client-config
-description: Configure connections, timeouts, auth, and connection pools.
+description: 연결, 타임아웃, 인증 및 connection pool 설정
 ---
 
 import Tabs from '@theme/Tabs';
@@ -16,11 +16,13 @@ import aerospike_py as aerospike
 from aerospike_py.types import ClientConfig
 
 config: ClientConfig = {
-    "hosts": [("127.0.0.1", 18710)],
-    "cluster_name": "docker",
+    "hosts": [("127.0.0.1", 3000)],
 }
 client = aerospike.client(config).connect()
 ```
+
+Client가 예상과 다른 cluster name을 가진 server를 거부해야 할 때만
+`cluster_name`을 지정하세요.
 
 ## 모든 필드
 

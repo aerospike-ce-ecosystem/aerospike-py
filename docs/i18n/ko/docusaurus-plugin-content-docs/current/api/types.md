@@ -1,8 +1,8 @@
 ---
-title: Types
-sidebar_label: Types
+title: 타입
+sidebar_label: 타입
 sidebar_position: 2
-description: NamedTuple return types and TypedDict input types.
+description: NamedTuple 반환 타입과 TypedDict 입력 타입
 ---
 
 모든 타입은 `aerospike_py` 또는 `aerospike_py.types` 에서 import 가능.

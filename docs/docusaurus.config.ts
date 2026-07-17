@@ -29,7 +29,7 @@ const config: Config = {
   markdown: {
     mermaid: true,
     hooks: {
-      onBrokenMarkdownLinks: 'warn',
+      onBrokenMarkdownLinks: 'throw',
     },
   },
   themes: ['@docusaurus/theme-mermaid'],
@@ -51,38 +51,19 @@ const config: Config = {
     },
   },
 
-  plugins: [
-    function context7Widget(): import('@docusaurus/types').Plugin {
-      return {
-        name: 'context7-widget',
-        injectHtmlTags() {
-          return {
-            postBodyTags: [
-              {
-                tagName: 'script',
-                attributes: {
-                  src: 'https://context7.com/widget.js',
-                  async: true,
-                  'data-library': '/kimsoungryoul/aerospike-py',
-                  'data-color': '#E64A19',
-                  'data-position': 'bottom-right',
-                },
-              },
-            ],
-          };
-        },
-      };
-    },
-  ],
-
   presets: [
     [
       'classic',
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          editUrl:
-            'https://github.com/aerospike-ce-ecosystem/aerospike-py/tree/main/docs/',
+          editUrl: ({locale, docPath}) => {
+            const sourcePath =
+              locale === 'ko'
+                ? `docs/i18n/ko/docusaurus-plugin-content-docs/current/${docPath}`
+                : `docs/docs/${docPath}`;
+            return `https://github.com/aerospike-ce-ecosystem/aerospike-py/edit/main/${sourcePath}`;
+          },
           showLastUpdateTime: true,
         },
         blog: false,
@@ -102,9 +83,10 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
+      title: 'aerospike-py',
       logo: {
-        alt: 'aerospike-py Logo',
-        src: 'img/logo.svg',
+        alt: '',
+        src: 'img/icon.svg',
       },
       items: [
         {
@@ -166,8 +148,8 @@ const config: Config = {
       copyright: `Copyright © ${new Date().getFullYear()} aerospike-py. Built with Docusaurus.`,
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: prismThemes.oneDark,
+      darkTheme: prismThemes.oneDark,
       additionalLanguages: ['python', 'bash', 'lua', 'toml', 'json'],
     },
   } satisfies Preset.ThemeConfig,

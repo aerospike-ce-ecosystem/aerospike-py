@@ -1,9 +1,9 @@
 ---
-title: NumPy Batch Read Guide
-sidebar_label: NumPy Batch Read
+title: NumPy Batch 읽기 가이드
+sidebar_label: NumPy Batch 읽기
 sidebar_position: 4
 slug: /guides/numpy-batch
-description: Use batch_read with numpy structured arrays for high-performance columnar analytics directly from Aerospike.
+description: NumPy 구조화 배열과 batch_read를 사용해 Aerospike 데이터를 고성능 열 기반 분석에 활용하는 방법
 ---
 
 import Tabs from '@theme/Tabs';

@@ -1,8 +1,8 @@
 ---
-title: Prometheus Metrics
-sidebar_label: Metrics
+title: Prometheus 메트릭
+sidebar_label: 메트릭
 sidebar_position: 2
-description: Prometheus metrics for monitoring Aerospike operations.
+description: Aerospike 작업을 모니터링하는 Prometheus 메트릭
 ---
 
 aerospike-py는 operation-level metric을 Rust에서 기록하고 **Prometheus text format**으로 제공합니다. Metric 이름은 [OpenTelemetry DB Client Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/database/)를 따릅니다.

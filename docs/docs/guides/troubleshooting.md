@@ -45,7 +45,7 @@ aerospike_py.ClusterError: Failed to connect to host(s)
 
 3. If Aerospike runs in a container, verify that the service port is mapped and reachable from the host.
 
-### TimeoutError
+### AerospikeTimeoutError
 
 **Symptoms:**
 
@@ -60,20 +60,18 @@ aerospike_py.AerospikeTimeoutError: Operation timed out
 
 **Solutions:**
 
-1. Increase the timeout in the relevant policy:
+1. Set the operation timeout on the call that needs it:
    ```python
-   # Per-operation timeout
-   record = client.get(key, policy={"timeout": 5000})  # 5 seconds
-
-   # Client-wide default
-   client = aerospike_py.client({
-       "hosts": [("127.0.0.1", 3000)],
-       "policies": {
-           "read": {"timeout": 5000},
-           "write": {"timeout": 5000},
-       },
-   }).connect()
+   read_policy = {
+       "socket_timeout": 5_000,
+       "total_timeout": 5_000,
+   }
+   record = client.get(key, policy=read_policy)
    ```
+
+   `ClientConfig.timeout` controls the initial connection timeout. Read and
+   write timeouts belong to each operation's policy; `ClientConfig` does not
+   accept a global `policies` field.
 
 2. Check server health:
    ```python

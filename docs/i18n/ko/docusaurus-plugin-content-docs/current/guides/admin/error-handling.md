@@ -1,9 +1,9 @@
 ---
-title: Error Handling
-sidebar_label: Error Handling
+title: 오류 처리
+sidebar_label: 오류 처리
 sidebar_position: 3
 slug: /guides/error-handling
-description: Production error handling patterns for aerospike-py.
+description: aerospike-py를 위한 운영 환경 오류 처리 패턴
 ---
 
 import Tabs from '@theme/Tabs';
