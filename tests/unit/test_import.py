@@ -32,8 +32,50 @@ def test_async_client_factory():
 def test_client_not_connected_raises():
     """Test that calling methods on unconnected client raises ClientError."""
     c = aerospike_py.client(DUMMY_CONFIG)
-    with pytest.raises(aerospike_py.ClientError):
+    with pytest.raises(aerospike_py.ClientError) as exc_info:
         c.get(("test", "demo", "key1"))
+    # A client-side error carries the ADR-0027 sentinel result_code (-1),
+    # inherited from the AerospikeError class-level default since this path
+    # is a direct client-side raise (never received a server response).
+    assert exc_info.value.result_code == -1
+
+
+# ── Structured result_code (ADR-0027) tests ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    "exc_cls",
+    [
+        aerospike_py.AerospikeError,
+        aerospike_py.ClientError,
+        aerospike_py.ServerError,
+        aerospike_py.RecordError,
+        aerospike_py.ClusterError,
+        aerospike_py.AerospikeTimeoutError,
+        aerospike_py.InvalidArgError,
+        aerospike_py.BackpressureError,
+        aerospike_py.RustPanicError,
+        aerospike_py.RecordNotFound,
+        aerospike_py.RecordExistsError,
+        aerospike_py.RecordTooBig,
+        aerospike_py.AerospikeIndexError,
+        aerospike_py.IndexNotFound,
+        aerospike_py.QueryError,
+        aerospike_py.AdminError,
+        aerospike_py.UDFError,
+    ],
+)
+def test_result_code_attribute_present(exc_cls):
+    """Every AerospikeError subclass exposes a structured int result_code (ADR-0027).
+
+    The class-level default is the client-side sentinel (-1); server errors
+    override it per-instance with the real wire code.
+    """
+    assert hasattr(exc_cls, "result_code")
+    assert isinstance(exc_cls.result_code, int)
+    assert exc_cls.result_code == -1
+    # An instance with no explicit server code inherits the class default.
+    assert exc_cls("boom").result_code == -1
 
 
 # ── Constants tests (parametrized) ──────────────────────────────────

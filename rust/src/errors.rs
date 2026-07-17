@@ -22,6 +22,32 @@ use log::debug;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 
+/// Sentinel `result_code` for client-side failures that never carried a server
+/// wire code — connection errors, client timeouts, invalid arguments,
+/// backpressure, caught Rust panics, and any not-yet-mapped
+/// `aerospike_core::Error` variant.
+///
+/// Matches ADR-0027's "-1 for unknown / no server response" guidance and mirrors
+/// the Aerospike C client's `AEROSPIKE_ERR_CLIENT = -1`. Exposed so downstream
+/// code and tests can classify "no server code" without hard-coding the literal.
+pub const CLIENT_SIDE_RESULT_CODE: i32 = -1;
+
+/// Attach the structured integer `result_code` (ADR-0027) to an exception
+/// instance so callers classify errors by a stable code instead of parsing the
+/// message string. The GIL is acquired only on the (exceptional) error path to
+/// materialise the exception value and set the attribute; on the rare chance the
+/// assignment fails it is logged and the original error is still raised. The
+/// per-instance value shadows the class-level default set in
+/// [`register_exceptions`].
+fn attach_result_code(err: PyErr, code: i32) -> PyErr {
+    Python::attach(|py| {
+        if let Err(set_err) = err.value(py).setattr("result_code", code) {
+            debug!("failed to attach result_code={code} to exception: {set_err}");
+        }
+    });
+    err
+}
+
 // Base exceptions
 pyo3::create_exception!(
     aerospike,
@@ -275,7 +301,8 @@ pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
 /// single-record failure (e.g. a batch server timeout becomes
 /// `AerospikeTimeoutError`, not a generic `ClientError`).
 fn result_code_to_pyerr(rc: &ResultCode, msg: String) -> PyErr {
-    match rc {
+    let code = result_code_to_int(rc);
+    let err = match rc {
         // Record-level: specific subclasses
         ResultCode::KeyNotFoundError => RecordNotFound::new_err(msg),
         ResultCode::KeyExistsError => RecordExistsError::new_err(msg),
@@ -334,7 +361,9 @@ fn result_code_to_pyerr(rc: &ResultCode, msg: String) -> PyErr {
             );
             ServerError::new_err(msg)
         }
-    }
+    };
+    // Carry the real server wire code on the exception instance (ADR-0027).
+    attach_result_code(err, code)
 }
 
 /// Convert an `aerospike_core::Error` into the appropriate Python exception.
@@ -345,11 +374,21 @@ fn result_code_to_pyerr(rc: &ResultCode, msg: String) -> PyErr {
 pub fn as_to_pyerr(err: AsError) -> PyErr {
     debug!("Mapping aerospike error: {}", err);
     match &err {
-        AsError::Connection(msg) => ClusterError::new_err(format!("Connection error: {msg}")),
-        AsError::Timeout(msg) => AerospikeTimeoutError::new_err(format!("Timeout: {msg}")),
-        AsError::InvalidArgument(msg) => {
-            InvalidArgError::new_err(format!("Invalid argument: {msg}"))
-        }
+        // Client-side errors never carried a server response, so they cannot
+        // carry a real wire code; they surface the CLIENT_SIDE_RESULT_CODE
+        // sentinel (ADR-0027).
+        AsError::Connection(msg) => attach_result_code(
+            ClusterError::new_err(format!("Connection error: {msg}")),
+            CLIENT_SIDE_RESULT_CODE,
+        ),
+        AsError::Timeout(msg) => attach_result_code(
+            AerospikeTimeoutError::new_err(format!("Timeout: {msg}")),
+            CLIENT_SIDE_RESULT_CODE,
+        ),
+        AsError::InvalidArgument(msg) => attach_result_code(
+            InvalidArgError::new_err(format!("Invalid argument: {msg}")),
+            CLIENT_SIDE_RESULT_CODE,
+        ),
         AsError::ServerError(rc, in_doubt, _node) => {
             let code = result_code_to_int(rc);
             let doubt_suffix = if *in_doubt { " [in_doubt]" } else { "" };
@@ -367,14 +406,23 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
             let msg = format!("AEROSPIKE_ERR ({code}) [batch_index={idx}]: {err}{doubt_suffix}");
             result_code_to_pyerr(rc, msg)
         }
-        AsError::InvalidNode(msg) => ClusterError::new_err(format!("Invalid node: {msg}")),
-        AsError::NoMoreConnections => ClusterError::new_err("No more connections available"),
+        AsError::InvalidNode(msg) => attach_result_code(
+            ClusterError::new_err(format!("Invalid node: {msg}")),
+            CLIENT_SIDE_RESULT_CODE,
+        ),
+        AsError::NoMoreConnections => attach_result_code(
+            ClusterError::new_err("No more connections available"),
+            CLIENT_SIDE_RESULT_CODE,
+        ),
         _ => {
             crate::bug_report::log_unexpected_error(
                 "errors::as_to_pyerr",
                 &format!("Unmapped aerospike_core::Error variant: {err}"),
             );
-            ClientError::new_err(format!("{err}"))
+            attach_result_code(
+                ClientError::new_err(format!("{err}")),
+                CLIENT_SIDE_RESULT_CODE,
+            )
         }
     }
 }
@@ -384,6 +432,14 @@ pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     // Base exceptions
     m.add("AerospikeError", py.get_type::<AerospikeError>())?;
+    // Expose a class-level default `result_code` on the base exception so every
+    // AerospikeError subclass instance carries `.result_code: int` (ADR-0027),
+    // even those constructed outside `as_to_pyerr` (e.g. BackpressureError,
+    // RustPanicError, InvalidArgError from policy/query validation). Server
+    // errors override this per-instance with the real wire code; purely
+    // client-side errors keep this CLIENT_SIDE_RESULT_CODE sentinel.
+    py.get_type::<AerospikeError>()
+        .setattr("result_code", CLIENT_SIDE_RESULT_CODE)?;
     m.add("ClientError", py.get_type::<ClientError>())?;
     m.add("ServerError", py.get_type::<ServerError>())?;
     m.add("RecordError", py.get_type::<RecordError>())?;
@@ -648,6 +704,102 @@ mod tests {
                 text.contains("in_doubt"),
                 "in_doubt batch error message must be flagged: {text}"
             );
+        });
+    }
+
+    /// Read the structured `.result_code` attribute off a mapped exception.
+    fn result_code_of(py: Python<'_>, err: &PyErr) -> i32 {
+        err.value(py)
+            .getattr("result_code")
+            .expect("mapped exception must expose a result_code attribute")
+            .extract::<i32>()
+            .expect("result_code must be an int")
+    }
+
+    #[test]
+    fn test_server_error_carries_result_code() {
+        // Representative server errors must carry their real wire code on the
+        // exception instance so callers classify by code, not message string
+        // (ADR-0027).
+        Python::initialize();
+        Python::attach(|py| {
+            let cases = [
+                (ResultCode::KeyNotFoundError, 2), // record-not-found
+                (ResultCode::KeyExistsError, 5),   // key-exists
+                (ResultCode::FailForbidden, 22),   // forbidden
+                (ResultCode::RecordTooBig, 13),
+                (ResultCode::Timeout, 9), // server-side timeout
+            ];
+            for (rc, expected) in cases {
+                let err = as_to_pyerr(AsError::ServerError(rc, false, String::new()));
+                assert_eq!(
+                    result_code_of(py, &err),
+                    expected,
+                    "ServerError({rc:?}) must expose result_code {expected}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn test_batch_error_carries_result_code() {
+        // Batch failures must expose the same structured code as their
+        // single-record equivalents.
+        Python::initialize();
+        Python::attach(|py| {
+            let err = as_to_pyerr(AsError::BatchError(
+                3,
+                ResultCode::KeyNotFoundError,
+                false,
+                "node".into(),
+            ));
+            assert_eq!(result_code_of(py, &err), 2);
+
+            let err = as_to_pyerr(AsError::BatchLastError(
+                0,
+                ResultCode::Timeout,
+                true,
+                "node".into(),
+            ));
+            assert_eq!(result_code_of(py, &err), 9);
+        });
+    }
+
+    #[test]
+    fn test_client_side_errors_carry_sentinel_result_code() {
+        // Client-side failures never received a server response, so they carry
+        // the CLIENT_SIDE_RESULT_CODE sentinel (-1) rather than a real wire code.
+        Python::initialize();
+        Python::attach(|py| {
+            let cases = [
+                as_to_pyerr(AsError::Timeout("client".into())), // client timeout
+                as_to_pyerr(AsError::Connection("refused".into())),
+                as_to_pyerr(AsError::InvalidArgument("bad".into())),
+                as_to_pyerr(AsError::InvalidNode("gone".into())),
+                as_to_pyerr(AsError::NoMoreConnections),
+            ];
+            for err in &cases {
+                assert_eq!(
+                    result_code_of(py, err),
+                    CLIENT_SIDE_RESULT_CODE,
+                    "client-side error must expose the -1 sentinel result_code"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn test_unknown_result_code_passed_through() {
+        // An Unknown server byte with no dedicated subclass still carries its
+        // raw wire value on the exception instance.
+        Python::initialize();
+        Python::attach(|py| {
+            let err = as_to_pyerr(AsError::ServerError(
+                ResultCode::Unknown(240),
+                false,
+                String::new(),
+            ));
+            assert_eq!(result_code_of(py, &err), 240);
         });
     }
 }

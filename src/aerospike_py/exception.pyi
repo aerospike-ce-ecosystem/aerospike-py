@@ -28,13 +28,37 @@ Exception hierarchy::
       +-- AerospikeTimeoutError    (operation timed out)
       +-- InvalidArgError          (invalid argument)
 
+Every exception in this hierarchy carries a structured integer ``result_code``
+attribute (ADR-0027) so callers can classify errors by a stable server code
+instead of matching on the message string::
+
+    try:
+        client.get(key)
+    except aerospike_py.AerospikeError as exc:
+        if exc.result_code == aerospike_py.AEROSPIKE_ERR_RECORD_NOT_FOUND:
+            ...
+
+Server errors expose the real Aerospike wire code (e.g. ``2`` for
+record-not-found, ``5`` for record-exists, ``22`` for forbidden), matching the
+``AEROSPIKE_ERR_*`` constants re-exported from the top-level package. Purely
+client-side errors that never received a server response (connection failures,
+client timeouts, invalid arguments) expose the sentinel ``-1``.
+
 Deprecated aliases (emit ``DeprecationWarning`` on access):
     - ``TimeoutError`` -- use ``AerospikeTimeoutError`` instead.
     - ``IndexError`` -- use ``AerospikeIndexError`` instead.
 """
 
 class AerospikeError(Exception):
-    """Base exception for all Aerospike errors."""
+    """Base exception for all Aerospike errors.
+
+    Attributes:
+        result_code: Structured Aerospike server result code (ADR-0027). The
+            real wire code for server errors (e.g. ``2`` = record-not-found);
+            ``-1`` for client-side errors that never received a server response.
+    """
+
+    result_code: int
 
 class ClientError(AerospikeError):
     """Client-side error such as connection failure, misconfiguration, or internal error."""
