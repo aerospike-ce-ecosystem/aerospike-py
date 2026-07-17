@@ -129,16 +129,13 @@ venv = ".venv"
 
 [tool.tox]
 requires = ["tox-uv>=1.25"]
-env_list = ["py{310,311,312,313,314,315}", "py313t", "py314t", "py315t"]
+env_list = ["py{310,311,312,313,314,315}", "py314t", "py315t"]
 
 [tool.tox.env_run_base]
 package = "wheel"
 dependency_groups = ["test"]
 pass_env = ["AEROSPIKE_HOST", "AEROSPIKE_PORT", "AEROSPIKE_CLUSTER_NAME"]
 commands = [["pytest", "tests/unit/", "-v"]]
-
-[tool.tox.env.py313t]
-base_python = ["python3.13t"]
 
 [tool.tox.env.py314t]
 base_python = ["python3.14t"]
@@ -155,12 +152,10 @@ commands = [["pytest", "tests/concurrency/", "-v", "--ignore=tests/concurrency/t
 
 # Free-threaded (no-GIL) concurrency runs.
 # The crate ships #[pymodule(gil_used = false)] so every free-threaded CPython
-# build (3.13t experimental, 3.14t supported-but-not-default, 3.15t alpha)
-# should pass the same concurrency suite.
-[tool.tox.env.freethreading-py313t]
-base_python = ["python3.13t"]
-commands = [["pytest", "tests/concurrency/", "-v"]]
-
+# build (3.14t supported-but-not-default, 3.15t alpha) should pass the same
+# concurrency suite. 3.13t is no longer supported: pyo3 0.29 (the
+# RUSTSEC-2026-0176/0177 security upgrade) dropped the free-threaded build of
+# 3.13 — CPython declared free-threading supported starting with 3.14.
 [tool.tox.env.freethreading-py314t]
 base_python = ["python3.14t"]
 commands = [["pytest", "tests/concurrency/", "-v"]]
