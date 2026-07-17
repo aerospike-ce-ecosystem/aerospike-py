@@ -16,7 +16,7 @@ pip install aerospike-py
 
 **Requirements:** Python 3.10+ (CPython)
 
-소스 checkout 에서 `make run-aerospike-ce` 로 로컬 Aerospike CE 컨테이너를 시작합니다; `127.0.0.1:18710` 에서 listen. Aerospike 를 default service port 로 직접 시작했다면 아래 예제에서 `3000` 으로 바꿔 쓰세요.
+소스 checkout에서 작업한다면 `make run-aerospike-ce`를 실행해 로컬 Aerospike CE 컨테이너를 시작하세요. 컨테이너는 `127.0.0.1:18710`에서 요청을 받습니다. Aerospike를 기본 service port로 직접 실행했다면 아래 예제의 `18710`을 `3000`으로 바꾸세요.
 
 ## Quick Start
 

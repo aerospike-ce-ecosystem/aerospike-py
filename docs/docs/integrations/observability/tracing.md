@@ -5,7 +5,7 @@ sidebar_position: 3
 description: OpenTelemetry distributed tracing for Aerospike operations.
 ---
 
-Built-in **OpenTelemetry tracing** for every data operation. Spans follow [Database Client Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/database/) and export via **OTLP gRPC**.
+aerospike-py can trace every data operation with **OpenTelemetry**. Spans follow the [Database Client Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/database/) and use **OTLP gRPC** for export.
 
 ## Quick Start
 

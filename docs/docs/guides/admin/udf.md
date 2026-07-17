@@ -6,7 +6,7 @@ slug: /guides/udf
 description: Register, execute, and remove Lua UDFs on the Aerospike server.
 ---
 
-User Defined Functions (UDFs) are Lua scripts that execute on the Aerospike server node owning the record.
+User-Defined Functions (UDFs) are Lua scripts. Aerospike runs each script on the server node that owns the target record.
 
 ## API
 
@@ -60,6 +60,6 @@ await client.udf_remove("counter")
 
 ## Notes
 
-- Lua is the only supported UDF language
-- UDF changes take a few seconds to propagate to all nodes
-- Keep UDFs simple for best performance
+- Lua is the only supported UDF language.
+- UDF changes take a few seconds to reach every node.
+- Keep UDFs simple for the best performance.

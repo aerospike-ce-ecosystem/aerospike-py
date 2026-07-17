@@ -8,9 +8,9 @@ description: End-to-end production-shaped benchmark — FastAPI + DLRM inference
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-End-to-end measurement against a **production-shaped deployment**: FastAPI on uvicorn, DLRM (CPU inference) in the request path, Aerospike CE behind it, real HTTP load from k6, and the response body serialised back to the client.
+This end-to-end benchmark uses a **production-shaped deployment**: FastAPI on uvicorn, DLRM CPU inference in the request path, Aerospike CE, k6 HTTP load, and a serialized response body.
 
-Everything that a real recsys serving pod pays for — HTTP parse, JSON serialise, model forward — is in the measurement, so the headline numbers compress relative to an [Isolated Benchmark](./isolated-benchmark), but they're the ones to quote for **capacity planning**.
+The measurement includes HTTP parsing, JSON serialization, and the model forward pass. These shared costs make the client difference smaller than in the [Isolated Benchmark](./isolated-benchmark), but they produce the numbers to use for **capacity planning**.
 
 > **Sources**: internal benchmark runs, April 2026. Raw measurement artifacts are not committed to the repo (see git history before the `benchmark/` rewrite for the original `benchmark/results/*.md` files). The headline numbers below are reproduced from those artifacts; a clean re-measurement on the new isolated harness is tracked in [Bottleneck Analysis](./bottleneck-analysis).
 
@@ -32,7 +32,7 @@ official-client result conversion at the tail.
 
 ## Environment A — Pure DB Client
 
-**What this isolates.** No FastAPI, no model inference, no HTTP loadgen. A Python loop drives `batch_read` directly — the surrounding stack is as thin as possible, so aerospike-py's advantage is **largest** here.
+**What this isolates.** This environment removes FastAPI, model inference, and HTTP load generation. A Python loop calls `batch_read` directly, so the client difference is **largest** here.
 
 ### Setup
 
@@ -66,7 +66,7 @@ Outlier: set_8 (0% found rate) → fast not-found path, not real read latency.
 0% found rate — the official client returns errors faster than success paths, so this row reflects "fast not-found" rather than real read latency. **All other sets show 4–8× mean speedup.**
 :::
 
-**`official-async`** (the sync C client wrapped with `loop.run_in_executor`) is slightly slower than the bare sync client across every set — each request pays a thread-pool hop. aerospike-py's gap over `official-async` is therefore consistently *larger* than its gap over `official`.
+**`official-async`** wraps the synchronous C client with `loop.run_in_executor`. It is slightly slower than the bare sync client for every set because each request crosses the thread pool. As a result, aerospike-py's lead over `official-async` is consistently larger than its lead over `official`.
 
   </TabItem>
   <TabItem value="B" label="B — uvicorn ASGI only">
@@ -178,7 +178,7 @@ B) uvicorn ASGI              mean 1.27×             ≈ noise at C=5
 C) uvicorn + DLRM            mean 1.24×             p95 −42%  🔥
 ```
 
-As layers are added around the DB call, the **ratio compresses** (4.8× → 1.24× mean) but **upper-percentile advantage holds** — aerospike-py keeps the GIL released during I/O, while the official client serialises GIL acquisition through `run_in_executor` and spikes at the tail.
+Adding layers around the database call reduces the mean ratio from 4.8× to 1.24×. The **upper-percentile advantage remains**: aerospike-py releases the GIL during I/O, while the official client serializes GIL acquisition through `run_in_executor`, increasing tail latency.
 
 ---
 

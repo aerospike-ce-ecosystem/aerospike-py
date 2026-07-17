@@ -6,7 +6,7 @@ description: Common problems and solutions when using aerospike-py.
 
 # Troubleshooting
 
-aerospike-py 사용 시 자주 만나는 문제, 원인, 해결책을 다룹니다.
+이 문서에서는 자주 발생하는 aerospike-py error의 원인을 확인하고 해결 방법을 안내합니다.
 
 ## 연결 문제
 
@@ -43,7 +43,7 @@ aerospike_py.ClusterError: Failed to connect to host(s)
    }).connect()
    ```
 
-3. 컨테이너에서 실행 시 port mapping 이 올바르고 host network 에서 접근 가능한지 확인.
+3. Aerospike를 container에서 실행한다면 service port가 올바르게 mapping되었고 host에서 접근할 수 있는지 확인하세요.
 
 ### TimeoutError
 
@@ -185,7 +185,7 @@ ERROR: Failed building wheel for aerospike-py
 
 **해결책:**
 
-1. 대부분의 사용자는 pre-built wheel 사용 가능 — pip 만 사용:
+1. 대부분의 사용자는 PyPI의 pre-built wheel을 설치하면 됩니다.
    ```bash
    pip install aerospike-py
    ```
@@ -344,11 +344,11 @@ TypeError: numpy dtype mismatch
 
 ## Python 3.14t (Free-Threaded) 노트
 
-aerospike-py 는 Python 3.14t (free-threaded / no-GIL build) 를 지원합니다. 다만 다음을 유의:
+aerospike-py는 Python 3.14t free-threaded build를 지원합니다. 다음 사항을 확인하세요.
 
-- **Experimental 지원**: Free-threaded Python 은 CPython 에서 아직 experimental. 일부 third-party 라이브러리가 제대로 동작 안 할 수 있음.
-- **Thread safety**: aerospike-py 의 `Client` 와 `AsyncClient` 는 thread-safe. Rust client 가 내부 동기화 처리.
-- **Performance 특성**: GIL 없이 Python thread 간 진정한 병렬성이 가능. 다만 GIL contention 이 더 이상 요인이 아니므로 Tokio runtime worker 수 (`AEROSPIKE_RUNTIME_WORKERS`) 튜닝이 필요할 수 있음.
+- **Experimental 지원**: Free-threaded Python은 아직 CPython의 experimental 기능입니다. 일부 third-party library가 올바르게 동작하지 않을 수 있습니다.
+- **Thread safety**: aerospike-py의 `Client`와 `AsyncClient`는 thread-safe합니다. Rust client가 내부 synchronization을 처리합니다.
+- **Performance 특성**: GIL이 없으면 Python thread를 병렬로 실행할 수 있습니다. Workload에 따라 Tokio runtime worker 수(`AEROSPIKE_RUNTIME_WORKERS`)를 조정해야 할 수 있습니다.
 
 free-threaded Python 특화 문제 발생 시:
 

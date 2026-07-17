@@ -6,7 +6,7 @@ slug: /guides/numpy-integration
 description: High-performance batch operations using NumPy structured arrays.
 ---
 
-High-performance batch reads and writes using NumPy structured arrays. Data flows directly between Aerospike and NumPy buffers via Rust, bypassing per-element Python object creation.
+Use NumPy structured arrays for high-performance batch reads and writes. The Rust client moves data directly between Aerospike and NumPy buffers without creating a Python object for each element.
 
 :::note[Requirement]
 Requires `numpy >= 2.0`. Install with: `pip install aerospike-py[numpy]`

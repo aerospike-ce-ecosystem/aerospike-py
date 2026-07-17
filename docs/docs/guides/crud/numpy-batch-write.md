@@ -11,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 ## Overview
 
-`batch_write_numpy()` writes multiple records to Aerospike directly from a **numpy structured array**. Each row becomes a separate write operation, with dtype fields mapped to Aerospike bins.
+`batch_write_numpy()` writes records directly from a **NumPy structured array**. Each row becomes one write operation, and each dtype field maps to an Aerospike bin.
 
 - **Direct array-to-record mapping** — no intermediate Python dicts or loops
 - **Key field extraction** — a designated dtype field (default `_key`) is used as the record's user key
@@ -20,7 +20,7 @@ import TabItem from '@theme/TabItem';
 
 :::tip[When to use]
 
-Use `batch_write_numpy()` when your data is already in numpy arrays (e.g., ML feature stores, sensor data pipelines, scientific datasets). For regular Python dicts, use `put()` or standard batch operations instead.
+Use `batch_write_numpy()` when your data already lives in NumPy arrays, such as ML feature-store data, sensor streams, or scientific datasets. For Python dictionaries, use `put()` or the standard batch operations.
 
 :::
 
@@ -434,7 +434,7 @@ for br in results.batch_records:
         print(f"Write failed for key {br.key} after retries (code={br.result})")
 ```
 
-The backoff schedule is 10ms, 20ms, 40ms, ... capped at 500ms between attempts. Only the failed records are re-submitted on each retry, not the entire batch.
+The delay starts at 10 ms, doubles to 20 ms, 40 ms, and so on, and stops growing at 500 ms. Each retry submits only failed records, not the entire batch.
 
 :::tip
 For large bulk ingestion where occasional transient failures are expected, `retry=3` is a good starting point. Set `retry=0` (default) when you want full control over retry logic in your application.

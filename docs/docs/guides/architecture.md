@@ -9,7 +9,7 @@ import TabItem from '@theme/TabItem';
 
 # Architecture
 
-aerospike-py is a Python client for [Aerospike](https://aerospike.com) built on the [Aerospike Rust Client](https://github.com/aerospike/aerospike-client-rust) via [PyO3](https://pyo3.rs). The Rust core compiles into a native Python extension module, giving Python applications near-native I/O performance while keeping a Pythonic API with full type annotations.
+aerospike-py uses [PyO3](https://pyo3.rs) to expose the [Aerospike Rust Client](https://github.com/aerospike/aerospike-client-rust) as a native Python extension. Applications get a typed, Python-friendly API while the Rust core handles Aerospike I/O.
 
 **Key properties:**
 
@@ -63,7 +63,7 @@ print(record.bins)  # {"name": "Alice"}
 client.close()
 ```
 
-Under the hood, each call releases the GIL, runs the Rust future on a Tokio runtime via `block_on()`, then re-acquires the GIL to return the result. Other Python threads can execute freely during the I/O wait.
+Each call releases the GIL and runs the Rust future on a Tokio runtime through `block_on()`. It reacquires the GIL only when returning the result, so other Python threads can run during the I/O wait.
 
   </TabItem>
   <TabItem value="async" label="Async">
@@ -91,7 +91,7 @@ Each call returns a Python awaitable backed by a Tokio future. The GIL is not he
 | Sync (sequential) | ~1.1x slower | ~1.1x slower | — |
 | Async (concurrent) | **2.1x faster** | **1.6x faster** | **3.4x faster** |
 
-The sync gap (~10%) comes from the `block_on()` overhead per call. Async is where aerospike-py shines — concurrent I/O eliminates per-call overhead entirely.
+The sync path pays about 10% for `block_on()` on each call. The async path overlaps concurrent I/O and avoids that per-call scheduling cost.
 
 ## Data Flow
 
@@ -213,7 +213,7 @@ except AerospikeError as e:
     print(f"Unexpected error: {e}")
 ```
 
-For batch operations, individual failures do not raise exceptions — check `br.result` on each `BatchRecord` instead. See the [Error Handling guide](./admin/error-handling.md) for the full exception hierarchy and batch error patterns.
+Batch operations report failures per record instead of raising for the whole batch. Check `br.result` on each `BatchRecord`. See the [Error Handling guide](./admin/error-handling.md) for the exception hierarchy and batch patterns.
 
 ## Observability
 

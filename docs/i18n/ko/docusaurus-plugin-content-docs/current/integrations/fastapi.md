@@ -128,7 +128,7 @@ async def delete_user(user_id: str, request: Request):
 
 ## 전체 예제
 
-[`examples/sample-fastapi/`](https://github.com/aerospike-ce-ecosystem/aerospike-py/tree/main/examples/sample-fastapi) 디렉토리에 router 11개, Pydantic 모델, Docker Compose 셋업, 테스트를 포함한 완전한 애플리케이션이 있습니다.
+[`examples/sample-fastapi/`](https://github.com/aerospike-ce-ecosystem/aerospike-py/tree/main/examples/sample-fastapi)에는 router 11개, Pydantic 모델, Docker Compose 설정, 테스트를 갖춘 완성된 애플리케이션이 있습니다.
 
 ```bash
 cd examples/sample-fastapi

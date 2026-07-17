@@ -6,7 +6,7 @@ description: Common problems and solutions when using aerospike-py.
 
 # Troubleshooting
 
-This guide covers common issues you may encounter when using aerospike-py, along with their causes and solutions.
+Use this guide to identify common aerospike-py errors, check their likely causes, and apply the corresponding fix.
 
 ## Connection Issues
 
@@ -43,7 +43,7 @@ aerospike_py.ClusterError: Failed to connect to host(s)
    }).connect()
    ```
 
-3. If running in a container, ensure the port is correctly mapped and accessible from the host network.
+3. If Aerospike runs in a container, verify that the service port is mapped and reachable from the host.
 
 ### TimeoutError
 
@@ -185,7 +185,7 @@ ERROR: Failed building wheel for aerospike-py
 
 **Solutions:**
 
-1. For most users, pre-built wheels are available -- just use pip:
+1. Most users can install a pre-built wheel from PyPI:
    ```bash
    pip install aerospike-py
    ```
@@ -344,7 +344,7 @@ TypeError: numpy dtype mismatch
 
 ## Python 3.14t (Free-Threaded) Notes
 
-aerospike-py supports Python 3.14t (free-threaded / no-GIL builds). However, keep in mind:
+aerospike-py supports Python 3.14t free-threaded builds. Keep these points in mind:
 
 - **Experimental support**: Free-threaded Python is still experimental in CPython. Some third-party libraries may not work correctly.
 - **Thread safety**: aerospike-py's `Client` and `AsyncClient` are thread-safe. The Rust client handles internal synchronization.

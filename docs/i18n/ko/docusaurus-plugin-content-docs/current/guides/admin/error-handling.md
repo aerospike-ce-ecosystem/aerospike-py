@@ -11,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 ## Exception Hierarchy
 
-모든 aerospike-py exception 은 `AerospikeError` 를 상속하며, `AerospikeError` 는 Python builtin `Exception` 을 상속:
+모든 aerospike-py exception은 `AerospikeError`를 상속합니다. `AerospikeError`는 Python builtin `Exception`을 상속합니다.
 
 ```
 Exception
@@ -56,7 +56,7 @@ from aerospike_py.exception import (
 
 ## 기본 error handling
 
-항상 더 구체적인 exception 을 더 넓은 것보다 먼저 catch:
+구체적인 exception을 먼저 catch하고, 더 넓은 exception은 나중에 처리하세요.
 
 ```python
 from aerospike_py.exception import (
@@ -85,7 +85,7 @@ except AerospikeError as e:
 
 ## Batch error handling
 
-Batch operation 은 개별 record 실패에 대해 exception 을 raise 하지 않음. 대신 각 `BatchRecord` 가 자체 result code 를 carry:
+Batch operation은 개별 record가 실패해도 exception을 발생시키지 않습니다. 대신 각 `BatchRecord`에 result code가 들어 있습니다.
 
 ```python
 keys = [("test", "demo", f"id-{i}") for i in range(100)]
@@ -125,7 +125,7 @@ for br in results.batch_records:
 
 ### `batch_write` 와 `in_doubt` flag
 
-`batch_write` 는 `in_doubt` flag 를 포함한 per-record 결과를 반환. `in_doubt` 가 `True` 일 때 일시적 error 에도 불구하고 write 가 server 에서 완료되었을 수 있음 (예: write 전송 후 timeout). non-idempotent operation 의 중복 write 방지 위해 retry 전 `in_doubt` 확인:
+`batch_write`는 record별 결과에 `in_doubt` flag를 포함합니다. 이 값이 `True`이면 transient error가 발생했어도 server에서 write를 완료했을 수 있습니다. Write를 보낸 뒤 timeout이 난 경우가 한 예입니다. Non-idempotent operation을 두 번 적용하지 않도록 retry 전에 `in_doubt`를 확인하세요.
 
 ```python
 from aerospike_py.exception import AerospikeError
@@ -228,7 +228,7 @@ async def fetch_many(client, keys: list) -> list[dict | None]:
 
 ### CREATE_ONLY (Insert-Only)
 
-record 가 이미 존재하면 `RecordExistsError` raise:
+Record가 이미 있으면 `RecordExistsError`가 발생합니다.
 
 ```python
 import aerospike_py as aerospike
@@ -289,7 +289,7 @@ except ClusterError as e:
 
 ### Reconnection 패턴
 
-node 가 down 되면 client 가 생존한 node 들로 자동 재연결. 다만 전체 cluster 가 도달 불가이면 operation 이 `ClusterError` 또는 `AerospikeTimeoutError` raise. retry-with-backoff 패턴이 transient failure 처리:
+Node가 중단되면 client는 정상 node로 자동 재연결합니다. 전체 cluster에 연결할 수 없으면 operation에서 `ClusterError`나 `AerospikeTimeoutError`가 발생합니다. Transient failure는 retry와 backoff로 처리할 수 있습니다.
 
 ```python
 import time
@@ -370,7 +370,7 @@ client.put(key, bins, policy=write_policy)
 | `sleep_between_retries` | `int` | `0` | retry 간 지연 (ms) |
 
 :::warning[기본 timeout 상호작용]
-기본값에서 `total_timeout` (1000ms) 이 `socket_timeout` (30000ms) 보다 **짧음**. 즉 개별 socket timeout 이 trigger 되기 전에 total deadline 에 도달. 실질적으로 30초 socket timeout 과 무관하게 1초 후 client 가 전체 operation (진행 중인 socket read/write 포함) 을 abort. `socket_timeout` 을 올리면 `total_timeout` 도 예상 latency 와 retry 횟수를 수용하는지 확인.
+기본값에서는 `total_timeout`(1,000 ms)이 `socket_timeout`(30,000 ms)보다 **짧습니다**. 따라서 개별 socket timeout보다 total deadline이 먼저 끝납니다. Client는 30초 socket timeout과 관계없이 1초 뒤에 진행 중인 socket I/O를 포함한 전체 operation을 중단합니다. `socket_timeout`을 늘릴 때는 `total_timeout`도 예상 latency와 retry 횟수를 수용하는지 확인하세요.
 :::
 
 :::tip

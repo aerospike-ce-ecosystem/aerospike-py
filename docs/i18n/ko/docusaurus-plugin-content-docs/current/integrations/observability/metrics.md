@@ -5,7 +5,7 @@ sidebar_position: 2
 description: Prometheus metrics for monitoring Aerospike operations.
 ---
 
-aerospike-py 는 operation-level metric 을 Rust 에서 수집해 **Prometheus text format** 으로 노출합니다. metric 이름은 [OpenTelemetry DB Client Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/database/) 를 따름.
+aerospike-py는 operation-level metric을 Rust에서 기록하고 **Prometheus text format**으로 제공합니다. Metric 이름은 [OpenTelemetry DB Client Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/database/)를 따릅니다.
 
 ## Quick Start
 
@@ -25,7 +25,7 @@ aerospike_py.stop_metrics_server()
 
 ## `db_client_operation_duration_seconds`
 
-모든 데이터 operation 의 duration 을 추적하는 **histogram**.
+모든 data operation의 duration을 추적하는 **histogram**입니다.
 
 **Labels:**
 
@@ -122,4 +122,4 @@ sum by (db_namespace, db_operation_name) (rate(db_client_operation_duration_seco
 | 네트워크 round-trip 대비 | 0.001-0.01% |
 | `get_metrics()` encoding | ~50-200 μs |
 
-Metric 수집은 항상 활성, 오버헤드는 무시 가능.
+Metric 수집은 항상 활성화되어 있으며 overhead는 무시할 수 있는 수준입니다.

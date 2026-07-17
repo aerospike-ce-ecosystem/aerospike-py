@@ -8,7 +8,7 @@ description: Secondary index queries with predicates.
 
 ## Secondary Index Query
 
-Query 는 query 대상 bin 에 secondary index 가 필요합니다.
+Query하려는 bin에는 secondary index가 있어야 합니다.
 
 ### Index 생성 + 데이터 insert
 
@@ -58,7 +58,7 @@ query.where(predicates.between("age", 25, 35))
 query.foreach(process)
 ```
 
-callback 에서 `False` 반환 시 조기 종료:
+Callback에서 `False`를 반환하면 순회를 일찍 끝낼 수 있습니다.
 
 ```python
 count = 0
@@ -105,4 +105,4 @@ point = '{"type":"Point","coordinates":[126.978, 37.5665]}'
 query.where(predicates.geo_contains_geojson_point("coverage", point))
 ```
 
-secondary index 없이 server-side filtering 은 [Expression Filters](./expression-filters.md) 참조.
+Secondary index 없이 server-side filtering을 사용하려면 [Expression Filters](./expression-filters.md)를 참고하세요.

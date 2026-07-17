@@ -6,7 +6,7 @@ slug: /guides/udf
 description: Register, execute, and remove Lua UDFs on the Aerospike server.
 ---
 
-User Defined Function (UDF) 은 record 를 소유한 Aerospike server node 위에서 실행되는 Lua 스크립트.
+User-Defined Function(UDF)은 Lua 스크립트입니다. Aerospike는 대상 record를 소유한 server node에서 스크립트를 실행합니다.
 
 ## API
 
@@ -60,6 +60,6 @@ await client.udf_remove("counter")
 
 ## 비고
 
-- Lua 가 유일한 UDF 언어
-- UDF 변경이 모든 node 에 전파되는 데 수 초 소요
-- 최선의 성능을 위해 UDF 는 단순하게 유지
+- UDF는 Lua로만 작성할 수 있습니다.
+- UDF 변경 사항이 모든 node에 전달되기까지 몇 초가 걸립니다.
+- 성능을 위해 UDF는 단순하게 유지하세요.

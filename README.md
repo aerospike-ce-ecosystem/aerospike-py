@@ -13,14 +13,14 @@
   <a href="LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache%202.0-647283?logo=apache&amp;logoColor=FFC72C&amp;labelColor=0B1F33"></a>
 </p>
 
-High-performance Aerospike Python Client built with PyO3 + Rust, powered by the [Aerospike Rust Client v2](https://github.com/aerospike/aerospike-client-rust).
+High-performance Python client for Aerospike, built with Rust and PyO3 on top of the [Aerospike Rust Client v2](https://github.com/aerospike/aerospike-client-rust).
 
 ## Features
 
-- Sync and Async (`AsyncClient`) API
-- CRUD, Batch, Query, UDF, Admin, Index, Truncate
-- CDT List/Map Operations, Expression Filters
-- NumPy v2 structured-array results for batch reads (skips Python-object overhead for analytical pipelines)
+- Sync and async (`AsyncClient`) APIs
+- CRUD, batch, query, UDF, admin, index, and truncate operations
+- List and map CDT operations and expression filters
+- NumPy v2 structured-array results for batch reads, without per-record Python objects in analytical pipelines
 - Full type stubs (`.pyi`) for IDE autocompletion
 
 > [Documentation](https://aerospike-ce-ecosystem.github.io/aerospike-py/) — API reference, usage guides, integration examples
@@ -135,11 +135,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and
 
 ## Repository Automation
 
-This repo wires several automations that fire on commit, PR, push, and schedule. Knowing they exist helps you understand why a check ran (or refused to).
+This repository runs several automations on commits, pull requests, pushes, and schedules. The following sections explain when each check runs and why it may block an action.
 
 ### Pre-commit hooks — `.pre-commit-config.yaml`
 
-Run on every `git commit`. Install once with `make pre-commit-install`.
+These hooks run on every `git commit`. Install them once with `make pre-commit-install`.
 
 | Hook | Source | Purpose |
 |---|---|---|

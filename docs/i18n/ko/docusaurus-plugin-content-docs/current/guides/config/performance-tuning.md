@@ -80,19 +80,20 @@ client.put(key, bins, meta={"ttl": aerospike.TTL_NAMESPACE_DEFAULT}) # 네임스
 
 ## 동시성 및 Backpressure 튜닝
 
-고동시성 Python 서비스(FastAPI, Gunicorn 워커, Celery 팬아웃)는
-`aerospike-py` 하부의 두 계층을 포화시킬 수 있습니다:
+동시성이 높은 Python 서비스는 `aerospike-py` 아래의 두 계층을 포화시킬
+수 있습니다. FastAPI, Gunicorn worker, Celery fan-out workload가 여기에
+해당합니다.
 
 1. Rust 비동기 클라이언트를 구동하는 **내부 Tokio 런타임**.
 2. Aerospike 서버에 대한 **노드별 커넥션 풀**.
 
-증상에 따라 적절한 튜닝 노브를 선택하세요. 두 노브는 독립적입니다.
+두 계층은 서로 독립적으로 조정합니다. 나타나는 증상에 맞는 설정을 선택하세요.
 
 ### `AEROSPIKE_RUNTIME_WORKERS` (환경 변수)
 
-내장 비동기 런타임이 사용하는 Tokio 워커 스레드 수를 제어합니다. **기본값: `2`**.
-CPU 집약적 워크로드(PyTorch 추론, sklearn 등)와 함께 배치되었을 때
-CPU 오버헤드를 낮게 유지합니다.
+내장 async runtime이 사용하는 Tokio worker thread 수를 제어합니다.
+기본값은 `2`입니다. 같은 process에서 PyTorch inference나 scikit-learn처럼
+CPU를 많이 쓰는 작업을 실행할 때 overhead를 낮게 유지하기 위한 값입니다.
 
 ```bash
 # 동시 FastAPI 요청 10개 이상이 각각 batch_read를 호출하고
@@ -120,9 +121,9 @@ export AEROSPIKE_RUNTIME_WORKERS=4
 
 ### `max_concurrent_operations` (클라이언트 설정)
 
-매 순간 Rust 클라이언트로 디스패치되는 진행 중 작업 수의 상한을 둡니다.
-**기본값은 비활성화**(`0`, 오버헤드 없음). 값을 설정하면 초과 호출자는
-실패하거나 커넥션 풀을 고갈시키는 대신 슬롯을 **대기**합니다.
+Rust client에 동시에 전달할 operation 수의 상한을 설정합니다. 기본값 `0`은
+제한을 비활성화하며 overhead도 없습니다. 제한을 활성화하면 초과 요청은
+실패하거나 connection pool을 고갈시키는 대신 빈 slot을 기다립니다.
 
 ```python
 config = {
@@ -140,9 +141,9 @@ config = {
 - 슬롯이 비기 전에 `operation_queue_timeout_ms`가 만료되면
   `aerospike_py.BackpressureError`가 발생합니다.
 
-**값 선정:** `max_conns_per_node`(기본값 `256`)에 가깝되 그 이상은
-넘지 않도록 설정합니다. 3노드 클러스터의 경우 `64`가 풀 고갈을 막으면서
-처리량을 유지하는 보수적인 출발점입니다.
+**값 선택:** `max_conns_per_node`(기본값 `256`)에 가깝게 설정하되 이 값을
+넘기지 마세요. 3-node cluster에서는 `64`부터 시작하는 것이 안전합니다.
+Connection pool을 보호하면서 throughput을 유지할 수 있는 보수적인 값입니다.
 
 **활성화 시점:** `spawn_blocking` 큐가 정체될 가능성이 있는 고-팬아웃
 배치 읽기, 또는 상위 호출자(부하 테스트 중인 FastAPI)가 커넥션 풀이
@@ -180,9 +181,10 @@ await client.connect()
 | Gunicorn `--workers` | `2 * CPU` | 각 워커마다 자체 클라이언트 + Tokio 런타임. |
 | `max_conns_per_node` | `256` | `max_concurrent_operations`보다 충분히 높게 유지. |
 
-위 값을 사용한 단일 Gunicorn 워커는 풀을 고갈시키지 않고도 동시 진행
-중인 Aerospike 작업 ~64개를 유지할 수 있습니다. 클러스터 전체 부하 =
-`gunicorn_workers * max_concurrent_operations`이므로 이에 맞춰 사이징하세요.
+위 설정을 사용하면 Gunicorn worker 하나가 connection pool을 고갈시키지
+않고 약 64개의 Aerospike operation을 동시에 처리할 수 있습니다. Cluster가
+받는 전체 부하는 `gunicorn_workers * max_concurrent_operations`로 계산한 뒤
+그 값에 맞춰 capacity를 정하세요.
 
 ## Async Client
 

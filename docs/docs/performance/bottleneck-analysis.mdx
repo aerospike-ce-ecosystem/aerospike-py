@@ -6,9 +6,9 @@ description: Per-stage profiling and optimisation recipes for aerospike-py. Pend
 ---
 
 :::caution TODO — pending re-measurement
-The previous bottleneck-analysis content was authored against the deleted `benchmark/results/*` artifacts (`bottleneck-analysis.md`, `internal-stage-toggle-comparison.md`). Those measurements identified the `spawn_blocking_delay` + `event_loop_resume_delay` stages as the dominant cost under GIL — that story is preserved in [Production Benchmark → Python 3.14t](./production-benchmark#what-gets-faster-and-why), where the same stages are shown collapsing to near-zero under free-threaded Python.
+The previous analysis relied on deleted `benchmark/results/*` artifacts (`bottleneck-analysis.md` and `internal-stage-toggle-comparison.md`). Those measurements found that `spawn_blocking_delay` and `event_loop_resume_delay` dominated the cost under the GIL. The [Production Benchmark → Python 3.14t](./production-benchmark#what-gets-faster-and-why) section preserves that result and shows both stages falling to nearly zero under free-threaded Python.
 
-What's missing is a fresh per-stage breakdown taken on the new [Isolated Benchmark](./isolated-benchmark) harness (s1–s5, oha, podman, local Aerospike CE 8.1.2.1_3). The harness already supports stage profiling — `AEROSPIKE_PY_INTERNAL_METRICS=1` toggles `db_client_internal_stage_seconds` histograms with negligible overhead — but the matrix has not yet been run and reduced into a page.
+The page still needs a fresh per-stage breakdown from the new [Isolated Benchmark](./isolated-benchmark) harness (s1–s5, oha, Podman, and local Aerospike CE 8.1.2.1_3). The harness already supports stage profiling through `AEROSPIKE_PY_INTERNAL_METRICS=1`, which enables the `db_client_internal_stage_seconds` histograms with negligible disabled-path overhead. The full matrix has not yet been run and summarized.
 
 Tracked work:
 
@@ -23,4 +23,4 @@ Tracked work:
 2. **Stage-profiling activation** — `AEROSPIKE_PY_INTERNAL_METRICS=1` env var, `aerospike_py.set_internal_stage_metrics_enabled(True)` runtime toggle, scoped context manager. All three exist today; their overhead is roughly one `AtomicBool` load per stage entry when disabled.
 3. **Recipes that measurably help.** The known winners from the previous round were (a) switch to aerospike-py, (b) consolidate `gather(N batch_reads)` into a single `batch_read(mixed keys)`, (c) move to Python 3.14t free-threaded. (a) and (c) are already quantified on the new harness in [Isolated Benchmark](./isolated-benchmark) and [Production Benchmark](./production-benchmark); (b) is what **s4_gather vs s4_single** is set up to re-measure.
 
-Until the re-measurement lands, treat the [Production Benchmark's 3.14t stage breakdown](./production-benchmark#what-gets-faster-and-why) as the canonical "where the time goes" reference.
+Until new measurements are available, use the [Production Benchmark's 3.14t stage breakdown](./production-benchmark#what-gets-faster-and-why) as the reference for where time is spent.

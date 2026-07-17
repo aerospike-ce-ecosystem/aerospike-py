@@ -5,7 +5,7 @@ sidebar_position: 1
 description: Rust-to-Python logging bridge for observing Aerospike client internals.
 ---
 
-내장 **Rust-to-Python logging bridge** 가 모든 내부 Rust log 를 Python `logging` 모듈로 forward 합니다. import 시 자동 초기화.
+aerospike-py에는 **Rust-to-Python logging bridge**가 내장되어 있습니다. 내부 Rust log를 Python `logging` module로 전달하며 package를 import할 때 자동으로 초기화됩니다.
 
 ## Quick Start
 
@@ -124,12 +124,12 @@ for name in ["aerospike_core", "aerospike_py"]:
 
 ## Shutdown Fallback
 
-Python GIL 을 사용할 수 없을 때 (예: interpreter shutdown 중) logging bridge 는 메시지를 Python 으로 forward 할 수 없습니다. 이 경우:
+Interpreter가 종료되는 동안처럼 Python GIL을 사용할 수 없으면 logging bridge가 메시지를 Python으로 전달할 수 없습니다. 이 경우 다음과 같이 동작합니다.
 
-- **WARN 과 ERROR** 메시지는 **stderr** 로 emit — 중요한 진단 정보 유실 방지
-- **INFO, DEBUG, TRACE** 메시지는 silently drop
+- **WARN과 ERROR** 메시지는 중요한 진단 정보가 사라지지 않도록 **stderr**에 출력합니다.
+- **INFO, DEBUG, TRACE** 메시지는 버립니다.
 
-drop 된 메시지 수는 `dropped_log_count()` 로 확인:
+버린 메시지 수는 `dropped_log_count()`로 확인할 수 있습니다.
 
 ```python
 import aerospike_py

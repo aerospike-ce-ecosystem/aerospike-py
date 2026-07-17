@@ -5,7 +5,7 @@ sidebar_position: 2
 description: Prometheus metrics for monitoring Aerospike operations.
 ---
 
-aerospike-py collects operation-level metrics in Rust and exposes them in **Prometheus text format**. Metric names follow [OpenTelemetry DB Client Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/database/).
+aerospike-py records operation-level metrics in Rust and exposes them in **Prometheus text format**. The metric names follow the [OpenTelemetry DB Client Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/database/).
 
 ## Quick Start
 

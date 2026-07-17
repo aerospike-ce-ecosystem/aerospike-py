@@ -108,7 +108,7 @@ client.touch(key, val=600)  # 또는: await client.touch(key, val=600)
 
 ## Multi-Operation (Operate)
 
-단일 record 에 여러 operation 을 atomic 하게 실행.
+한 record에 여러 operation을 atomic하게 실행합니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -141,7 +141,7 @@ result = await client.operate_ordered(key, ops)
 
 ## Batch Write
 
-**per-record bin** 으로 다수 record 를 한 batch 호출로 write. `put()` 의 batch 버전 — 각 record 가 다른 bin name 과 value 를 가질 수 있음.
+한 번의 batch call로 여러 record의 **per-record bin**을 씁니다. `put()`과 마찬가지로 record마다 서로 다른 bin name과 value를 사용할 수 있습니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -226,7 +226,7 @@ results = await client.batch_write(records_with_ttl)
   </TabItem>
 </Tabs>
 
-**auto-recovery retry:** transient error (timeout, device overload, key busy) 로 실패한 record 는 exponential backoff 로 자동 재시도:
+**자동 retry:** `retry`를 설정하면 timeout, device overload, key busy 같은 transient error를 exponential backoff로 다시 시도합니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -248,7 +248,7 @@ results = await client.batch_write(records, retry=5)
 </Tabs>
 
 :::tip[in_doubt flag]
-`br.in_doubt` 가 `True` 일 때 error 에도 불구하고 write 가 server 에서 완료되었을 수 있음 (예: write 전송 후 timeout). non-idempotent operation 의 중복 write 방지 위해 retry 전 `in_doubt` 확인.
+`br.in_doubt`가 `True`이면 error가 발생했어도 server에서 write를 완료했을 수 있습니다. Write를 보낸 뒤 timeout이 난 경우가 한 예입니다. Non-idempotent operation을 두 번 적용하지 않도록 retry 전에 `in_doubt`를 확인하세요.
 :::
 
 ## Batch Operate / Remove
@@ -291,4 +291,4 @@ except RecordGenerationError:
 
 - **Batch size**: batch 당 100-5,000 key 가 최적. 너무 크면 timeout 가능.
 - **Timeout**: 큰 batch operation 의 경우 `total_timeout` 증가.
-- **Error handling**: 개별 batch record 는 독립적으로 실패 가능. `br.record` 가 `None` 인지 항상 확인.
+- **Error handling**: Batch 안의 record는 각각 독립적으로 실패할 수 있습니다. 항상 `br.record`가 `None`인지 확인하세요.

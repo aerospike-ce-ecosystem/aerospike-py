@@ -80,19 +80,20 @@ client.put(key, bins, meta={"ttl": aerospike.TTL_NAMESPACE_DEFAULT}) # use names
 
 ## Concurrency & Backpressure Tuning
 
-High-concurrency Python services (FastAPI, Gunicorn workers, Celery
-fan-out) can saturate the two layers underneath `aerospike-py`:
+High-concurrency Python services can saturate two layers beneath
+`aerospike-py`. This includes FastAPI services, Gunicorn workers, and Celery
+fan-out workloads:
 
 1. The **internal Tokio runtime** that drives the Rust async client.
 2. The **per-node connection pool** to the Aerospike server.
 
-There are two independent knobs — pick the right one for the symptom.
+Tune these layers independently. Choose the setting that matches the symptom.
 
 ### `AEROSPIKE_RUNTIME_WORKERS` (env var)
 
-Controls the number of Tokio worker threads used by the embedded async
-runtime. **Default: `2`**, which keeps CPU overhead low when colocated
-with CPU-heavy workloads (PyTorch inference, sklearn, etc.).
+This variable controls the number of Tokio worker threads in the embedded
+async runtime. It defaults to `2` to limit CPU overhead when the process also
+runs CPU-heavy work such as PyTorch inference or scikit-learn.
 
 ```bash
 # Bump worker count when 10+ concurrent FastAPI requests each call
@@ -114,16 +115,16 @@ export AEROSPIKE_RUNTIME_WORKERS=4
 - `tokio-console` (or a Tokio runtime metric) shows a queue depth that
   grows unboundedly during load.
 
-The env var is read **once at runtime initialization** (first
-`AsyncClient.connect()`). Changing it after the runtime is up has no
-effect — set it before importing `aerospike_py`.
+The client reads this variable once, when the first `AsyncClient.connect()`
+initializes the runtime. Set it before importing `aerospike_py`; changing it
+after initialization has no effect.
 
 ### `max_concurrent_operations` (client config)
 
-Caps the number of in-flight operations dispatched into the Rust client
-at any moment. **Disabled by default** (`0`, zero overhead). When set,
-excess callers **queue** for a slot instead of failing or exhausting the
-connection pool.
+This setting caps the number of operations dispatched to the Rust client at
+one time. It is disabled by default (`0`) and adds no overhead. When enabled,
+extra callers wait for a slot instead of failing or exhausting the connection
+pool.
 
 ```python
 config = {
@@ -141,15 +142,13 @@ When enabled:
 - `aerospike_py.BackpressureError` is raised only if
   `operation_queue_timeout_ms` expires before a slot frees up.
 
-**Choosing the value:** set this close to (but no higher than)
-`max_conns_per_node` (default `256`). For a 3-node cluster, `64` is a
-conservative starting point that prevents pool exhaustion while keeping
-throughput high.
+**Choose a value:** keep it close to, but no higher than,
+`max_conns_per_node` (default `256`). For a three-node cluster, start at `64`.
+This conservative value protects the pool while preserving throughput.
 
-**Enable when:** high-fanout batch reads where the `spawn_blocking`
-queue would otherwise stall, or when an upstream caller (FastAPI under
-load test) can issue more concurrent ops than the connection pool can
-serve.
+**Enable it when:** high-fan-out batch reads stall the `spawn_blocking` queue,
+or an upstream caller can issue more operations than the connection pool can
+serve. A FastAPI load test is one common example.
 
 ### Quick before/after
 
@@ -183,9 +182,10 @@ For a FastAPI service deployed under Gunicorn with `uvicorn` workers
 | Gunicorn `--workers` | `2 * CPU` | Each worker has its own client + Tokio runtime. |
 | `max_conns_per_node` | `256` | Stay well above `max_concurrent_operations`. |
 
-A single Gunicorn worker with the values above can sustain ~64 concurrent
-in-flight Aerospike ops without exhausting the pool. Total cluster-side
-load = `gunicorn_workers * max_concurrent_operations`; size accordingly.
+With these starting values, one Gunicorn worker can sustain about 64
+concurrent Aerospike operations without exhausting the pool. Calculate total
+cluster-side load as `gunicorn_workers * max_concurrent_operations`, then size
+the cluster for that result.
 
 ## Async Client
 

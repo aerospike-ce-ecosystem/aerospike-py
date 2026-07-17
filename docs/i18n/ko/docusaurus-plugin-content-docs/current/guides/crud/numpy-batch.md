@@ -9,15 +9,15 @@ description: Use batch_read with numpy structured arrays for high-performance co
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-`batch_read(...).to_numpy(dtype)` 는 Python object 대신 **numpy structured array** 를 반환:
+`batch_read(...).to_numpy(dtype)`는 batch result를 record별 Python object 대신 **NumPy structured array**로 materialize합니다.
 
-- **Zero-copy columnar access** — `batch.batch_records["temperature"]` 가 numpy array 반환; `torch.from_numpy(...)` 와 결합해 O(1) tensor hand-off
-- **Fill 동안 GIL release** — per-record `Value → buffer` write 가 GIL 해제된 상태로 발생, 다른 asyncio task / thread 가 동시 실행 가능
-- **Vectorised 연산** — 결과에 numpy/pandas 직접 사용
-- **메모리 효율** — Rust 가 numpy buffer 에 직접 write, Python object 우회
+- **Zero-copy column access** — `batch.batch_records["temperature"]`는 NumPy array를 반환합니다. `torch.from_numpy(...)`에 전달하면 O(1)로 tensor를 만들 수 있습니다.
+- **GIL-free buffer fill** — Client는 GIL을 해제한 상태에서 record별 `Value`를 buffer에 씁니다. 이 동안 다른 asyncio task와 thread가 실행될 수 있습니다.
+- **Vectorized 연산** — 결과를 NumPy나 pandas에서 바로 사용할 수 있습니다.
+- **낮은 object overhead** — Rust가 NumPy buffer에 직접 쓰므로 value마다 Python object를 만들지 않습니다.
 
 :::tip[Performance]
-record 10K + bin 5개에서 `lazy_records.to_dict()` materialisation 대비 ~60K 개 중간 Python object 제거.
+Record 10,000개와 bin 5개를 읽을 때 `lazy_records.to_dict()`로 materialize하는 방식보다 중간 Python object를 약 60,000개 줄입니다.
 :::
 
 ## 설치
@@ -26,7 +26,7 @@ record 10K + bin 5개에서 `lazy_records.to_dict()` materialisation 대비 ~60K
 pip install "aerospike-py[numpy]"
 ```
 
-선택적 dependency 로 `numpy>=2.0` 설치됨.
+선택적 dependency로 `numpy>=2.0`을 설치합니다.
 
 ## Quick Start
 
@@ -116,17 +116,17 @@ asyncio.run(main())
 
 ## NumpyBatchRecords
 
-`batch_read()` 가 반환하는 `LazyBatchRecords` 에 `.to_numpy(dtype)` 를 호출하면 `NumpyBatchRecords` 객체를 얻음. structured-array fill 이 GIL release 된 상태로 실행되어 결과를 `torch.from_numpy(...)` 에 zero-copy 로 바로 넘길 수 있음:
+`batch_read()`가 반환한 `LazyBatchRecords`에서 `.to_numpy(dtype)`를 호출하면 `NumpyBatchRecords` 객체를 얻습니다. Client가 GIL을 해제하고 structured array를 채우므로 결과를 복사하지 않고 `torch.from_numpy(...)`에 바로 전달할 수 있습니다.
 
-:::warning[Missing read 는 silently zero-fill]
+:::warning[찾지 못한 record는 0으로 채워짐]
 
-`result_codes[i] != 0` 인 row (`RecordNotFound` 포함) 는 data 와 meta entry 가 dtype 의 zero 값으로 남음 — buffer 만으로는 실제로 bin 이 zero 인 record 와 구분 불가. averaging, summing, inference 전에 항상 `batch.result_codes == 0` 으로 mask (또는 `lazy_records.found_count()` 확인).
+`RecordNotFound`를 포함해 `result_codes[i] != 0`인 row는 data와 metadata가 dtype의 0 값으로 남습니다. Buffer만 봐서는 실제 bin 값이 0인 record와 구분할 수 없습니다. 평균이나 합계를 계산하거나 inference에 전달하기 전에 `batch.result_codes == 0`으로 mask하거나 `lazy_records.found_count()`를 확인하세요.
 
 :::
 
 | Attribute | Type | 설명 |
 |-----------|------|-------------|
-| `batch_records` | `np.ndarray` | 사용자 지정 dtype 의 structured array |
+| `batch_records` | `np.ndarray` | 사용자 지정 dtype을 사용하는 structured array |
 | `meta` | `np.ndarray` | dtype `[("gen", "u4"), ("ttl", "u4")]` 의 structured array |
 | `result_codes` | `np.ndarray` | per-record result code 의 `int32` array (0 = success) |
 | `_map` | `dict` | key 기반 lookup 을 위한 `{primary_key: index}` 매핑 |
@@ -194,7 +194,7 @@ print(f"Failed: {failed.sum()} / {len(batch.result_codes)}")
 
 ## dtype 정의
 
-dtype field 이름이 Aerospike bin 이름과 정확히 일치해야 함.
+dtype field 이름은 Aerospike bin 이름과 정확히 일치해야 합니다.
 
 ### Numeric bin
 
@@ -323,7 +323,7 @@ valid_data = batch.batch_records[success_mask]
 
 ### Missing Bin
 
-record 가 존재하지만 bin 이 missing 이면 field 가 zero 로 default (해당 dtype 의 numpy zero-value):
+Record는 있지만 bin이 없으면 해당 field에는 dtype에 맞는 NumPy zero value가 들어갑니다.
 
 ```python
 # record 가 "temperature" 는 있지만 "humidity" 가 없음
@@ -364,11 +364,11 @@ print(hot_sensors.describe())
 
 ## Best Practice
 
-- **dtype 을 bin 에 맞춤** — dtype field 이름이 Aerospike bin 이름과 일치
+- **dtype을 bin에 맞추기** — dtype field 이름을 Aerospike bin 이름과 같게 지정하세요.
 - **`bins` 파라미터 사용** — `.to_numpy(dtype)` 와 결합해 네트워크 전송 줄이기
 - **`result_codes` 확인** — 분석 전 실패한 record 필터링
-- **충분한 최소 dtype 사용** — 메모리 절감 위해 `"f8"` 대신 `"f4"`, `"i8"` 대신 `"i2"`
-- **Batch size** — 최적 성능을 위해 batch 를 100-5,000 key 로 유지
+- **데이터를 표현할 수 있는 가장 작은 dtype 사용** — 메모리를 줄이려면 `"f8"` 대신 `"f4"`, `"i8"` 대신 `"i2"`를 사용하세요.
+- **Batch size** — batch 하나에 100~5,000개 key를 넣을 때 성능이 가장 좋습니다.
 - **Vector 데이터** — embedding 을 `tobytes()` blob 으로 저장하고 sub-array dtype 으로 read
 
 ## API Reference
@@ -391,7 +391,7 @@ lazy_records: LazyBatchRecords = await client.batch_read(
 batch: NumpyBatchRecords = lazy_records.to_numpy(dtype)
 ```
 
-`LazyBatchRecords.to_numpy(dtype)` 호출은 GIL 해제된 상태로 structured-array materialisation 을 수행 — per-record fill loop 가 raw `ptr::write_unaligned` write 시퀀스라, sibling Python 작업 (다른 asyncio task, torch inference thread) 이 buffer fill 중 GIL 보유 가능.
+`LazyBatchRecords.to_numpy(dtype)`는 GIL을 해제한 상태에서 structured array를 materialize합니다. Record별 fill loop는 raw `ptr::write_unaligned`를 사용하므로 buffer를 채우는 동안 다른 asyncio task나 PyTorch inference thread가 GIL을 사용할 수 있습니다.
 
 | Parameter | Type | Default | 설명 |
 |-----------|------|---------|-------------|

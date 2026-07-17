@@ -8,9 +8,9 @@ description: 5-scenario uvicorn ASGI benchmark suite (benchmark/) — strips Fas
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-A focused comparison of **aerospike-py vs the official `aerospike` Python client** behind a real uvicorn ASGI process. The suite intentionally **strips response serialisation cost** (each endpoint returns a single derived scalar — `found`, `pred_sum`, `subset_sum`) so the measured latency reflects `batch_read` + materialisation + (optional) inference, not JSON encoding.
+This benchmark compares **aerospike-py with the official `aerospike` Python client** behind a real uvicorn ASGI process. Each endpoint returns one derived scalar (`found`, `pred_sum`, or `subset_sum`) to remove response-serialization cost. The measured latency therefore covers `batch_read`, materialization, and optional inference instead of JSON encoding.
 
-The opposite end of the spectrum is the [Production Benchmark](./production-benchmark), which keeps every cost a real serving pod pays (HTTP parse, full record marshalling, DLRM, network out). Use this page when you want to know **how much of the gap belongs to the client library itself**, and that page when you want **capacity-planning numbers**.
+The [Production Benchmark](./production-benchmark) measures the other end of the spectrum. It includes HTTP parsing, full-record marshaling, DLRM inference, and network output. Use this page to isolate the client library's contribution. Use the production benchmark for capacity planning.
 
 > **Source**: `benchmark/` in this repo. Runs locally on podman/docker against Aerospike CE 8.1.2.1_3.
 
@@ -24,12 +24,12 @@ make bench-all CONCURRENCY=10 DURATION=30s BATCH_SIZE=50
 make report       # → markdown comparison grouped per scenario
 ```
 
-`make bench` starts a uvicorn process per CLIENT, waits for `/healthz`, runs `oha` for the given duration, kills the process, and moves on. `oha` is the load generator (`oha --output-format json --no-tui -c $C -z $D -m POST …`); each run drops a `meta.json` next to `oha.json` so `loadtest/report.py` can group runs by `(scenario, batch_size, concurrency, python)`.
+`make bench` starts one uvicorn process for each client and waits for `/healthz`. It then runs `oha` for the requested duration, stops the process, and continues to the next client. Each run writes `meta.json` beside `oha.json`, which lets `loadtest/report.py` group results by `(scenario, batch_size, concurrency, python)`.
 
-The Aerospike CE container mounts `scripts/aerospike.template.conf` so `access-address` is pinned to `127.0.0.1`. aerospike-py performs full cluster discovery on `connect()` and would otherwise re-connect to the podman-internal IP and fail; the official client only hits the seed host and gets away without it.
+The Aerospike CE container mounts `scripts/aerospike.template.conf` and pins `access-address` to `127.0.0.1`. aerospike-py performs full cluster discovery during `connect()`. Without this setting, it would reconnect to the Podman-internal address and fail. The official client uses only the seed host in this benchmark.
 
 :::caution Real measurement is follow-up
-The numbers per scenario below come from a short development sanity matrix (py3.11, concurrency=4, batch=30, 3s per run) with everything cache-warm. Use them for **shape** (which scenario widens or compresses the gap), not for absolute claims. Production-grade matrices want larger seed (10k–100k), longer duration (60s), higher concurrency (10–50).
+The scenario results below come from a short, warm-cache development matrix: Python 3.11, concurrency 4, batch size 30, and three seconds per run. Use them to compare the **shape** of the results, not as absolute performance claims. A production-grade matrix needs 10,000–100,000 seed records, 60-second runs, and concurrency between 10 and 50.
 :::
 
 ## Scenarios
@@ -79,7 +79,7 @@ Materialise records into per-row Python lists, build a `torch.tensor`, run a 2-l
 | aerospike-py | `result.to_dict()` → `bins_by_key.get(key)` per record (key order from request list) |
 | official | iterate `result.batch_records` (preserves request order per aerospike 19.x, verified) |
 
-Both paths build a Python list of lists and call `torch.tensor(rows, dtype=torch.float32)` exactly once — no cell-by-cell tensor assignment that would unfairly punish either side.
+Both paths build a Python list of lists and call `torch.tensor(rows, dtype=torch.float32)` exactly once. Neither path assigns tensor cells one by one, so the comparison treats both clients equally.
 
 **Smoke**
 
@@ -187,7 +187,7 @@ Smaller gap than s3 because the wire payload is identical and the official clien
 
 **Expected on 3.14t**
 
-aerospike-py's `to_numpy(subset_dtype)` releases the GIL during the per-record fill, so multiple s5 requests can materialise in parallel under 3.14t. Official client's per-request dict build is also GIL-released inside the C extension itself, but the resulting dict ownership flips the GIL on the Python side. Ratio likely holds.
+aerospike-py's `to_numpy(subset_dtype)` releases the GIL while filling each record, so Python 3.14t can materialise several s5 requests in parallel. The official client also releases the GIL while its C extension builds each request's dict. However, Python must take ownership of the resulting dict. The ratio will likely remain similar.
 
   </TabItem>
 </Tabs>
@@ -198,7 +198,7 @@ aerospike-py's `to_numpy(subset_dtype)` releases the GIL during the per-record f
 |---|---|
 | Response body serialisation | Each endpoint returns `{found: N}` (or `+ pred_sum / subset_sum`) — a single scalar derived from the records. JSON encoding of full records would add a cost both clients pay but with different key/digest shapes, inflating the official-client side asymmetrically and burying the client gap. |
 | OTel / Prometheus / nelo | Measurement noise. The parent client library exposes those features; the benchmark suite stays clean. |
-| Docker image / k8s manifests | The point is to isolate the client library — adding a deploy/registry/manifests path drags in noise unrelated to it. |
+| Docker image / k8s manifests | The benchmark isolates the client library. Deployment, registry, and manifest work would add unrelated variance. |
 | Bin projection (`bins=[…]` on the wire) | Server-side optimisation, orthogonal to the client comparison. **s5** measures client-side materialisation cost on the same wire payload. |
 
 For the inverse — measurement that *includes* all the production cost — see the [Production Benchmark](./production-benchmark).

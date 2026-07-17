@@ -9,13 +9,13 @@ import TabItem from '@theme/TabItem';
 
 # Architecture
 
-aerospike-py 는 [PyO3](https://pyo3.rs) 위에서 [Aerospike Rust Client](https://github.com/aerospike/aerospike-client-rust) 를 사용한 [Aerospike](https://aerospike.com) 용 Python client 입니다. Rust core 가 native Python extension module 로 컴파일되어, Python application 이 거의 native I/O 성능을 누리면서도 type annotation 이 완전한 Pythonic API 를 유지합니다.
+aerospike-py는 [PyO3](https://pyo3.rs)를 사용해 [Aerospike Rust Client](https://github.com/aerospike/aerospike-client-rust)를 native Python extension으로 제공합니다. Python application은 type annotation을 갖춘 익숙한 API를 사용하고, Rust core가 Aerospike I/O를 처리합니다.
 
 **주요 속성:**
 
-- **GIL-free I/O** — 모든 데이터베이스 호출 동안 GIL release, 다른 Python thread 와 coroutine 이 동시 실행 가능.
-- **Type-safe** — IDE autocompletion 과 type checker 지원을 위한 `.pyi` stub 동봉.
-- **Zero dependencies** — base install 은 외부 Python dependency 없음. NumPy 와 OpenTelemetry 는 선택적 extras.
+- **GIL-free I/O** — 모든 database call 중에 GIL을 해제하므로 다른 Python thread와 coroutine이 동시에 실행될 수 있습니다.
+- **Type-safe** — IDE autocompletion과 type checker를 지원하는 `.pyi` stub을 제공합니다.
+- **Zero dependencies** — 기본 설치에는 외부 Python dependency가 없습니다. NumPy와 OpenTelemetry는 선택 사항입니다.
 
 ## Layers
 
@@ -48,7 +48,7 @@ aerospike-py 는 [PyO3](https://pyo3.rs) 위에서 [Aerospike Rust Client](https
 
 ## Sync vs Async
 
-두 client 가 동일한 API surface 를 노출. 차이는 내부 Tokio runtime 위에서 I/O 를 schedule 하는 방식.
+두 client는 같은 API를 제공합니다. 차이는 내부 Tokio runtime에서 I/O를 schedule하는 방식입니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync" default>
@@ -63,7 +63,7 @@ print(record.bins)  # {"name": "Alice"}
 client.close()
 ```
 
-내부적으로 각 호출이 GIL 을 release 하고, `block_on()` 을 통해 Tokio runtime 위에서 Rust future 를 실행한 뒤, 결과를 반환하기 위해 GIL 을 재획득합니다. I/O 대기 동안 다른 Python thread 는 자유롭게 실행 가능.
+각 호출은 GIL을 해제하고 `block_on()`을 통해 Tokio runtime에서 Rust future를 실행합니다. 결과를 반환할 때만 GIL을 다시 획득하므로 I/O를 기다리는 동안 다른 Python thread가 실행될 수 있습니다.
 
   </TabItem>
   <TabItem value="async" label="Async">
@@ -91,7 +91,7 @@ await client.close()
 | Sync (sequential) | ~1.1x 느림 | ~1.1x 느림 | — |
 | Async (concurrent) | **2.1x 빠름** | **1.6x 빠름** | **3.4x 빠름** |
 
-Sync gap (~10%) 은 호출당 `block_on()` overhead 에서 옴. Async 가 aerospike-py 의 진가 — 동시 I/O 가 호출당 overhead 를 완전히 제거.
+Sync path에서는 호출마다 `block_on()` 비용이 들어 약 10%의 차이가 납니다. Async path는 여러 I/O를 겹쳐 실행해 이 scheduling 비용을 피합니다.
 
 ## Data Flow
 
@@ -99,12 +99,12 @@ Sync gap (~10%) 은 호출당 `block_on()` overhead 에서 옴. Async 가 aerosp
 
 1. Python dict `{"name": "Alice"}` 가 Rust `Vec<Bin>` 으로 변환.
 2. Key tuple `("test", "demo", "user1")` 이 Aerospike `Key` 로 (RIPEMD-160 digest 포함).
-3. GIL release. Rust client 가 bin 을 Aerospike wire protocol 로 직렬화해 TCP 로 전송.
+3. GIL을 해제합니다. Rust client가 bin을 Aerospike wire protocol로 직렬화해 TCP로 전송합니다.
 4. Server 가 ack. GIL 재획득하고 `None` 을 Python 으로 반환.
 
 ### Read path (`get`)
 
-1. GIL release. Rust client 가 read 요청 전송 후 응답 수신.
+1. GIL을 해제합니다. Rust client가 read request를 보내고 response를 받습니다.
 2. Rust `Record` (bins + generation + TTL) 가 Python tuple `(key, meta, bins)` 로 변환.
 3. Python wrapper layer 가 이를 `Record` NamedTuple 로 wrap:
 
@@ -162,7 +162,7 @@ for user_key, bins in batch.items():
   </TabItem>
 </Tabs>
 
-높은 throughput pipeline 을 위해 NumPy dtype 을 전달하면 zero-copy columnar 접근 가능한 structured array 를 받음. 자세한 내용은 [NumPy Batch Read guide](./crud/numpy-batch.md) 참조.
+처리량이 높은 pipeline에서는 NumPy dtype을 전달해 zero-copy columnar access를 지원하는 structured array를 받을 수 있습니다. 자세한 내용은 [NumPy Batch Read guide](./crud/numpy-batch.md)를 참고하세요.
 
 ```python
 import numpy as np
@@ -174,7 +174,7 @@ print(result.batch_records["score"].mean())  # columnar 접근
 
 ### batch_write
 
-각 record 는 `(key, bins)` tuple. 세 번째 element 로 per-record metadata (TTL 등) 를 선택적으로 추가:
+각 record는 `(key, bins)` tuple입니다. 세 번째 element에 TTL 같은 record별 metadata를 선택적으로 추가할 수 있습니다.
 
 ```python
 records = [
@@ -200,7 +200,7 @@ for br in results.batch_records:
 
 ## Error Handling
 
-server 로부터의 error 는 `AerospikeError` 를 root 로 하는 Python exception hierarchy 로 매핑. 각 exception 이 원본 error message 와 result code 를 carry.
+Server error는 `AerospikeError`를 최상위로 하는 Python exception hierarchy에 매핑됩니다. 각 exception에는 원본 error message와 result code가 들어 있습니다.
 
 ```python
 from aerospike_py.exception import RecordNotFound, AerospikeError
@@ -213,11 +213,11 @@ except AerospikeError as e:
     print(f"Unexpected error: {e}")
 ```
 
-Batch operation 의 경우 개별 실패는 exception 을 raise 하지 않음 — 각 `BatchRecord` 의 `br.result` 를 확인. 전체 exception hierarchy 와 batch error 패턴은 [Error Handling guide](./admin/error-handling.md) 참조.
+Batch operation은 개별 record가 실패해도 전체 batch에 exception을 발생시키지 않습니다. 각 `BatchRecord`의 `br.result`를 확인하세요. 전체 exception hierarchy와 batch error 처리 방법은 [Error Handling guide](./admin/error-handling.md)를 참고하세요.
 
 ## Observability
 
-aerospike-py 는 tracing, metrics, logging 에 대해 내장 지원. 셋 다 선택적이며 비활성 시 거의 0 overhead.
+aerospike-py는 tracing, metrics, logging을 기본으로 지원합니다. 세 기능 모두 선택 사항이며, 비활성화하면 overhead가 거의 없습니다.
 
 ### OpenTelemetry Tracing
 
