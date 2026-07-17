@@ -86,7 +86,7 @@ fn get_rank(dict: &Bound<'_, PyDict>) -> PyResult<i64> {
 
 fn get_count(dict: &Bound<'_, PyDict>) -> PyResult<Option<i64>> {
     dict.get_item("count")?
-        .and_then(|v| if v.is_none() { None } else { Some(v) })
+        .filter(|v| !v.is_none())
         .map(|v| v.extract())
         .transpose()
 }
@@ -106,7 +106,7 @@ fn get_map_key(dict: &Bound<'_, PyDict>) -> PyResult<Value> {
 
 fn get_val_end(dict: &Bound<'_, PyDict>) -> PyResult<Value> {
     dict.get_item("val_end")?
-        .and_then(|v| if v.is_none() { None } else { Some(v) })
+        .filter(|v| !v.is_none())
         .map(|v| py_to_value(&v))
         .transpose()
         .map(|v| v.unwrap_or(Value::Infinity))
@@ -441,13 +441,13 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
 
         let bin_name: Option<String> = dict
             .get_item("bin")?
-            .and_then(|v| if v.is_none() { None } else { Some(v) })
+            .filter(|v| !v.is_none())
             .map(|v| v.extract())
             .transpose()?;
 
         let val: Option<Value> = dict
             .get_item("val")?
-            .and_then(|v| if v.is_none() { None } else { Some(v) })
+            .filter(|v| !v.is_none())
             .map(|v| py_to_value(&v))
             .transpose()?;
 

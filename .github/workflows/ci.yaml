@@ -1,5 +1,5 @@
 name: CI
-# Rust build + Python 3.10~3.15 unit tests (incl. 3.13t/3.14t/3.15t free-threaded)
+# Rust build + Python 3.10~3.15 unit tests (incl. 3.14t/3.15t free-threaded)
 # + integration tests + concurrency tests + compatibility tests + lint + security audit
 
 on:
@@ -192,9 +192,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - python-version: "3.13t"
-            tox-env: py313t
-            experimental: true  # 3.13t was experimental upstream
+          # 3.13t was dropped by pyo3 0.29 (the RUSTSEC-2026-0176/0177 security
+          # upgrade); CPython declared free-threading supported starting with 3.14.
           - python-version: "3.14t"
             tox-env: py314t
           - python-version: "3.15t"
@@ -339,9 +338,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - python-version: "3.13t"
-            tox-env: freethreading-py313t
-            experimental: true
+          # 3.13t was dropped by pyo3 0.29 (the RUSTSEC-2026-0176/0177 security
+          # upgrade); CPython declared free-threading supported starting with 3.14.
           - python-version: "3.14t"
             tox-env: freethreading-py314t
           - python-version: "3.15t"
