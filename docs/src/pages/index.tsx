@@ -1,6 +1,7 @@
 import {type ReactNode, useState, useCallback} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import Layout from '@theme/Layout';
 import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import styles from './index.module.css';
@@ -35,9 +36,12 @@ const STATS = [
 ];
 
 function HeroSection() {
+  const iconSrc = useBaseUrl('/img/icon.svg');
+
   return (
     <header className={styles.heroBanner}>
       <div className={clsx('container', styles.heroContent)}>
+        <img className={styles.heroLogo} src={iconSrc} alt="" aria-hidden="true" />
         <div className={styles.heroBadge}>
           <span>⚡</span>
           <span>Built with Rust + PyO3</span>
