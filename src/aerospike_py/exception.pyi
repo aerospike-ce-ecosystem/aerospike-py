@@ -44,7 +44,7 @@ record-not-found, ``5`` for record-exists, ``22`` for forbidden), matching the
 client-side errors that never received a server response (connection failures,
 client timeouts, invalid arguments) expose the sentinel ``-1``.
 
-Deprecated aliases (emit ``DeprecationWarning`` on access):
+Deprecated aliases (emit ``DeprecationWarning`` on access; **removed in v1.0.0**):
     - ``TimeoutError`` -- use ``AerospikeTimeoutError`` instead.
     - ``IndexError`` -- use ``AerospikeIndexError`` instead.
 """
@@ -78,7 +78,8 @@ class AerospikeTimeoutError(AerospikeError):
 class TimeoutError(AerospikeTimeoutError):
     """Deprecated: use ``AerospikeTimeoutError`` instead.
 
-    Accessing this name emits a ``DeprecationWarning``.
+    Accessing this name emits a ``DeprecationWarning``. Scheduled for removal in
+    v1.0.0.
     """
 
 class BackpressureError(ClientError):
@@ -137,7 +138,8 @@ class AerospikeIndexError(ServerError):
 class IndexError(AerospikeIndexError):
     """Deprecated: use ``AerospikeIndexError`` instead.
 
-    Accessing this name emits a ``DeprecationWarning``.
+    Accessing this name emits a ``DeprecationWarning``. Scheduled for removal in
+    v1.0.0.
     """
 
 class IndexNotFound(AerospikeIndexError):

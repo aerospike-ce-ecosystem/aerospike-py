@@ -45,6 +45,11 @@ from aerospike_py._aerospike import (
     IndexError as _IndexError,  # deprecated alias for AerospikeIndexError
 )
 
+# Deprecated aliases scheduled for removal in v1.0.0 (the first major release).
+# They shadow the Python builtins ``TimeoutError`` / ``IndexError``, so they were
+# renamed to ``AerospikeTimeoutError`` / ``AerospikeIndexError``; the old names
+# remain accessible (with a DeprecationWarning) until v1.0.0.
+_ALIAS_REMOVAL_VERSION = "1.0.0"
 _DEPRECATED_ALIASES: dict[str, tuple[type, str]] = {
     "TimeoutError": (_TimeoutError, "AerospikeTimeoutError"),
     "IndexError": (_IndexError, "AerospikeIndexError"),
@@ -55,7 +60,8 @@ def __getattr__(name: str):
     if name in _DEPRECATED_ALIASES:
         cls, replacement = _DEPRECATED_ALIASES[name]
         warnings.warn(
-            f"aerospike_py.exception.{name} is deprecated, use {replacement} instead",
+            f"aerospike_py.exception.{name} is deprecated and will be removed in "
+            f"v{_ALIAS_REMOVAL_VERSION}; use {replacement} instead",
             DeprecationWarning,
             stacklevel=2,
         )
