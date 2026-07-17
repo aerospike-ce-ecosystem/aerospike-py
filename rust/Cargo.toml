@@ -58,10 +58,6 @@ otel = [
     "dep:opentelemetry-otlp",
 ]
 
-# Profiling: keep line-number debug info in release builds so Tachyon `--native`
-# can resolve Rust function names (record_to_py_inner / value_to_py / key_to_py
-# instead of opaque <native>). Adds ~5% to wheel size; perf impact negligible.
-[profile.release]
-debug = 2
-strip = "none"
-split-debuginfo = "off"
+# NOTE: no `[profile.*]` here. Cargo ignores profiles declared in workspace
+# *member* manifests — the release profile (LTO, panic=unwind, and the
+# debug-symbol / profiling knobs) lives in the workspace-root `Cargo.toml`.

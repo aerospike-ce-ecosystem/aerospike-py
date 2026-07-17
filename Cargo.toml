@@ -2,6 +2,11 @@
 members = ["rust"]
 resolver = "2"
 
+# IMPORTANT: this is the *only* release profile that cargo honours. Cargo
+# ignores `[profile.*]` declared in workspace *member* manifests, so all release
+# tuning for the `rust/` member MUST live here in the workspace root — including
+# the profiling knobs that previously lived (dead) in `rust/Cargo.toml`.
+#
 # `panic = "unwind"` lets us catch panics from aerospike-core in `read` paths
 # (notably `bytes_to_particle()` panicking on PYTHON_BLOB / JAVA_BLOB / etc. —
 # see issue #280). Switching from "abort" adds DWARF unwind tables to the
@@ -9,8 +14,19 @@ resolver = "2"
 # Linux x86_64). Hot-path runtime cost is negligible: LLVM uses `invoke`
 # instead of `call`, indistinguishable from `call` on modern CPUs unless a
 # panic actually propagates.
+#
+# `debug = 2` + `strip = "none"` + `split-debuginfo = "off"` keep full
+# line-number debug info in release builds so profilers (Tachyon `--native`) can
+# resolve Rust function names (record_to_py_inner / value_to_py / key_to_py)
+# instead of opaque <native>. Adds ~5% to wheel size; perf impact negligible.
+# These knobs were previously set in `rust/Cargo.toml` where cargo silently
+# ignored them, so the root's old `strip = "symbols"` won and stripped the very
+# symbols the profiling comment intended to keep — they now live here and take
+# effect.
 [profile.release]
 lto = "fat"
 codegen-units = 1
-strip = "symbols"
+debug = 2
+strip = "none"
+split-debuginfo = "off"
 panic = "unwind"
