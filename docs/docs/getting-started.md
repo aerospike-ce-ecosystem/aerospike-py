@@ -16,10 +16,9 @@ pip install aerospike-py
 
 **Requirements:** Python 3.10+ (CPython)
 
-If you work from a source checkout, run `make run-aerospike-ce` to start the
-local Aerospike CE container on `127.0.0.1:18710`. If you start Aerospike
-manually on its default service port, replace `18710` with `3000` in the
-examples below.
+Before running the examples, make sure an Aerospike server is available at
+`127.0.0.1:3000`, or replace the host and port with a seed address for your
+cluster.
 
 ## Quick Start
 
@@ -31,7 +30,7 @@ import aerospike_py as aerospike
 from aerospike_py import Record
 
 with aerospike.client({
-    "hosts": [("127.0.0.1", 18710)],
+    "hosts": [("127.0.0.1", 3000)],
 }).connect() as client:
     key: tuple[str, str, str] = ("test", "demo", "user1")
 
@@ -59,7 +58,7 @@ import aerospike_py as aerospike
 from aerospike_py import AsyncClient, Record
 
 async def main() -> None:
-    async with AsyncClient({"hosts": [("127.0.0.1", 18710)]}) as client:
+    async with AsyncClient({"hosts": [("127.0.0.1", 3000)]}) as client:
         await client.connect()
         key: tuple[str, str, str] = ("test", "demo", "user1")
 

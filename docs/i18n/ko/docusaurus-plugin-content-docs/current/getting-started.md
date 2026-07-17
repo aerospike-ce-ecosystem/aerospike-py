@@ -16,7 +16,7 @@ pip install aerospike-py
 
 **Requirements:** Python 3.10+ (CPython)
 
-소스 checkout에서 작업한다면 `make run-aerospike-ce`를 실행해 로컬 Aerospike CE 컨테이너를 시작하세요. 컨테이너는 `127.0.0.1:18710`에서 요청을 받습니다. Aerospike를 기본 service port로 직접 실행했다면 아래 예제의 `18710`을 `3000`으로 바꾸세요.
+예제를 실행하기 전에 `127.0.0.1:3000`에서 Aerospike server가 실행 중인지 확인하세요. 다른 환경을 사용한다면 host와 port를 해당 cluster의 seed address로 바꾸세요.
 
 ## Quick Start
 
@@ -28,7 +28,7 @@ import aerospike_py as aerospike
 from aerospike_py import Record
 
 with aerospike.client({
-    "hosts": [("127.0.0.1", 18710)],
+    "hosts": [("127.0.0.1", 3000)],
 }).connect() as client:
     key: tuple[str, str, str] = ("test", "demo", "user1")
 
@@ -56,7 +56,7 @@ import aerospike_py as aerospike
 from aerospike_py import AsyncClient, Record
 
 async def main() -> None:
-    async with AsyncClient({"hosts": [("127.0.0.1", 18710)]}) as client:
+    async with AsyncClient({"hosts": [("127.0.0.1", 3000)]}) as client:
         await client.connect()
         key: tuple[str, str, str] = ("test", "demo", "user1")
 
