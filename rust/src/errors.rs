@@ -427,6 +427,22 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
     }
 }
 
+/// Build the `RecordNotFound` error raised when a delete targeted a record
+/// that did not exist.
+///
+/// `aerospike-core` collapses the server's KEY_NOT_FOUND_ERROR delete response
+/// into `Ok(false)` instead of surfacing an `Error`, so `do_remove` constructs
+/// this exception itself. The failure *is* a server response, so it must carry
+/// the real wire code (2 — matching both the message text and
+/// `AEROSPIKE_ERR_RECORD_NOT_FOUND`), not the [`CLIENT_SIDE_RESULT_CODE`]
+/// sentinel (ADR-0027).
+pub(crate) fn record_not_found_for_delete() -> PyErr {
+    attach_result_code(
+        RecordNotFound::new_err("AEROSPIKE_ERR (2): Record not found"),
+        result_code_to_int(&ResultCode::KeyNotFoundError),
+    )
+}
+
 /// Register all Aerospike exception types on the native Python module.
 pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
@@ -800,6 +816,23 @@ mod tests {
                 String::new(),
             ));
             assert_eq!(result_code_of(py, &err), 240);
+        });
+    }
+
+    #[test]
+    fn test_delete_not_found_carries_record_not_found_code() {
+        // `delete()` of a missing record is reported by the server as
+        // KEY_NOT_FOUND_ERROR (2), but aerospike-core collapses that response
+        // into `Ok(false)`, so `do_remove` builds the exception itself. It must
+        // carry the real wire code 2 — the message already says
+        // "AEROSPIKE_ERR (2)" and the documented ADR-0027 classification
+        // pattern is `exc.result_code == AEROSPIKE_ERR_RECORD_NOT_FOUND` — not
+        // the -1 client-side sentinel.
+        Python::initialize();
+        Python::attach(|py| {
+            let err = record_not_found_for_delete();
+            assert!(err.is_instance_of::<RecordNotFound>(py));
+            assert_eq!(result_code_of(py, &err), 2);
         });
     }
 }

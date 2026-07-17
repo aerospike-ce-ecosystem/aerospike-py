@@ -106,9 +106,10 @@ pub async fn do_remove(client: &AsClient, args: RemoveArgs) -> PyResult<()> {
     )?;
 
     if !existed {
-        return Err(crate::errors::RecordNotFound::new_err(
-            "AEROSPIKE_ERR (2): Record not found",
-        ));
+        // The server reported KEY_NOT_FOUND_ERROR (wire code 2); aerospike-core
+        // collapsed it into `Ok(false)`, so the exception is built here — with
+        // the real wire code attached (ADR-0027), not the -1 sentinel.
+        return Err(crate::errors::record_not_found_for_delete());
     }
     Ok(())
 }
