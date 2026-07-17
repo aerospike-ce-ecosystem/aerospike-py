@@ -102,9 +102,10 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
+      title: 'aerospike-py',
       logo: {
-        alt: 'aerospike-py Logo',
-        src: 'img/logo.svg',
+        alt: 'aerospike-py icon',
+        src: 'img/icon.svg',
       },
       items: [
         {
