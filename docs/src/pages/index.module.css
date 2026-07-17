@@ -6,38 +6,38 @@
   text-align: center;
   position: relative;
   overflow: hidden;
-  background: var(--apy-color-navy, #1B2838);
+  background: var(--apy-color-navy, #0B1F33);
   color: #fff;
 }
 
-/* Radial glow effect */
+/* Single data-line motif */
 .heroBanner::before {
   content: '';
   position: absolute;
-  top: -10%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 80%;
-  height: 60%;
-  background: radial-gradient(ellipse at center, rgba(230, 74, 25, 0.25) 0%, transparent 70%);
-  pointer-events: none;
-}
-
-/* Grid pattern overlay */
-.heroBanner::after {
-  content: '';
-  position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
-  background-size: 40px 40px;
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0,
+    transparent 39px,
+    rgba(255, 199, 44, 0.07) 39px,
+    rgba(255, 199, 44, 0.07) 40px
+  );
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.72), transparent 78%);
   pointer-events: none;
 }
 
 .heroContent {
   position: relative;
   z-index: 1;
+}
+
+.heroLogo {
+  display: block;
+  width: 5.5rem;
+  height: 5.5rem;
+  margin: 0 auto 1.25rem;
+  border-radius: 1.15rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
 }
 
 /* ============================================================
@@ -47,13 +47,13 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  background: rgba(230, 74, 25, 0.15);
-  border: 1px solid rgba(230, 74, 25, 0.4);
+  background: rgba(255, 199, 44, 0.1);
+  border: 1px solid rgba(255, 199, 44, 0.42);
   border-radius: 100px;
   padding: 0.3rem 0.9rem;
   font-size: 0.8rem;
   font-weight: 600;
-  color: #FF8A65;
+  color: var(--apy-color-yellow, #FFC72C);
   letter-spacing: 0.03em;
   margin-bottom: 1.5rem;
 }
@@ -71,7 +71,7 @@
 }
 
 .heroTitleAccent {
-  color: #FF8A65;
+  color: var(--apy-color-yellow, #FFC72C);
   position: relative;
 }
 
@@ -96,18 +96,18 @@
 }
 
 .ctaPrimary {
-  background: #E64A19 !important;
-  border-color: #E64A19 !important;
-  color: #fff !important;
+  background: var(--apy-color-yellow, #FFC72C) !important;
+  border-color: var(--apy-color-yellow, #FFC72C) !important;
+  color: var(--apy-color-navy, #0B1F33) !important;
   font-weight: 600;
   transition: background 0.2s, transform 0.15s, box-shadow 0.2s !important;
 }
 
 .ctaPrimary:hover {
-  background: #D84315 !important;
-  border-color: #D84315 !important;
+  background: #FFD154 !important;
+  border-color: #FFD154 !important;
   transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(230, 74, 25, 0.4) !important;
+  box-shadow: 0 4px 16px rgba(255, 199, 44, 0.28) !important;
 }
 
 .ctaSecondary {
@@ -139,7 +139,7 @@
 }
 
 .installCommand code {
-  color: #FF8A65;
+  color: var(--apy-color-yellow, #FFC72C);
   font-size: 1rem;
   font-family: var(--ifm-font-family-monospace, monospace);
   background: none;
@@ -163,6 +163,13 @@
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   border-color: rgba(255, 255, 255, 0.6);
+}
+
+.ctaPrimary:focus-visible,
+.ctaSecondary:focus-visible,
+.copyButton:focus-visible {
+  outline: 3px solid var(--apy-color-yellow, #FFC72C);
+  outline-offset: 3px;
 }
 
 /* ============================================================
@@ -211,6 +218,11 @@
     padding: 4rem 1.5rem 3.5rem;
   }
 
+  .heroLogo {
+    width: 4.75rem;
+    height: 4.75rem;
+  }
+
   .statsBar {
     flex-direction: column;
     align-items: stretch;
@@ -226,5 +238,18 @@
 
   .statItem:last-child {
     border-bottom: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctaPrimary,
+  .ctaSecondary,
+  .copyButton {
+    transition: none !important;
+  }
+
+  .ctaPrimary:hover,
+  .ctaSecondary:hover {
+    transform: none;
   }
 }

@@ -20,7 +20,7 @@ const config: Config = {
   ],
   title: 'aerospike-py',
   tagline: 'High-performance Aerospike Python Client built in Rust (Sync/Async)',
-  favicon: 'img/favicon.svg',
+  favicon: 'img/favicon.ico',
 
   future: {
     v4: true,
@@ -94,6 +94,7 @@ const config: Config = {
   ],
 
   themeConfig: {
+    image: 'img/social-preview.png',
     metadata: [
       {name: 'keywords', content: 'aerospike, python, rust, pyo3, async, database, nosql, client'},
     ],
@@ -101,7 +102,6 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'aerospike-py',
       logo: {
         alt: 'aerospike-py Logo',
         src: 'img/logo.svg',

@@ -1,24 +1,24 @@
 /* ============================================================
-   Color Theme — Aerospike Orange-Red
+   Color Theme — aerospike-py Navy / Yellow
    ============================================================ */
 :root {
-  /* Aerospike brand: Deep Orange 700 */
-  --ifm-color-primary:          #E64A19;
-  --ifm-color-primary-dark:     #D84315;
-  --ifm-color-primary-darker:   #CC3D11;
-  --ifm-color-primary-darkest:  #BF360C;
-  --ifm-color-primary-light:    #F4511E;
-  --ifm-color-primary-lighter:  #FF5722;
-  --ifm-color-primary-lightest: #FF8A65;
+  --ifm-color-primary:          #0B1F33;
+  --ifm-color-primary-dark:     #091C2E;
+  --ifm-color-primary-darker:   #081A2B;
+  --ifm-color-primary-darkest:  #071624;
+  --ifm-color-primary-light:    #23364A;
+  --ifm-color-primary-lighter:  #304357;
+  --ifm-color-primary-lightest: #647283;
 
   --ifm-code-font-size: 95%;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
 
   /* Custom brand variables */
-  --apy-color-accent:   #FF6D00;
-  --apy-color-rust:     #B7410E;
-  --apy-color-navy:     #1B2838;
-  --apy-color-charcoal: #263238;
+  --apy-color-yellow: #FFC72C;
+  --apy-color-navy:   #0B1F33;
+  --apy-color-white:  #FFFFFF;
+  --apy-color-muted:  #647283;
+  --apy-color-code:   #102A43;
 
   /* Typography */
   --ifm-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
@@ -28,14 +28,13 @@
 }
 
 [data-theme='dark'] {
-  /* Deep Orange 300 for dark mode */
-  --ifm-color-primary:          #FF8A65;
-  --ifm-color-primary-dark:     #FF7043;
-  --ifm-color-primary-darker:   #FF5722;
-  --ifm-color-primary-darkest:  #F4511E;
-  --ifm-color-primary-light:    #FFAB91;
-  --ifm-color-primary-lighter:  #FFCCBC;
-  --ifm-color-primary-lightest: #FBE9E7;
+  --ifm-color-primary:          #FFC72C;
+  --ifm-color-primary-dark:     #F2B800;
+  --ifm-color-primary-darker:   #E8AE00;
+  --ifm-color-primary-darkest:  #C28F00;
+  --ifm-color-primary-light:    #FFD154;
+  --ifm-color-primary-lighter:  #FFD866;
+  --ifm-color-primary-lightest: #FFE79D;
 
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
 }
@@ -45,6 +44,7 @@
    ============================================================ */
 .navbar {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  border-bottom: 2px solid var(--apy-color-yellow);
 }
 
 [data-theme='dark'] .navbar {
@@ -101,7 +101,7 @@
 
 [data-theme='dark'] .prism-code {
   border-color: rgba(255, 255, 255, 0.1);
-  background-color: var(--apy-color-charcoal) !important;
+  background-color: var(--apy-color-code) !important;
 }
 
 /* Inline code */
@@ -190,11 +190,11 @@ table td code {
 
 .feature-card:hover {
   border-color: var(--ifm-color-primary);
-  box-shadow: 0 2px 12px rgba(230, 74, 25, 0.12);
+  box-shadow: 0 2px 12px rgba(11, 31, 51, 0.12);
 }
 
 [data-theme='dark'] .feature-card:hover {
-  box-shadow: 0 2px 12px rgba(255, 138, 101, 0.15);
+  box-shadow: 0 2px 12px rgba(255, 199, 44, 0.15);
 }
 
 .feature-card h3 {
