@@ -367,8 +367,12 @@ client.put(key, bins, policy=write_policy)
 |-------|------|---------|-------------|
 | `socket_timeout` | `int` | `30000` | Timeout per socket call (ms) |
 | `total_timeout` | `int` | `1000` | Total timeout including retries (ms) |
-| `max_retries` | `int` | `2` | Maximum number of retries |
+| `max_retries` | `int` | `2` reads / `0` writes | Maximum number of retries. Writes default to `0` — see the note below. |
 | `sleep_between_retries` | `int` | `0` | Delay between retries (ms) |
+
+:::warning[Writes do not retry by default]
+`WritePolicy` defaults `max_retries` to **`0`**, while `ReadPolicy` defaults to `2`. `increment()`, `append()`, `prepend()`, and `operate()` with an increment op are **not idempotent**: a spurious client-side timeout on a write the server already committed would, on retry, over-count the counter or append the string twice — silently. Set `max_retries` explicitly on writes you know are idempotent (a plain `put()` of full bin values is one).
+:::
 
 :::warning[Default timeout interaction]
 With the defaults, `total_timeout` (1000ms) is **shorter** than `socket_timeout` (30000ms). This means the total deadline will be reached before any individual socket timeout fires. In practice, the client will abort the entire operation (including any in-flight socket read/write) after 1 second, regardless of the 30-second socket timeout. If you increase `socket_timeout`, also verify that `total_timeout` accommodates your expected latency and retry count.

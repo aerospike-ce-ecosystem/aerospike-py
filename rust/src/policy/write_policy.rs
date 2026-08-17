@@ -12,8 +12,34 @@ use super::{
     parse_generation_policy, parse_read_touch_ttl, parse_record_exists_action,
 };
 
+/// Build a [`WritePolicy`] carrying aerospike-py's write defaults.
+///
+/// aerospike-core's `BasePolicy::default()` is `socket_timeout: 30000,
+/// total_timeout: 1000, max_retries: 2, sleep_between_retries: 0`
+/// (aerospike-core-2.0.0 `src/policy/read_policy.rs:33-45`). `max_retries: 2`
+/// is a reasonable read default but an unsafe **write** default: `increment()`,
+/// `append()`, `prepend()`, and `operate()` with `OP_INCR` are not idempotent,
+/// and the inherited budget retries twice with **zero backoff** inside a
+/// 1000 ms total timeout — precisely the conditions that produce a client-side
+/// timeout on a write the server already committed. A retried counter
+/// over-counts; a retried append duplicates. Silently, in both cases.
+///
+/// Writes therefore default to **no retries**, matching the official Aerospike
+/// clients and this repo's own documentation — `docs/docs/api/types.md` already
+/// documents the `WritePolicy` `max_retries` default as `0`, and
+/// `docs/docs/guides/config/performance-tuning.md` recommends "2-3 for reads,
+/// 0 for writes (idempotency)". Callers whose write *is* idempotent opt back in
+/// explicitly with `policy={"max_retries": N}`.
+///
+/// Read, query, scan, and batch policy defaults are deliberately left alone.
+fn default_write_policy() -> WritePolicy {
+    let mut policy = WritePolicy::default();
+    policy.base_policy.max_retries = 0;
+    policy
+}
+
 /// Lazily-initialized default write policy used when no policy dict is provided.
-pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(WritePolicy::default);
+pub static DEFAULT_WRITE_POLICY: LazyLock<WritePolicy> = LazyLock::new(default_write_policy);
 
 /// Convert a TTL integer value to an [`Expiration`] enum.
 ///
@@ -45,7 +71,7 @@ pub fn parse_write_policy(
     meta: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<WritePolicy> {
     trace!("Parsing write policy");
-    let mut policy = WritePolicy::default();
+    let mut policy = default_write_policy();
 
     // Apply meta (gen, ttl) first
     if let Some(meta_dict) = meta {
@@ -163,6 +189,57 @@ mod tests {
             parse_ttl(-3).expect("TTL_CLIENT_DEFAULT should parse"),
             Expiration::NamespaceDefault
         ));
+    }
+
+    #[test]
+    fn write_policy_defaults_to_no_retries() {
+        Python::initialize();
+        Python::attach(|_py| {
+            // Writes are not idempotent; a retried increment / append silently
+            // double-applies. This assertion fails against
+            // `WritePolicy::default()` (aerospike-core ships `max_retries: 2`).
+            let p = parse_write_policy(None, None).expect("empty write policy should parse");
+            assert_eq!(p.base_policy.max_retries, 0);
+            assert_eq!(DEFAULT_WRITE_POLICY.base_policy.max_retries, 0);
+        });
+    }
+
+    #[test]
+    fn write_policy_keeps_upstream_timeout_defaults() {
+        Python::initialize();
+        Python::attach(|_py| {
+            // Only max_retries is overridden — the rest of BasePolicy::default()
+            // is inherited unchanged.
+            let p = parse_write_policy(None, None).expect("empty write policy should parse");
+            assert_eq!(p.base_policy.socket_timeout, 30000);
+            assert_eq!(p.base_policy.total_timeout, 1000);
+            assert_eq!(p.base_policy.sleep_between_retries, 0);
+        });
+    }
+
+    #[test]
+    fn write_policy_max_retries_is_still_caller_overridable() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = pyo3::types::PyDict::new(py);
+            d.set_item("max_retries", 3u32).unwrap();
+            let p = parse_write_policy(Some(&d), None).unwrap();
+            assert_eq!(p.base_policy.max_retries, 3);
+        });
+    }
+
+    #[test]
+    fn write_policy_meta_only_still_defaults_to_no_retries() {
+        Python::initialize();
+        Python::attach(|py| {
+            // meta-only calls return early, before the policy dict is read —
+            // that early return must carry the safe default too.
+            let meta = pyo3::types::PyDict::new(py);
+            meta.set_item("ttl", 300i64).unwrap();
+            let p = parse_write_policy(None, Some(&meta)).unwrap();
+            assert_eq!(p.base_policy.max_retries, 0);
+            assert!(matches!(p.expiration, Expiration::Seconds(300)));
+        });
     }
 
     #[test]
