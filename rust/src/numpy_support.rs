@@ -84,6 +84,18 @@ const NATIVE_BYTEORDER_CHAR: &str = if cfg!(target_endian = "little") {
 /// `i1`/`u1`), and [`NATIVE_BYTEORDER_CHAR`]. Anything else is rejected loudly,
 /// following the client-side input-rejection pattern used elsewhere in the
 /// crate.
+///
+/// # Not recursive
+///
+/// This checks one level. A **nested structured** field —
+/// `np.dtype([('a', [('b', '>i4')])])` — reports `kind='V'`, `byteorder='|'`,
+/// and `base is self`, so it is accepted and the inner `>i4` is never inspected.
+/// That is deliberate rather than a hole: a `V` field is handled as opaque
+/// fixed-width bytes by [`write_bytes_to_buffer`] / [`read_value_from_buffer`],
+/// so its payload is copied verbatim in both directions and round-trips
+/// byte-identically whatever the inner byte order. Do not assume recursive
+/// coverage here; if `V` fields ever gain per-member interpretation, this check
+/// has to recurse with them.
 fn check_native_byteorder(base: &Bound<'_, PyAny>, name: &str) -> PyResult<()> {
     let byteorder: String = base.getattr("byteorder")?.extract()?;
     if byteorder == "=" || byteorder == "|" || byteorder == NATIVE_BYTEORDER_CHAR {
@@ -1202,6 +1214,20 @@ class FakeSubArrayDtype:
         self.base = base
 
 
+class FakeNestedStructDtype:
+    '''A nested structured field: numpy reports kind='V', byteorder='|' and
+    `base is self` here, so the inner member's byte order is invisible at this
+    level. Handled as opaque fixed-width bytes.'''
+
+    def __init__(self, inner):
+        self.kind = 'V'
+        self.itemsize = inner.itemsize
+        self.byteorder = '|'
+        self.base = self
+        self.names = ('b',)
+        self.fields = {'b': (inner, 0)}
+
+
 class FakeSingleFieldDtype:
     def __init__(self, field_dtype):
         self.names = ('score',)
@@ -1247,6 +1273,10 @@ def make_scalar_dtype(kind, itemsize, byteorder):
 def make_subarray_dtype(kind, itemsize, byteorder, count):
     base = FakeFieldDtype(kind, itemsize, byteorder)
     return FakeSingleFieldDtype(FakeSubArrayDtype(base, count))
+
+def make_nested_struct_dtype(kind, itemsize, byteorder):
+    inner = FakeFieldDtype(kind, itemsize, byteorder)
+    return FakeSingleFieldDtype(FakeNestedStructDtype(inner))
 
 def make_step_slice():
     buf = _build_buffer()
@@ -1390,6 +1420,25 @@ def make_reverse_slice():
             )
             .expect_err("byte-swapped sub-array base dtype must be rejected");
             assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+
+    /// Documents the one-level boundary of the byte-order check.
+    ///
+    /// A nested structured field reports `kind='V'`, `byteorder='|'`, and
+    /// `base is self`, so it is accepted and its inner `>i4` is never inspected.
+    /// Benign: `V` is handled as opaque fixed-width bytes and round-trips
+    /// byte-identically. Pinned so nobody later assumes recursive coverage.
+    #[test]
+    fn parse_dtype_fields_accepts_nested_struct_without_recursing() {
+        Python::initialize();
+        Python::attach(|py| {
+            let (fields, row_stride) =
+                parse_helper_dtype(py, "make_nested_struct_dtype", ("i", 4usize, ">"))
+                    .expect("nested struct field is opaque V bytes and must be accepted");
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].kind, DtypeKind::VoidBytes);
+            assert_eq!(row_stride, 4);
         });
     }
 
