@@ -59,9 +59,66 @@ pub struct FieldInfo {
 
 // ── dtype parsing ───────────────────────────────────────────────
 
+/// The NumPy byte-order character matching this build's native endianness.
+///
+/// NumPy normally normalises a native-endian scalar to `'='`, but an explicitly
+/// spelled `'<i4'` can still surface the concrete character, so the host's own
+/// marker is accepted alongside `'='`.
+const NATIVE_BYTEORDER_CHAR: &str = if cfg!(target_endian = "little") {
+    "<"
+} else {
+    ">"
+};
+
+/// Reject a dtype field whose base scalar is not stored in native byte order.
+///
+/// Every buffer helper in this module reads and writes native Rust scalars via
+/// `ptr::read_unaligned` / `ptr::write_unaligned`, i.e. always **native**-endian.
+/// Byte order was previously never inspected, so a byte-swapped field such as
+/// `>i4` passed validation as `kind='i', itemsize=4` and then round-tripped
+/// silently corrupted numbers in both directions: `to_numpy(dtype)` handed back
+/// wrong values (native `1` reads back as `16777216`), and `batch_write_numpy`
+/// wrote wrong values *into the database* — no exception, no warning.
+///
+/// Accepted: `'='` (native), `'|'` (not applicable — `S`, `V`, and single-byte
+/// `i1`/`u1`), and [`NATIVE_BYTEORDER_CHAR`]. Anything else is rejected loudly,
+/// following the client-side input-rejection pattern used elsewhere in the
+/// crate.
+///
+/// # Not recursive
+///
+/// This checks one level. A **nested structured** field —
+/// `np.dtype([('a', [('b', '>i4')])])` — reports `kind='V'`, `byteorder='|'`,
+/// and `base is self`, so it is accepted and the inner `>i4` is never inspected.
+/// That is deliberate rather than a hole: a `V` field is handled as opaque
+/// fixed-width bytes by [`write_bytes_to_buffer`] / [`read_value_from_buffer`],
+/// so its payload is copied verbatim in both directions and round-trips
+/// byte-identically whatever the inner byte order. Do not assume recursive
+/// coverage here; if `V` fields ever gain per-member interpretation, this check
+/// has to recurse with them.
+fn check_native_byteorder(base: &Bound<'_, PyAny>, name: &str) -> PyResult<()> {
+    let byteorder: String = base.getattr("byteorder")?.extract()?;
+    if byteorder == "=" || byteorder == "|" || byteorder == NATIVE_BYTEORDER_CHAR {
+        return Ok(());
+    }
+    warn!(
+        "Non-native dtype byteorder '{}' for field '{}'",
+        byteorder, name
+    );
+    Err(PyValueError::new_err(format!(
+        "dtype field '{}' has non-native byte order (byteorder='{}', base dtype {}): \
+         this buffer is read and written natively, so a byte-swapped field would \
+         silently round-trip corrupted values. Convert the array first with \
+         `arr.astype(arr.dtype.newbyteorder('='))`, or declare the field natively \
+         (e.g. 'i4' / '=i4' instead of '>i4').",
+        name, byteorder, base,
+    )))
+}
+
 /// Parse a NumPy structured dtype into field descriptors and the row stride.
 ///
-/// Validates that every field fits within the row stride (no buffer overrun).
+/// Validates that every field is a supported kind, is stored in native byte
+/// order, and fits within the row stride (no buffer overrun).
 fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usize)> {
     let names = dtype.getattr("names")?;
     let names: Vec<String> = names.extract()?;
@@ -91,6 +148,8 @@ fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usi
                 )));
             }
         };
+
+        check_native_byteorder(&base, name)?;
 
         let itemsize: usize = field_dtype.getattr("itemsize")?.extract()?;
         let base_itemsize: usize = base.getattr("itemsize")?.extract()?;
@@ -1134,10 +1193,46 @@ import ctypes
 import struct
 
 class FakeFieldDtype:
-    def __init__(self, kind, itemsize):
+    def __init__(self, kind, itemsize, byteorder='='):
         self.kind = kind
         self.itemsize = itemsize
+        self.byteorder = byteorder
         self.base = self
+
+    def __str__(self):
+        return f'{self.byteorder}{self.kind}{self.itemsize}'
+
+
+class FakeSubArrayDtype:
+    '''A sub-array field: numpy reports byteorder '|' here and the real
+    byte order on `.base`, so `parse_dtype_fields` must inspect `.base`.'''
+
+    def __init__(self, base, count):
+        self.kind = 'V'
+        self.itemsize = base.itemsize * count
+        self.byteorder = '|'
+        self.base = base
+
+
+class FakeNestedStructDtype:
+    '''A nested structured field: numpy reports kind='V', byteorder='|' and
+    `base is self` here, so the inner member's byte order is invisible at this
+    level. Handled as opaque fixed-width bytes.'''
+
+    def __init__(self, inner):
+        self.kind = 'V'
+        self.itemsize = inner.itemsize
+        self.byteorder = '|'
+        self.base = self
+        self.names = ('b',)
+        self.fields = {'b': (inner, 0)}
+
+
+class FakeSingleFieldDtype:
+    def __init__(self, field_dtype):
+        self.names = ('score',)
+        self.fields = {'score': (field_dtype, 0)}
+        self.itemsize = field_dtype.itemsize
 
 class FakeDtype:
     def __init__(self):
@@ -1172,6 +1267,17 @@ def _build_buffer():
 def make_dtype():
     return FakeDtype()
 
+def make_scalar_dtype(kind, itemsize, byteorder):
+    return FakeSingleFieldDtype(FakeFieldDtype(kind, itemsize, byteorder))
+
+def make_subarray_dtype(kind, itemsize, byteorder, count):
+    base = FakeFieldDtype(kind, itemsize, byteorder)
+    return FakeSingleFieldDtype(FakeSubArrayDtype(base, count))
+
+def make_nested_struct_dtype(kind, itemsize, byteorder):
+    inner = FakeFieldDtype(kind, itemsize, byteorder)
+    return FakeSingleFieldDtype(FakeNestedStructDtype(inner))
+
 def make_step_slice():
     buf = _build_buffer()
     return FakeArray(buf, ctypes.addressof(buf), (2,), (16,))
@@ -1183,6 +1289,171 @@ def make_reverse_slice():
             c"fake_numpy_support.py",
             c"fake_numpy_support",
         )
+    }
+
+    // ── dtype byte-order validation ─────────────────────────────
+
+    /// The numpy byte-order character that is *not* native on this host.
+    fn non_native_byteorder_char() -> &'static str {
+        if cfg!(target_endian = "little") {
+            ">"
+        } else {
+            "<"
+        }
+    }
+
+    /// Parse a single-field dtype built by the `fake_numpy_support` helper.
+    ///
+    /// `factory` is `make_scalar_dtype` or `make_subarray_dtype`; `args` matches
+    /// that factory's signature.
+    fn parse_helper_dtype<'py, A>(
+        py: Python<'py>,
+        factory: &str,
+        args: A,
+    ) -> PyResult<(Vec<FieldInfo>, usize)>
+    where
+        A: pyo3::call::PyCallArgs<'py>,
+    {
+        let module = fake_numpy_stride_module(py).expect("test helper module should compile");
+        let dtype = module
+            .getattr(factory)
+            .expect("dtype factory should exist")
+            .call1(args)
+            .expect("dtype construction should succeed");
+        parse_dtype_fields(&dtype)
+    }
+
+    #[test]
+    fn parse_dtype_fields_accepts_native_byteorder() {
+        Python::initialize();
+        Python::attach(|py| {
+            let (fields, row_stride) =
+                parse_helper_dtype(py, "make_scalar_dtype", ("i", 4usize, "="))
+                    .expect("native-endian dtype must be accepted");
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].kind, DtypeKind::Int);
+            assert_eq!(row_stride, 4);
+        });
+    }
+
+    #[test]
+    fn parse_dtype_fields_accepts_host_native_byteorder_char() {
+        Python::initialize();
+        Python::attach(|py| {
+            // numpy normalises native dtypes to '=', but an explicitly spelled
+            // '<i4' (on a little-endian host) must be accepted too.
+            let (fields, _) = parse_helper_dtype(
+                py,
+                "make_scalar_dtype",
+                ("i", 4usize, NATIVE_BYTEORDER_CHAR),
+            )
+            .expect("host-native byteorder char must be accepted");
+            assert_eq!(fields.len(), 1);
+        });
+    }
+
+    #[test]
+    fn parse_dtype_fields_accepts_byteorder_agnostic() {
+        Python::initialize();
+        Python::attach(|py| {
+            // '|' means "not applicable": S / V and single-byte i1 / u1.
+            let (fields, _) = parse_helper_dtype(py, "make_scalar_dtype", ("S", 10usize, "|"))
+                .expect("byte-order-agnostic dtype must be accepted");
+            assert_eq!(fields[0].kind, DtypeKind::FixedBytes);
+        });
+    }
+
+    /// Regression test for the silent corruption this check exists to stop.
+    ///
+    /// A `>i4` field used to parse as `kind='i', itemsize=4`; the buffer helpers
+    /// then wrote native bytes and numpy read them back byte-swapped — native
+    /// `1` surfaced as `16777216`, with no exception and no warning.
+    #[test]
+    fn parse_dtype_fields_rejects_non_native_int_byteorder() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = parse_helper_dtype(
+                py,
+                "make_scalar_dtype",
+                ("i", 4usize, non_native_byteorder_char()),
+            )
+            .expect_err("byte-swapped int dtype must be rejected");
+            assert!(err.is_instance_of::<PyValueError>(py));
+            let msg = err.to_string();
+            assert!(msg.contains("score"), "error should name the field: {msg}");
+            assert!(
+                msg.contains("non-native byte order"),
+                "error should state the cause: {msg}"
+            );
+            assert!(
+                msg.contains("newbyteorder"),
+                "error should tell the caller how to convert: {msg}"
+            );
+        });
+    }
+
+    #[test]
+    fn parse_dtype_fields_rejects_non_native_float_byteorder() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = parse_helper_dtype(
+                py,
+                "make_scalar_dtype",
+                ("f", 8usize, non_native_byteorder_char()),
+            )
+            .expect_err("byte-swapped float dtype must be rejected");
+            assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+
+    /// numpy reports `byteorder == '|'` on a *sub-array* field dtype and the
+    /// real byte order only on its `.base`, so the check must inspect `.base`.
+    /// Reading the field dtype instead would let `>f4` sub-arrays through.
+    #[test]
+    fn parse_dtype_fields_rejects_non_native_subarray_base_byteorder() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = parse_helper_dtype(
+                py,
+                "make_subarray_dtype",
+                ("f", 4usize, non_native_byteorder_char(), 4usize),
+            )
+            .expect_err("byte-swapped sub-array base dtype must be rejected");
+            assert!(err.is_instance_of::<PyValueError>(py));
+        });
+    }
+
+    /// Documents the one-level boundary of the byte-order check.
+    ///
+    /// A nested structured field reports `kind='V'`, `byteorder='|'`, and
+    /// `base is self`, so it is accepted and its inner `>i4` is never inspected.
+    /// Benign: `V` is handled as opaque fixed-width bytes and round-trips
+    /// byte-identically. Pinned so nobody later assumes recursive coverage.
+    #[test]
+    fn parse_dtype_fields_accepts_nested_struct_without_recursing() {
+        Python::initialize();
+        Python::attach(|py| {
+            let (fields, row_stride) =
+                parse_helper_dtype(py, "make_nested_struct_dtype", ("i", 4usize, ">"))
+                    .expect("nested struct field is opaque V bytes and must be accepted");
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].kind, DtypeKind::VoidBytes);
+            assert_eq!(row_stride, 4);
+        });
+    }
+
+    #[test]
+    fn parse_dtype_fields_accepts_native_subarray_base_byteorder() {
+        Python::initialize();
+        Python::attach(|py| {
+            let (fields, row_stride) =
+                parse_helper_dtype(py, "make_subarray_dtype", ("f", 4usize, "=", 4usize))
+                    .expect("native sub-array dtype must be accepted");
+            assert_eq!(fields[0].kind, DtypeKind::Float);
+            assert_eq!(fields[0].base_itemsize, 4);
+            assert_eq!(fields[0].itemsize, 16);
+            assert_eq!(row_stride, 16);
+        });
     }
 
     #[test]
