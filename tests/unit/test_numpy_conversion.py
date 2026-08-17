@@ -163,6 +163,38 @@ class TestDtypeValidation:
             _batch_records_to_numpy(batch, dtype, [])
 
 
+class TestDtypeByteOrder:
+    """This pure-Python path assigns through numpy, so byte order is safe here.
+
+    `data[i][field] = val` lets numpy do the byte swap, so a big-endian dtype
+    round-trips correctly and needs no guard. The native-buffer Rust path
+    (`numpy_support::parse_dtype_fields`, used by `to_numpy()` and
+    `batch_write_numpy()`) writes native-endian bytes directly and therefore
+    *does* reject non-native byte order — see the `parse_dtype_fields_*_byteorder`
+    tests in `rust/src/numpy_support.rs` and `TestDtypeByteOrder` in
+    `tests/integration/test_numpy_batch_edge_cases.py`.
+
+    Pinned here so that optimising this path into raw buffer writes cannot
+    silently reintroduce the corruption.
+    """
+
+    def test_big_endian_dtype_roundtrips_correctly(self):
+        dtype = np.dtype([("score", ">i4")])
+        batch = _make_batch_records(
+            [_make_batch_record(("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"score": 1}))]
+        )
+        result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")])
+        assert result.batch_records[0]["score"] == 1
+
+    def test_native_dtype_roundtrips_correctly(self):
+        dtype = np.dtype([("score", "i4")])
+        batch = _make_batch_records(
+            [_make_batch_record(("test", "demo", "k1"), 0, (None, {"gen": 1, "ttl": 0}, {"score": 1}))]
+        )
+        result = _batch_records_to_numpy(batch, dtype, [("test", "demo", "k1")])
+        assert result.batch_records[0]["score"] == 1
+
+
 # ── result_code != 0 handling ──────────────────────────────────
 
 

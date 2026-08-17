@@ -12,9 +12,11 @@ Covers scenarios that prior bugs would have silently corrupted:
 - custom key_field names
 - overwrite existing records
 - concurrent async write → read
+- non-native dtype byte order rejection (both read and write paths)
 """
 
 import numpy as np
+import pytest
 
 from aerospike_py.numpy_batch import NumpyBatchRecords
 
@@ -486,3 +488,120 @@ class TestBatchWriteNumpyTTL:
             assert meta is not None
             assert meta.ttl > 0
             assert meta.ttl <= ttl_seconds
+
+
+# ── dtype byte order ────────────────────────────────────────────────
+
+
+class TestDtypeByteOrder:
+    """Non-native dtype byte order must be rejected, not silently corrupted.
+
+    The Rust buffer helpers read and write native-endian scalars via
+    `ptr::read_unaligned` / `ptr::write_unaligned`, but `parse_dtype_fields`
+    never inspected `dtype.byteorder` — so a `>i4` field passed validation as
+    `kind='i', itemsize=4` and then round-tripped byte-swapped values with no
+    exception and no warning, in both directions.
+
+    Hermetic unit coverage of the guard itself lives in
+    `rust/src/numpy_support.rs` (`parse_dtype_fields_*_byteorder`); these tests
+    pin the end-to-end Python behaviour through both public entry points.
+    """
+
+    def test_big_endian_read_dtype_rejected(self, client, cleanup):
+        """`to_numpy()` with a big-endian dtype raises instead of corrupting."""
+        key = (NS, SET, 7701)
+        cleanup.append(key)
+        client.put(key, {"score": 1})
+
+        with pytest.raises(ValueError, match="non-native byte order"):
+            client.batch_read([key]).to_numpy(np.dtype([("score", ">i4")]))
+
+    def test_big_endian_read_dtype_would_have_returned_wrong_value(self, client, cleanup):
+        """Regression test for the corruption itself.
+
+        Stored value is 1. Writing native bytes into a `>i4` field makes numpy
+        read back 16777216 (1 << 24). Assert we now raise rather than hand back
+        that plausible-looking wrong number.
+        """
+        key = (NS, SET, 7702)
+        cleanup.append(key)
+        client.put(key, {"score": 1})
+
+        with pytest.raises(ValueError, match="non-native byte order"):
+            client.batch_read([key]).to_numpy(np.dtype([("score", ">i4")]))
+
+        # The native dtype still returns the true value, and the byte-swapped
+        # reading of those same bytes is the wrong number we refused to return.
+        native = client.batch_read([key]).to_numpy(np.dtype([("score", "i4")]))
+        assert native.batch_records[0]["score"] == 1
+        assert native.batch_records["score"].astype("i4").view(">i4")[0] == 16777216
+
+    def test_big_endian_write_dtype_rejected(self, client):
+        """`batch_write_numpy()` with a big-endian dtype writes nothing."""
+        dtype = np.dtype([("_key", "i4"), ("score", ">i4")])
+        data = np.array([(7703, 1)], dtype=dtype)
+
+        with pytest.raises(ValueError, match="non-native byte order"):
+            client.batch_write_numpy(data, NS, SET, dtype)
+
+        # Rejection happens before any I/O: nothing reached the database.
+        read = client.batch_read([(NS, SET, 7703)])
+        assert read.batch_records[0].result != 0
+
+    async def test_async_big_endian_write_dtype_rejected(self, async_client):
+        """Async `batch_write_numpy()` rejects the same dtype."""
+        dtype = np.dtype([("_key", "i4"), ("score", ">f8")])
+        data = np.array([(7704, 0.5)], dtype=dtype)
+
+        with pytest.raises(ValueError, match="non-native byte order"):
+            await async_client.batch_write_numpy(data, NS, SET, dtype)
+
+    def test_big_endian_subarray_base_rejected(self, client):
+        """numpy reports byteorder '|' on a sub-array field and the real order
+        on `.base`, so a `>f4` embedding must still be rejected."""
+        dtype = np.dtype([("_key", "i4"), ("emb", ">f4", (4,))])
+        data = np.zeros(1, dtype=dtype)
+        data[0]["_key"] = 7705
+
+        with pytest.raises(ValueError, match="non-native byte order"):
+            client.batch_write_numpy(data, NS, SET, dtype)
+
+    def test_native_dtype_still_accepted(self, client, cleanup):
+        """Native and explicitly little-endian dtypes are unaffected."""
+        for i, spec in enumerate(["i4", "<i4", "=i4"]):
+            key = (NS, SET, 7710 + i)
+            cleanup.append(key)
+            dtype = np.dtype([("_key", "i4"), ("val", spec)])
+            data = np.array([(7710 + i, 42)], dtype=dtype)
+            results = client.batch_write_numpy(data, NS, SET, dtype)
+            assert results.batch_records[0].result == 0
+
+            read = client.batch_read([key]).to_numpy(np.dtype([("val", spec)]))
+            assert read.batch_records[0]["val"] == 42
+
+    def test_byteorder_agnostic_dtype_still_accepted(self, client, cleanup):
+        """`'|'` byte order (S / V / single-byte i1) is not byte-swapped."""
+        key = (NS, SET, 7720)
+        cleanup.append(key)
+        dtype = np.dtype([("_key", "i4"), ("name", "S8"), ("flag", "i1")])
+        data = np.array([(7720, b"alice", 7)], dtype=dtype)
+        results = client.batch_write_numpy(data, NS, SET, dtype)
+        assert results.batch_records[0].result == 0
+
+        read = client.batch_read([key]).to_numpy(np.dtype([("name", "S8"), ("flag", "i1")]))
+        assert read.batch_records[0]["name"] == b"alice"
+        assert read.batch_records[0]["flag"] == 7
+
+    def test_newbyteorder_conversion_is_accepted(self, client, cleanup):
+        """The conversion the error message recommends actually works."""
+        key = (NS, SET, 7730)
+        cleanup.append(key)
+        be_dtype = np.dtype([("_key", "i4"), ("val", ">i4")])
+        be_data = np.array([(7730, 99)], dtype=be_dtype)
+
+        native_data = be_data.astype(be_data.dtype.newbyteorder("="))
+        results = client.batch_write_numpy(native_data, NS, SET, native_data.dtype)
+        assert results.batch_records[0].result == 0
+
+        read = client.batch_read([key]).to_numpy(np.dtype([("val", "i4")]))
+        assert read.batch_records[0]["val"] == 99
