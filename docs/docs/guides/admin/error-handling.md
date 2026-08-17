@@ -371,7 +371,14 @@ client.put(key, bins, policy=write_policy)
 | `sleep_between_retries` | `int` | `0` | Delay between retries (ms) |
 
 :::warning[Writes do not retry by default]
-`WritePolicy` defaults `max_retries` to **`0`**, while `ReadPolicy` defaults to `2`. `increment()`, `append()`, `prepend()`, and `operate()` with an increment op are **not idempotent**: a spurious client-side timeout on a write the server already committed would, on retry, over-count the counter or append the string twice — silently. Set `max_retries` explicitly on writes you know are idempotent (a plain `put()` of full bin values is one).
+`WritePolicy` defaults `max_retries` to **`0`**, while `ReadPolicy` defaults to `2`. `increment()`, `append()`, `prepend()`, `operate()` with an increment op, and `apply()` (an arbitrary UDF) are **not idempotent**: a spurious client-side timeout on a write the server already committed would, on retry, over-count the counter or append the string twice — silently.
+
+The `0` default applies to *every* operation that takes a `WritePolicy`, including the idempotent ones — `put()`, `remove()`, `touch()`, and `remove_bin()`. One uniform default is easier to reason about than a per-operation table, so for those four opt back in explicitly when you want the resilience:
+
+```python
+client.remove(key, policy={"max_retries": 2})
+client.put(key, bins, policy={"max_retries": 2})  # full-bin overwrite is idempotent
+```
 :::
 
 :::warning[Default timeout interaction]

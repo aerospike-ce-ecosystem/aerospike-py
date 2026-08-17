@@ -32,6 +32,25 @@ use super::{
 /// explicitly with `policy={"max_retries": N}`.
 ///
 /// Read, query, scan, and batch policy defaults are deliberately left alone.
+///
+/// # Reach
+///
+/// This is the default for every operation that parses a write policy — all
+/// eight `prepare_*_args` helpers in `client_common.rs`: `put`, `remove`,
+/// `touch`, `append`/`prepend`, `increment`, `remove_bin`,
+/// `operate`/`operate_ordered`, and `apply`.
+///
+/// Only `increment`, `append`, `prepend`, `operate` with an increment op, and
+/// `apply` (an arbitrary UDF) are actually unsafe to retry. `put`, `remove`,
+/// `touch`, and `remove_bin` are idempotent in their effect on bin data, so
+/// they lose retry resilience without gaining safety.
+///
+/// That uniformity is deliberate. `docs/docs/api/types.md` names `remove()` and
+/// `touch()` as `WritePolicy` consumers on the same table that publishes
+/// `max_retries` default `0`, so giving those two a different default would
+/// re-create the docs/code divergence this default exists to close — and would
+/// mean threading a per-operation flag through all eight call sites, each one a
+/// chance to pick wrong. One default is the cheaper invariant to hold.
 fn default_write_policy() -> WritePolicy {
     let mut policy = WritePolicy::default();
     policy.base_policy.max_retries = 0;
