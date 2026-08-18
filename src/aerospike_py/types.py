@@ -83,6 +83,12 @@ class BatchRetryInfo(NamedTuple):
 
     The defaults describe a call that issued exactly one batch and never
     retried, which is what every non-``batch_write`` batch method reports.
+
+    **Only available when the call returned.** If *every* attempt fails at the
+    transport level there are no per-record results, so the last error is raised
+    instead and these counters never reach you — the retry budget was still
+    spent, and only the client log records it. Truncation is therefore visible
+    when the batch partly succeeded and invisible when it wholly failed.
     """
 
     attempts: int = 1
