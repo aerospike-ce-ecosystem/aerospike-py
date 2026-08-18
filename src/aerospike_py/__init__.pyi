@@ -821,7 +821,10 @@ class Client:
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
-                ``unresolved``. Total wall-clock time may still exceed
+                ``unresolved``. Those counters only reach you when the call
+                returned — if *every* attempt fails at the transport level the
+                last error is raised instead, and the retries it did spend are
+                recorded only in the client log. Total wall-clock time may still exceed
                 ``total_timeout`` by up to one additional timeout window,
                 because the guard does not account for the in-flight attempt.
 
@@ -904,7 +907,10 @@ class Client:
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
-                ``unresolved``. Total wall-clock time may still exceed
+                ``unresolved``. Those counters only reach you when the call
+                returned — if *every* attempt fails at the transport level the
+                last error is raised instead, and the retries it did spend are
+                recorded only in the client log. Total wall-clock time may still exceed
                 ``total_timeout`` by up to one additional timeout window,
                 because the guard does not account for the in-flight attempt.
 
@@ -1967,7 +1973,10 @@ class AsyncClient:
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
-                ``unresolved``. Total wall-clock time may still exceed
+                ``unresolved``. Those counters only reach you when the call
+                returned — if *every* attempt fails at the transport level the
+                last error is raised instead, and the retries it did spend are
+                recorded only in the client log. Total wall-clock time may still exceed
                 ``total_timeout`` by up to one additional timeout window,
                 because the guard does not account for the in-flight attempt.
 
@@ -2031,7 +2040,10 @@ class AsyncClient:
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
-                ``unresolved``. Total wall-clock time may still exceed
+                ``unresolved``. Those counters only reach you when the call
+                returned — if *every* attempt fails at the transport level the
+                last error is raised instead, and the retries it did spend are
+                recorded only in the client log. Total wall-clock time may still exceed
                 ``total_timeout`` by up to one additional timeout window,
                 because the guard does not account for the in-flight attempt.
 
