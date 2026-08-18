@@ -125,3 +125,32 @@ uv run python benchmark/gil_starvation.py --json   # 기계 판독용
 PyTorch inference 가 아니라 **같은 프로세스의 GIL 경쟁 + 올바른 지표** 다.
 
 절대값은 머신·서버에 따라 다르므로 두 클라이언트의 **비율** 로 읽을 것.
+
+### 측정 결과 — 비용이 어디에 있나 (이슈 #347)
+
+`AEROSPIKE_PY_INTERNAL_METRICS=1` 로 켜지는 내장 stage 타이머로 같은 부하를
+구간별로 쪼갠 결과. 720 keys × 8 bins, concurrency 8, ms/op:
+
+| stage | 경쟁자 없음 | CPU 경쟁자 있음 | 배율 |
+|---|---:|---:|---:|
+| `event_loop_resume_delay` | 1.746 | **81.218** | **47×** |
+| `key_parse` | 0.167 | **10.788** | **65×** |
+| `spawn_blocking_delay` | 0.250 | 3.936 | 16× |
+| `to_dict` | 0.653 | 0.684 | 1.0× |
+| `as_dict_*` (레코드 변환 합) | 0.326 | 0.374 | 1.1× |
+| `future_into_py_setup` | 0.004 | 0.005 | 1.0× |
+| `into_pyobject` | 0.0002 | 0.0002 | 1.0× |
+
+**GIL 을 잡아야 하는 구간만 폭발한다.** 레코드 변환(`to_dict`, `as_dict_*`,
+`into_pyobject`)은 평평하고, `future_into_py_setup` 은 애초에 무시할 수준이다.
+비용은 결과를 만드는 데가 아니라 **호출이 Python 경계를 넘는 데** 있다.
+
+그래서 free-threaded 런타임에서 격차가 사라진다:
+
+| 런타임 | idle | CPU 경쟁자 있음 | starvation p99 |
+|---|---:|---:|---:|
+| 3.13 (GIL) | ~520 ops/s | ~104 ops/s | 70–104 ms |
+| 3.14t (free-threaded) | ~478 ops/s | **~433 ops/s** | **0.08–0.84 ms** |
+
+참고로 공식 C 클라이언트(19.2.2)는 3.14t 에 free-threaded wheel 이 없고 소스
+빌드도 실패해서, 같은 런타임에서의 비교는 불가능했다.
