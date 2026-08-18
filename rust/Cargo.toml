@@ -37,9 +37,9 @@ ripemd = "0.2"
 log = "0.4"
 rand = "0.10"
 prometheus-client = "0.24"
-opentelemetry = { version = "0.31", optional = true }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"], optional = true }
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"], optional = true }
+opentelemetry = { version = "0.32", optional = true }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"], optional = true }
 
 [dev-dependencies]
 # Compile-time layout guards for the test-only #[repr(C)] mirror struct
