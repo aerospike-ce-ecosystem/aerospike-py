@@ -437,10 +437,129 @@ pub async fn do_batch_write(
         .map(|(_, bins, _)| bins.iter().map(aerospike_core::operations::put).collect())
         .collect();
 
-    let start = std::time::Instant::now();
     let timeout_ms = batch_policy.base_policy.total_timeout as u64;
-    let retry_op_name = format!("{}_retry", op_name);
+    let env = ClusterAttempts {
+        client,
+        batch_policy,
+        records,
+        cached_ops,
+        ns,
+        set,
+        parent_ctx,
+        conn_info,
+        op_name,
+        retry_op_name: format!("{}_retry", op_name),
+        start: std::time::Instant::now(),
+    };
+    drive_batch_write_retries(&env, max_retries, timeout_ms).await
+}
 
+/// The outside world the retry loop talks to: a clock, a sleep, and one send.
+///
+/// Extracted purely so [`drive_batch_write_retries`] can be exercised without a
+/// cluster. `retry=N`'s whole point is what happens when attempts fail or the
+/// budget runs out, and those paths are not reachable from an integration test
+/// against a healthy server — forcing per-record retryable codes with a tiny
+/// `socket_timeout` succeeded in 1 run out of 10 (measured), which is a flake
+/// rather than a test. A scripted implementation makes them deterministic.
+///
+/// Generic, not boxed: each call monomorphises into the code the loop had
+/// inline, and the `max_retries == 0` fast path never reaches here at all.
+trait BatchWriteAttempts {
+    /// Milliseconds since the call began.
+    fn elapsed_ms(&self) -> u64;
+
+    /// How many records the full batch holds, for logging.
+    fn record_count(&self) -> usize;
+
+    /// Send one attempt. `indices` is `None` for the whole batch, `Some` for the
+    /// subset still worth re-driving.
+    fn send(
+        &self,
+        indices: Option<&[usize]>,
+        attempt: u32,
+    ) -> impl std::future::Future<Output = PyResult<Vec<BatchRecord>>> + Send;
+
+    /// Wait out the backoff between attempts.
+    fn sleep_ms(&self, ms: u64) -> impl std::future::Future<Output = ()> + Send;
+}
+
+/// The real implementation: a batch call against the cluster, traced as before.
+struct ClusterAttempts<'a> {
+    client: &'a AsClient,
+    batch_policy: &'a aerospike_core::BatchPolicy,
+    records: &'a [(
+        aerospike_core::Key,
+        Vec<aerospike_core::Bin>,
+        Arc<BatchWritePolicy>,
+    )],
+    cached_ops: Vec<Vec<aerospike_core::operations::Operation>>,
+    ns: &'a str,
+    set: &'a str,
+    parent_ctx: client_common::ParentContext,
+    conn_info: Arc<crate::tracing::ConnectionInfo>,
+    op_name: &'a str,
+    retry_op_name: String,
+    start: std::time::Instant,
+}
+
+impl BatchWriteAttempts for ClusterAttempts<'_> {
+    fn elapsed_ms(&self) -> u64 {
+        self.start.elapsed().as_millis() as u64
+    }
+
+    fn record_count(&self) -> usize {
+        self.records.len()
+    }
+
+    async fn send(&self, indices: Option<&[usize]>, attempt: u32) -> PyResult<Vec<BatchRecord>> {
+        // Build this attempt from cached ops (avoids rebuilding from bins).
+        // Without a response yet, re-send everything; otherwise only the records
+        // whose result codes are worth re-driving.
+        let attempt_ops: Vec<BatchOperation> = match indices {
+            Some(indices) => indices
+                .iter()
+                .map(|&i| {
+                    let (key, _, write_policy) = &self.records[i];
+                    BatchOperation::write(write_policy, key.clone(), self.cached_ops[i].clone())
+                })
+                .collect(),
+            None => self
+                .records
+                .iter()
+                .zip(self.cached_ops.iter())
+                .map(|((key, _, write_policy), ops)| {
+                    BatchOperation::write(write_policy, key.clone(), ops.clone())
+                })
+                .collect(),
+        };
+
+        let attempt_op_name: &str = if attempt == 0 {
+            self.op_name
+        } else {
+            &self.retry_op_name
+        };
+        traced_op!(
+            attempt_op_name,
+            self.ns,
+            self.set,
+            self.parent_ctx,
+            self.conn_info,
+            self.client.batch(self.batch_policy, &attempt_ops).await
+        )
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+    }
+}
+
+/// Drive the attempt/retry loop. See [`do_batch_write`] for the semantics.
+async fn drive_batch_write_retries<E: BatchWriteAttempts + Sync>(
+    env: &E,
+    max_retries: u32,
+    timeout_ms: u64,
+) -> PyResult<(Vec<BatchRecord>, BatchWriteRetryStats)> {
     let mut results: Vec<BatchRecord> = Vec::new();
     let mut retry_indices: Vec<usize> = Vec::new();
     // False until some attempt returns a batch response. While it is false there
@@ -463,7 +582,7 @@ pub async fn do_batch_write(
             // Elapsed time guard: stop retries if remaining time is insufficient.
             // This is what truncates `retry=N` under the 1000 ms default
             // `total_timeout`; record it so Python can see it happened.
-            let elapsed_ms = start.elapsed().as_millis() as u64;
+            let elapsed_ms = env.elapsed_ms();
             if !retry_budget_permits(elapsed_ms, backoff_ms, timeout_ms) {
                 log::warn!(
                     "batch_write retry: elapsed {}ms + backoff {}ms >= timeout {}ms, \
@@ -483,50 +602,27 @@ pub async fn do_batch_write(
                 if responded {
                     retry_indices.len()
                 } else {
-                    records.len()
+                    env.record_count()
                 },
                 attempt,
                 max_retries,
                 backoff_ms
             );
-            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+            env.sleep_ms(backoff_ms).await;
         }
 
-        // Build this attempt from cached ops (avoids rebuilding from bins).
-        // Without a response yet, re-send everything; otherwise only the records
-        // whose result codes are worth re-driving.
-        let attempt_ops: Vec<BatchOperation> = if responded {
-            retry_indices
-                .iter()
-                .map(|&i| {
-                    let (key, _, write_policy) = &records[i];
-                    BatchOperation::write(write_policy, key.clone(), cached_ops[i].clone())
-                })
-                .collect()
-        } else {
-            records
-                .iter()
-                .zip(cached_ops.iter())
-                .map(|((key, _, write_policy), ops)| {
-                    BatchOperation::write(write_policy, key.clone(), ops.clone())
-                })
-                .collect()
-        };
-
-        let attempt_op_name: &str = if attempt == 0 {
-            op_name
-        } else {
-            &retry_op_name
-        };
         attempts_made += 1;
-        let attempt_results: Vec<BatchRecord> = match traced_op!(
-            attempt_op_name,
-            ns,
-            set,
-            parent_ctx,
-            conn_info,
-            client.batch(batch_policy, &attempt_ops).await
-        ) {
+        let attempt_results: Vec<BatchRecord> = match env
+            .send(
+                if responded {
+                    Some(&retry_indices)
+                } else {
+                    None
+                },
+                attempt,
+            )
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
                 log::warn!(
@@ -1043,6 +1139,228 @@ mod tests {
         const DEFAULT_TOTAL_TIMEOUT_MS: u64 = 1000;
         assert!(!retry_budget_permits(600, 500, DEFAULT_TOTAL_TIMEOUT_MS));
         assert!(!retry_budget_permits(900, 250, DEFAULT_TOTAL_TIMEOUT_MS));
+    }
+
+    // ── drive_batch_write_retries: the loop's own control flow ─────────────
+    //
+    // `truncated_by_timeout` and `unresolved` are the two observables this
+    // change exists to add, and neither is reachable from an integration test
+    // against a healthy server: forcing per-record retryable codes with a tiny
+    // `socket_timeout` succeeded in 1 run out of 10 (measured), which is a flake
+    // rather than a test. A scripted `BatchWriteAttempts` makes them exact.
+
+    /// What a scripted attempt returns.
+    enum Scripted {
+        /// Per-record result codes, in the order the attempt requested them.
+        Codes(Vec<Option<ResultCode>>),
+        /// The whole attempt failed below the batch layer.
+        Transport,
+    }
+
+    /// A `BatchWriteAttempts` with a canned response per attempt and a clock the
+    /// test drives, so the elapsed-time guard fires exactly when intended.
+    struct ScriptedAttempts {
+        responses: Vec<Scripted>,
+        record_count: usize,
+        /// Milliseconds each send consumes.
+        step_ms: u64,
+        elapsed: std::sync::atomic::AtomicU64,
+        /// What each attempt asked for: `None` = full batch, `Some` = subset.
+        sent: std::sync::Mutex<Vec<Option<Vec<usize>>>>,
+    }
+
+    impl ScriptedAttempts {
+        fn new(record_count: usize, step_ms: u64, responses: Vec<Scripted>) -> Self {
+            Self {
+                responses,
+                record_count,
+                step_ms,
+                elapsed: std::sync::atomic::AtomicU64::new(0),
+                sent: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn sends(&self) -> Vec<Option<Vec<usize>>> {
+            self.sent.lock().unwrap().clone()
+        }
+    }
+
+    impl BatchWriteAttempts for ScriptedAttempts {
+        fn elapsed_ms(&self) -> u64 {
+            self.elapsed.load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        fn record_count(&self) -> usize {
+            self.record_count
+        }
+
+        async fn send(
+            &self,
+            indices: Option<&[usize]>,
+            attempt: u32,
+        ) -> PyResult<Vec<BatchRecord>> {
+            self.sent
+                .lock()
+                .unwrap()
+                .push(indices.map(<[usize]>::to_vec));
+            self.elapsed
+                .fetch_add(self.step_ms, std::sync::atomic::Ordering::Relaxed);
+            match self.responses.get(attempt as usize) {
+                Some(Scripted::Codes(codes)) => {
+                    Ok(codes.iter().map(|c| make_batch_record(*c)).collect())
+                }
+                // Running off the end of the script means the loop attempted more
+                // than the test scripted; treat it as a transport failure so the
+                // test still terminates.
+                _ => Err(crate::errors::ClientError::new_err(
+                    "scripted transport error",
+                )),
+            }
+        }
+
+        async fn sleep_ms(&self, ms: u64) {
+            self.elapsed
+                .fetch_add(ms, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    fn drive(
+        env: &ScriptedAttempts,
+        max_retries: u32,
+        timeout_ms: u64,
+    ) -> PyResult<(Vec<BatchRecord>, BatchWriteRetryStats)> {
+        futures::executor::block_on(drive_batch_write_retries(env, max_retries, timeout_ms))
+    }
+
+    #[test]
+    fn test_budget_truncation_sets_the_flag_and_counts_unresolved() {
+        // The reported failure: `retry=10` asks for 11 attempts, `total_timeout`
+        // allows one, and before this change nothing said so.
+        let env = ScriptedAttempts::new(
+            3,
+            100, // one send exhausts the whole budget
+            vec![Scripted::Codes(vec![
+                Some(ResultCode::Ok),
+                Some(ResultCode::Timeout),
+                Some(ResultCode::DeviceOverload),
+            ])],
+        );
+        let (results, stats) = drive(&env, 10, 100).unwrap();
+
+        assert!(
+            stats.truncated_by_timeout,
+            "the elapsed guard stopped the loop; the flag must say so"
+        );
+        assert_eq!(stats.attempts, 1, "only the initial send fit in the budget");
+        assert_eq!(stats.max_attempts, 11, "retry=10 asked for 11");
+        assert_eq!(
+            stats.unresolved, 2,
+            "two records still carry a retryable code"
+        );
+        assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn test_unresolved_counts_only_retryable_failures() {
+        // A permanent failure is not something more retries would fix, so it must
+        // not inflate `unresolved` — otherwise a caller reads it as "retry budget
+        // would have saved these".
+        let env = ScriptedAttempts::new(
+            3,
+            100,
+            vec![Scripted::Codes(vec![
+                Some(ResultCode::Ok),
+                Some(ResultCode::KeyExistsError), // permanent
+                Some(ResultCode::Timeout),        // retryable
+            ])],
+        );
+        let (_, stats) = drive(&env, 5, 100).unwrap();
+
+        assert_eq!(stats.unresolved, 1);
+        assert!(stats.truncated_by_timeout);
+    }
+
+    #[test]
+    fn test_no_truncation_when_the_budget_is_ample() {
+        // Retry succeeds inside the budget: both observables stay at their
+        // defaults, so a passing truncation test cannot be passing by accident.
+        let env = ScriptedAttempts::new(
+            2,
+            1,
+            vec![
+                Scripted::Codes(vec![Some(ResultCode::Ok), Some(ResultCode::Timeout)]),
+                Scripted::Codes(vec![Some(ResultCode::Ok)]),
+            ],
+        );
+        let (results, stats) = drive(&env, 5, 60_000).unwrap();
+
+        assert!(!stats.truncated_by_timeout);
+        assert_eq!(stats.unresolved, 0);
+        assert_eq!(stats.attempts, 2);
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[1].result_code,
+            Some(ResultCode::Ok),
+            "retry merged in"
+        );
+    }
+
+    #[test]
+    fn test_only_the_retryable_subset_is_resent() {
+        let env = ScriptedAttempts::new(
+            3,
+            1,
+            vec![
+                Scripted::Codes(vec![
+                    Some(ResultCode::Ok),
+                    Some(ResultCode::Timeout),
+                    Some(ResultCode::Ok),
+                ]),
+                Scripted::Codes(vec![Some(ResultCode::Ok)]),
+            ],
+        );
+        drive(&env, 5, 60_000).unwrap();
+
+        assert_eq!(
+            env.sends(),
+            vec![None, Some(vec![1])],
+            "the first attempt sends everything; the retry sends only index 1"
+        );
+    }
+
+    #[test]
+    fn test_every_attempt_failing_at_transport_propagates() {
+        // Nothing ever responded, so there are no per-record results to hand back
+        // and an empty Ok would read as success.
+        let env = ScriptedAttempts::new(2, 1, vec![Scripted::Transport]);
+        let err = drive(&env, 3, 60_000).unwrap_err();
+
+        assert_eq!(env.sends().len(), 4, "the full retry budget was spent");
+        assert!(err.to_string().contains("scripted transport error"));
+    }
+
+    #[test]
+    fn test_a_later_transport_error_keeps_the_results_already_received() {
+        // Once an attempt has responded, a later transport failure must not throw
+        // away what was already delivered.
+        let env = ScriptedAttempts::new(
+            2,
+            1,
+            vec![
+                Scripted::Codes(vec![Some(ResultCode::Ok), Some(ResultCode::Timeout)]),
+                Scripted::Transport,
+            ],
+        );
+        let (results, stats) = drive(&env, 1, 60_000).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].result_code, Some(ResultCode::Ok));
+        assert_eq!(stats.attempts, 2);
+        assert_eq!(stats.unresolved, 1);
+        assert!(
+            !stats.truncated_by_timeout,
+            "attempts ran out, not the clock"
+        );
     }
 
     #[test]
