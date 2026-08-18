@@ -2496,6 +2496,18 @@ class Query:
         runtime, so it may call back into the client (for example to look
         something up per record).
 
+        **Behaviour change — partial delivery is now possible.** This method
+        previously fetched the whole result set before invoking the callback, so
+        the scan was finished by the time the first callback ran and a cluster
+        fault *during callback processing* could not affect the call: you got
+        either zero callbacks and an exception, or a complete iteration. Now the
+        scan stays open for as long as the callback takes, so a fault part-way
+        through raises **after** a prefix of records has already been handed to
+        the callback. Bounded memory and all-or-nothing delivery cannot both
+        hold. If your callback has side effects that must not be applied to a
+        partial result set, use :meth:`results` instead — it is unchanged and
+        still materialises everything before returning.
+
         Args:
             callback: Function called with each record. Return ``False`` to stop.
                 Any other return value, including ``None``, continues.
@@ -2587,6 +2599,18 @@ class AsyncQuery:
         The callback runs on the calling thread, outside the client's async
         runtime, so it may call back into the client (for example to look
         something up per record).
+
+        **Behaviour change — partial delivery is now possible.** This method
+        previously fetched the whole result set before invoking the callback, so
+        the scan was finished by the time the first callback ran and a cluster
+        fault *during callback processing* could not affect the call: you got
+        either zero callbacks and an exception, or a complete iteration. Now the
+        scan stays open for as long as the callback takes, so a fault part-way
+        through raises **after** a prefix of records has already been handed to
+        the callback. Bounded memory and all-or-nothing delivery cannot both
+        hold. If your callback has side effects that must not be applied to a
+        partial result set, use :meth:`results` instead — it is unchanged and
+        still materialises everything before returning.
 
         Args:
             callback: Function called with each record. Return ``False`` to stop.
