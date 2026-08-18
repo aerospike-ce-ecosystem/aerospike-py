@@ -106,8 +106,9 @@ jobs:
           $(echo -e "${AFFECTED_FILES}")
 
           ### Next Steps
-          1. The \`skill-impact-review\` label is automatically applied so the Hub Planner analyzes the diff
-          2. After reviewing the analysis, add the \`start-implement\` label to auto-dispatch to the plugins repo
+          1. The \`skill-impact-review\` label is applied automatically; it is a marker for triage, nothing acts on it
+          2. Review the diff, then open a PR against \`aerospike-ce-ecosystem-plugins\` yourself if a skill needs updating
+          3. Close this issue when the skills match, or as \`not planned\` if they already did
 
           ---
           > This issue was automatically created by the skill-impact-notify workflow in ${SOURCE_REPO}.
@@ -124,7 +125,7 @@ jobs:
               --description "$2" \
               --color "$3" 2>/dev/null || true
           }
-          ensure_label "skill-impact-review" "Skill impact review — Hub Planner analyzes upstream diff" "D93F0B"
+          ensure_label "skill-impact-review" "Skill impact review — a human checks the upstream diff against the skills" "D93F0B"
           ensure_label "cross-repo"          "Tracks impact across multiple repos"                       "5319E7"
 
           gh issue create \
