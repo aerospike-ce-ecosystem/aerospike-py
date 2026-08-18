@@ -230,3 +230,57 @@ results = client.query("test", "demo").results(policy={"filter_expression": expr
 | `socket_timeout` | 1-5s. Catches hung connections. |
 | `total_timeout` | Set based on SLA. Includes retries. |
 | `max_retries` | 2-3 for reads, 0 for writes (idempotency). |
+
+## CPU-Bound and Multi-Worker Deployments
+
+If your process also does CPU-bound Python work — ML inference, heavy
+serialisation, anything that holds the GIL for milliseconds at a time — that
+work and the client compete for the same interpreter lock, and client throughput
+collapses. This is the single largest performance factor for services of that
+shape, and it is a **deployment** choice rather than a client setting.
+
+**Run a free-threaded interpreter (3.14t or 3.15t).** aerospike-py ships
+`gil_used = false`, so it keeps free-threading enabled rather than forcing the
+GIL back on the way most C extensions still do.
+
+Measured with `benchmark/gil_starvation.py` (720 keys × 8 bins per `batch_read`,
+concurrency 8, Aerospike CE 8.1.0.3 single node, Apple M4 Pro), with a
+pure-Python busy loop standing in for co-located inference:
+
+| Runtime | `batch_read`/s, idle | `batch_read`/s, with CPU-bound thread | Event-loop starvation p99 |
+|---|---:|---:|---:|
+| 3.13 (GIL) | ~520 | **~104** | 70–104 ms |
+| 3.14t (free-threaded) | ~478 | **~433** | **0.08–0.84 ms** |
+
+On the GIL build, throughput drops **5×** once something else in the process
+wants CPU. Free-threaded, it barely moves, and event-loop starvation — how long
+your own coroutines sit unable to run — falls by roughly three orders of
+magnitude.
+
+The trade-off is a small cost when nothing is competing: free-threading's atomic
+reference counting makes an otherwise-idle process about 10% less CPU-efficient
+per operation. If your service is purely I/O-bound, that cost buys you nothing.
+If it shares a process with CPU-bound work, it is the difference between
+saturating at 104 requests/s and at 433.
+
+Verify at runtime:
+
+```python
+import sys
+assert not sys._is_gil_enabled(), "not running free-threaded"
+```
+
+### If you must stay on a GIL build
+
+- **Move CPU-bound work out of the process** (a separate service or a
+  `ProcessPoolExecutor`) so it cannot hold the GIL against the client.
+- **`AEROSPIKE_RUNTIME_WORKERS` will not help.** Operations per CPU-second is
+  flat across 1, 2 and 4 workers, with and without contention: more workers buy
+  throughput at proportionally more CPU, not efficiency.
+- **Reducing per-record conversion will not help either.** Under contention the
+  conversion stages (`to_dict`, `into_pyobject`) stay flat while argument
+  parsing and event-loop resumption inflate 47–65×. The cost is in getting the
+  call across the Python boundary, not in materialising its results.
+
+Both of those are measurements, not guesses — reproduce them with
+`make gil-starvation` in `benchmark/`.
