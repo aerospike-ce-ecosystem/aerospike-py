@@ -333,12 +333,19 @@ fn collect_retryable_indices(results: &[BatchRecord], out: &mut Vec<usize>) {
 /// is applied between retries to avoid thundering-herd effects.
 ///
 /// **Retry behavior notes:**
-/// - If a transport-level error occurs during a retry attempt, retries stop
-///   immediately and the function returns partial results. Records that were
-///   being retried retain their previous (failed) result codes.
+/// - Transport-level errors consume retry budget rather than ending the call.
+///   This covers the initial send too: a connection reset or an unreachable node
+///   on the first attempt re-drives the whole batch instead of propagating
+///   immediately. Re-driving is safe because every operation is a pure `put`,
+///   an idempotent full-bin overwrite.
+/// - If *every* attempt fails at the transport level there are no per-record
+///   results to report, so the last transport error propagates. Once any attempt
+///   has returned a batch response, later transport errors leave those results
+///   intact and the call still returns `Ok`.
 /// - The elapsed time guard prevents retries when `elapsed + backoff >= total_timeout`,
 ///   but does not account for the actual batch operation time. Total wall-clock
 ///   time may exceed `total_timeout` by up to one additional timeout window.
+///   `total_timeout` defaults to 1000 ms, which truncates large `retry=N` values.
 /// - Callers should always check per-record `result_code` values regardless of
 ///   the overall `Ok` return status.
 #[allow(clippy::too_many_arguments)]
@@ -383,115 +390,144 @@ pub async fn do_batch_write(
         .map(|(_, bins, _)| bins.iter().map(aerospike_core::operations::put).collect())
         .collect();
 
-    let batch_ops: Vec<BatchOperation> = records
-        .iter()
-        .zip(cached_ops.iter())
-        .map(|((key, _, write_policy), ops)| {
-            BatchOperation::write(write_policy, key.clone(), ops.clone())
-        })
-        .collect();
-
-    // First attempt
-    let mut results: Vec<BatchRecord> = traced_op!(
-        op_name,
-        ns,
-        set,
-        parent_ctx,
-        conn_info,
-        client.batch(batch_policy, &batch_ops).await
-    )?;
-
-    // Retry loop: only retry records with retryable error codes
     let start = std::time::Instant::now();
     let timeout_ms = batch_policy.base_policy.total_timeout as u64;
+    let retry_op_name = format!("{}_retry", op_name);
+
+    let mut results: Vec<BatchRecord> = Vec::new();
     let mut retry_indices: Vec<usize> = Vec::new();
-    for attempt in 0..max_retries {
-        // Find indices of failed records that are retryable
-        collect_retryable_indices(&results, &mut retry_indices);
+    // False until some attempt returns a batch response. While it is false there
+    // is nothing to merge into, so the next attempt re-sends the whole batch.
+    let mut responded = false;
+    let mut last_transport_error: Option<pyo3::PyErr> = None;
 
-        if retry_indices.is_empty() {
-            log::debug!(
-                "batch_write retry: all records succeeded after {} attempt(s)",
-                attempt + 1
-            );
-            break;
-        }
+    // Attempt 0 is the initial send; attempts 1..=max_retries are the retries
+    // that `retry=N` buys. Keeping the initial send inside the loop is what lets
+    // a transport error on it consume retry budget instead of propagating —
+    // previously that single case, the most common transient batch failure,
+    // was the one thing `retry=` did nothing for.
+    for attempt in 0..=max_retries {
+        if attempt > 0 {
+            // Full Jitter backoff: random_between(0, min(500ms, 10ms * 2^attempt))
+            let backoff_ms = compute_backoff_ms(attempt - 1, 10, 500);
 
-        // Full Jitter backoff: random_between(0, min(500ms, 10ms * 2^attempt))
-        let backoff_ms = compute_backoff_ms(attempt, 10, 500);
-
-        // Elapsed time guard: stop retries if remaining time is insufficient
-        if timeout_ms > 0 {
-            let elapsed_ms = start.elapsed().as_millis() as u64;
-            if elapsed_ms + backoff_ms >= timeout_ms {
-                log::warn!(
-                    "batch_write retry: elapsed {}ms + backoff {}ms >= timeout {}ms, stopping",
-                    elapsed_ms,
-                    backoff_ms,
-                    timeout_ms
-                );
-                break;
+            // Elapsed time guard: stop retries if remaining time is insufficient
+            if timeout_ms > 0 {
+                let elapsed_ms = start.elapsed().as_millis() as u64;
+                if elapsed_ms + backoff_ms >= timeout_ms {
+                    log::warn!(
+                        "batch_write retry: elapsed {}ms + backoff {}ms >= timeout {}ms, stopping",
+                        elapsed_ms,
+                        backoff_ms,
+                        timeout_ms
+                    );
+                    break;
+                }
             }
+
+            log::info!(
+                "batch_write retry: {} record(s) to re-send, attempt {}/{}, backoff {}ms",
+                if responded {
+                    retry_indices.len()
+                } else {
+                    records.len()
+                },
+                attempt,
+                max_retries,
+                backoff_ms
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
         }
 
-        log::info!(
-            "batch_write retry: {} failed records, attempt {}/{}, backoff {}ms",
-            retry_indices.len(),
-            attempt + 1,
-            max_retries,
-            backoff_ms
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+        // Build this attempt from cached ops (avoids rebuilding from bins).
+        // Without a response yet, re-send everything; otherwise only the records
+        // whose result codes are worth re-driving.
+        let attempt_ops: Vec<BatchOperation> = if responded {
+            retry_indices
+                .iter()
+                .map(|&i| {
+                    let (key, _, write_policy) = &records[i];
+                    BatchOperation::write(write_policy, key.clone(), cached_ops[i].clone())
+                })
+                .collect()
+        } else {
+            records
+                .iter()
+                .zip(cached_ops.iter())
+                .map(|((key, _, write_policy), ops)| {
+                    BatchOperation::write(write_policy, key.clone(), ops.clone())
+                })
+                .collect()
+        };
 
-        // Build retry batch from cached ops (avoids rebuilding from bins)
-        let retry_ops: Vec<BatchOperation> = retry_indices
-            .iter()
-            .map(|&i| {
-                let (key, _, write_policy) = &records[i];
-                BatchOperation::write(write_policy, key.clone(), cached_ops[i].clone())
-            })
-            .collect();
-
-        let retry_op_name = format!("{}_retry", op_name);
-        let retry_results: Vec<BatchRecord> = match traced_op!(
-            &retry_op_name,
+        let attempt_op_name: &str = if attempt == 0 {
+            op_name
+        } else {
+            &retry_op_name
+        };
+        let attempt_results: Vec<BatchRecord> = match traced_op!(
+            attempt_op_name,
             ns,
             set,
             parent_ctx,
             conn_info,
-            client.batch(batch_policy, &retry_ops).await
+            client.batch(batch_policy, &attempt_ops).await
         ) {
             Ok(r) => r,
             Err(e) => {
                 log::warn!(
-                    "batch_write retry transport error on attempt {}/{}: {}",
-                    attempt + 1,
+                    "batch_write transport error on attempt {}/{}: {}",
+                    attempt,
                     max_retries,
                     e
                 );
-                break; // Return partial results instead of propagating error
+                last_transport_error = Some(e);
+                // Consume retry budget instead of abandoning the batch.
+                continue;
             }
         };
 
-        // Merge retry results back into the main results vector
-        if retry_results.len() != retry_indices.len() {
-            log::warn!(
-                "batch_write retry: expected {} results, got {} (partial batch response)",
-                retry_indices.len(),
-                retry_results.len()
-            );
+        if responded {
+            // Merge retry results back into the main results vector
+            if attempt_results.len() != retry_indices.len() {
+                log::warn!(
+                    "batch_write retry: expected {} results, got {} (partial batch response)",
+                    retry_indices.len(),
+                    attempt_results.len()
+                );
+            }
+            let update_count = attempt_results.len().min(retry_indices.len());
+            for (original_idx, retry_record) in retry_indices[..update_count]
+                .iter()
+                .copied()
+                .zip(attempt_results)
+            {
+                results[original_idx] = retry_record;
+            }
+        } else {
+            results = attempt_results;
+            responded = true;
         }
-        let update_count = retry_results.len().min(retry_indices.len());
-        for (original_idx, retry_record) in retry_indices[..update_count]
-            .iter()
-            .copied()
-            .zip(retry_results)
-        {
-            results[original_idx] = retry_record;
+        last_transport_error = None;
+
+        // Find indices of failed records that are retryable
+        collect_retryable_indices(&results, &mut retry_indices);
+        if retry_indices.is_empty() {
+            log::debug!(
+                "batch_write: all records succeeded after {} attempt(s)",
+                attempt + 1
+            );
+            break;
         }
     }
 
-    Ok(results)
+    match last_transport_error {
+        // Every attempt failed at the transport level, so there are no per-record
+        // results to hand back. Propagate rather than returning an empty batch
+        // that a caller would read as success.
+        Some(e) if !responded => Err(e),
+        _ => Ok(results),
+    }
 }
 
 // ── Info ────────────────────────────────────────────────────────────────────

@@ -66,13 +66,18 @@ test-all = [{include-group = "test-integration"}, "gunicorn"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 minversion = "7.0"
-addopts = ["-ra", "--strict-markers", "--strict-config"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "-m", "not destructive"]
 markers = [
     "unit: unit tests (no server required)",
     "integration: integration tests (Aerospike server required)",
     "compatibility: compatibility tests with official C client",
     "concurrency: thread safety tests",
     "slow: slow tests (>5 seconds)",
+    # Deselected by default: these stop and restart the server, which breaks
+    # module-scoped client fixtures and silently voids cleanup for every other
+    # module in the same session. Run them in their own session via
+    # `tox -e batch-retry-transport`.
+    "destructive: stops or restarts the Aerospike server; needs its own session",
 ]
 
 [build-system]
@@ -134,7 +139,14 @@ env_list = ["py{310,311,312,313,314,315}", "py314t", "py315t"]
 [tool.tox.env_run_base]
 package = "wheel"
 dependency_groups = ["test"]
-pass_env = ["AEROSPIKE_HOST", "AEROSPIKE_PORT", "AEROSPIKE_CLUSTER_NAME"]
+pass_env = [
+    "AEROSPIKE_HOST",
+    "AEROSPIKE_PORT",
+    "AEROSPIKE_CLUSTER_NAME",
+    # Set by the CI jobs that provision a server: an unreachable server must
+    # fail the job instead of silently skipping the suite (issue #428).
+    "AEROSPIKE_REQUIRE_SERVER",
+]
 commands = [["pytest", "tests/unit/", "-v"]]
 
 [tool.tox.env.py314t]
@@ -146,6 +158,15 @@ base_python = ["python3.15t"]
 [tool.tox.env.integration]
 dependency_groups = ["test-integration"]
 commands = [["pytest", "tests/integration/", "-v"]]
+
+# Server-lifecycle tests, in their own session so restarting the server cannot
+# void other modules' fixtures. Skips itself unless a controllable container is
+# present, so it is a no-op against a CI service container.
+[tool.tox.env.batch-retry-transport]
+dependency_groups = ["test-integration"]
+commands = [
+    ["pytest", "tests/integration/test_batch_retry_transport.py", "-v", "-m", "destructive"],
+]
 
 [tool.tox.env.concurrency]
 commands = [["pytest", "tests/concurrency/", "-v", "--ignore=tests/concurrency/test_freethreading.py"]]

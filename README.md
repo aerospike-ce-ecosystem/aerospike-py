@@ -163,14 +163,6 @@ Active when developing through [Claude Code](https://docs.anthropic.com/en/docs/
 | `docs.yaml` | PR touching `docs/` | Docusaurus build check. |
 | `docs-publish.yaml` | `push` to `main` | publish Docusaurus site to GitHub Pages. |
 
-**PR & issue automation (Claude-driven)**
-
-| Workflow | Trigger | Purpose |
-|---|---|---|
-| `pr-reviewer.yml` | PR opened / updated | automatic Claude review comment. |
-| `issue-planner.yml` | issue opened / labeled | generate an implementation plan in the issue. |
-| `agent-implement.yml` | issue labeled `plan-complete` | execute the plan, open a PR. |
-
 **Skill & docs follow-up notifications**
 
 | Workflow | Trigger | Purpose |
