@@ -162,6 +162,13 @@ commands = [["pytest", "tests/integration/", "-v"]]
 # Server-lifecycle tests, in their own session so restarting the server cannot
 # void other modules' fixtures. Skips itself unless a controllable container is
 # present, so it is a no-op against a CI service container.
+# Query-interruption tests, in their own session for the same reason.
+[tool.tox.env.query-foreach-interruption]
+dependency_groups = ["test-integration"]
+commands = [
+    ["pytest", "tests/integration/test_query_foreach_interruption.py", "-v", "-m", "destructive"],
+]
+
 [tool.tox.env.batch-retry-transport]
 dependency_groups = ["test-integration"]
 commands = [

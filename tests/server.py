@@ -88,3 +88,70 @@ def skip_or_fail_unreachable(reason: str = "Aerospike server not available") -> 
     if server_required():
         pytest.fail(f"{REQUIRE_SERVER_ENV} is set but no Aerospike server is reachable at {host}:{port}")
     pytest.skip(f"{reason} ({host}:{port})")
+
+
+# ── server lifecycle control (destructive tests only) ───────────────────────
+#
+# Some behaviours can only be reached by taking the server away mid-call — a
+# transport error on a batch write, a query stream interrupted part-way. Tests
+# that do that carry the `destructive` marker and are deselected by default,
+# because restarting the server voids module-scoped client fixtures and the
+# cleanup of every other module sharing the session.
+
+CONTAINER_ENV = "AEROSPIKE_CONTAINER"
+RUNTIME_ENV = "RUNTIME"
+
+
+def container_name() -> str:
+    return os.environ.get(CONTAINER_ENV, "aerospike")
+
+
+def container_runtime() -> str:
+    return os.environ.get(RUNTIME_ENV, "podman")
+
+
+def can_control_server() -> bool:
+    """Whether the configured container runtime can start/stop our Aerospike."""
+    import shutil
+    import subprocess
+
+    runtime = container_runtime()
+    if shutil.which(runtime) is None:
+        return False
+    try:
+        listed = subprocess.run([runtime, "ps", "--format", "{{.Names}}"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return container_name() in listed.stdout.split()
+
+
+def control_server(action: str) -> None:
+    """Run `start` / `stop` / `restart` against the Aerospike container."""
+    import subprocess
+
+    subprocess.run([container_runtime(), action, container_name()], check=True, capture_output=True, timeout=120)
+
+
+def wait_until_serving(config: dict, timeout: float = 90.0) -> None:
+    """Block until a fresh client can connect, so the next test is not raced.
+
+    Probes with a real client rather than the container's own health command:
+    the container reports ready slightly before the cluster accepts client
+    connections, and that gap is long enough to fail the next fixture.
+    """
+    import time
+
+    import aerospike_py
+
+    deadline = time.monotonic() + timeout
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
+        try:
+            probe = aerospike_py.client(config).connect()
+        except Exception as exc:  # cluster not accepting connections yet
+            last_error = exc
+            time.sleep(0.5)
+            continue
+        probe.close()
+        return
+    raise RuntimeError(f"{container_name()} did not accept a client within {timeout}s: {last_error!r}")
