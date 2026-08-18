@@ -82,3 +82,46 @@ make down
 ## 포트 충돌 주의
 
 `compose.yaml` 은 `127.0.0.1:18710` 을 점유한다. 메인 패키지의 `compose.local.yaml` 도 같은 포트를 쓰므로 **둘 중 하나만** 띄울 것.
+
+---
+
+## `gil_starvation.py` — CPU efficiency and event-loop starvation (issue #347)
+
+위 oha 시나리오들은 end-to-end HTTP throughput 을 잰다. 이슈 #347 이 보고한 것은
+throughput 이 아니라 **RPS 당 CPU** 와 **같은 프로세스에 있는 inference 스레드의
+느려짐** 이고, 그 둘은 HTTP 측정으로 분리되지 않는다.
+
+`gil_starvation.py` 는 그 두 값을 직접 잰다. 의존성은 표준 라이브러리와
+`aerospike_py` 뿐이고, oha·torch·클러스터 없이 돈다. 공식 클라이언트가 있으면
+같이 재고, 없으면 aerospike-py 만 재고 넘어간다 — 비교까지 하려면 레포 루트에서:
+
+```bash
+uv sync --group test-compat   # 공식 aerospike C 클라이언트 설치
+```
+
+| 지표 | 의미 |
+|---|---|
+| `ops_per_cpu_s` | 완료한 `batch_read` ÷ 프로세스 CPU 초. 이슈 #347 의 "RPS / core" 를 단일 프로세스로 표현한 값 |
+| `cpu_utilisation` | CPU 초 ÷ wall 초. 1.0 을 넘으면 여러 스레드에서 CPU 를 쓰고 있다는 뜻 |
+| `starvation_p99_ms` | `batch_read` 가 떠 있는 동안 형제 asyncio 태스크가 **못 돈** 시간의 p99. 다른 스레드가 GIL 을 잡고 있던 시간의 근사값 |
+
+```bash
+# 레포 루트에서 Aerospike 를 띄운 뒤 (make run-aerospike-ce)
+uv run python benchmark/gil_starvation.py
+
+# 이슈 #347 의 shape + GIL 을 잡는 CPU 경쟁자 (핵심 조건)
+uv run python benchmark/gil_starvation.py \
+    --keys 720 --bins 8 --concurrency 8 --duration 10 --cpu-competitor
+
+# 요청 경로 비용과 레코드 변환 비용 분리
+uv run python benchmark/gil_starvation.py --materialise none
+
+uv run python benchmark/gil_starvation.py --json   # 기계 판독용
+```
+
+`--cpu-competitor` 가 결정적이다. 경쟁자 없이는 격차가 1.4-1.5x 에 그치지만,
+같은 프로세스에서 GIL 을 잡는 CPU 부하가 돌면 2.0-2.2x 로 벌어진다 — 프로덕션에서
+보고된 2.4x 에 가깝다. 즉 이 격차를 재현하는 데 필요한 건 5-노드 클러스터나 실제
+PyTorch inference 가 아니라 **같은 프로세스의 GIL 경쟁 + 올바른 지표** 다.
+
+절대값은 머신·서버에 따라 다르므로 두 클라이언트의 **비율** 로 읽을 것.
