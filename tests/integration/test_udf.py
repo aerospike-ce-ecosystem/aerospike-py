@@ -6,6 +6,7 @@ import pytest
 
 import aerospike_py
 from tests import AEROSPIKE_CONFIG
+from tests.server import skip_or_raise
 
 UDF_FILE = os.path.join(os.path.dirname(__file__), "..", "test_udf.lua")
 
@@ -15,8 +16,8 @@ def client():
     config = AEROSPIKE_CONFIG
     try:
         c = aerospike_py.client(config).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
+    except Exception as e:
+        skip_or_raise(e)
     yield c
     c.close()
 

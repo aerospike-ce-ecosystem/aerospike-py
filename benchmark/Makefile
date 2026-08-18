@@ -9,8 +9,13 @@ SCENARIO ?= s1
 CONCURRENCY ?= 10
 DURATION ?= 30s
 BATCH_SIZE ?= 50
+GIL_KEYS ?= 720
+GIL_BINS ?= 8
+GIL_CONCURRENCY ?= 8
+GIL_DURATION ?= 10
+GIL_CPU_COMPETITOR ?= 1
 
-.PHONY: help sync up down seed serve-py serve-official bench-s1-py bench-s1-official bench-s1 report clean fmt lint
+.PHONY: help sync up down seed serve-py serve-official bench-s1-py bench-s1-official bench-s1 report gil-starvation clean fmt lint
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -60,6 +65,11 @@ bench-all: ## Bench all 6 scenario variants sequentially (py vs official for eac
 		echo; echo "===== scenario $$s ====="; \
 		bash loadtest/bench_matrix.sh $$s $(CONCURRENCY) $(DURATION) $(BATCH_SIZE); \
 	done
+
+gil-starvation: ## CPU efficiency + event-loop starvation vs the official client (issue #347)
+	cd .. && uv run python benchmark/gil_starvation.py \
+		--keys $(GIL_KEYS) --bins $(GIL_BINS) --concurrency $(GIL_CONCURRENCY) \
+		--duration $(GIL_DURATION) $(if $(filter 1,$(GIL_CPU_COMPETITOR)),--cpu-competitor,)
 
 report: ## Render a markdown comparison table from results/
 	uv run python -m loadtest.report

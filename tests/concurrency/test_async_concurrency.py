@@ -6,6 +6,7 @@ import pytest
 
 import aerospike_py
 from tests import AEROSPIKE_CONFIG
+from tests.server import skip_or_raise
 
 NS = "test"
 SET_NAME = "conc_async"
@@ -58,8 +59,8 @@ class TestAsyncConcurrency:
             c = aerospike_py.AsyncClient(AEROSPIKE_CONFIG)
             try:
                 await c.connect()
-            except Exception:
-                pytest.skip("Aerospike server not available")
+            except Exception as e:
+                skip_or_raise(e)
             assert c.is_connected()
             await c.close()
             assert not c.is_connected()
@@ -250,8 +251,8 @@ class TestExtendedAsyncConcurrency:
         probe = aerospike_py.AsyncClient(AEROSPIKE_CONFIG)
         try:
             await probe.connect()
-        except Exception:
-            pytest.skip("Aerospike server not available")
+        except Exception as e:
+            skip_or_raise(e)
         await probe.close()
 
         async def connect_cycle():

@@ -6,6 +6,7 @@ import pytest
 
 import aerospike_py
 from tests import AEROSPIKE_CONFIG
+from tests.server import skip_or_raise
 
 # Skip entire module if official client is not installed
 aerospike = pytest.importorskip("aerospike")
@@ -24,8 +25,8 @@ OFFICIAL_CONFIG = {
 def rust_client():
     try:
         c = aerospike_py.client(AEROSPIKE_CONFIG).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
+    except Exception as e:
+        skip_or_raise(e)
     yield c
     c.close()
 
@@ -34,8 +35,8 @@ def rust_client():
 def official_client():
     try:
         c = aerospike.client(OFFICIAL_CONFIG).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
+    except Exception as e:
+        skip_or_raise(e)
     yield c
     c.close()
 
