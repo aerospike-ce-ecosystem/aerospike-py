@@ -14,7 +14,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::backpressure::OperationLimiter;
-use crate::batch_types::batch_to_batch_records_py;
+use crate::batch_types::{batch_to_batch_records_py, batch_to_batch_records_py_with_retry};
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::catch_panic_sync;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
@@ -1222,7 +1222,7 @@ impl PyClient {
             &self.connection_info,
         )?;
         let limiter = self.limiter.clone();
-        let results = catch_panic_sync("Client.batch_write", || {
+        let (results, retry_stats) = catch_panic_sync("Client.batch_write", || {
             py.detach(|| {
                 RUNTIME.block_on(async {
                     let _permit = limiter.acquire_named("batch_write").await?;
@@ -1241,7 +1241,7 @@ impl PyClient {
                 })
             })
         })?;
-        let batch = batch_to_batch_records_py(py, results)?;
+        let batch = batch_to_batch_records_py_with_retry(py, results, Some(retry_stats))?;
         Ok(Py::new(py, batch)?.into_any())
     }
 
@@ -1291,7 +1291,7 @@ impl PyClient {
         let set = set_name.to_string();
 
         let limiter = self.limiter.clone();
-        let results = catch_panic_sync("Client.batch_write_numpy", || {
+        let (results, retry_stats) = catch_panic_sync("Client.batch_write_numpy", || {
             py.detach(|| {
                 RUNTIME.block_on(async {
                     let _permit = limiter.acquire_named("batch_write_numpy").await?;
@@ -1311,7 +1311,7 @@ impl PyClient {
             })
         })?;
 
-        let batch = batch_to_batch_records_py(py, results)?;
+        let batch = batch_to_batch_records_py_with_retry(py, results, Some(retry_stats))?;
         Ok(Py::new(py, batch)?.into_any())
     }
 

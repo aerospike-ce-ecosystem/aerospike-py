@@ -100,6 +100,16 @@ impl PyBatchRecord {
 pub struct PyBatchRecords {
     #[pyo3(get)]
     batch_records: Vec<Py<PyBatchRecord>>,
+    /// `(attempts, max_attempts, truncated_by_timeout, unresolved)` for calls
+    /// that ran the client-side retry loop, else `None`.
+    ///
+    /// `None` on every path that issues a single batch call — `retry=0`
+    /// `batch_write`, and `batch_operate` / `batch_remove` / `batch_apply`,
+    /// which have no `retry` parameter. Keeping it `None` rather than a
+    /// populated default means the common path builds no tuple at all, and the
+    /// Python wrapper only pays one attribute read.
+    #[pyo3(get)]
+    retry_info: Option<(u32, u32, bool, u32)>,
 }
 
 // ── Deferred conversion types for async client ─────────────────────
@@ -115,6 +125,18 @@ pub struct PyBatchRecords {
 /// `batch_write`, `batch_write_numpy`, and `batch_remove`.
 pub struct PendingBatchRecords {
     pub results: Vec<BatchRecord>,
+    /// `Some` only for `batch_write` / `batch_write_numpy` with `retry > 0`.
+    pub retry_stats: Option<crate::client_ops::BatchWriteRetryStats>,
+}
+
+impl PendingBatchRecords {
+    /// For batch calls that have no client-side retry loop to report on.
+    pub fn without_retry(results: Vec<BatchRecord>) -> Self {
+        Self {
+            results,
+            retry_stats: None,
+        }
+    }
 }
 
 impl<'py> IntoPyObject<'py> for PendingBatchRecords {
@@ -123,7 +145,7 @@ impl<'py> IntoPyObject<'py> for PendingBatchRecords {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let batch = batch_to_batch_records_py(py, self.results)?;
+        let batch = batch_to_batch_records_py_with_retry(py, self.results, self.retry_stats)?;
         Ok(Py::new(py, batch)?.into_bound(py).into_any())
     }
 }
@@ -882,6 +904,18 @@ pub fn batch_to_batch_records_py(
     py: Python<'_>,
     results: Vec<BatchRecord>,
 ) -> PyResult<PyBatchRecords> {
+    batch_to_batch_records_py_with_retry(py, results, None)
+}
+
+/// As [`batch_to_batch_records_py`], additionally carrying retry statistics.
+///
+/// Only `batch_write` / `batch_write_numpy` with `retry > 0` pass `Some`; every
+/// other batch call has no retry loop to report on.
+pub fn batch_to_batch_records_py_with_retry(
+    py: Python<'_>,
+    results: Vec<BatchRecord>,
+    retry_stats: Option<crate::client_ops::BatchWriteRetryStats>,
+) -> PyResult<PyBatchRecords> {
     trace!(
         "Converting {} batch records to Python (lazy bins)",
         results.len()
@@ -916,7 +950,17 @@ pub fn batch_to_batch_records_py(
         batch_records.push(Py::new(py, batch_record)?);
     }
 
-    Ok(PyBatchRecords { batch_records })
+    Ok(PyBatchRecords {
+        batch_records,
+        retry_info: retry_stats.map(|s| {
+            (
+                s.attempts,
+                s.max_attempts,
+                s.truncated_by_timeout,
+                s.unresolved,
+            )
+        }),
+    })
 }
 
 #[cfg(test)]
