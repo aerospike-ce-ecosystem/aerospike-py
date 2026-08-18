@@ -1335,8 +1335,54 @@ mod tests {
         let env = ScriptedAttempts::new(2, 1, vec![Scripted::Transport]);
         let err = drive(&env, 3, 60_000).unwrap_err();
 
-        assert_eq!(env.sends().len(), 4, "the full retry budget was spent");
+        assert_eq!(
+            env.sends(),
+            vec![None, None, None, None],
+            "the full retry budget was spent, and since nothing ever responded \
+             every attempt must re-send the WHOLE batch — asserting only the \
+             count here let an empty-subset re-send pass"
+        );
         assert!(err.to_string().contains("scripted transport error"));
+    }
+
+    #[test]
+    fn test_a_first_attempt_transport_error_resends_the_whole_batch() {
+        // This is the case #424 was filed for, and the one no test pinned.
+        //
+        // Attempt 0 dies below the batch layer, so nothing responded and there is
+        // no per-record result to merge into. `responded` must therefore still be
+        // false on attempt 1, which makes it send `None` — the whole batch —
+        // rather than the (empty) retry subset.
+        //
+        // Without this assertion, replacing the `if responded { .. } else { None }`
+        // selector with a bare `Some(&retry_indices)` is invisible: the scripted
+        // env answers with its canned codes whatever it is asked for, so results,
+        // stats and attempt counts are all unchanged. Against a real server that
+        // mutation sends an EMPTY batch, writes nothing, and returns Ok — a silent
+        // data loss that reads as success. `sends()` is the only observable that
+        // distinguishes them.
+        let env = ScriptedAttempts::new(
+            2,
+            1,
+            vec![
+                Scripted::Transport,
+                Scripted::Codes(vec![Some(ResultCode::Ok), Some(ResultCode::Ok)]),
+            ],
+        );
+        let (results, stats) = drive(&env, 3, 60_000).unwrap();
+
+        assert_eq!(
+            env.sends(),
+            vec![None, None],
+            "attempt 0 never responded, so attempt 1 must re-send the whole batch"
+        );
+        assert_eq!(results.len(), 2, "both records came back on the retry");
+        assert_eq!(
+            stats.attempts, 2,
+            "the transport failure consumed one attempt"
+        );
+        assert_eq!(stats.unresolved, 0);
+        assert!(!stats.truncated_by_timeout);
     }
 
     #[test]
