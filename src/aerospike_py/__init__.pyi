@@ -2496,17 +2496,26 @@ class Query:
         runtime, so it may call back into the client (for example to look
         something up per record).
 
-        **Behaviour change — partial delivery is now possible.** This method
-        previously fetched the whole result set before invoking the callback, so
-        the scan was finished by the time the first callback ran and a cluster
-        fault *during callback processing* could not affect the call: you got
-        either zero callbacks and an exception, or a complete iteration. Now the
-        scan stays open for as long as the callback takes, so a fault part-way
-        through raises **after** a prefix of records has already been handed to
-        the callback. Bounded memory and all-or-nothing delivery cannot both
-        hold. If your callback has side effects that must not be applied to a
-        partial result set, use :meth:`results` instead — it is unchanged and
-        still materialises everything before returning.
+        **Behaviour change — a failing query may now raise after processing
+        part of the result set.** This method previously fetched everything
+        before invoking the callback, so a query error — a `total_timeout`
+        expiring, a node going away, any transport fault — was decided *before
+        the first callback ran*: you got either zero callbacks and an exception,
+        or a complete iteration. Now the scan stays open for as long as the
+        callback takes, so such an error raises **after** an arbitrary prefix of
+        records has already been handed to the callback.
+
+        Concretely: a callback that writes each record into another system, and
+        an outer ``except`` that treats the exception as "nothing was written",
+        is now wrong — some rows were written. The exception type and message are
+        unchanged, so nothing at the call site reveals this.
+
+        Bounded memory and all-or-nothing delivery cannot both hold. If your
+        callback has side effects that must not be applied to a partial result
+        set, use :meth:`results` instead — it is unchanged, still materialises
+        everything before returning, and still fails without delivering anything.
+        Note this is separate from a callback raising on its own, which has
+        always left preceding records processed.
 
         Args:
             callback: Function called with each record. Return ``False`` to stop.
@@ -2600,17 +2609,26 @@ class AsyncQuery:
         runtime, so it may call back into the client (for example to look
         something up per record).
 
-        **Behaviour change — partial delivery is now possible.** This method
-        previously fetched the whole result set before invoking the callback, so
-        the scan was finished by the time the first callback ran and a cluster
-        fault *during callback processing* could not affect the call: you got
-        either zero callbacks and an exception, or a complete iteration. Now the
-        scan stays open for as long as the callback takes, so a fault part-way
-        through raises **after** a prefix of records has already been handed to
-        the callback. Bounded memory and all-or-nothing delivery cannot both
-        hold. If your callback has side effects that must not be applied to a
-        partial result set, use :meth:`results` instead — it is unchanged and
-        still materialises everything before returning.
+        **Behaviour change — a failing query may now raise after processing
+        part of the result set.** This method previously fetched everything
+        before invoking the callback, so a query error — a `total_timeout`
+        expiring, a node going away, any transport fault — was decided *before
+        the first callback ran*: you got either zero callbacks and an exception,
+        or a complete iteration. Now the scan stays open for as long as the
+        callback takes, so such an error raises **after** an arbitrary prefix of
+        records has already been handed to the callback.
+
+        Concretely: a callback that writes each record into another system, and
+        an outer ``except`` that treats the exception as "nothing was written",
+        is now wrong — some rows were written. The exception type and message are
+        unchanged, so nothing at the call site reveals this.
+
+        Bounded memory and all-or-nothing delivery cannot both hold. If your
+        callback has side effects that must not be applied to a partial result
+        set, use :meth:`results` instead — it is unchanged, still materialises
+        everything before returning, and still fails without delivering anything.
+        Note this is separate from a callback raising on its own, which has
+        always left preceding records processed.
 
         Args:
             callback: Function called with each record. Return ``False`` to stop.
