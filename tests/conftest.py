@@ -5,6 +5,7 @@ import pytest
 import aerospike_py
 from tests import AEROSPIKE_CONFIG
 from tests.helpers import invoke
+from tests.server import server_required, skip_or_raise
 
 
 @pytest.fixture(scope="module")
@@ -12,8 +13,8 @@ def client():
     """Create and connect a sync client for the test module."""
     try:
         c = aerospike_py.client(AEROSPIKE_CONFIG).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
+    except Exception as e:
+        skip_or_raise(e)
     yield c
     c.close()
 
@@ -25,7 +26,7 @@ async def async_client():
         c = aerospike_py.AsyncClient(AEROSPIKE_CONFIG)
         await c.connect()
     except Exception as e:
-        pytest.skip(f"Aerospike server not available: {e}")
+        skip_or_raise(e)
     yield c
     await c.close()
 
@@ -91,3 +92,40 @@ async def async_cleanup(async_client):
             await async_client.remove(key)
         except Exception:
             pass
+
+
+# ── All-skipped guard ───────────────────────────────────────────────────────
+# Independent of the fixture change above: if a *new* fixture ever reintroduces
+# a bare ``except Exception: pytest.skip(...)``, a suite that skips its way to
+# zero passes must still turn the job red rather than exiting 0.
+
+_passed = 0
+_skipped = 0
+
+
+def pytest_runtest_logreport(report):
+    """Tally outcomes. Setup-phase skips never reach the ``call`` phase."""
+    global _passed, _skipped
+    if report.outcome == "skipped":
+        _skipped += 1
+    elif report.when == "call" and report.outcome == "passed":
+        _passed += 1
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Fail a required-server run that collected tests but passed none of them."""
+    if not server_required() or exitstatus != 0:
+        return
+    if not (session.testscollected and _skipped and _passed == 0):
+        return
+    session.exitstatus = 1
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    message = (
+        f"AEROSPIKE_REQUIRE_SERVER is set, {session.testscollected} test(s) were collected, "
+        f"{_skipped} skipped and none passed — treating this run as a failure."
+    )
+    if reporter is not None:
+        reporter.write_sep("=", "all tests skipped", red=True)
+        reporter.write_line(message)
+    else:  # pragma: no cover - terminalreporter is absent only under -p no:terminal
+        print(message)

@@ -112,6 +112,7 @@ Runs automatically on commit: trailing-whitespace, ruff format/lint, pyright, ca
 - Run `make run-aerospike-ce` to start a local server before running integration tests
 - maturin version is pinned to `>=1.9,<2.0`
 - The `AEROSPIKE_HOST` and `AEROSPIKE_PORT` environment variables override the server address (default: `127.0.0.1:18710`)
+- The `AEROSPIKE_REQUIRE_SERVER` environment variable turns an unreachable server into a test failure instead of a skip; CI sets it on every job that provisions a server
 - The `AEROSPIKE_RUNTIME_WORKERS` environment variable controls the number of internal Tokio worker threads (default: 2; since the workload is I/O-bound, 2 is sufficient in most cases)
 - The `RUNTIME` environment variable selects the container runtime: docker or podman (default: podman)
 - Container configuration is managed via compose files at the project root: `compose.local.yaml` (development) and `compose.sample-fastapi.yaml` (FastAPI sample)

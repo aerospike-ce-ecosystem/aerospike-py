@@ -1,26 +1,28 @@
 from pathlib import Path
 
-from tests.feasibility import conftest as feasibility_conftest
+from tests import server as server_policy
 
 
-def test_server_available_uses_aerospike_env(monkeypatch):
+def test_server_reachable_uses_aerospike_env(monkeypatch):
+    """The reachability probe the feasibility suite gates on honours the env."""
     connected_to = []
 
-    class FakeSocket:
-        def settimeout(self, timeout):
-            pass
+    class FakeConnection:
+        def __enter__(self):
+            return self
 
-        def connect(self, address):
-            connected_to.append(address)
+        def __exit__(self, *exc_info):
+            return False
 
-        def close(self):
-            pass
+    def fake_create_connection(address, timeout=None):
+        connected_to.append(address)
+        return FakeConnection()
 
     monkeypatch.setenv("AEROSPIKE_HOST", "aerospike-ci")
     monkeypatch.setenv("AEROSPIKE_PORT", "3000")
-    monkeypatch.setattr(feasibility_conftest.socket, "socket", FakeSocket)
+    monkeypatch.setattr(server_policy.socket, "create_connection", fake_create_connection)
 
-    assert feasibility_conftest._server_available()
+    assert server_policy.server_reachable()
     assert connected_to == [("aerospike-ci", 3000)]
 
 

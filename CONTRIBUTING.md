@@ -66,6 +66,26 @@ uvx --with tox-uv tox -e compat
 uvx --with tox-uv tox -e all
 ```
 
+### Requiring a server
+
+Server-dependent suites skip themselves when no Aerospike server is reachable,
+so a local run without a container stays green. CI must not have that latitude —
+a suite that skips its way to zero passes would report a connect-path regression
+as a pass. The CI jobs that provision a server therefore set:
+
+```bash
+AEROSPIKE_REQUIRE_SERVER=1 uvx --with tox-uv tox -e all
+```
+
+With it set, an unreachable server is an error rather than a skip, and a run
+that collects tests but passes none of them fails the job. Set it locally to
+reproduce a CI failure; leave it unset for the usual skip-when-absent
+convenience.
+
+Note that the skip also requires the service port to be genuinely closed. If the
+port accepts connections but `connect()` still fails, that is a client-side bug,
+and the suite reports it instead of skipping — regardless of this variable.
+
 ## Pre-commit hooks
 
 This project uses [pre-commit](https://pre-commit.com/) for linting and formatting:

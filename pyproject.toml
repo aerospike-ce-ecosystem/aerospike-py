@@ -134,7 +134,14 @@ env_list = ["py{310,311,312,313,314,315}", "py314t", "py315t"]
 [tool.tox.env_run_base]
 package = "wheel"
 dependency_groups = ["test"]
-pass_env = ["AEROSPIKE_HOST", "AEROSPIKE_PORT", "AEROSPIKE_CLUSTER_NAME"]
+pass_env = [
+    "AEROSPIKE_HOST",
+    "AEROSPIKE_PORT",
+    "AEROSPIKE_CLUSTER_NAME",
+    # Set by the CI jobs that provision a server: an unreachable server must
+    # fail the job instead of silently skipping the suite (issue #428).
+    "AEROSPIKE_REQUIRE_SERVER",
+]
 commands = [["pytest", "tests/unit/", "-v"]]
 
 [tool.tox.env.py314t]
