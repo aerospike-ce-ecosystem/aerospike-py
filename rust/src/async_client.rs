@@ -851,7 +851,7 @@ impl PyAsyncClient {
         future_into_py_panic_safe(py, "AsyncClient.batch_operate", async move {
             let _permit = limiter.acquire_named("batch_operate").await?;
             let results = client_ops::do_batch_operate(&client, &args).await?;
-            Ok(PendingBatchRecords { results })
+            Ok(PendingBatchRecords::without_retry(results))
         })
     }
 
@@ -878,7 +878,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_write", async move {
             let _permit = limiter.acquire_named("batch_write").await?;
-            let results = client_ops::do_batch_write(
+            let (results, retry_stats) = client_ops::do_batch_write(
                 &client,
                 &args.batch_policy,
                 &args.records,
@@ -890,7 +890,10 @@ impl PyAsyncClient {
                 "batch_write",
             )
             .await?;
-            Ok(PendingBatchRecords { results })
+            Ok(PendingBatchRecords {
+                results,
+                retry_stats: Some(retry_stats),
+            })
         })
     }
 
@@ -938,7 +941,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_write_numpy", async move {
             let _permit = limiter.acquire_named("batch_write_numpy").await?;
-            let results = client_ops::do_batch_write(
+            let (results, retry_stats) = client_ops::do_batch_write(
                 &client,
                 &batch_policy,
                 &records,
@@ -950,7 +953,10 @@ impl PyAsyncClient {
                 "batch_write_numpy",
             )
             .await?;
-            Ok(PendingBatchRecords { results })
+            Ok(PendingBatchRecords {
+                results,
+                retry_stats: Some(retry_stats),
+            })
         })
     }
 
@@ -971,7 +977,7 @@ impl PyAsyncClient {
         future_into_py_panic_safe(py, "AsyncClient.batch_remove", async move {
             let _permit = limiter.acquire_named("batch_remove").await?;
             let results = client_ops::do_batch_remove(&client, &args).await?;
-            Ok(PendingBatchRecords { results })
+            Ok(PendingBatchRecords::without_retry(results))
         })
     }
 
@@ -1007,7 +1013,7 @@ impl PyAsyncClient {
         future_into_py_panic_safe(py, "AsyncClient.batch_apply", async move {
             let _permit = limiter.acquire_named("batch_apply").await?;
             let results = client_ops::do_batch_apply(&client, &args).await?;
-            Ok(PendingBatchRecords { results })
+            Ok(PendingBatchRecords::without_retry(results))
         })
     }
 

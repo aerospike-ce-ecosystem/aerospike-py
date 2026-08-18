@@ -308,6 +308,44 @@ fn compute_backoff_ms(attempt: u32, base_ms: u64, cap_ms: u64) -> u64 {
     rand::rng().random_range(0..=max_backoff)
 }
 
+/// Whether the remaining `total_timeout` budget still permits another attempt.
+///
+/// `timeout_ms == 0` means no budget was configured, so retries are unbounded by
+/// time. Otherwise an attempt is allowed only if waiting `backoff_ms` still
+/// leaves the deadline in the future — this is the guard that silently truncates
+/// `retry=N` under the 1000 ms default `total_timeout`.
+fn retry_budget_permits(elapsed_ms: u64, backoff_ms: u64, timeout_ms: u64) -> bool {
+    timeout_ms == 0 || elapsed_ms + backoff_ms < timeout_ms
+}
+
+/// What the client-side retry loop actually did, so Python can see truncation.
+///
+/// `retry=N` promises `N + 1` attempts, but the elapsed-time guard above stops
+/// early once `total_timeout` runs out. Without these counters that difference
+/// is invisible from Python — the only report was a `log::warn!`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BatchWriteRetryStats {
+    /// Attempts actually issued, including the initial send. Always >= 1.
+    pub attempts: u32,
+    /// Attempts the caller asked for: `1 + retry`.
+    pub max_attempts: u32,
+    /// The elapsed-time guard stopped the loop while records still needed
+    /// retrying — i.e. `total_timeout` truncated `retry=N`.
+    pub truncated_by_timeout: bool,
+    /// Records still carrying a retryable failure code when the loop ended.
+    pub unresolved: u32,
+}
+
+impl BatchWriteRetryStats {
+    /// Stats for a path that issues exactly one batch call and never retries.
+    pub const SINGLE_ATTEMPT: Self = Self {
+        attempts: 1,
+        max_attempts: 1,
+        truncated_by_timeout: false,
+        unresolved: 0,
+    };
+}
+
 /// Collect indices of batch records with retryable error codes into `out`.
 ///
 /// Clears `out` first, then appends indices of records whose `result_code`
@@ -345,7 +383,15 @@ fn collect_retryable_indices(results: &[BatchRecord], out: &mut Vec<usize>) {
 /// - The elapsed time guard prevents retries when `elapsed + backoff >= total_timeout`,
 ///   but does not account for the actual batch operation time. Total wall-clock
 ///   time may exceed `total_timeout` by up to one additional timeout window.
-///   `total_timeout` defaults to 1000 ms, which truncates large `retry=N` values.
+///   `total_timeout` defaults to **1000 ms**, so a large `retry=N` is routinely
+///   truncated: with Full Jitter doubling from 10 ms plus each attempt's own
+///   network time, `retry=10` yields far fewer than 11 attempts by default.
+///   Callers who want the full count must raise `total_timeout` themselves —
+///   this function never lengthens the budget on its own.
+/// - The returned [`BatchWriteRetryStats`] reports how many attempts were
+///   actually issued, whether the timeout guard truncated them, and how many
+///   records are still failing, so that truncation is visible from Python
+///   instead of only in a `log::warn!`.
 /// - Callers should always check per-record `result_code` values regardless of
 ///   the overall `Ok` return status.
 #[allow(clippy::too_many_arguments)]
@@ -363,7 +409,7 @@ pub async fn do_batch_write(
     conn_info: Arc<crate::tracing::ConnectionInfo>,
     max_retries: u32,
     op_name: &str,
-) -> PyResult<Vec<BatchRecord>> {
+) -> PyResult<(Vec<BatchRecord>, BatchWriteRetryStats)> {
     // Fast path: no retry — build ops directly, no cache overhead
     if max_retries == 0 {
         let batch_ops: Vec<BatchOperation> = records
@@ -374,14 +420,15 @@ pub async fn do_batch_write(
                 BatchOperation::write(write_policy, key.clone(), ops)
             })
             .collect();
-        return traced_op!(
+        let results = traced_op!(
             op_name,
             ns,
             set,
             parent_ctx,
             conn_info,
             client.batch(batch_policy, &batch_ops).await
-        );
+        )?;
+        return Ok((results, BatchWriteRetryStats::SINGLE_ATTEMPT));
     }
 
     // Retry path: pre-build ops once per record, reuse via clone on retry
@@ -400,6 +447,8 @@ pub async fn do_batch_write(
     // is nothing to merge into, so the next attempt re-sends the whole batch.
     let mut responded = false;
     let mut last_transport_error: Option<pyo3::PyErr> = None;
+    let mut attempts_made: u32 = 0;
+    let mut truncated_by_timeout = false;
 
     // Attempt 0 is the initial send; attempts 1..=max_retries are the retries
     // that `retry=N` buys. Keeping the initial send inside the loop is what lets
@@ -411,18 +460,22 @@ pub async fn do_batch_write(
             // Full Jitter backoff: random_between(0, min(500ms, 10ms * 2^attempt))
             let backoff_ms = compute_backoff_ms(attempt - 1, 10, 500);
 
-            // Elapsed time guard: stop retries if remaining time is insufficient
-            if timeout_ms > 0 {
-                let elapsed_ms = start.elapsed().as_millis() as u64;
-                if elapsed_ms + backoff_ms >= timeout_ms {
-                    log::warn!(
-                        "batch_write retry: elapsed {}ms + backoff {}ms >= timeout {}ms, stopping",
-                        elapsed_ms,
-                        backoff_ms,
-                        timeout_ms
-                    );
-                    break;
-                }
+            // Elapsed time guard: stop retries if remaining time is insufficient.
+            // This is what truncates `retry=N` under the 1000 ms default
+            // `total_timeout`; record it so Python can see it happened.
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            if !retry_budget_permits(elapsed_ms, backoff_ms, timeout_ms) {
+                log::warn!(
+                    "batch_write retry: elapsed {}ms + backoff {}ms >= timeout {}ms, \
+                     stopping after {}/{} attempt(s)",
+                    elapsed_ms,
+                    backoff_ms,
+                    timeout_ms,
+                    attempts_made,
+                    max_retries + 1
+                );
+                truncated_by_timeout = true;
+                break;
             }
 
             log::info!(
@@ -465,6 +518,7 @@ pub async fn do_batch_write(
         } else {
             &retry_op_name
         };
+        attempts_made += 1;
         let attempt_results: Vec<BatchRecord> = match traced_op!(
             attempt_op_name,
             ns,
@@ -526,7 +580,30 @@ pub async fn do_batch_write(
         // results to hand back. Propagate rather than returning an empty batch
         // that a caller would read as success.
         Some(e) if !responded => Err(e),
-        _ => Ok(results),
+        _ => {
+            // `retry_indices` already holds the records still carrying a
+            // retryable code, so reporting it costs nothing extra.
+            let stats = BatchWriteRetryStats {
+                attempts: attempts_made,
+                max_attempts: max_retries + 1,
+                truncated_by_timeout,
+                unresolved: retry_indices.len() as u32,
+            };
+            if stats.attempts < stats.max_attempts && stats.unresolved > 0 {
+                log::warn!(
+                    "batch_write: {} record(s) still failing after {} of {} attempt(s){}",
+                    stats.unresolved,
+                    stats.attempts,
+                    stats.max_attempts,
+                    if truncated_by_timeout {
+                        " — retries truncated by total_timeout"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            Ok((results, stats))
+        }
     }
 }
 
@@ -929,6 +1006,52 @@ mod tests {
         assert!(val <= 500);
         let val = compute_backoff_ms(u32::MAX, 10, 500);
         assert!(val <= 500);
+    }
+
+    // ── retry_budget_permits: the guard that truncates retry=N ─────────────
+
+    #[test]
+    fn test_budget_permits_with_room_to_spare() {
+        assert!(retry_budget_permits(100, 50, 1000));
+    }
+
+    #[test]
+    fn test_budget_boundary_is_exclusive() {
+        // elapsed + backoff == timeout must NOT permit another attempt: the
+        // deadline would be reached exactly when the backoff ends.
+        assert!(!retry_budget_permits(950, 50, 1000));
+        assert!(retry_budget_permits(949, 50, 1000));
+    }
+
+    #[test]
+    fn test_budget_denies_when_overrun() {
+        assert!(!retry_budget_permits(990, 50, 1000));
+        assert!(!retry_budget_permits(2000, 0, 1000));
+    }
+
+    #[test]
+    fn test_zero_timeout_means_unbounded() {
+        // total_timeout = 0 is "no budget configured", not "no time left".
+        assert!(retry_budget_permits(u64::MAX / 2, 500, 0));
+    }
+
+    #[test]
+    fn test_default_total_timeout_truncates_full_jitter_ladder() {
+        // The reported failure mode: BasePolicy::default() is total_timeout =
+        // 1000ms, and the Full Jitter ladder caps at 500ms per wait, so once a
+        // few attempts have been spent the guard denies the rest.
+        const DEFAULT_TOTAL_TIMEOUT_MS: u64 = 1000;
+        assert!(!retry_budget_permits(600, 500, DEFAULT_TOTAL_TIMEOUT_MS));
+        assert!(!retry_budget_permits(900, 250, DEFAULT_TOTAL_TIMEOUT_MS));
+    }
+
+    #[test]
+    fn test_single_attempt_stats_describe_a_non_retrying_call() {
+        let stats = BatchWriteRetryStats::SINGLE_ATTEMPT;
+        assert_eq!(stats.attempts, 1);
+        assert_eq!(stats.max_attempts, 1);
+        assert!(!stats.truncated_by_timeout);
+        assert_eq!(stats.unresolved, 0);
     }
 
     // ── collect_retryable_indices tests ────────────────────────────────────

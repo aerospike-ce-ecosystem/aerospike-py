@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
-from aerospike_py._client import _wrap_batch_record, _wrap_exists, _wrap_operate_ordered, _wrap_record
+from aerospike_py._client import (
+    _wrap_batch_write_result,
+    _wrap_exists,
+    _wrap_operate_ordered,
+    _wrap_record,
+)
 from aerospike_py.types import (
     BatchWriteResult,
     ExistsResult,
@@ -233,7 +238,7 @@ class AsyncClient:
             ```
         """
         raw = await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_write")
     async def batch_write(self, records, policy=None, retry=0) -> BatchWriteResult:
@@ -242,17 +247,17 @@ class AsyncClient:
         See :meth:`AsyncClient.batch_write` in ``__init__.pyi`` for full documentation.
         """
         raw = await self._inner.batch_write(records, policy, retry)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_operate")
     async def batch_operate(self, keys, ops, policy=None) -> BatchWriteResult:
         raw = await self._inner.batch_operate(keys, ops, policy)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_remove")
     async def batch_remove(self, keys, policy=None) -> BatchWriteResult:
         raw = await self._inner.batch_remove(keys, policy)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.ping")
     async def ping(self) -> bool:
@@ -339,7 +344,7 @@ class AsyncClient:
     @catch_unexpected("AsyncClient.batch_apply")
     async def batch_apply(self, keys, module, function, args=None, policy=None) -> BatchWriteResult:
         raw = await self._inner.batch_apply(keys, module, function, args, policy)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     # -- Admin: User --
 

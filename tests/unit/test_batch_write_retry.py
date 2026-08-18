@@ -36,3 +36,28 @@ class TestBatchWriteRetryParameter:
         sig = inspect.signature(aerospike_py.AsyncClient.batch_write_numpy)
         param = sig.parameters["retry"]
         assert param.default == 0, f"Expected default retry=0, got {param.default}"
+
+
+class TestBatchRetryInfo:
+    """``BatchWriteResult.retry`` — the counters that make truncation visible (#425)."""
+
+    def test_defaults_describe_a_single_attempt(self):
+        info = aerospike_py.BatchRetryInfo()
+        assert info.attempts == 1
+        assert info.max_attempts == 1
+        assert info.truncated_by_timeout is False
+        assert info.unresolved == 0
+
+    def test_batch_write_result_defaults_its_retry_field(self):
+        """Constructing without ``retry`` must keep working for existing callers."""
+        result = aerospike_py.BatchWriteResult(batch_records=[])
+        assert result.retry == aerospike_py.BatchRetryInfo()
+
+    def test_batch_records_remains_the_first_field(self):
+        """Positional access to ``batch_records`` is part of the public surface."""
+        result = aerospike_py.BatchWriteResult(batch_records=["sentinel"])
+        assert result[0] == ["sentinel"]
+        assert result.batch_records == ["sentinel"]
+
+    def test_retry_info_is_exported(self):
+        assert "BatchRetryInfo" in aerospike_py.__all__

@@ -179,6 +179,13 @@ def test_batch_write_survives_a_node_restart(restartable_client):
 
     assert [br.result for br in result.batch_records] == [0] * len(records)
 
+    # The retry counters (#425) report what actually happened: the failed
+    # attempts were spent, and the generous total_timeout was never the limit.
+    assert result.retry.attempts > 1, "the surviving call must have taken more than one attempt"
+    assert result.retry.max_attempts == 61
+    assert result.retry.truncated_by_timeout is False
+    assert result.retry.unresolved == 0
+
     # The records really landed, rather than merely being reported as written.
     _wait_until_serving()
     assert restartable_client.get((NS, SET_NAME, "restart_7")).bins == {"v": 7}

@@ -88,13 +88,18 @@ def test_varargs_and_raises_render_without_losing_stub_details() -> None:
     assert "Raises `ValueError` If ``partition_id`` is outside the valid range." in rendered
 
 
-def test_markdown_note_inside_argument_is_not_a_fake_parameter() -> None:
-    """A bold ``**Note:**`` inside retry's prose stays in the retry cell."""
+def test_markdown_bold_inside_argument_is_not_a_fake_parameter() -> None:
+    """A bold span inside retry's prose stays in the retry cell.
+
+    ``retry``'s description leads with bold markdown mid-paragraph; the
+    generator must not mistake it for the start of a new parameter row.
+    """
     rendered = GENERATOR.generate_client_doc(TREE)
 
+    assert "| `**`retry`" not in rendered
     assert "| `**Note` |" not in rendered
-    assert rendered.count("**Note:** If a transport error occurs during retry") == 2
-    assert "| `retry` | Maximum number of retries" in rendered
+    assert rendered.count("**`retry` is bounded by `total_timeout`, which defaults to 1000 ms.**") == 2
+    assert "| `retry` | Maximum number of *retries*" in rendered
 
 
 def test_note_section_ends_example_and_normalizes_sphinx_method_reference() -> None:

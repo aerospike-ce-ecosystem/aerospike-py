@@ -8,7 +8,14 @@ Claude Code Plugin::
 
 import logging
 
-from aerospike_py.types import BatchRecord, BatchRecords, BatchWriteResult, UserKey, AerospikeRecord  # noqa: F401
+from aerospike_py.types import (  # noqa: F401
+    AerospikeRecord,
+    BatchRecord,
+    BatchRecords,
+    BatchRetryInfo,
+    BatchWriteResult,
+    UserKey,
+)
 
 # Import all exceptions from native module
 from aerospike_py._aerospike import (  # noqa: F401
@@ -376,6 +383,7 @@ __all__ = [
     "AsyncQuery",
     "BatchRecord",
     "BatchRecords",
+    "BatchRetryInfo",
     "BatchWriteResult",
     "UserKey",
     "AerospikeRecord",

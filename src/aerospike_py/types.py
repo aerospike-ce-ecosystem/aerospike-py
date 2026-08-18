@@ -73,10 +73,37 @@ class BatchRecord(NamedTuple):
     in_doubt: bool = False
 
 
+class BatchRetryInfo(NamedTuple):
+    """What ``batch_write``'s client-side retry loop actually did.
+
+    ``retry=N`` asks for ``N + 1`` attempts, but the loop also stops once
+    ``total_timeout`` runs out — and that budget defaults to **1000 ms**, so a
+    large ``retry`` is routinely truncated. These counters make the difference
+    between what was asked for and what happened visible from Python.
+
+    The defaults describe a call that issued exactly one batch and never
+    retried, which is what every non-``batch_write`` batch method reports.
+    """
+
+    attempts: int = 1
+    """Attempts actually issued, including the first. Always >= 1."""
+
+    max_attempts: int = 1
+    """Attempts the caller asked for: ``1 + retry``."""
+
+    truncated_by_timeout: bool = False
+    """``total_timeout`` stopped the retries before ``max_attempts``."""
+
+    unresolved: int = 0
+    """Records still carrying a retryable failure code when the loop ended."""
+
+
 class BatchWriteResult(NamedTuple):
     """Container for batch write/operate/remove results."""
 
     batch_records: list[BatchRecord]
+    retry: BatchRetryInfo = BatchRetryInfo()
+    """How the retry loop behaved. Default for methods that never retry."""
 
 
 # ---------------------------------------------------------------------------

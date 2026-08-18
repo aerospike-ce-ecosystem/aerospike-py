@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from aerospike_py.types import (
     AerospikeKey,
     BatchRecord as BatchRecordTuple,
+    BatchRetryInfo,
     BatchWriteResult,
     BinTuple,
     ExistsResult,
@@ -63,6 +64,24 @@ def _wrap_batch_record(br) -> BatchRecordTuple:
     key = _wrap_key(br.key)
     record = _wrap_record(br.record) if br.record is not None else None
     return BatchRecordTuple(key=key, result=br.result, record=record, in_doubt=br.in_doubt)
+
+
+_NO_RETRIES = BatchRetryInfo()
+
+
+def _wrap_batch_write_result(raw) -> BatchWriteResult:
+    """Wrap a native ``BatchRecords``, carrying retry stats when there are any.
+
+    ``raw.retry_info`` is ``None`` on every path that issues a single batch call
+    — ``retry=0`` ``batch_write`` and all of ``batch_operate`` /
+    ``batch_remove`` / ``batch_apply`` — so the common case costs one attribute
+    read and reuses a shared default rather than building a tuple per call.
+    """
+    info = raw.retry_info
+    return BatchWriteResult(
+        batch_records=[_wrap_batch_record(br) for br in raw.batch_records],
+        retry=_NO_RETRIES if info is None else BatchRetryInfo(*info),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +245,7 @@ class Client(_NativeClient):
             ```
         """
         raw = super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     @catch_unexpected("Client.batch_write")
     def batch_write(self, records, policy=None, retry=0) -> BatchWriteResult:
@@ -235,17 +254,17 @@ class Client(_NativeClient):
         See :meth:`Client.batch_write` in ``__init__.pyi`` for full documentation.
         """
         raw = super().batch_write(records, policy, retry)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     @catch_unexpected("Client.batch_operate")
     def batch_operate(self, keys, ops, policy=None) -> BatchWriteResult:
         raw = super().batch_operate(keys, ops, policy)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     @catch_unexpected("Client.batch_remove")
     def batch_remove(self, keys, policy=None) -> BatchWriteResult:
         raw = super().batch_remove(keys, policy)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     @catch_unexpected("Client.put")
     def put(self, key, bins, meta=None, policy=None) -> None:
@@ -316,7 +335,7 @@ class Client(_NativeClient):
     @catch_unexpected("Client.batch_apply")
     def batch_apply(self, keys, module, function, args=None, policy=None) -> BatchWriteResult:
         raw = super().batch_apply(keys, module, function, args, policy)
-        return BatchWriteResult(batch_records=[_wrap_batch_record(br) for br in raw.batch_records])
+        return _wrap_batch_write_result(raw)
 
     # -- Admin: User --
 

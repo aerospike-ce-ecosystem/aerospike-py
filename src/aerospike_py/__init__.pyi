@@ -31,6 +31,7 @@ from aerospike_py.types import (
     BatchUDFPolicy as BatchUDFPolicy,
     BatchRecord as BatchRecord,
     BatchRecords as BatchRecords,
+    BatchRetryInfo as BatchRetryInfo,
     BatchWriteResult as BatchWriteResult,
     Bins as Bins,
     BinTuple as BinTuple,
@@ -800,20 +801,38 @@ class Client:
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-            retry: Maximum number of retries for failed records (default ``0``).
-                When > 0, records that fail with transient errors (timeout,
-                device overload, key busy) are automatically retried with
-                exponential backoff (Full Jitter, max 500ms). Retries stop
-                early if the elapsed time approaches ``total_timeout``.
+            retry: Maximum number of *retries* for failed records (default
+                ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
+                > 0, records that fail with transient errors (timeout, device
+                overload, key busy) are retried with exponential backoff (Full
+                Jitter, max 500 ms), and an attempt that fails at the transport
+                level (connection reset, node down) re-drives the batch instead
+                of raising immediately.
 
-                **Note:** If a transport error occurs during retry, retries
-                stop and partial results are returned. Always check each
-                ``BatchRecord.result`` code. Total wall-clock time may exceed
-                ``total_timeout`` by up to one additional timeout window.
+                **`retry` is bounded by `total_timeout`, which defaults to
+                1000 ms.** Retries stop once ``elapsed + backoff`` would reach
+                that budget, so with the default policy ``retry=10`` yields far
+                fewer than 11 attempts — the backoff ladder alone can consume
+                half of it, before counting each attempt's own network time. To
+                actually get ``N + 1`` attempts, raise it yourself with
+                ``policy={"total_timeout": 30000}`` — the client never lengthens
+                the budget on your behalf.
+
+                Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
+                to see what happened: ``attempts`` versus ``max_attempts``,
+                ``truncated_by_timeout``, and how many records are still
+                ``unresolved``. Total wall-clock time may still exceed
+                ``total_timeout`` by up to one additional timeout window,
+                because the guard does not account for the in-flight attempt.
+
+                Always check each ``BatchRecord.result`` code regardless of
+                whether the call returned successfully.
 
         Returns:
             A ``BatchWriteResult`` with per-record result codes in
-            ``batch_records: list[BatchRecord]``.
+            ``batch_records: list[BatchRecord]``, plus ``retry``
+            ([`BatchRetryInfo`](types.md#batchretryinfo)) describing how the
+            retry loop behaved.
 
         Example:
             ```python
@@ -865,20 +884,38 @@ class Client:
                 keys (``socket_timeout``, ``total_timeout``, ``max_retries``,
                 ``filter_expression``, ``allow_inline``, ``allow_inline_ssd``,
                 ``respond_all_keys``).
-            retry: Maximum number of retries for failed records (default ``0``).
-                When > 0, records that fail with transient errors (timeout,
-                device overload, key busy) are automatically retried with
-                exponential backoff (Full Jitter, max 500ms). Retries stop
-                early if the elapsed time approaches ``total_timeout``.
+            retry: Maximum number of *retries* for failed records (default
+                ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
+                > 0, records that fail with transient errors (timeout, device
+                overload, key busy) are retried with exponential backoff (Full
+                Jitter, max 500 ms), and an attempt that fails at the transport
+                level (connection reset, node down) re-drives the batch instead
+                of raising immediately.
 
-                **Note:** If a transport error occurs during retry, retries
-                stop and partial results are returned. Always check each
-                ``BatchRecord.result`` code. Total wall-clock time may exceed
-                ``total_timeout`` by up to one additional timeout window.
+                **`retry` is bounded by `total_timeout`, which defaults to
+                1000 ms.** Retries stop once ``elapsed + backoff`` would reach
+                that budget, so with the default policy ``retry=10`` yields far
+                fewer than 11 attempts — the backoff ladder alone can consume
+                half of it, before counting each attempt's own network time. To
+                actually get ``N + 1`` attempts, raise it yourself with
+                ``policy={"total_timeout": 30000}`` — the client never lengthens
+                the budget on your behalf.
+
+                Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
+                to see what happened: ``attempts`` versus ``max_attempts``,
+                ``truncated_by_timeout``, and how many records are still
+                ``unresolved``. Total wall-clock time may still exceed
+                ``total_timeout`` by up to one additional timeout window,
+                because the guard does not account for the in-flight attempt.
+
+                Always check each ``BatchRecord.result`` code regardless of
+                whether the call returned successfully.
 
         Returns:
             A ``BatchWriteResult`` containing per-record result codes in
-            ``batch_records: list[BatchRecord]``.
+            ``batch_records: list[BatchRecord]``, plus ``retry``
+            ([`BatchRetryInfo`](types.md#batchretryinfo)) describing how the
+            retry loop behaved.
 
         Example:
             ```python
@@ -937,7 +974,9 @@ class Client:
 
         Returns:
             A ``BatchWriteResult`` with per-record result codes in
-            ``batch_records: list[BatchRecord]``.
+            ``batch_records: list[BatchRecord]``. Its ``retry`` field is always
+            the default — this method has no ``retry`` parameter and issues a
+            single batch call.
             Each ``BatchRecord`` also includes an ``in_doubt`` flag
             (see :meth:`batch_write` for details).
 
@@ -976,7 +1015,9 @@ class Client:
 
         Returns:
             A ``BatchWriteResult`` with per-record result codes in
-            ``batch_records: list[BatchRecord]``.
+            ``batch_records: list[BatchRecord]``. Its ``retry`` field is always
+            the default — this method has no ``retry`` parameter and issues a
+            single batch call.
             Each ``BatchRecord`` also includes an ``in_doubt`` flag
             (see :meth:`batch_write` for details).
 
@@ -1906,20 +1947,38 @@ class AsyncClient:
             _dtype: numpy dtype describing the array layout.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-            retry: Maximum number of retries for failed records (default ``0``).
-                When > 0, records that fail with transient errors (timeout,
-                device overload, key busy) are automatically retried with
-                exponential backoff (Full Jitter, max 500ms). Retries stop
-                early if the elapsed time approaches ``total_timeout``.
+            retry: Maximum number of *retries* for failed records (default
+                ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
+                > 0, records that fail with transient errors (timeout, device
+                overload, key busy) are retried with exponential backoff (Full
+                Jitter, max 500 ms), and an attempt that fails at the transport
+                level (connection reset, node down) re-drives the batch instead
+                of raising immediately.
 
-                **Note:** If a transport error occurs during retry, retries
-                stop and partial results are returned. Always check each
-                ``BatchRecord.result`` code. Total wall-clock time may exceed
-                ``total_timeout`` by up to one additional timeout window.
+                **`retry` is bounded by `total_timeout`, which defaults to
+                1000 ms.** Retries stop once ``elapsed + backoff`` would reach
+                that budget, so with the default policy ``retry=10`` yields far
+                fewer than 11 attempts — the backoff ladder alone can consume
+                half of it, before counting each attempt's own network time. To
+                actually get ``N + 1`` attempts, raise it yourself with
+                ``policy={"total_timeout": 30000}`` — the client never lengthens
+                the budget on your behalf.
+
+                Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
+                to see what happened: ``attempts`` versus ``max_attempts``,
+                ``truncated_by_timeout``, and how many records are still
+                ``unresolved``. Total wall-clock time may still exceed
+                ``total_timeout`` by up to one additional timeout window,
+                because the guard does not account for the in-flight attempt.
+
+                Always check each ``BatchRecord.result`` code regardless of
+                whether the call returned successfully.
 
         Returns:
             A ``BatchWriteResult`` with per-record result codes in
-            ``batch_records: list[BatchRecord]``.
+            ``batch_records: list[BatchRecord]``, plus ``retry``
+            ([`BatchRetryInfo`](types.md#batchretryinfo)) describing how the
+            retry loop behaved.
 
         Example:
             ```python
@@ -1952,20 +2011,38 @@ class AsyncClient:
         Args:
             records: List of ``(key, bins)`` or ``(key, bins, meta)`` tuples.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
-            retry: Maximum number of retries for failed records (default ``0``).
-                When > 0, records that fail with transient errors (timeout,
-                device overload, key busy) are automatically retried with
-                exponential backoff (Full Jitter, max 500ms). Retries stop
-                early if the elapsed time approaches ``total_timeout``.
+            retry: Maximum number of *retries* for failed records (default
+                ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
+                > 0, records that fail with transient errors (timeout, device
+                overload, key busy) are retried with exponential backoff (Full
+                Jitter, max 500 ms), and an attempt that fails at the transport
+                level (connection reset, node down) re-drives the batch instead
+                of raising immediately.
 
-                **Note:** If a transport error occurs during retry, retries
-                stop and partial results are returned. Always check each
-                ``BatchRecord.result`` code. Total wall-clock time may exceed
-                ``total_timeout`` by up to one additional timeout window.
+                **`retry` is bounded by `total_timeout`, which defaults to
+                1000 ms.** Retries stop once ``elapsed + backoff`` would reach
+                that budget, so with the default policy ``retry=10`` yields far
+                fewer than 11 attempts — the backoff ladder alone can consume
+                half of it, before counting each attempt's own network time. To
+                actually get ``N + 1`` attempts, raise it yourself with
+                ``policy={"total_timeout": 30000}`` — the client never lengthens
+                the budget on your behalf.
+
+                Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
+                to see what happened: ``attempts`` versus ``max_attempts``,
+                ``truncated_by_timeout``, and how many records are still
+                ``unresolved``. Total wall-clock time may still exceed
+                ``total_timeout`` by up to one additional timeout window,
+                because the guard does not account for the in-flight attempt.
+
+                Always check each ``BatchRecord.result`` code regardless of
+                whether the call returned successfully.
 
         Returns:
             A ``BatchWriteResult`` containing per-record result codes in
-            ``batch_records: list[BatchRecord]``.
+            ``batch_records: list[BatchRecord]``, plus ``retry``
+            ([`BatchRetryInfo`](types.md#batchretryinfo)) describing how the
+            retry loop behaved.
 
         Example:
             ```python
@@ -2007,7 +2084,9 @@ class AsyncClient:
 
         Returns:
             A ``BatchWriteResult`` with per-record result codes in
-            ``batch_records: list[BatchRecord]``.
+            ``batch_records: list[BatchRecord]``. Its ``retry`` field is always
+            the default — this method has no ``retry`` parameter and issues a
+            single batch call.
             Each ``BatchRecord`` also includes an ``in_doubt`` flag
             (see :meth:`batch_write` for details).
 
