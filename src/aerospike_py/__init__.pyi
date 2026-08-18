@@ -2479,14 +2479,29 @@ class Query:
         callback: Callable[[Record], Optional[bool]],
         policy: Optional[dict[str, Any]] = None,
     ) -> None:
-        """Execute the query and invoke a callback for each record.
+        """Execute the query and invoke a callback for each record, streaming.
 
         The callback receives a ``Record`` NamedTuple. Return ``False``
         from the callback to stop iteration early.
 
+        Records are delivered **as they arrive**, so this is the API to reach
+        for on a result set too large to hold in memory. Peak memory is bounded
+        by the client's internal record queue (``record_queue_size``, default
+        1024 records) rather than by the size of the result set, and the first
+        callback runs at the first record's latency rather than after the whole
+        scan. Returning ``False`` stops fetching from the server, so it bounds
+        both time and memory — use it for "scan until I find the first match".
+
+        The callback runs on the calling thread, outside the client's async
+        runtime, so it may call back into the client (for example to look
+        something up per record).
+
         Args:
             callback: Function called with each record. Return ``False`` to stop.
-            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
+                Any other return value, including ``None``, continues.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict. Set
+                ``record_queue_size`` to trade buffered memory against how far
+                the client reads ahead of a slow callback.
 
         Example:
             ```python
@@ -2556,14 +2571,29 @@ class AsyncQuery:
         callback: Callable[[Record], Optional[bool]],
         policy: Optional[dict[str, Any]] = None,
     ) -> None:
-        """Execute the query and invoke a callback for each record.
+        """Execute the query and invoke a callback for each record, streaming.
 
         The callback receives a ``Record`` NamedTuple. Return ``False``
         from the callback to stop iteration early.
 
+        Records are delivered **as they arrive**, so this is the API to reach
+        for on a result set too large to hold in memory. Peak memory is bounded
+        by the client's internal record queue (``record_queue_size``, default
+        1024 records) rather than by the size of the result set, and the first
+        callback runs at the first record's latency rather than after the whole
+        scan. Returning ``False`` stops fetching from the server, so it bounds
+        both time and memory — use it for "scan until I find the first match".
+
+        The callback runs on the calling thread, outside the client's async
+        runtime, so it may call back into the client (for example to look
+        something up per record).
+
         Args:
             callback: Function called with each record. Return ``False`` to stop.
-            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
+                Any other return value, including ``None``, continues.
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict. Set
+                ``record_queue_size`` to trade buffered memory against how far
+                the client reads ahead of a slow callback.
 
         Example:
             ```python

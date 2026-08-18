@@ -413,7 +413,28 @@ fn execute_query(
     Ok(py_list.into_any().unbind())
 }
 
-/// Execute a query/scan and call a callback for each record.
+/// Execute a query/scan and call a callback for each record, **streaming**.
+///
+/// The callback runs as records arrive rather than after the whole result set
+/// has been materialised. That is the property `foreach` exists for: peak memory
+/// is bounded by `aerospike-core`'s internal record queue (`record_queue_size`,
+/// default 1024) instead of the full result set, and time-to-first-callback is
+/// the first record's latency instead of the whole scan's duration. Returning
+/// `False` stops the scan rather than breaking out of an already-filled `Vec`.
+///
+/// **Why the stream is pumped one record at a time from this thread**, rather
+/// than driving the loop inside a single `RUNTIME.block_on`: the callback must
+/// not run inside the Tokio runtime context. Callbacks that call back into the
+/// client — "scan, and look up something for each record" — are supported today,
+/// and those re-entrant calls use `RUNTIME.block_on` themselves, which panics
+/// when invoked from a thread already inside the runtime. Polling one record per
+/// `block_on` keeps every callback outside that context.
+///
+/// This costs nothing in fetch throughput: `Recordset` is an `async_channel`
+/// bounded by `record_queue_size` that the per-node reader tasks keep filling on
+/// the runtime's worker threads while the callback runs here. Dropping the
+/// stream on early exit runs `Recordset::drop`, which closes the recordset and
+/// stops those commands.
 #[allow(clippy::too_many_arguments, unused)]
 fn execute_foreach(
     py: Python<'_>,
@@ -426,18 +447,96 @@ fn execute_foreach(
     set_name: &str,
     conn_info: &crate::tracing::ConnectionInfo,
 ) -> PyResult<()> {
-    let records = execute_query_collect(
-        py, client, statement, policy, op_name, namespace, set_name, conn_info,
-    )?;
-    for record in &records {
-        let py_record = record_to_py(py, record, None)?;
-        let result = callback.call1((py_record,))?;
-        // If callback returns False, stop iteration
-        if let Ok(false) = result.extract::<bool>() {
-            break;
+    let client = client.clone();
+    let (query_policy, partition_filter) = parse_query_policy(policy)?;
+    debug!("Executing {} (streaming)", op_name);
+
+    let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
+
+    // Span opened before the operation runs so its duration reflects real query
+    // latency, matching `execute_query_collect`.
+    #[cfg(feature = "otel")]
+    let otel_span = {
+        use opentelemetry::trace::{SpanKind, Tracer};
+        use opentelemetry::KeyValue;
+        let tracer = crate::tracing::otel_impl::get_tracer();
+        let span_name = format!("{} {}.{}", op_name.to_uppercase(), namespace, set_name);
+        tracer
+            .span_builder(span_name)
+            .with_kind(SpanKind::Client)
+            .with_attributes(vec![
+                KeyValue::new("db.system.name", "aerospike"),
+                KeyValue::new("db.namespace", namespace.to_string()),
+                KeyValue::new("db.collection.name", set_name.to_string()),
+                KeyValue::new("db.operation.name", op_name.to_uppercase()),
+                KeyValue::new("server.address", conn_info.server_address.clone()),
+                KeyValue::new("server.port", conn_info.server_port),
+                KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
+            ])
+            .start(&tracer)
+    };
+
+    let panic_op: &'static str = match op_name {
+        "scan" => "Query.scan",
+        "query" => "Query.query",
+        _ => "Query.execute",
+    };
+
+    // `catch_panic_sync` covers the whole drive loop, including the Rust side of
+    // each callback invocation, so a panic still surfaces as `RustPanicError`.
+    let outcome: PyResult<Result<(), AsError>> = catch_panic_sync(panic_op, || {
+        let started = py.detach(|| {
+            RUNTIME.block_on(async {
+                client
+                    .query(&query_policy, partition_filter, statement)
+                    .await
+            })
+        });
+        let mut stream = match started {
+            Ok(rs) => rs.into_stream(),
+            Err(e) => return Ok(Err(e)),
+        };
+
+        loop {
+            // GIL released while waiting for the next record; re-taken only to
+            // build the Python record and run the callback.
+            let next = py.detach(|| RUNTIME.block_on(stream.next()));
+            let Some(item) = next else { break };
+            let record = match item {
+                Ok(record) => record,
+                Err(e) => return Ok(Err(e)),
+            };
+
+            let py_record = record_to_py(py, &record, None)?;
+            let result = callback.call1((py_record,))?;
+            // If callback returns False, stop iteration
+            if let Ok(false) = result.extract::<bool>() {
+                break;
+            }
         }
+        Ok(Ok(()))
+    });
+
+    // Finish metrics and end the OTel span on every path — including a caught
+    // panic and a callback that raised — before propagating any error.
+    match &outcome {
+        Ok(Ok(())) => timer.finish(""),
+        Ok(Err(e)) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
+        Err(_) => {} // panic or Python error: timer left unrecorded (no Drop impl)
     }
-    Ok(())
+
+    #[cfg(feature = "otel")]
+    {
+        use opentelemetry::trace::TraceContextExt;
+        let cx = opentelemetry::Context::current().with_span(otel_span);
+        let span_ref = TraceContextExt::span(&cx);
+        if let Ok(Err(e)) = &outcome {
+            crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
+        }
+        span_ref.end();
+    }
+
+    outcome?.map_err(as_to_pyerr)
 }
 
 // ── Query class ──────────────────────────────────────────
