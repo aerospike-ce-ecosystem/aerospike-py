@@ -278,6 +278,8 @@ jobs:
 
       - name: Run all tests
         run: uvx --with tox-uv tox -e all
+        env:
+          AEROSPIKE_REQUIRE_SERVER: "1"
 
   test-concurrency:
     name: Concurrency Tests
@@ -324,6 +326,8 @@ jobs:
 
       - name: Run concurrency tests
         run: uvx --with tox-uv tox -e concurrency
+        env:
+          AEROSPIKE_REQUIRE_SERVER: "1"
 
   test-concurrency-freethreaded:
     # End-to-end concurrency suite under a real free-threaded interpreter.
@@ -394,6 +398,7 @@ jobs:
         run: uvx --with tox-uv tox -e ${{ matrix.tox-env }}
         env:
           UV_PYTHON: ${{ matrix.python-version }}
+          AEROSPIKE_REQUIRE_SERVER: "1"
 
   feasibility:
     name: Feasibility
@@ -440,6 +445,8 @@ jobs:
 
       - name: Run feasibility test
         run: uvx --with tox-uv tox -e feasibility
+        env:
+          AEROSPIKE_REQUIRE_SERVER: "1"
 
   security:
     name: Security Audit
@@ -514,3 +521,5 @@ jobs:
 
       - name: Run compatibility tests
         run: uvx --with tox-uv tox -e compat
+        env:
+          AEROSPIKE_REQUIRE_SERVER: "1"

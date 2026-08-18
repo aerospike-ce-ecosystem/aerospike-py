@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import aerospike_py  # noqa: E402
 from tests import AEROSPIKE_CONFIG  # noqa: E402
+from tests.server import skip_or_raise  # noqa: E402
 
 CONFIG = AEROSPIKE_CONFIG
 NS = "test"
@@ -246,8 +247,8 @@ def sync_client():
     """Sync client for test data setup/cleanup."""
     try:
         c = aerospike_py.client(CONFIG).connect()
-    except Exception:
-        pytest.skip("Aerospike server not available")
+    except Exception as e:
+        skip_or_raise(e)
     yield c
     c.close()
 
