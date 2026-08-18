@@ -24,6 +24,7 @@ import time
 
 import pytest
 
+import aerospike_py
 from tests.helpers import invoke
 
 NS = "test"
@@ -204,3 +205,67 @@ class TestAsyncQueryForeach:
         await invoke(query, "foreach", collect)
 
         assert len(seen) == 10
+
+
+class TestQueryErrorsReachTheCaller:
+    """A failing query must raise — never read as an empty or short result set.
+
+    These are the streaming loop's error paths. They run in the ordinary suite
+    (no server lifecycle control needed), because the mutations they kill —
+    swallowing a mid-stream error, and treating a failed query start as an empty
+    result — otherwise survive a full CI run.
+    """
+
+    def test_a_query_start_failure_propagates_rather_than_looking_empty(self, client):
+        """A query that never starts must raise, not deliver zero records quietly."""
+        calls = 0
+
+        def callback(_record):
+            nonlocal calls
+            calls += 1
+            return True
+
+        with pytest.raises(aerospike_py.AerospikeError):
+            client.query("no_such_namespace", "no_such_set").foreach(callback)
+
+        assert calls == 0
+
+    def test_a_mid_stream_failure_raises_after_delivering_a_prefix(self, client, seeded):
+        """The behaviour change, pinned executably.
+
+        A query error part-way through now surfaces *after* records have reached
+        the callback — buffered, it surfaced before any callback ran. Both halves
+        matter: the raise (a swallowed mid-stream error would silently truncate
+        the scan and report success) and the non-zero prefix (the semantics this
+        PR changes, which callers with side-effecting callbacks must know about).
+
+        The budget is derived from a measured baseline rather than hard-coded, so
+        the test tracks machine speed, and it halves on a miss so a fast run
+        cannot turn into a flake.
+        """
+        baseline_ms = _scan_timings(client, seeded)[1] * 1000
+        budget_ms = max(15, round(baseline_ms * 0.5))
+
+        for _ in range(5):
+            calls = 0
+
+            def callback(_record):
+                nonlocal calls
+                calls += 1
+                return True
+
+            try:
+                client.query(NS, SET_NAME).foreach(callback, policy={"total_timeout": budget_ms})
+            except aerospike_py.AerospikeError:
+                assert calls > 0, (
+                    "the query failed before any record was delivered — this test needs a "
+                    "failure *during* the scan to pin the partial-delivery semantics"
+                )
+                assert calls < seeded, "the scan must not have completed"
+                return
+            budget_ms = max(5, budget_ms // 2)
+
+        pytest.fail(
+            f"could not make a {seeded}-record scan time out mid-stream "
+            f"(baseline {baseline_ms:.0f}ms); the streaming error path is untested"
+        )
