@@ -216,8 +216,33 @@ class TestQueryErrorsReachTheCaller:
     result — otherwise survive a full CI run.
     """
 
-    def test_a_query_start_failure_propagates_rather_than_looking_empty(self, client):
-        """A query that never starts must raise, not deliver zero records quietly."""
+    def test_a_query_start_failure_propagates_rather_than_looking_empty(self, client, seeded):
+        """A query that never starts must raise, not deliver zero records quietly.
+
+        ``partition_filter_by_range(0, 0)`` is the one reachable way to fail
+        ``client.query()`` itself from Python: aerospike-py validates the begin
+        and begin+count bounds client-side, but a zero count is only rejected
+        by ``PartitionTracker::new`` inside aerospike-core, so this exercises the
+        query-start error branch rather than the stream one. Without it, a
+        mutation that turns that branch into an empty successful scan survives a
+        full CI run.
+        """
+        calls = 0
+
+        def callback(_record):
+            nonlocal calls
+            calls += 1
+            return True
+
+        empty_partition_range = aerospike_py.partition_filter_by_range(0, 0)
+
+        with pytest.raises(aerospike_py.AerospikeError):
+            client.query(NS, SET_NAME).foreach(callback, policy={"partition_filter": empty_partition_range})
+
+        assert calls == 0
+
+    def test_an_unknown_namespace_propagates_rather_than_looking_empty(self, client):
+        """The stream-level equivalent: no node serves the namespace."""
         calls = 0
 
         def callback(_record):
