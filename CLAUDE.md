@@ -9,7 +9,7 @@ Python client library for the Aerospike NoSQL database.
 pip install aerospike-py
 ```
 
-> Python 3.10–3.14 (including 3.14t free-threaded), CPython only. Supports macOS (arm64, x86_64) and Linux (x86_64, aarch64).
+> Python 3.10–3.14 (including 3.14t free-threaded on macOS/Linux), CPython only. Supports macOS (arm64, x86_64), Linux (x86_64, aarch64), and Windows (x64).
 
 ## Project Structure
 
