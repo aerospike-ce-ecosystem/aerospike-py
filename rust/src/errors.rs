@@ -414,6 +414,19 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
             ClusterError::new_err("No more connections available"),
             CLIENT_SIDE_RESULT_CODE,
         ),
+        // aerospike-core 2.1+ ships a per-node circuit breaker: once a node
+        // exceeds `ClientPolicy::max_error_rate` errors within one
+        // `error_rate_window`, commands aimed at it are refused client-side
+        // until the counter resets. That is a node-availability condition, so
+        // it belongs with the other ClusterError cases — and mapping it keeps
+        // it out of the catch-all, which would log a spurious "this may be a
+        // bug in aerospike-py, please file an issue" on every trip.
+        AsError::MaxErrorRate(addr) => attach_result_code(
+            ClusterError::new_err(format!(
+                "Node circuit breaker tripped (max_error_rate exceeded) for node {addr}"
+            )),
+            CLIENT_SIDE_RESULT_CODE,
+        ),
         _ => {
             crate::bug_report::log_unexpected_error(
                 "errors::as_to_pyerr",
@@ -793,6 +806,7 @@ mod tests {
                 as_to_pyerr(AsError::InvalidArgument("bad".into())),
                 as_to_pyerr(AsError::InvalidNode("gone".into())),
                 as_to_pyerr(AsError::NoMoreConnections),
+                as_to_pyerr(AsError::MaxErrorRate("127.0.0.1:3000".into())),
             ];
             for err in &cases {
                 assert_eq!(
@@ -801,6 +815,21 @@ mod tests {
                     "client-side error must expose the -1 sentinel result_code"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn test_max_error_rate_maps_to_cluster_error() {
+        // The per-node circuit breaker added in aerospike-core 2.1 must land on
+        // ClusterError, not on the catch-all that tells users to file a bug.
+        Python::initialize();
+        Python::attach(|py| {
+            let err = as_to_pyerr(AsError::MaxErrorRate("127.0.0.1:3000".into()));
+            assert!(
+                err.is_instance_of::<ClusterError>(py),
+                "MaxErrorRate must raise ClusterError, got {err}"
+            );
+            assert!(err.to_string().contains("127.0.0.1:3000"));
         });
     }
 
