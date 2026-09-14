@@ -272,3 +272,21 @@ expr = exp.gt(
 )
 records = client.query("test", "transactions").results(policy={"filter_expression": expr})
 ```
+
+## Nesting Limit
+
+An expression tree may nest at most **64 levels** deep. A deeper tree raises
+`ValueError("Expression nesting exceeds maximum depth of 64")` when the policy
+is parsed, before any request is sent. The limit matches the one applied to
+nested list/map bin values and exists to keep the recursive converter from
+overflowing the native stack — relevant when expressions are generated from
+untrusted input, such as a query builder that translates client-supplied JSON
+filters into `exp.*` calls.
+
+```python
+# Raises ValueError — nested far deeper than any hand-written filter
+expr = exp.int_bin("a")
+for _ in range(1000):
+    expr = exp.not_(expr)
+client.query("test", "users").results(policy={"filter_expression": expr})
+```

@@ -12,8 +12,31 @@ use pyo3::types::{PyDict, PyList};
 
 use crate::types::value::py_to_value;
 
+/// Maximum nesting depth of a filter expression tree.
+///
+/// The converter below walks the Python dict tree recursively, and
+/// `aerospike_core::Expression` itself drops recursively, so an unbounded tree
+/// overflows the *native* stack (a SIGSEGV that `catch_unwind` in
+/// `panic_safety` cannot intercept, killing the whole interpreter). Services
+/// that translate untrusted request input into `exp.*` builders would turn that
+/// into a one-request process crash. Mirrors `MAX_NESTING_DEPTH` in
+/// `types::value`, and is far above any expression a human writes.
+const MAX_EXPRESSION_DEPTH: usize = 64;
+
 /// Convert a Python expression dict tree into an aerospike-core Expression.
 pub fn py_to_expression(obj: &Bound<'_, PyAny>) -> PyResult<Expression> {
+    py_to_expression_inner(obj, 0)
+}
+
+/// Depth-tracking body of [`py_to_expression`]. `depth` is the nesting level of
+/// `obj` itself; the cap is checked before anything is constructed so an
+/// over-deep tree never builds (and never drops) a deep `Expression`.
+fn py_to_expression_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Expression> {
+    if depth > MAX_EXPRESSION_DEPTH {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Expression nesting exceeds maximum depth of {MAX_EXPRESSION_DEPTH}"
+        )));
+    }
     let dict = obj.cast::<PyDict>().map_err(|_| {
         pyo3::exceptions::PyTypeError::new_err(
             "Expression must be a dict with '__expr__' key (use aerospike_py.exp builder functions)",
@@ -71,32 +94,32 @@ pub fn py_to_expression(obj: &Bound<'_, PyAny>) -> PyResult<Expression> {
 
         // ── Comparison operations (binary: left + right) ──
         "eq" | "ne" | "gt" | "ge" | "lt" | "le" | "geo_compare" => {
-            convert_binary_comparison(op.as_str(), dict)
+            convert_binary_comparison(op.as_str(), dict, depth)
         }
 
         // ── Logical operations ──
-        "not" => Ok(expressions::not(parse_sub_expr(dict, "expr")?)),
+        "not" => Ok(expressions::not(parse_sub_expr(dict, "expr", depth)?)),
 
         // ── Variadic operations (take Vec<Expression>) ──
         "and" | "or" | "xor" | "num_add" | "num_sub" | "num_mul" | "num_div" | "min" | "max"
         | "int_and" | "int_or" | "int_xor" | "cond" | "let" => {
-            convert_variadic_op(op.as_str(), dict)
+            convert_variadic_op(op.as_str(), dict, depth)
         }
 
         // ── Unary operations (take single Expression from "exprs" list) ──
         "num_abs" | "num_floor" | "num_ceil" | "to_int" | "to_float" | "int_not" | "int_count" => {
-            convert_unary_op(op.as_str(), dict)
+            convert_unary_op(op.as_str(), dict, depth)
         }
 
         // ── Binary pair operations (take exactly 2 Expressions from "exprs" list) ──
         "num_mod" | "num_pow" | "num_log" | "int_lshift" | "int_rshift" | "int_arshift"
-        | "int_lscan" | "int_rscan" => convert_binary_pair_op(op.as_str(), dict),
+        | "int_lscan" | "int_rscan" => convert_binary_pair_op(op.as_str(), dict, depth),
 
         // ── Pattern matching ──
         "regex_compare" => {
             let regex: String = get_required(dict, "regex")?;
             let flags: i64 = get_required(dict, "flags")?;
-            let bin_expr = parse_sub_expr(dict, "bin")?;
+            let bin_expr = parse_sub_expr(dict, "bin", depth)?;
             Ok(expressions::regex_compare(regex, flags, bin_expr))
         }
 
@@ -104,7 +127,7 @@ pub fn py_to_expression(obj: &Bound<'_, PyAny>) -> PyResult<Expression> {
         "var" => Ok(expressions::var(get_required::<String>(dict, "name")?)),
         "def" => {
             let name: String = get_required(dict, "name")?;
-            let value = parse_sub_expr(dict, "value")?;
+            let value = parse_sub_expr(dict, "value", depth)?;
             Ok(expressions::def(name, value))
         }
 
@@ -140,9 +163,13 @@ fn convert_bin_accessor(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expressi
 }
 
 /// Convert binary comparison operations that take "left" and "right" sub-expressions.
-fn convert_binary_comparison(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
-    let left = parse_sub_expr(dict, "left")?;
-    let right = parse_sub_expr(dict, "right")?;
+fn convert_binary_comparison(
+    op: &str,
+    dict: &Bound<'_, PyDict>,
+    depth: usize,
+) -> PyResult<Expression> {
+    let left = parse_sub_expr(dict, "left", depth)?;
+    let right = parse_sub_expr(dict, "right", depth)?;
     match op {
         "eq" => Ok(expressions::eq(left, right)),
         "ne" => Ok(expressions::ne(left, right)),
@@ -173,8 +200,8 @@ fn convert_binary_comparison(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Exp
 /// `cond` and `let` additionally carry a structural operand shape (an odd
 /// `cond` chain of `(condition, action)` pairs plus a default; a `let` body of
 /// definitions plus a scope expression) that is likewise validated here.
-fn convert_variadic_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
-    let exprs = parse_sub_expr_list(dict, "exprs")?;
+fn convert_variadic_op(op: &str, dict: &Bound<'_, PyDict>, depth: usize) -> PyResult<Expression> {
+    let exprs = parse_sub_expr_list(dict, "exprs", depth)?;
     if exprs.is_empty() {
         return Err(crate::errors::InvalidArgError::new_err(format!(
             "Expression '{op}' requires at least one operand, got an empty 'exprs' list"
@@ -228,8 +255,8 @@ fn convert_variadic_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expressio
 }
 
 /// Convert unary operations that take a single Expression from "exprs" list.
-fn convert_unary_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
-    let exprs = parse_sub_expr_list(dict, "exprs")?;
+fn convert_unary_op(op: &str, dict: &Bound<'_, PyDict>, depth: usize) -> PyResult<Expression> {
+    let exprs = parse_sub_expr_list(dict, "exprs", depth)?;
     let expr = exprs.into_iter().next().ok_or_else(|| {
         pyo3::exceptions::PyValueError::new_err(format!(
             "{op} requires at least 1 expression in 'exprs'"
@@ -250,8 +277,12 @@ fn convert_unary_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> 
 }
 
 /// Convert binary pair operations that take exactly 2 Expressions from "exprs" list.
-fn convert_binary_pair_op(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expression> {
-    let exprs = parse_sub_expr_list(dict, "exprs")?;
+fn convert_binary_pair_op(
+    op: &str,
+    dict: &Bound<'_, PyDict>,
+    depth: usize,
+) -> PyResult<Expression> {
+    let exprs = parse_sub_expr_list(dict, "exprs", depth)?;
     if exprs.len() != 2 {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
             "{op} requires exactly 2 expressions, got {}",
@@ -304,19 +335,23 @@ fn get_required_any<'py>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<Bound
     })
 }
 
-fn parse_sub_expr(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Expression> {
+fn parse_sub_expr(dict: &Bound<'_, PyDict>, key: &str, depth: usize) -> PyResult<Expression> {
     let obj = get_required_any(dict, key)?;
-    py_to_expression(&obj)
+    py_to_expression_inner(&obj, depth + 1)
 }
 
-fn parse_sub_expr_list(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<Expression>> {
+fn parse_sub_expr_list(
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+    depth: usize,
+) -> PyResult<Vec<Expression>> {
     let obj = get_required_any(dict, key)?;
     let list = obj.cast::<PyList>().map_err(|_| {
         pyo3::exceptions::PyTypeError::new_err(format!("'{key}' must be a list of expressions"))
     })?;
     let mut result = Vec::with_capacity(list.len());
     for item in list.iter() {
-        result.push(py_to_expression(&item)?);
+        result.push(py_to_expression_inner(&item, depth + 1)?);
     }
     Ok(result)
 }
@@ -547,6 +582,49 @@ mod tests {
         Python::attach(|py| {
             let dict = bin_accessor_dict(py, "int_bin", "age");
             py_to_expression(dict.as_any()).expect("non-empty bin name must convert");
+        });
+    }
+
+    /// Build a `not(not(...(int_bin)))` chain nested `depth` levels deep.
+    fn nested_not_dict(py: Python<'_>, depth: usize) -> Bound<'_, PyDict> {
+        let mut dict = bin_accessor_dict(py, "int_bin", "a");
+        for _ in 0..depth {
+            let outer = PyDict::new(py);
+            outer.set_item("__expr__", "not").unwrap();
+            outer.set_item("expr", &dict).unwrap();
+            dict = outer;
+        }
+        dict
+    }
+
+    /// A tree nested deeper than the cap is rejected with `ValueError` rather
+    /// than recursing until the native stack overflows.
+    #[test]
+    fn overdeep_expression_is_rejected() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = nested_not_dict(py, MAX_EXPRESSION_DEPTH + 1);
+            let err = py_to_expression(dict.as_any())
+                .expect_err("expression deeper than the cap must be rejected");
+            assert!(
+                err.is_instance_of::<pyo3::exceptions::PyValueError>(py),
+                "over-deep expression must raise ValueError, got {err:?}"
+            );
+            assert!(
+                err.to_string()
+                    .contains(&format!("maximum depth of {MAX_EXPRESSION_DEPTH}")),
+                "error must state the limit: {err:?}"
+            );
+        });
+    }
+
+    /// A tree exactly at the cap still converts (the guard is off-by-one safe).
+    #[test]
+    fn expression_at_max_depth_converts() {
+        Python::initialize();
+        Python::attach(|py| {
+            let dict = nested_not_dict(py, MAX_EXPRESSION_DEPTH);
+            py_to_expression(dict.as_any()).expect("expression at the cap must convert");
         });
     }
 }
