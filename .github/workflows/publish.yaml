@@ -54,6 +54,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Installed FIRST, on purpose. actions/setup-python prepends every
+      # install to PATH and the free-threaded framework symlinks
+      # `python3.14 -> python3.14t`, so installing 3.14t last would leave
+      # `--find-interpreter` resolving `python3.14` to the free-threaded build
+      # and no cp314-cp314 macOS wheel would ever be produced (releases 0.13.0
+      # through 0.14.2 shipped without one). With 3.14t first, the GIL 3.14 of
+      # the next step wins the `python3.14` name while `python3.14t` is still
+      # discoverable further down PATH; maturin keys its interpreter dedup on
+      # gil_disabled, so it keeps both.
+      #
+      # 3.14t is not officially distributed on Windows yet (the
+      # actions/python-versions manifest publishes no win-x64 build of cpython
+      # 3.14t at time of writing), so install it only on Linux/macOS.
+      - name: Install free-threaded Python 3.14t (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.14t
+          allow-prereleases: true
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -63,16 +83,6 @@ jobs:
             3.12
             3.13
             3.14
-          allow-prereleases: true
-
-      # Free-threaded Python 3.14t: not officially distributed on Windows yet
-      # (actions/python-versions manifest does not publish win-x64 builds of
-      # cpython 3.14t at time of writing). Install only on Linux/macOS.
-      - name: Install free-threaded Python 3.14t (Linux/macOS)
-        if: runner.os != 'Windows'
-        uses: actions/setup-python@v7
-        with:
-          python-version: 3.14t
           allow-prereleases: true
 
       - name: Extract version and update Cargo.toml
@@ -104,7 +114,15 @@ jobs:
         if: runner.os == 'Windows'
         uses: PyO3/maturin-action@v1
         with:
-          args: --release --out dist
+          args: --release --out dist --find-interpreter
+
+      # maturin never reports the interpreters it did not find, so a runner
+      # that loses one publishes a release with a hole in it. Fail here
+      # instead: every classifier in pyproject.toml needs a wheel, or
+      # `pip install aerospike-py` falls back to the sdist and demands a Rust
+      # toolchain.
+      - name: Verify wheel matrix
+        run: python scripts/check-wheel-matrix.py dist
 
       - name: Upload wheels
         uses: actions/upload-artifact@v7.0.1
