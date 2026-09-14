@@ -145,6 +145,27 @@ class TestExpressionGet:
         with pytest.raises(aerospike_py.FilteredOut):
             client.get(key, policy={"filter_expression": expr})
 
+    def test_bool_bin_filter_match(self, client):
+        """bool_bin must compare against a BOOL particle, not an INT one."""
+        key = self.keys[0]  # active=True
+        expr = exp.eq(exp.bool_bin("active"), exp.bool_val(True))
+        _, _, bins = client.get(key, policy={"filter_expression": expr})
+        assert bins["active"] is True
+
+    def test_bool_bin_filter_no_match(self, client):
+        """bool_bin filter should raise FilteredOut when the bool differs."""
+        key = self.keys[0]  # active=True
+        expr = exp.eq(exp.bool_bin("active"), exp.bool_val(False))
+        with pytest.raises(aerospike_py.FilteredOut):
+            client.get(key, policy={"filter_expression": expr})
+
+    def test_bool_bin_filter_match_false(self, client):
+        """bool_bin filter matches a False-valued bool bin."""
+        key = self.keys[1]  # active=False
+        expr = exp.eq(exp.bool_bin("active"), exp.bool_val(False))
+        _, _, bins = client.get(key, policy={"filter_expression": expr})
+        assert bins["active"] is False
+
 
 class TestExpressionBatch:
     """Expression filters applied to batch operations."""

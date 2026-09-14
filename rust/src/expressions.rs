@@ -124,7 +124,7 @@ fn convert_bin_accessor(op: &str, dict: &Bound<'_, PyDict>) -> PyResult<Expressi
         "int_bin" => Ok(expressions::int_bin(name)),
         "float_bin" => Ok(expressions::float_bin(name)),
         "string_bin" => Ok(expressions::string_bin(name)),
-        "bool_bin" => Ok(expressions::int_bin(name)), // booleans are stored as integers
+        "bool_bin" => Ok(expressions::bool_bin(name)),
         "blob_bin" => Ok(expressions::blob_bin(name)),
         "list_bin" => Ok(expressions::list_bin(name)),
         "map_bin" => Ok(expressions::map_bin(name)),
