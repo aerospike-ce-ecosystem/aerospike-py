@@ -445,11 +445,76 @@ fn parse_i32_flag(val: &Option<Value>, op_name: &str, field_name: &str) -> PyRes
 
 // ── Main conversion ─────────────────────────────────────────────
 
+/// Whether a Python op code produces an operation the server treats as a write.
+///
+/// `aerospike_core::Operation::is_write` (and the `OperationType` it inspects)
+/// is `pub(crate)`, so the classification has to be re-derived here from the
+/// `OP_*` code. The match lists the *read* codes explicitly and treats every
+/// other code — including codes added later — as a write, so a new op can never
+/// be silently routed onto the read-only batch path.
+///
+/// Keep this in sync with the dispatch table in [`py_ops_to_rust`]: a code is a
+/// read here exactly when the `aerospike-core` constructor it maps to builds an
+/// `OperationType::Read`/`CdtRead`/`BitRead`/`HllRead` operation.
+pub fn op_code_is_write(op_code: i32) -> bool {
+    !matches!(
+        op_code,
+        OP_READ
+            // List CDT reads
+            | OP_LIST_SIZE
+            | OP_LIST_GET
+            | OP_LIST_GET_RANGE
+            | OP_LIST_GET_BY_VALUE
+            | OP_LIST_GET_BY_INDEX
+            | OP_LIST_GET_BY_INDEX_RANGE
+            | OP_LIST_GET_BY_RANK
+            | OP_LIST_GET_BY_RANK_RANGE
+            | OP_LIST_GET_BY_VALUE_LIST
+            | OP_LIST_GET_BY_VALUE_RANGE
+            // Map CDT reads
+            | OP_MAP_SIZE
+            | OP_MAP_GET_BY_KEY
+            | OP_MAP_GET_BY_KEY_RANGE
+            | OP_MAP_GET_BY_VALUE
+            | OP_MAP_GET_BY_VALUE_RANGE
+            | OP_MAP_GET_BY_INDEX
+            | OP_MAP_GET_BY_INDEX_RANGE
+            | OP_MAP_GET_BY_RANK
+            | OP_MAP_GET_BY_RANK_RANGE
+            | OP_MAP_GET_BY_KEY_LIST
+            | OP_MAP_GET_BY_VALUE_LIST
+            // HLL reads
+            | OP_HLL_GET_COUNT
+            | OP_HLL_GET_UNION
+            | OP_HLL_GET_UNION_COUNT
+            | OP_HLL_GET_INTERSECT_COUNT
+            | OP_HLL_GET_SIMILARITY
+            | OP_HLL_DESCRIBE
+            // Bitwise reads
+            | OP_BIT_GET
+            | OP_BIT_COUNT
+            | OP_BIT_LSCAN
+            | OP_BIT_RSCAN
+            | OP_BIT_GET_INT
+    )
+}
+
 /// Convert a Python list of operation dicts to Rust Operations.
 /// Each operation is a dict: {"op": int, "bin": str, "val": any, ...}
 pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> {
+    py_ops_to_rust_checked(ops_list).map(|(ops, _)| ops)
+}
+
+/// Like [`py_ops_to_rust`], but also reports whether the list contains a write.
+///
+/// `batch_operate` needs the flag to decide between a batch *write* and a batch
+/// *read*: `aerospike-core` rejects a batch write whose op list contains no
+/// write op ("Batch write operations do not contain a write") before sending
+/// anything, so an all-read op list has to be issued as a batch read instead.
+pub fn py_ops_to_rust_checked(ops_list: &Bound<'_, PyList>) -> PyResult<(Vec<Operation>, bool)> {
     trace!("Converting {} Python operations to Rust", ops_list.len());
     let mut rust_ops: Vec<Operation> = Vec::with_capacity(ops_list.len());
+    let mut has_write = false;
 
     for item in ops_list.iter() {
         let dict = item.cast::<PyDict>()?;
@@ -1210,10 +1275,11 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
             }
         };
 
+        has_write |= op_code_is_write(op_code);
         rust_ops.push(op);
     }
 
-    Ok(rust_ops)
+    Ok((rust_ops, has_write))
 }
 
 #[cfg(test)]

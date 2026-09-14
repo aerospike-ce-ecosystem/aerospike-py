@@ -109,6 +109,28 @@ class TestAsyncBatchWrite:
                 assert val == 77
 
 
+class TestAsyncBatchOperateReadOnly:
+    """Async batch_operate must accept op lists that contain no write."""
+
+    async def test_async_batch_operate_read_only_ops(self, async_client, async_cleanup):
+        keys = [
+            ("test", "demo", "async_batch_ro_1"),
+            ("test", "demo", "async_batch_ro_2"),
+        ]
+        for k in keys:
+            async_cleanup.append(k)
+
+        await async_client.put(keys[0], {"counter": 10})
+        await async_client.put(keys[1], {"counter": 20})
+
+        ops = [{"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None}]
+        results = await async_client.batch_operate(keys, ops)
+        assert len(results.batch_records) == 2
+        assert [br.result for br in results.batch_records] == [0, 0]
+        assert results.batch_records[0].record.bins["counter"] == 10
+        assert results.batch_records[1].record.bins["counter"] == 20
+
+
 class TestAsyncBatchWriteGeneric:
     """Test async batch_write() — generic dict-based batch write."""
 

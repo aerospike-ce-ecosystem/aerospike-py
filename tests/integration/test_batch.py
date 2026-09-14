@@ -3,6 +3,7 @@
 import pytest
 
 import aerospike_py
+from aerospike_py import exp, list_operations
 
 
 class TestBatchRead:
@@ -286,6 +287,83 @@ class TestBatchOperate:
         else:
             assert counter0 == 15
             assert counter1 == 25
+
+
+class TestBatchOperateReadOnly:
+    """batch_operate must accept op lists that contain no write (issue: read-only ops)."""
+
+    def test_batch_operate_read_only_ops(self, client, cleanup):
+        """An OPERATOR_READ-only op list is a batch read, not a rejected batch write."""
+        keys = [
+            ("test", "demo", "batch_ro_1"),
+            ("test", "demo", "batch_ro_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        client.put(keys[0], {"counter": 10})
+        client.put(keys[1], {"counter": 20})
+
+        ops = [{"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None}]
+        results = client.batch_operate(keys, ops)
+        assert len(results.batch_records) == 2
+        assert [br.result for br in results.batch_records] == [0, 0]
+        assert results.batch_records[0].record.bins["counter"] == 10
+        assert results.batch_records[1].record.bins["counter"] == 20
+
+    def test_batch_operate_read_only_ops_with_filter_expression(self, client, cleanup):
+        """The documented filter_expression + OPERATOR_READ batch recipe works."""
+        keys = [
+            ("test", "demo", "batch_ro_fe_1"),
+            ("test", "demo", "batch_ro_fe_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        client.put(keys[0], {"score": 10})
+        client.put(keys[1], {"score": 99})
+
+        ops = [{"op": aerospike_py.OPERATOR_READ, "bin": "score", "val": None}]
+        expr = exp.gt(exp.int_bin("score"), exp.int_val(50))
+        results = client.batch_operate(keys, ops, policy={"filter_expression": expr})
+        assert len(results.batch_records) == 2
+        # Record 0 is filtered out, record 1 matches.
+        assert results.batch_records[0].result != 0
+        assert results.batch_records[1].result == 0
+        assert results.batch_records[1].record.bins["score"] == 99
+
+    def test_batch_operate_read_only_cdt_ops(self, client, cleanup):
+        """A CDT-read-only op list (list_get_by_index) is also a batch read."""
+        keys = [
+            ("test", "demo", "batch_ro_cdt_1"),
+            ("test", "demo", "batch_ro_cdt_2"),
+        ]
+        for k in keys:
+            cleanup.append(k)
+
+        client.put(keys[0], {"items": [1, 2, 3]})
+        client.put(keys[1], {"items": [4, 5, 6]})
+
+        ops = [list_operations.list_get_by_index("items", 0, aerospike_py.LIST_RETURN_VALUE)]
+        results = client.batch_operate(keys, ops)
+        assert [br.result for br in results.batch_records] == [0, 0]
+        assert results.batch_records[0].record.bins["items"] == 1
+        assert results.batch_records[1].record.bins["items"] == 4
+
+    def test_batch_operate_mixed_ops_still_write(self, client, cleanup):
+        """An op list with a single write keeps the batch-write path."""
+        keys = [("test", "demo", "batch_ro_mixed_1")]
+        cleanup.append(keys[0])
+        client.put(keys[0], {"counter": 1})
+
+        ops = [
+            {"op": aerospike_py.OPERATOR_READ, "bin": "counter", "val": None},
+            {"op": aerospike_py.OPERATOR_INCR, "bin": "counter", "val": 4},
+        ]
+        results = client.batch_operate(keys, ops)
+        assert results.batch_records[0].result == 0
+        _, _, bins = client.get(keys[0])
+        assert bins["counter"] == 5
 
 
 class TestBatchConcurrency:

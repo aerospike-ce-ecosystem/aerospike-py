@@ -18,7 +18,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
-use crate::operations::py_ops_to_rust;
+use crate::operations::{py_ops_to_rust, py_ops_to_rust_checked};
 use crate::policy::admin_policy::parse_admin_policy;
 use crate::policy::batch_policy::parse_batch_policy;
 use crate::policy::read_policy::{parse_read_policy, DEFAULT_READ_POLICY};
@@ -504,7 +504,12 @@ impl BatchReadArgs {
 pub struct BatchOperateArgs {
     pub rust_keys: Vec<Key>,
     pub batch_policy: aerospike_core::BatchPolicy,
+    pub read_policy: aerospike_core::BatchReadPolicy,
     pub ops: Vec<Operation>,
+    /// `true` when at least one op in `ops` is a write. An all-read op list must
+    /// be issued as a batch *read*: `aerospike-core` refuses to encode a batch
+    /// write that contains no write op.
+    pub has_write: bool,
     pub batch_ns: String,
     pub batch_set: String,
     pub otel: OtelContext,
@@ -518,7 +523,8 @@ pub fn prepare_batch_operate_args(
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchOperateArgs> {
     let batch_policy = parse_batch_policy(policy)?;
-    let rust_ops = py_ops_to_rust(ops)?;
+    let read_policy = parse_batch_read_policy(policy)?;
+    let (rust_ops, has_write) = py_ops_to_rust_checked(ops)?;
     let rust_keys = py_to_keys(py, keys)?;
 
     let (batch_ns, batch_set) = rust_keys
@@ -529,7 +535,9 @@ pub fn prepare_batch_operate_args(
     Ok(BatchOperateArgs {
         rust_keys,
         batch_policy,
+        read_policy,
         ops: rust_ops,
+        has_write,
         batch_ns,
         batch_set,
         otel: OtelContext::new(py, conn_info),
@@ -538,6 +546,18 @@ pub fn prepare_batch_operate_args(
 
 impl BatchOperateArgs {
     pub fn to_batch_ops(&self) -> Vec<BatchOperation> {
+        // An op list without a write cannot be sent as a batch write:
+        // `aerospike-core` fails buffer preparation with "Batch write
+        // operations do not contain a write". Read-only op lists (OPERATOR_READ,
+        // list_get*/map_get*/bit_get*/hll_get*, ...) are valid batch reads, so
+        // route them there instead.
+        if !self.has_write {
+            return self
+                .rust_keys
+                .iter()
+                .map(|k| BatchOperation::read_ops(&self.read_policy, k.clone(), self.ops.clone()))
+                .collect();
+        }
         let write_policy = BatchWritePolicy::default();
         self.rust_keys
             .iter()
@@ -1126,11 +1146,77 @@ pub fn prepare_create_role_args(
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_cluster_name, parse_increment_offset};
-    use aerospike_core::Value;
+    use super::{extract_cluster_name, parse_increment_offset, prepare_batch_operate_args};
+    use crate::constants::{OP_INCR, OP_LIST_GET_BY_INDEX, OP_READ};
+    use crate::tracing::ConnectionInfo;
+    use aerospike_core::{BatchOperation, Value};
     use pyo3::exceptions::PyTypeError;
     use pyo3::prelude::*;
     use pyo3::types::{PyDict, PyList};
+    use std::sync::Arc;
+
+    /// Build `BatchOperateArgs` for a single key and the given op dicts.
+    fn batch_ops_for(py: Python<'_>, ops: &[Bound<'_, PyDict>]) -> Vec<BatchOperation> {
+        let keys = PyList::new(py, [("test", "demo", "k1")]).unwrap();
+        let op_list = PyList::new(py, ops).unwrap();
+        let conn_info = Arc::new(ConnectionInfo::default());
+        prepare_batch_operate_args(py, &keys, &op_list, None, &conn_info)
+            .expect("args should parse")
+            .to_batch_ops()
+    }
+
+    #[test]
+    fn batch_operate_read_only_ops_build_a_batch_read() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Plain OPERATOR_READ.
+            let read = PyDict::new(py);
+            read.set_item("op", OP_READ).unwrap();
+            read.set_item("bin", "counter").unwrap();
+
+            // CDT read (list_get_by_index) — also non-write.
+            let cdt_read = PyDict::new(py);
+            cdt_read.set_item("op", OP_LIST_GET_BY_INDEX).unwrap();
+            cdt_read.set_item("bin", "items").unwrap();
+            cdt_read.set_item("index", 0).unwrap();
+            cdt_read.set_item("return_type", 7).unwrap();
+
+            for batch_ops in [
+                batch_ops_for(py, std::slice::from_ref(&read)),
+                batch_ops_for(py, std::slice::from_ref(&cdt_read)),
+                batch_ops_for(py, &[read.clone(), cdt_read.clone()]),
+            ] {
+                assert!(
+                    matches!(
+                        batch_ops.as_slice(),
+                        [BatchOperation::Read { ops: Some(_), .. }]
+                    ),
+                    "read-only op list must produce a batch read, got {batch_ops:?}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn batch_operate_keeps_write_path_when_any_op_writes() {
+        Python::initialize();
+        Python::attach(|py| {
+            let read = PyDict::new(py);
+            read.set_item("op", OP_READ).unwrap();
+            read.set_item("bin", "counter").unwrap();
+
+            let incr = PyDict::new(py);
+            incr.set_item("op", OP_INCR).unwrap();
+            incr.set_item("bin", "counter").unwrap();
+            incr.set_item("val", 1).unwrap();
+
+            let batch_ops = batch_ops_for(py, &[read, incr]);
+            assert!(
+                matches!(batch_ops.as_slice(), [BatchOperation::Write { .. }]),
+                "a mixed op list must stay on the batch-write path, got {batch_ops:?}"
+            );
+        });
+    }
 
     #[test]
     fn parse_increment_offset_accepts_int_and_float() {
