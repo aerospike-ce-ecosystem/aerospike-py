@@ -67,10 +67,14 @@ class TestWriteMetaKeyAndCommitLevel:
         client.put(sent, {"val": 1}, meta={"key": aerospike_py.POLICY_KEY_SEND})
         client.put(digest_only, {"val": 2})
 
+        # Key the assertions on the two known digests so leftovers from an
+        # aborted earlier run on a shared server cannot break the test.
+        sent_digest = client.get(sent)[0][3]
+        digest_only_digest = client.get(digest_only)[0][3]
+
         scanned = {record_key[3]: record_key[2] for record_key, _, _ in client.query("test", "meta_keysend").results()}
-        assert len(scanned) == 2
-        stored = [user_key for user_key in scanned.values() if user_key is not None]
-        assert stored == ["meta_key_sent"]
+        assert scanned[sent_digest] == "meta_key_sent"
+        assert scanned[digest_only_digest] is None
 
     def test_put_meta_commit_level_master(self, client, cleanup):
         """``meta={"commit_level": ...}`` is accepted and does not break the write."""

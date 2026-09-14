@@ -440,7 +440,7 @@ For every write field, **per-record `WriteMeta` always wins over batch-level `Ba
 
 #### Write field precedence (single-record writes)
 
-`put()`, `remove()`, `touch()`, `operate()`, `append()`, `prepend()`, `increment()`, `remove_bin()` and `apply()` accept both `meta` and `policy`. All six `WriteMeta` fields reach the server, but the order is the mirror image of `batch_write()`: `meta` is applied first and the **explicit `policy` dict wins** on any field they share.
+`put()`, `remove()`, `touch()`, `operate()`, `operate_ordered()`, `append()`, `prepend()`, `increment()` and `remove_bin()` accept both `meta` and `policy`. All six `WriteMeta` fields reach the server, but the order is the mirror image of `batch_write()`: `meta` is applied first and the **explicit `policy` dict wins** on any field they share.
 
 ```python
 # meta alone → CREATE_ONLY is honoured (raises RecordExistsError on an existing record)
