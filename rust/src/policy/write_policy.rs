@@ -92,7 +92,13 @@ pub fn parse_write_policy(
     trace!("Parsing write policy");
     let mut policy = default_write_policy();
 
-    // Apply meta (gen, ttl) first
+    // Apply the per-call `meta` dict first; an explicit `policy` dict below
+    // overrides any field the two have in common (unchanged precedence).
+    //
+    // Every key of the public `WriteMeta` TypedDict is honoured here, with the
+    // same semantics as the batch path's `apply_record_meta` — note `gen` is
+    // asymmetric: in `meta` it is an expected generation (implying
+    // `ExpectGenEqual`), in `policy` it is a `POLICY_GEN_*` enum index.
     if let Some(meta_dict) = meta {
         if let Some(gen) = meta_dict.get_item("gen")? {
             policy.generation = gen.extract::<u32>()?;
@@ -100,6 +106,18 @@ pub fn parse_write_policy(
         }
         if let Some(ttl) = meta_dict.get_item("ttl")? {
             policy.expiration = parse_ttl(ttl.extract::<i64>()?)?;
+        }
+        if let Some(key) = meta_dict.get_item("key")? {
+            policy.send_key = key.extract::<i32>()? == 1;
+        }
+        if let Some(exists) = meta_dict.get_item("exists")? {
+            policy.record_exists_action = parse_record_exists_action(exists.extract::<i32>()?);
+        }
+        if let Some(commit_level) = meta_dict.get_item("commit_level")? {
+            policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+        }
+        if let Some(durable_delete) = meta_dict.get_item("durable_delete")? {
+            policy.durable_delete = durable_delete.extract::<bool>()?;
         }
     }
 
@@ -160,6 +178,7 @@ pub fn parse_write_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aerospike_core::{CommitLevel, RecordExistsAction};
 
     #[test]
     fn parse_ttl_accepts_valid_positive_seconds() {
@@ -268,6 +287,122 @@ mod tests {
             let err = parse_ttl(-100).expect_err("unknown negative ttl must fail");
             assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
             assert!(err.to_string().contains("ttl out of range"));
+        });
+    }
+
+    #[test]
+    fn write_policy_meta_exists_create_only_is_honoured() {
+        Python::initialize();
+        Python::attach(|py| {
+            // POLICY_EXISTS_CREATE_ONLY == 4. Dropping this key silently turns a
+            // create-only write into an unconditional upsert.
+            let meta = pyo3::types::PyDict::new(py);
+            meta.set_item("exists", 4i32).unwrap();
+            let p = parse_write_policy(None, Some(&meta)).unwrap();
+            assert!(matches!(
+                p.record_exists_action,
+                RecordExistsAction::CreateOnly
+            ));
+        });
+    }
+
+    #[test]
+    fn write_policy_meta_key_send_is_honoured() {
+        Python::initialize();
+        Python::attach(|py| {
+            // POLICY_KEY_SEND == 1.
+            let meta = pyo3::types::PyDict::new(py);
+            meta.set_item("key", 1i32).unwrap();
+            let p = parse_write_policy(None, Some(&meta)).unwrap();
+            assert!(p.send_key, "meta key=1 must enable send_key");
+
+            let meta = pyo3::types::PyDict::new(py);
+            meta.set_item("key", 0i32).unwrap();
+            let p = parse_write_policy(None, Some(&meta)).unwrap();
+            assert!(
+                !p.send_key,
+                "meta key=0 (POLICY_KEY_DIGEST) must not send the key"
+            );
+        });
+    }
+
+    #[test]
+    fn write_policy_meta_commit_level_is_honoured() {
+        Python::initialize();
+        Python::attach(|py| {
+            // POLICY_COMMIT_LEVEL_MASTER == 1.
+            let meta = pyo3::types::PyDict::new(py);
+            meta.set_item("commit_level", 1i32).unwrap();
+            let p = parse_write_policy(None, Some(&meta)).unwrap();
+            assert!(matches!(p.commit_level, CommitLevel::CommitMaster));
+        });
+    }
+
+    #[test]
+    fn write_policy_meta_durable_delete_is_honoured() {
+        Python::initialize();
+        Python::attach(|py| {
+            let meta = pyo3::types::PyDict::new(py);
+            meta.set_item("durable_delete", true).unwrap();
+            let p = parse_write_policy(None, Some(&meta)).unwrap();
+            assert!(p.durable_delete);
+        });
+    }
+
+    #[test]
+    fn write_policy_dict_still_overrides_meta_for_the_same_field() {
+        Python::initialize();
+        Python::attach(|py| {
+            // Precedence for single-record writes is unchanged: meta is applied
+            // first, the explicit policy dict wins on conflict.
+            let meta = pyo3::types::PyDict::new(py);
+            meta.set_item("exists", 4i32).unwrap(); // CREATE_ONLY
+            meta.set_item("key", 1i32).unwrap(); // KEY_SEND
+            meta.set_item("commit_level", 1i32).unwrap(); // MASTER
+            meta.set_item("durable_delete", true).unwrap();
+            meta.set_item("ttl", 300i64).unwrap();
+
+            let d = pyo3::types::PyDict::new(py);
+            d.set_item("exists", 1i32).unwrap(); // POLICY_EXISTS_UPDATE_ONLY
+            d.set_item("key", 0i32).unwrap(); // KEY_DIGEST
+            d.set_item("commit_level", 0i32).unwrap(); // ALL
+            d.set_item("durable_delete", false).unwrap();
+            d.set_item("ttl", 600i64).unwrap();
+
+            let p = parse_write_policy(Some(&d), Some(&meta)).unwrap();
+            assert!(matches!(
+                p.record_exists_action,
+                RecordExistsAction::UpdateOnly
+            ));
+            assert!(!p.send_key);
+            assert!(matches!(p.commit_level, CommitLevel::CommitAll));
+            assert!(!p.durable_delete);
+            assert!(matches!(p.expiration, Expiration::Seconds(600)));
+        });
+    }
+
+    #[test]
+    fn write_policy_meta_fields_survive_an_unrelated_policy_dict() {
+        Python::initialize();
+        Python::attach(|py| {
+            // A policy dict that does not mention the meta fields must not reset
+            // them back to the defaults.
+            let meta = pyo3::types::PyDict::new(py);
+            meta.set_item("exists", 4i32).unwrap();
+            meta.set_item("key", 1i32).unwrap();
+            meta.set_item("durable_delete", true).unwrap();
+
+            let d = pyo3::types::PyDict::new(py);
+            d.set_item("total_timeout", 5000u32).unwrap();
+
+            let p = parse_write_policy(Some(&d), Some(&meta)).unwrap();
+            assert!(matches!(
+                p.record_exists_action,
+                RecordExistsAction::CreateOnly
+            ));
+            assert!(p.send_key);
+            assert!(p.durable_delete);
+            assert_eq!(p.base_policy.total_timeout, 5000);
         });
     }
 }
