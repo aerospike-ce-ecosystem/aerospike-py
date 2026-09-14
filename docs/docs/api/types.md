@@ -414,6 +414,8 @@ Used by: `put()`, `remove()`, `touch()`, `operate()` as the `meta` parameter, **
 
 In `batch_write()`, fields set in per-record `WriteMeta` override the corresponding batch-level [`BatchPolicy`](#batchpolicy) defaults — see the [precedence rule](#write-field-precedence-batch_write).
 
+On single-record writes, `meta` is applied **first** and an explicit `policy` dict overrides it for any field the two share — see [single-record precedence](#write-field-precedence-single-record-writes).
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `gen` | `int` | Expected generation. Setting this implies `POLICY_GEN_EQ` (CAS-style write). |
@@ -435,6 +437,25 @@ For every write field, **per-record `WriteMeta` always wins over batch-level `Ba
 | `gen`            | ✅ (enum index)             | ✅ (expected value)      | Asymmetric: batch-level = `POLICY_GEN_*` enum index; per-record = numeric generation that forces `POLICY_GEN_EQ`. |
 | `commit_level`   | ✅                          | ✅                       | |
 | `durable_delete` | ✅                          | ✅                       | |
+
+#### Write field precedence (single-record writes)
+
+`put()`, `remove()`, `touch()`, `operate()`, `append()`, `prepend()`, `increment()`, `remove_bin()` and `apply()` accept both `meta` and `policy`. All six `WriteMeta` fields reach the server, but the order is the mirror image of `batch_write()`: `meta` is applied first and the **explicit `policy` dict wins** on any field they share.
+
+```python
+# meta alone → CREATE_ONLY is honoured (raises RecordExistsError on an existing record)
+client.put(key, {"val": 1}, meta={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})
+
+# policy wins over meta for the same field → this is a plain upsert
+client.put(
+    key,
+    {"val": 1},
+    meta={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+    policy={"exists": aerospike_py.POLICY_EXISTS_IGNORE},
+)
+```
+
+Note the `gen` asymmetry here too: `meta={"gen": n}` is an expected generation (implying `POLICY_GEN_EQ`), while `policy={"gen": ...}` is a `POLICY_GEN_*` enum index.
 
 ### `Privilege`
 

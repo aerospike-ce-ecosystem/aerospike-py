@@ -312,6 +312,16 @@ class ScanPolicy(TypedDict, total=False):
 
 
 class WriteMeta(TypedDict, total=False):
+    """Per-call write metadata.
+
+    Accepted as the ``meta`` argument of every single-record write
+    (``put``/``remove``/``touch``/``operate``/``apply``/...) and as the third
+    tuple element of a ``batch_write`` record. All six fields are honoured on
+    both paths, but precedence differs: in ``batch_write`` per-record
+    ``WriteMeta`` wins over the batch-level policy, while on single-record
+    writes an explicit ``policy`` dict wins over ``meta``.
+    """
+
     gen: int
     ttl: int
     key: int
