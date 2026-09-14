@@ -16,13 +16,22 @@ use super::{
 ///
 /// aerospike-core's `BasePolicy::default()` is `socket_timeout: 30000,
 /// total_timeout: 1000, max_retries: 2, sleep_between_retries: 0`
-/// (aerospike-core-2.0.0 `src/policy/read_policy.rs:33-45`). `max_retries: 2`
+/// (aerospike-core-2.2.0 `src/policy/read_policy.rs:33-45`; the numbers are
+/// unchanged from 2.0.0). `max_retries: 2`
 /// is a reasonable read default but an unsafe **write** default: `increment()`,
 /// `append()`, `prepend()`, and `operate()` with `OP_INCR` are not idempotent,
 /// and the inherited budget retries twice with **zero backoff** inside a
 /// 1000 ms total timeout — precisely the conditions that produce a client-side
 /// timeout on a write the server already committed. A retried counter
 /// over-counts; a retried append duplicates. Silently, in both cases.
+///
+/// Note that this default only became *effective* with aerospike-core 2.2.0.
+/// Under 2.0.0 the retry cap was gated on `policy.max_retries() > 0`
+/// (`src/commands/single_command.rs:112`), so `0` meant "retry until
+/// `total_timeout` expires" rather than "do not retry" — the opposite of the
+/// intent here. 2.2.0 computes `effective_attempt = max_retries + 1`, so `0`
+/// now means exactly one attempt. Do not read this default as having been
+/// honoured on 2.0.0.
 ///
 /// Writes therefore default to **no retries**, matching the official Aerospike
 /// clients and this repo's own documentation — `docs/docs/api/types.md` already

@@ -200,6 +200,7 @@ pub fn error_type_from_aerospike_error(err: &AsError) -> Cow<'static, str> {
         },
         AsError::InvalidNode(_) => Cow::Borrowed("InvalidNode"),
         AsError::NoMoreConnections => Cow::Borrowed("NoMoreConnections"),
+        AsError::MaxErrorRate(_) => Cow::Borrowed("MaxErrorRate"),
         _ => Cow::Borrowed("Unknown"),
     }
 }
