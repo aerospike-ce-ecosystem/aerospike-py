@@ -265,13 +265,15 @@ class TestQueryErrorsReachTheCaller:
         PR changes, which callers with side-effecting callbacks must know about).
 
         The budget is derived from a measured baseline rather than hard-coded, so
-        the test tracks machine speed, and it halves on a miss so a fast run
-        cannot turn into a flake.
+        the test tracks machine speed, and it moves towards the scan on a miss in
+        either direction: halved when the scan finished inside it, raised when it
+        ran out before the first record arrived (a busy moment on the machine,
+        which says nothing about the behaviour under test).
         """
         baseline_ms = _scan_timings(client, seeded)[1] * 1000
         budget_ms = max(15, round(baseline_ms * 0.5))
 
-        for _ in range(5):
+        for _ in range(8):
             calls = 0
 
             def callback(_record):
@@ -282,10 +284,9 @@ class TestQueryErrorsReachTheCaller:
             try:
                 client.query(NS, SET_NAME).foreach(callback, policy={"total_timeout": budget_ms})
             except aerospike_py.AerospikeError:
-                assert calls > 0, (
-                    "the query failed before any record was delivered — this test needs a "
-                    "failure *during* the scan to pin the partial-delivery semantics"
-                )
+                if calls == 0:
+                    budget_ms = round(budget_ms * 1.5) + 1
+                    continue
                 assert calls < seeded, "the scan must not have completed"
                 return
             budget_ms = max(5, budget_ms // 2)
