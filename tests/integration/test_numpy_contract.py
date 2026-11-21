@@ -638,6 +638,18 @@ class TestAFieldOfNoBytes:
         assert result.batch_records["v"].tolist() == [1, 2]
         assert result.batch_records["e"].nbytes == 0
 
+    async def test_more_rows_of_no_bytes_than_fit_in_memory_are_an_error(self, any_client):
+        """Rows without bytes cost NumPy nothing, so an array can claim any number of them.
+
+        The rows the client builds from them do take memory. Asking for more
+        than there can be used to abort the interpreter.
+        """
+        data = np.zeros(2**62, np.dtype([("_key", "S0"), ("b", "S0")]))
+        assert data.nbytes == 0
+
+        with pytest.raises(MemoryError, match="cannot hold 4611686018427387904 rows"):
+            await invoke(any_client, "batch_write_numpy", data, NS, SET)
+
 
 class TestBytesOfEveryKind:
     """What ``get()`` returns as ``bytes`` goes into a bytes field, whatever the server calls it."""

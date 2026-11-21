@@ -19,7 +19,7 @@ use std::ptr;
 use aerospike_core::{BatchRecord, Bin, FloatValue, Key, Value};
 use half::f16;
 use log::{debug, warn};
-use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyMemoryError, PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -1357,7 +1357,14 @@ fn records_of_array(
     let ns_field = fields.iter().find(|f| f.name == "_namespace");
     let set_field = fields.iter().find(|f| f.name == "_set");
 
-    let mut result = Vec::with_capacity(n);
+    // The row count is whatever the array says, and an array whose rows have
+    // no bytes can say any number at no cost to itself: `np.zeros(2**40, ...)`
+    // of `S0` fields is a valid array of zero bytes. Room that cannot be had
+    // is an error for the caller, not an abort of the process.
+    let mut result = Vec::new();
+    result.try_reserve_exact(n).map_err(|_| {
+        PyMemoryError::new_err(format!("cannot hold {n} rows in memory for one batch"))
+    })?;
 
     for i in 0..n {
         let row_offset = checked_row_offset(i, row_stride)?;
