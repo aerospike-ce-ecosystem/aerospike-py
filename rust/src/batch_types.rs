@@ -1134,16 +1134,11 @@ pub fn collect_user_keys<'py>(
 ///
 /// Only key and result_code are converted eagerly (lightweight).
 /// The record's `(key, meta, bins)` tuple is deferred until `br.record` is accessed.
-pub fn batch_to_batch_records_py(
-    py: Python<'_>,
-    results: Vec<BatchRecord>,
-) -> PyResult<PyBatchRecords> {
-    build_batch_records(py, results, None, &[])
-}
-
-/// As [`batch_to_batch_records_py`], additionally carrying what the
-/// `batch_write` retry loop has to report: its statistics, and the failed rows
-/// that an earlier attempt left in doubt (`in_doubt_rows`, ascending).
+///
+/// `retry_stats` is what the `batch_write` retry loop has to report, and
+/// `in_doubt_rows` (ascending) the failed rows the call knows more about than
+/// the row itself says: one an earlier attempt left in doubt, or one that may
+/// be the answer to a second send of its record.
 fn build_batch_records(
     py: Python<'_>,
     results: Vec<BatchRecord>,

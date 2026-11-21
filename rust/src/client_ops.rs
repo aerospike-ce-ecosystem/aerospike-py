@@ -8,11 +8,11 @@
 use std::sync::Arc;
 
 use aerospike_core::{
-    BatchOperation, BatchRecord, BatchWritePolicy, Bins, Client as AsClient, Error as AsError, Key,
-    Record, Task, Value,
+    BatchOperation, BatchPolicy, BatchRecord, BatchWritePolicy, Bins, Client as AsClient,
+    Error as AsError, Key, Record, ResultCode, Task, Value,
 };
 
-use pyo3::PyResult;
+use pyo3::{PyErr, PyResult};
 
 use crate::batch_types::{PendingBatchRecords, RowOutcome};
 use crate::client_common::{
@@ -110,7 +110,11 @@ pub async fn do_remove(client: &AsClient, args: RemoveArgs) -> PyResult<()> {
         // The server reported KEY_NOT_FOUND_ERROR (wire code 2); aerospike-core
         // collapsed it into `Ok(false)`, so the exception is built here — with
         // the real wire code attached (ADR-0027), not the -1 sentinel.
-        return Err(crate::errors::record_not_found_for_delete());
+        // With `max_retries > 0` this may be the answer to a second send
+        // whose first one deleted the record; see
+        // `rows_a_resend_may_have_answered`.
+        let may_be_a_resend = args.write_policy.base_policy.max_retries > 0;
+        return Err(crate::errors::record_not_found_for_delete(may_be_a_resend));
     }
     Ok(())
 }
@@ -273,21 +277,89 @@ fn finish_batch<'k>(
     ops: Vec<BatchOperation>,
     outcome: PyResult<()>,
     keys: impl Iterator<Item = &'k Key>,
-) -> PyResult<Vec<BatchRecord>> {
-    let mut rows = collect_rows(ops);
-    match outcome {
-        Ok(()) => Ok(rows),
-        Err(err) => {
-            restore_keys(&mut rows, keys);
-            if rows.iter().all(row_has_a_server_answer) {
-                return Ok(rows);
-            }
-            Err(crate::batch_types::attach_partial_result(
-                err,
-                PendingBatchRecords::without_retry(rows),
-            ))
-        }
+    batch_policy: &BatchPolicy,
+) -> PyResult<PendingBatchRecords> {
+    let (rows, failure) = settle_batch(ops, outcome, keys);
+    let pending = PendingBatchRecords {
+        in_doubt_rows: rows_a_resend_may_have_answered(&rows, batch_policy),
+        results: rows,
+        retry_stats: None,
+    };
+    match failure {
+        None => Ok(pending),
+        Some(err) => Err(crate::batch_types::attach_partial_result(err, pending)),
     }
+}
+
+/// [`finish_batch`] for a batch that only reads. A read is never in doubt, so
+/// the rows are all there is to report.
+fn finish_read_batch<'k>(
+    ops: Vec<BatchOperation>,
+    outcome: PyResult<()>,
+    keys: impl Iterator<Item = &'k Key>,
+) -> PyResult<Vec<BatchRecord>> {
+    match settle_batch(ops, outcome, keys) {
+        (rows, None) => Ok(rows),
+        (rows, Some(err)) => Err(crate::batch_types::attach_partial_result(
+            err,
+            PendingBatchRecords::without_retry(rows),
+        )),
+    }
+}
+
+/// The rows of a finished batch call, and the call's error if it failed as a
+/// whole (see [`finish_batch`] for when it did).
+fn settle_batch<'k>(
+    ops: Vec<BatchOperation>,
+    outcome: PyResult<()>,
+    keys: impl Iterator<Item = &'k Key>,
+) -> (Vec<BatchRecord>, Option<PyErr>) {
+    let mut rows = collect_rows(ops);
+    let Err(err) = outcome else {
+        return (rows, None);
+    };
+    restore_keys(&mut rows, keys);
+    if rows.iter().all(row_has_a_server_answer) {
+        (rows, None)
+    } else {
+        (rows, Some(err))
+    }
+}
+
+/// The failed rows of a write batch that may be the answer to a *second* send
+/// of their record, in ascending order.
+///
+/// With `max_retries > 0` aerospike-core sends a node's share of a batch again
+/// when its answer did not arrive. If the first send had been applied, the
+/// second one meets its own work: a delete finds no record, a write whose
+/// filter the first send made false is filtered out, a UDF fails on the state
+/// it left behind. Such a row says "failed" about a record that was changed.
+///
+/// For most answers aerospike-core marks a row that was sent before as in
+/// doubt. These three it reads on the path of an ordinary record, which has
+/// no such mark, and the binding cannot see whether a row was sent twice. So
+/// when re-sending is switched on (it is off by default for a batch that
+/// writes), every row of a write that ends in one of them is reported in
+/// doubt: the call does not know, and says so.
+fn rows_a_resend_may_have_answered(rows: &[BatchRecord], batch_policy: &BatchPolicy) -> Vec<usize> {
+    if batch_policy.base_policy.max_retries == 0 {
+        return Vec::new();
+    }
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            row.has_write()
+                && matches!(
+                    RowOutcome::of(row),
+                    RowOutcome::Failed(ErrorClass::Server(
+                        ResultCode::KeyNotFoundError
+                            | ResultCode::FilteredOut
+                            | ResultCode::UdfBadResponse
+                    ))
+                )
+        })
+        .map(|(index, _)| index)
+        .collect()
 }
 
 /// Whether a server said what happened to this row's record: success, or a
@@ -310,14 +382,14 @@ pub async fn do_batch_read(client: &AsClient, args: &BatchReadArgs) -> PyResult<
         args.otel.conn_info,
         client.batch(&args.batch_policy, &mut ops).await
     );
-    finish_batch(ops, outcome, args.rust_keys.iter())
+    finish_read_batch(ops, outcome, args.rust_keys.iter())
 }
 
 /// Perform operations on multiple records in a batch.
 pub async fn do_batch_operate(
     client: &AsClient,
     args: &BatchOperateArgs,
-) -> PyResult<Vec<BatchRecord>> {
+) -> PyResult<PendingBatchRecords> {
     let mut ops = args.to_batch_ops();
     let outcome = traced_op!(
         "batch_operate",
@@ -327,14 +399,14 @@ pub async fn do_batch_operate(
         args.otel.conn_info,
         client.batch(&args.batch_policy, &mut ops).await
     );
-    finish_batch(ops, outcome, args.rust_keys.iter())
+    finish_batch(ops, outcome, args.rust_keys.iter(), &args.batch_policy)
 }
 
 /// Remove multiple records in a batch.
 pub async fn do_batch_remove(
     client: &AsClient,
     args: &BatchRemoveArgs,
-) -> PyResult<Vec<BatchRecord>> {
+) -> PyResult<PendingBatchRecords> {
     let mut ops = args.to_batch_ops();
     let outcome = traced_op!(
         "batch_remove",
@@ -344,14 +416,19 @@ pub async fn do_batch_remove(
         args.otel.conn_info,
         client.batch(&args.batch_policy, &mut ops).await
     );
-    finish_batch(ops, outcome, args.records.iter().map(|(key, _)| key))
+    finish_batch(
+        ops,
+        outcome,
+        args.records.iter().map(|(key, _)| key),
+        &args.batch_policy,
+    )
 }
 
 /// Execute a UDF on multiple records in a batch.
 pub async fn do_batch_apply(
     client: &AsClient,
     args: &BatchApplyArgs,
-) -> PyResult<Vec<BatchRecord>> {
+) -> PyResult<PendingBatchRecords> {
     let mut ops = args.to_batch_ops();
     let outcome = traced_op!(
         "batch_apply",
@@ -361,7 +438,12 @@ pub async fn do_batch_apply(
         args.otel.conn_info,
         client.batch(&args.batch_policy, &mut ops).await
     );
-    finish_batch(ops, outcome, args.records.iter().map(|entry| &entry.0))
+    finish_batch(
+        ops,
+        outcome,
+        args.records.iter().map(|entry| &entry.0),
+        &args.batch_policy,
+    )
 }
 
 /// Check if a batch record result code is retryable.
@@ -579,12 +661,17 @@ pub async fn do_batch_write(
                 client.batch(batch_policy, &mut batch_ops).await
             )
         });
-        let results = finish_batch(batch_ops, outcome, records.iter().map(|(key, _, _)| key))?;
-        return Ok(PendingBatchRecords {
-            results,
-            retry_stats: Some(BatchWriteRetryStats::SINGLE_ATTEMPT),
-            in_doubt_rows: Vec::new(),
-        });
+        let stamp = |mut pending: PendingBatchRecords| {
+            pending.retry_stats = Some(BatchWriteRetryStats::SINGLE_ATTEMPT);
+            pending
+        };
+        return finish_batch(
+            batch_ops,
+            outcome,
+            records.iter().map(|(key, _, _)| key),
+            batch_policy,
+        )
+        .map(stamp);
     }
 
     // Retry path: pre-build ops once per record, reuse via clone on retry

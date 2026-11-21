@@ -80,7 +80,7 @@ enum CloseOutcome {
     },
 }
 
-use crate::batch_types::{PendingBatchRead, PendingBatchRecords};
+use crate::batch_types::PendingBatchRead;
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::future_into_py_panic_safe;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
@@ -877,8 +877,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_operate", async move {
             let _permit = limiter.acquire_named("batch_operate").await?;
-            let results = client_ops::do_batch_operate(&client, &args).await?;
-            Ok(PendingBatchRecords::without_retry(results))
+            client_ops::do_batch_operate(&client, &args).await
         })
     }
 
@@ -1003,8 +1002,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_remove", async move {
             let _permit = limiter.acquire_named("batch_remove").await?;
-            let results = client_ops::do_batch_remove(&client, &args).await?;
-            Ok(PendingBatchRecords::without_retry(results))
+            client_ops::do_batch_remove(&client, &args).await
         })
     }
 
@@ -1039,8 +1037,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_apply", async move {
             let _permit = limiter.acquire_named("batch_apply").await?;
-            let results = client_ops::do_batch_apply(&client, &args).await?;
-            Ok(PendingBatchRecords::without_retry(results))
+            client_ops::do_batch_apply(&client, &args).await
         })
     }
 

@@ -17,6 +17,7 @@ must not be logged as a possible bug in the client (issue #445).
 
 import logging
 import time
+from typing import ClassVar
 
 import pytest
 
@@ -172,6 +173,66 @@ class TestServerAnsweredWithAFailure:
         ] * count
         for key in keys:
             assert (await invoke(any_client, "get", key)).bins == {"v": 1}
+
+
+class TestAWriteBatchThatMayBeSentTwice:
+    """``max_retries`` on a write: a failed row may be the answer to the second send.
+
+    If the first send was applied and its answer lost, the re-sent delete finds
+    no record, the re-sent filtered write no longer matches, the re-sent UDF
+    fails on what it left behind. The Rust client does not say whether a row
+    was sent twice, so with re-sending switched on such a row is reported in
+    doubt; with it off (the default for writes) the same answer is definite.
+    """
+
+    RESEND: ClassVar[dict] = {"max_retries": 1}
+
+    @pytest.mark.parametrize(("policy", "in_doubt"), [(None, False), (RESEND, True)], ids=["default", "max_retries"])
+    async def test_batch_remove_of_a_missing_record(self, any_client, policy, in_doubt):
+        key = (NS, SET_NAME, "resend_missing")
+
+        (row,) = (await invoke(any_client, "batch_remove", [key], policy=policy)).batch_records
+
+        assert (row.result, row.in_doubt) == (aerospike_py.AEROSPIKE_ERR_RECORD_NOT_FOUND, in_doubt)
+
+    @pytest.mark.parametrize(("policy", "in_doubt"), [(None, False), (RESEND, True)], ids=["default", "max_retries"])
+    async def test_remove_of_a_missing_record(self, any_client, policy, in_doubt):
+        with pytest.raises(aerospike_py.RecordNotFound) as excinfo:
+            await invoke(any_client, "remove", (NS, SET_NAME, "resend_missing"), policy=policy)
+
+        assert excinfo.value.in_doubt is in_doubt
+
+    @pytest.mark.parametrize(("policy", "in_doubt"), [({}, False), (RESEND, True)], ids=["default", "max_retries"])
+    async def test_a_filtered_out_batch_write(self, any_client, any_cleanup, policy, in_doubt):
+        keys = [(NS, SET_NAME, f"resend_filtered_{i}") for i in range(2)]
+        any_cleanup.extend(keys)
+        await invoke(any_client, "batch_write", [(key, {"v": 1}) for key in keys])
+        only_v0 = {"filter_expression": exp.eq(exp.int_bin("v"), exp.int_val(0)), **policy}
+
+        result = await invoke(any_client, "batch_write", [(key, {"v": 2}) for key in keys], policy=only_v0)
+
+        assert [(row.result, row.error_type, row.in_doubt) for row in result.batch_records] == [
+            (27, "FilteredOut", in_doubt)
+        ] * 2
+
+    async def test_a_failed_batch_apply(self, any_client, any_cleanup, failing_udf):
+        keys = [(NS, SET_NAME, f"resend_udf_{i}") for i in range(2)]
+        any_cleanup.extend(keys)
+        await invoke(any_client, "batch_write", [(key, {"v": 1}) for key in keys])
+
+        result = await invoke(
+            any_client, "batch_apply", keys, "failing_udf", "update_then_fail", [], policy=self.RESEND
+        )
+
+        assert [(row.result, row.in_doubt) for row in result.batch_records] == [
+            (aerospike_py.AEROSPIKE_ERR_UDF, True)
+        ] * 2
+
+    async def test_a_batch_read_is_never_in_doubt(self, any_client):
+        """Reads are re-sent by default, and a read changes nothing."""
+        (row,) = (await invoke(any_client, "batch_read", [(NS, SET_NAME, "resend_missing")])).batch_records
+
+        assert (row.result, row.in_doubt) == (aerospike_py.AEROSPIKE_ERR_RECORD_NOT_FOUND, False)
 
 
 class TestNoServerAnswered:

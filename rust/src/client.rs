@@ -14,7 +14,6 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::backpressure::OperationLimiter;
-use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::catch_panic_sync;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
@@ -1204,7 +1203,7 @@ impl PyClient {
                 })
             })
         })?;
-        let batch = batch_to_batch_records_py(py, results)?;
+        let batch = results.into_batch_records(py)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 
@@ -1353,7 +1352,7 @@ impl PyClient {
                 })
             })
         })?;
-        let batch = batch_to_batch_records_py(py, results)?;
+        let batch = results.into_batch_records(py)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 
@@ -1393,7 +1392,7 @@ impl PyClient {
                 })
             })
         })?;
-        let batch = batch_to_batch_records_py(py, results)?;
+        let batch = results.into_batch_records(py)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 }

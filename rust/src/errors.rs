@@ -676,12 +676,17 @@ fn udf_answer(err: &AsError) -> Option<&AsError> {
 /// the real wire code (2 — matching both the message text and
 /// `AEROSPIKE_ERR_RECORD_NOT_FOUND`), not the [`CLIENT_SIDE_RESULT_CODE`]
 /// sentinel (ADR-0027).
-pub(crate) fn record_not_found_for_delete() -> PyErr {
+///
+/// `may_be_a_resend` is the delete's `max_retries > 0`: a delete that was sent
+/// twice finds nothing the second time because the first time removed the
+/// record. aerospike-core does not say whether that happened, so with
+/// re-sending switched on the miss is reported in doubt.
+pub(crate) fn record_not_found_for_delete(may_be_a_resend: bool) -> PyErr {
     build_pyerr(
         ErrorClass::Server(ResultCode::KeyNotFoundError),
         "Record not found",
         None,
-        false,
+        may_be_a_resend,
     )
 }
 
@@ -1065,9 +1070,10 @@ mod tests {
     fn delete_not_found_carries_record_not_found_code() {
         Python::initialize();
         Python::attach(|py| {
-            let err = record_not_found_for_delete();
+            let err = record_not_found_for_delete(false);
             assert!(err.is_instance_of::<RecordNotFound>(py));
             assert_eq!(attr::<i32>(py, &err, "result_code"), 2);
+            assert!(!attr::<bool>(py, &err, "in_doubt"));
             assert_eq!(
                 err.to_string(),
                 "RecordNotFound: AEROSPIKE_ERR (2): Record not found"
