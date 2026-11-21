@@ -240,7 +240,8 @@ fn collect_rows(ops: Vec<BatchOperation>) -> Vec<BatchRecord> {
     rows
 }
 
-/// Give its key back to every row that lost it.
+/// Give its key back to every row that lost it, and say which rows those
+/// were (ascending).
 ///
 /// While a batch runs, aerospike-core swaps each operation for an empty
 /// stand-in and puts the real one back at the end. On the paths where it
@@ -248,12 +249,60 @@ fn collect_rows(ops: Vec<BatchOperation>) -> Vec<BatchRecord> {
 /// the stand-ins are left behind, and a stand-in has an empty key. Such a row
 /// is replaced by an unanswered row for the key the caller asked about, so a
 /// partial result never names a key nobody requested.
-fn restore_keys<'k>(rows: &mut [BatchRecord], keys: impl Iterator<Item = &'k Key>) {
-    for (row, key) in rows.iter_mut().zip(keys) {
+fn restore_keys<'k>(rows: &mut [BatchRecord], keys: impl Iterator<Item = &'k Key>) -> Vec<usize> {
+    let mut stand_ins = Vec::new();
+    for (index, (row, key)) in rows.iter_mut().zip(keys).enumerate() {
         if row.key.digest() != key.digest() {
             *row = BatchRecord::new(key.clone(), false);
+            stand_ins.push(index);
         }
     }
+    stand_ins
+}
+
+/// Whether a batch call that came back with an error of this class may have
+/// sent the rows it left as stand-ins (see [`restore_keys`]).
+///
+/// aerospike-core returns without putting the rows back in two cases. When no
+/// key could be routed, nothing was sent, and the error is the routing
+/// failure: an invalid namespace, a partition without a node. When a node's
+/// task could not be joined - it panicked, or the runtime is going down - its
+/// request may have gone out before, and the answers of the other nodes are
+/// lost along with it; the error is then a bare client error. Only the routing
+/// failures are known to mean "nothing was sent". For anything else a write
+/// may have been applied, and a row that says "no answer, not in doubt" would
+/// invite the caller to send it again.
+fn unanswered_rows_may_have_been_sent(class: ErrorClass) -> bool {
+    !matches!(class, ErrorClass::InvalidArgument | ErrorClass::InvalidNode)
+}
+
+/// Send one batch, noting the class of the error it comes back with.
+///
+/// `traced_op!` turns that error into the Python exception. What the rows of
+/// a failed call mean depends on its class, and the class is not to be had
+/// from the exception without the GIL.
+async fn batch_noting_class(
+    client: &AsClient,
+    policy: &BatchPolicy,
+    ops: &mut [BatchOperation],
+    failed_with: &mut Option<ErrorClass>,
+) -> Result<(), AsError> {
+    let result = client.batch(policy, ops).await;
+    if let Err(e) = &result {
+        *failed_with = Some(ErrorClass::of(e));
+    }
+    result
+}
+
+/// What a write-type batch call knows about itself when it hands its rows to
+/// [`finish_batch`].
+struct SentBatch<'a> {
+    policy: &'a BatchPolicy,
+    /// Whether the batch changes records. `batch_operate` with nothing but
+    /// reads does not, and a read is never in doubt.
+    writes: bool,
+    /// The class of the error the call came back with, if it did.
+    failed_with: Option<ErrorClass>,
 }
 
 /// Turn a finished batch call into its rows, or into an exception that
@@ -277,17 +326,40 @@ fn finish_batch<'k>(
     ops: Vec<BatchOperation>,
     outcome: PyResult<()>,
     keys: impl Iterator<Item = &'k Key>,
-    batch_policy: &BatchPolicy,
+    sent: SentBatch<'_>,
 ) -> PyResult<PendingBatchRecords> {
-    let (rows, failure) = settle_batch(ops, outcome, keys);
+    let Settled {
+        rows,
+        failure,
+        stand_ins,
+    } = settle_batch(ops, outcome, keys);
+    let mut in_doubt_rows = rows_a_resend_may_have_answered(&rows, sent.policy);
+    // The call gave up on rows it may already have sent: see
+    // `unanswered_rows_may_have_been_sent`. Without a class to go by, assume
+    // that it did.
+    let gave_up_after_sending = sent.writes
+        && failure.is_some()
+        && !stand_ins.is_empty()
+        && sent
+            .failed_with
+            .is_none_or(unanswered_rows_may_have_been_sent);
+    if gave_up_after_sending {
+        in_doubt_rows.extend(stand_ins);
+        in_doubt_rows.sort_unstable();
+        in_doubt_rows.dedup();
+    }
     let pending = PendingBatchRecords {
-        in_doubt_rows: rows_a_resend_may_have_answered(&rows, batch_policy),
+        in_doubt_rows,
         results: rows,
         retry_stats: None,
     };
     match failure {
         None => Ok(pending),
-        Some(err) => Err(crate::batch_types::attach_partial_result(err, pending)),
+        Some(err) => Err(crate::batch_types::attach_partial_result(
+            err,
+            pending,
+            gave_up_after_sending,
+        )),
     }
 }
 
@@ -298,31 +370,50 @@ fn finish_read_batch<'k>(
     outcome: PyResult<()>,
     keys: impl Iterator<Item = &'k Key>,
 ) -> PyResult<Vec<BatchRecord>> {
-    match settle_batch(ops, outcome, keys) {
-        (rows, None) => Ok(rows),
-        (rows, Some(err)) => Err(crate::batch_types::attach_partial_result(
+    let Settled { rows, failure, .. } = settle_batch(ops, outcome, keys);
+    match failure {
+        None => Ok(rows),
+        Some(err) => Err(crate::batch_types::attach_partial_result(
             err,
             PendingBatchRecords::without_retry(rows),
+            false,
         )),
     }
 }
 
-/// The rows of a finished batch call, and the call's error if it failed as a
-/// whole (see [`finish_batch`] for when it did).
+/// A finished batch call.
+struct Settled {
+    rows: Vec<BatchRecord>,
+    /// The call's error, if it failed as a whole (see [`finish_batch`] for
+    /// when it did).
+    failure: Option<PyErr>,
+    /// The rows aerospike-core left as stand-ins: see [`restore_keys`].
+    stand_ins: Vec<usize>,
+}
+
 fn settle_batch<'k>(
     ops: Vec<BatchOperation>,
     outcome: PyResult<()>,
     keys: impl Iterator<Item = &'k Key>,
-) -> (Vec<BatchRecord>, Option<PyErr>) {
+) -> Settled {
     let mut rows = collect_rows(ops);
     let Err(err) = outcome else {
-        return (rows, None);
+        return Settled {
+            rows,
+            failure: None,
+            stand_ins: Vec::new(),
+        };
     };
-    restore_keys(&mut rows, keys);
-    if rows.iter().all(row_has_a_server_answer) {
-        (rows, None)
+    let stand_ins = restore_keys(&mut rows, keys);
+    let failure = if rows.iter().all(row_has_a_server_answer) {
+        None
     } else {
-        (rows, Some(err))
+        Some(err)
+    };
+    Settled {
+        rows,
+        failure,
+        stand_ins,
     }
 }
 
@@ -391,15 +482,25 @@ pub async fn do_batch_operate(
     args: &BatchOperateArgs,
 ) -> PyResult<PendingBatchRecords> {
     let mut ops = args.to_batch_ops();
+    let mut failed_with = None;
     let outcome = traced_op!(
         "batch_operate",
         &args.batch_ns,
         &args.batch_set,
         args.otel.parent_ctx,
         args.otel.conn_info,
-        client.batch(&args.batch_policy, &mut ops).await
+        batch_noting_class(client, &args.batch_policy, &mut ops, &mut failed_with).await
     );
-    finish_batch(ops, outcome, args.rust_keys.iter(), &args.batch_policy)
+    finish_batch(
+        ops,
+        outcome,
+        args.rust_keys.iter(),
+        SentBatch {
+            policy: &args.batch_policy,
+            writes: args.has_write,
+            failed_with,
+        },
+    )
 }
 
 /// Remove multiple records in a batch.
@@ -408,19 +509,24 @@ pub async fn do_batch_remove(
     args: &BatchRemoveArgs,
 ) -> PyResult<PendingBatchRecords> {
     let mut ops = args.to_batch_ops();
+    let mut failed_with = None;
     let outcome = traced_op!(
         "batch_remove",
         &args.batch_ns,
         &args.batch_set,
         args.otel.parent_ctx,
         args.otel.conn_info,
-        client.batch(&args.batch_policy, &mut ops).await
+        batch_noting_class(client, &args.batch_policy, &mut ops, &mut failed_with).await
     );
     finish_batch(
         ops,
         outcome,
         args.records.iter().map(|(key, _)| key),
-        &args.batch_policy,
+        SentBatch {
+            policy: &args.batch_policy,
+            writes: true,
+            failed_with,
+        },
     )
 }
 
@@ -430,19 +536,24 @@ pub async fn do_batch_apply(
     args: &BatchApplyArgs,
 ) -> PyResult<PendingBatchRecords> {
     let mut ops = args.to_batch_ops();
+    let mut failed_with = None;
     let outcome = traced_op!(
         "batch_apply",
         &args.batch_ns,
         &args.batch_set,
         args.otel.parent_ctx,
         args.otel.conn_info,
-        client.batch(&args.batch_policy, &mut ops).await
+        batch_noting_class(client, &args.batch_policy, &mut ops, &mut failed_with).await
     );
     finish_batch(
         ops,
         outcome,
         args.records.iter().map(|entry| &entry.0),
-        &args.batch_policy,
+        SentBatch {
+            policy: &args.batch_policy,
+            writes: true,
+            failed_with,
+        },
     )
 }
 
@@ -534,6 +645,32 @@ fn judge_row(outcome: RowOutcome, in_doubt: bool, idempotent: bool) -> RowJudgem
         in_doubt,
         unanswered,
     }
+}
+
+/// The judgement of a row that came back without any answer, when the way
+/// its call failed settles it. `None` leaves the row to [`judge_row`].
+fn judge_unanswered(
+    gave_up_after_sending: bool,
+    call_would_fail_again: bool,
+) -> Option<RowJudgement> {
+    if gave_up_after_sending {
+        // Sent, perhaps, and never answered: see
+        // `unanswered_rows_may_have_been_sent`. Sending it again could apply
+        // the write a second time, and what made the call give up may do so
+        // again.
+        return Some(RowJudgement {
+            failed: true,
+            retry: false,
+            in_doubt: true,
+            unanswered: true,
+        });
+    }
+    call_would_fail_again.then_some(RowJudgement {
+        failed: true,
+        retry: false,
+        in_doubt: false,
+        unanswered: true,
+    })
 }
 
 /// Compute backoff duration in milliseconds using Full Jitter strategy.
@@ -651,6 +788,7 @@ pub async fn do_batch_write(
                 })
                 .collect()
         });
+        let mut failed_with = None;
         let outcome = crate::stage_timer!("io", op_name, {
             traced_op!(
                 op_name,
@@ -658,7 +796,7 @@ pub async fn do_batch_write(
                 set,
                 parent_ctx,
                 conn_info,
-                client.batch(batch_policy, &mut batch_ops).await
+                batch_noting_class(client, batch_policy, &mut batch_ops, &mut failed_with).await
             )
         });
         let stamp = |mut pending: PendingBatchRecords| {
@@ -669,7 +807,11 @@ pub async fn do_batch_write(
             batch_ops,
             outcome,
             records.iter().map(|(key, _, _)| key),
-            batch_policy,
+            SentBatch {
+                policy: batch_policy,
+                writes: true,
+                failed_with,
+            },
         )
         .map(stamp);
     }
@@ -694,6 +836,7 @@ pub async fn do_batch_write(
         retry_op_name: format!("{}_retry", op_name),
         start: std::time::Instant::now(),
         call_would_fail_again: std::sync::atomic::AtomicBool::new(false),
+        gave_up_after_sending: std::sync::atomic::AtomicBool::new(false),
     };
     let BatchWriteOutcome {
         mut rows,
@@ -710,6 +853,22 @@ pub async fn do_batch_write(
         }),
         Some(err) => {
             restore_keys(&mut rows, records.iter().map(|(key, _, _)| key));
+            let gave_up_after_sending = env
+                .gave_up_after_sending
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let mut in_doubt_rows = in_doubt_rows;
+            if gave_up_after_sending {
+                // A row without any answer cannot say that it is in doubt:
+                // that is known from the call, not from the row.
+                in_doubt_rows.extend(
+                    rows.iter()
+                        .enumerate()
+                        .filter(|(_, row)| RowOutcome::of(row) == RowOutcome::NoResponse)
+                        .map(|(index, _)| index),
+                );
+                in_doubt_rows.sort_unstable();
+                in_doubt_rows.dedup();
+            }
             Err(crate::batch_types::attach_partial_result(
                 err,
                 PendingBatchRecords {
@@ -717,6 +876,7 @@ pub async fn do_batch_write(
                     retry_stats: Some(stats),
                     in_doubt_rows,
                 },
+                gave_up_after_sending,
             ))
         }
     }
@@ -786,6 +946,10 @@ struct ClusterAttempts<'a> {
     /// before it has marked the rows, which leaves them looking merely
     /// unanswered; this keeps them from being sent again for nothing.
     call_would_fail_again: std::sync::atomic::AtomicBool,
+    /// The last attempt came back without its rows, and may have sent them
+    /// before: see [`unanswered_rows_may_have_been_sent`]. Those rows are in
+    /// doubt, and are not sent again.
+    gave_up_after_sending: std::sync::atomic::AtomicBool,
 }
 
 impl BatchWriteAttempts for ClusterAttempts<'_> {
@@ -844,14 +1008,20 @@ impl BatchWriteAttempts for ClusterAttempts<'_> {
             std::sync::atomic::Ordering::Relaxed,
         );
         let mut rows = collect_rows(attempt_ops);
-        if outcome.is_err() {
+        let stand_ins = if outcome.is_err() {
             match indices {
                 Some(indices) => {
-                    restore_keys(&mut rows, indices.iter().map(|&i| &self.records[i].0));
+                    restore_keys(&mut rows, indices.iter().map(|&i| &self.records[i].0))
                 }
                 None => restore_keys(&mut rows, self.records.iter().map(|(key, _, _)| key)),
             }
-        }
+        } else {
+            Vec::new()
+        };
+        self.gave_up_after_sending.store(
+            !stand_ins.is_empty() && call_class.is_none_or(unanswered_rows_may_have_been_sent),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         (rows, outcome.err())
     }
 
@@ -860,17 +1030,16 @@ impl BatchWriteAttempts for ClusterAttempts<'_> {
             return RowJudgement::default();
         }
         let outcome = RowOutcome::of(row);
-        if outcome == RowOutcome::NoResponse
-            && self
-                .call_would_fail_again
-                .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return RowJudgement {
-                failed: true,
-                retry: false,
-                in_doubt: false,
-                unanswered: true,
-            };
+        if outcome == RowOutcome::NoResponse {
+            let settled_by_the_call = judge_unanswered(
+                self.gave_up_after_sending
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                self.call_would_fail_again
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            );
+            if let Some(judgement) = settled_by_the_call {
+                return judgement;
+            }
         }
         judge_row(
             outcome,
@@ -1712,8 +1881,9 @@ mod tests {
         let mut rows = vec![stand_in, answered];
         let keys = [test_key("a"), test_key("b")];
 
-        restore_keys(&mut rows, keys.iter());
+        let stand_ins = restore_keys(&mut rows, keys.iter());
 
+        assert_eq!(stand_ins, vec![0]);
         assert_eq!(rows[0].key.digest(), keys[0].digest());
         assert_eq!(rows[0].key.namespace(), "test");
         assert_eq!(RowOutcome::of(&rows[0]), RowOutcome::NoResponse);
@@ -1721,6 +1891,125 @@ mod tests {
             rows[1].record.as_ref().map(|r| r.generation),
             Some(7),
             "a row that kept its key keeps its result"
+        );
+    }
+
+    // ── a call that gave up on rows it may have sent ───────────────────────
+
+    /// What aerospike-core leaves in the caller's slice when it returns
+    /// before putting the operations back.
+    fn stand_in_ops(count: usize) -> Vec<BatchOperation> {
+        let policy = aerospike_core::BatchReadPolicy::default();
+        (0..count)
+            .map(|_| {
+                let nobody = Key::with_digest("", "", None, [0; 20]);
+                BatchOperation::read(&policy, nobody, Bins::All)
+            })
+            .collect()
+    }
+
+    /// Run `finish_batch` on a call that left only stand-ins behind and
+    /// failed with `error`. Returns `(result, in_doubt)` of the rows on the
+    /// exception, and the exception's own `in_doubt`.
+    fn gave_up_with(error: AsError, writes: bool) -> (Vec<(i32, bool)>, bool) {
+        pyo3::Python::initialize();
+        let keys = [test_key("a"), test_key("b")];
+        let policy = BatchPolicy::default();
+        let failed_with = Some(ErrorClass::of(&error));
+        let raised = finish_batch(
+            stand_in_ops(keys.len()),
+            Err(as_to_pyerr(error)),
+            keys.iter(),
+            SentBatch {
+                policy: &policy,
+                writes,
+                failed_with,
+            },
+        )
+        .err()
+        .expect("a call that left rows without an answer fails as a whole");
+
+        pyo3::Python::attach(|py| {
+            use pyo3::types::PyAnyMethods;
+            let exception = raised.value(py);
+            let rows = exception
+                .getattr("partial_result")
+                .unwrap()
+                .getattr("batch_records")
+                .unwrap()
+                .try_iter()
+                .unwrap()
+                .map(|row| {
+                    let row = row.unwrap();
+                    (
+                        row.getattr("result").unwrap().extract::<i32>().unwrap(),
+                        row.getattr("in_doubt").unwrap().extract::<bool>().unwrap(),
+                    )
+                })
+                .collect();
+            let in_doubt = exception.getattr("in_doubt").unwrap().extract().unwrap();
+            (rows, in_doubt)
+        })
+    }
+
+    #[test]
+    fn test_a_write_batch_whose_task_was_lost_is_in_doubt() {
+        // A node's task panicked or was cancelled: aerospike-core reports a
+        // bare client error and hands back no row at all, also not the ones
+        // other nodes had answered. The requests may all have gone out.
+        let (rows, call_in_doubt) = gave_up_with(AsError::client_error("task 7 panicked"), true);
+
+        assert_eq!(rows, vec![(-1, true), (-1, true)]);
+        assert!(call_in_doubt);
+    }
+
+    #[test]
+    fn test_a_batch_that_could_not_be_routed_was_never_sent() {
+        let (rows, call_in_doubt) =
+            gave_up_with(AsError::invalid_argument("namespace not found"), true);
+
+        assert_eq!(rows, vec![(-1, false), (-1, false)]);
+        assert!(!call_in_doubt);
+    }
+
+    #[test]
+    fn test_reads_are_not_in_doubt_whatever_became_of_the_task() {
+        let (rows, call_in_doubt) = gave_up_with(AsError::client_error("task 7 panicked"), false);
+
+        assert_eq!(rows, vec![(-1, false), (-1, false)]);
+        assert!(!call_in_doubt);
+    }
+
+    #[test]
+    fn test_only_a_routing_failure_proves_that_nothing_was_sent() {
+        assert!(!unanswered_rows_may_have_been_sent(
+            ErrorClass::InvalidArgument
+        ));
+        assert!(!unanswered_rows_may_have_been_sent(ErrorClass::InvalidNode));
+        for class in [
+            ErrorClass::Client,
+            ErrorClass::Connection,
+            ErrorClass::ClientTimeout,
+            ErrorClass::Unknown,
+        ] {
+            assert!(unanswered_rows_may_have_been_sent(class), "{class:?}");
+        }
+    }
+
+    #[test]
+    fn test_an_unanswered_row_of_the_retry_loop_follows_its_call() {
+        let gave_up = judge_unanswered(true, true).expect("settled");
+        assert!(gave_up.failed && gave_up.in_doubt && gave_up.unanswered);
+        assert!(!gave_up.retry, "a write that may be in is not sent again");
+
+        let never_sent = judge_unanswered(false, true).expect("settled");
+        assert!(never_sent.failed && never_sent.unanswered);
+        assert!(!never_sent.in_doubt && !never_sent.retry);
+
+        assert_eq!(
+            judge_unanswered(false, false),
+            None,
+            "an attempt that may pass next time is judged like any other row"
         );
     }
 

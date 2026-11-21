@@ -291,13 +291,29 @@ impl PendingBatchRecords {
 /// failure is what a node going down produces, for many calls at once, so the
 /// wait would land on the requests to the healthy nodes at the worst moment.
 /// [`off_the_runtime`] lets the runtime carry on while this thread waits.
-pub(crate) fn attach_partial_result(err: PyErr, rows: PendingBatchRecords) -> PyErr {
+///
+/// `call_in_doubt` is set when the call gave up on rows it may already have
+/// sent (a node's task could not be joined). The error of such a call is a
+/// plain client error that knows nothing of a send, so the exception is
+/// marked here, like the rows.
+pub(crate) fn attach_partial_result(
+    err: PyErr,
+    rows: PendingBatchRecords,
+    call_in_doubt: bool,
+) -> PyErr {
     off_the_runtime(|| {
         Python::attach(|py| {
             let attached = rows
                 .into_batch_records(py)
                 .and_then(|batch| Py::new(py, batch))
-                .and_then(|batch| err.value(py).setattr("partial_result", batch));
+                .and_then(|batch| err.value(py).setattr("partial_result", batch))
+                .and_then(|()| {
+                    if call_in_doubt {
+                        err.value(py).setattr("in_doubt", true)
+                    } else {
+                        Ok(())
+                    }
+                });
             if let Err(attach_err) = attached {
                 debug!("failed to attach the partial batch result to the exception: {attach_err}");
             }
