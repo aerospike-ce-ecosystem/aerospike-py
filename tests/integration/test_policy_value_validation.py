@@ -579,6 +579,38 @@ class TestIntegersThatDoNotFit:
 
         assert [r.getMessage()[:100] for r in caplog.records if "may be a bug in aerospike-py" in r.getMessage()] == []
 
+    async def test_a_queue_no_query_can_have_is_refused(self, client, async_client, caplog):
+        """The record queue cannot have more than 2**61 - 1 slots. Asking for more was a panic."""
+        too_large = {"record_queue_size": 2**61}
+        refused = pytest.raises(aerospike_py.InvalidArgError, match="record_queue_size is too large")
+
+        with caplog.at_level("DEBUG"):
+            with refused:
+                client.query(NS, SET).results(too_large)
+            with refused:
+                client.query(NS, SET).foreach(lambda _record: None, too_large)
+            with refused:
+                await async_client.query(NS, SET).results(too_large)
+            with refused:
+                await async_client.query(NS, SET).foreach(lambda _record: None, too_large)
+            with refused:
+                async_client.query(NS, SET).stream(too_large)
+
+        assert [r.getMessage()[:100] for r in caplog.records if "may be a bug in aerospike-py" in r.getMessage()] == []
+
+    async def test_the_largest_queue_there_can_be_is_accepted(self, any_client, any_cleanup):
+        key = (NS, SET, "largest_queue")
+        any_cleanup.append(key)
+        await invoke(any_client, "put", key, {"v": 1})
+
+        found = any_client.query(NS, SET).results({"record_queue_size": 2**61 - 1})
+        if hasattr(found, "__await__"):
+            found = await found
+
+        assert "largest_queue" in {record.key[2] for record in found if record.key is not None} or any(
+            record.bins == {"v": 1} for record in found
+        )
+
 
 class TestARecordWithoutBins:
     """``batch_write`` cannot write an empty record, and says so before it sends anything.

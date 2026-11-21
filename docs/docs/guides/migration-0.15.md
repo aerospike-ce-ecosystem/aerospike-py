@@ -457,6 +457,7 @@ A `filter_expression` that is not an expression built with `aerospike_py.exp` (a
 
 - `max_retries = 2**64 - 1` raises `InvalidArgError` (`max_retries is too large: ...`). Rust client 3.0 would make no attempt at all with that value, so the call would fail with "Timeout after 0 tries" without being sent.
 - An integer that does not fit its field (`retry=-1`, `total_timeout=-1`, `ttl=2**70`) raises `OverflowError`. It is not logged as a possible bug in aerospike-py.
+- A `record_queue_size` above `2**61 - 1` raises `InvalidArgError` (`record_queue_size is too large: ...`). On 0.14.x a value the client could not allocate a queue for, `2**60` for example, raised `RustPanicError`.
 - A `batch_write()` record without bins, `(key, {})`, raises `InvalidArgError` (`record 1 has no bins: ...`) and nothing is written. On 0.14.x the call raised `ClientError` ("Batch write operations do not contain a write") and logged it as a possible bug in aerospike-py. A bin set to `None` is still a write, it removes the bin. `batch_write_numpy()` refuses a dtype without bin fields with `ValueError` for the same reason.
 
 `batch_write(retry=2**32 - 1)` reports `retry.max_attempts == 2**32 - 1`: the count saturates instead of wrapping to `0`.

@@ -11,6 +11,22 @@ use super::{
     parse_read_mode_ap, parse_read_touch_ttl, parse_replica,
 };
 
+/// Refuse a `record_queue_size` no queue can have.
+///
+/// The queue between the node readers and the consumer is a Tokio channel,
+/// and that panics when asked for more slots than its semaphore can count
+/// (`usize::MAX >> 3`). Nobody has that many records to queue: a number this
+/// large is a mistake, and is reported as one instead of as a panic.
+fn check_record_queue_size(record_queue_size: usize) -> PyResult<()> {
+    let most = tokio::sync::Semaphore::MAX_PERMITS;
+    if record_queue_size > most {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "record_queue_size is too large: {record_queue_size} (the most a queue can hold is {most})"
+        )));
+    }
+    Ok(())
+}
+
 /// Parse a Python policy dict into a `(QueryPolicy, PartitionFilter)` pair.
 ///
 /// `PartitionFilter` is a positional argument to
@@ -41,6 +57,7 @@ pub fn parse_query_policy(
         "include_bin_data" => policy.include_bin_data
     });
     super::check_max_retries(policy.base_policy.max_retries)?;
+    check_record_queue_size(policy.record_queue_size)?;
 
     if let Some(val) = dict.get_item("replica")? {
         policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;

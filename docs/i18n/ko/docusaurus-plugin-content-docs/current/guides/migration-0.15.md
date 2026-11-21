@@ -457,6 +457,7 @@ invalid exists value: 9 (valid: POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONL
 
 - `max_retries = 2**64 - 1`은 `InvalidArgError`(`max_retries is too large: ...`)를 발생시킵니다. Rust client 3.0은 이 값으로는 한 번도 시도하지 않으므로, 그대로 두면 호출이 보내지지도 않은 채 "Timeout after 0 tries"로 실패합니다.
 - Field에 맞지 않는 정수(`retry=-1`, `total_timeout=-1`, `ttl=2**70`)는 `OverflowError`를 발생시킵니다. aerospike-py의 bug일 수 있다는 log는 남기지 않습니다.
+- `2**61 - 1`보다 큰 `record_queue_size`는 `InvalidArgError`(`record_queue_size is too large: ...`)를 발생시킵니다. 0.14.x에서는 client가 queue를 할당할 수 없는 값(예: `2**60`)이 `RustPanicError`를 발생시켰습니다.
 - Bin이 없는 `batch_write()` record `(key, {})`는 `InvalidArgError`(`record 1 has no bins: ...`)를 발생시키고 아무것도 쓰지 않습니다. 0.14.x에서는 호출이 `ClientError`("Batch write operations do not contain a write")를 발생시키고 aerospike-py의 bug일 수 있다는 log를 남겼습니다. Bin을 `None`으로 지정하는 것은 여전히 write이며, 그 bin을 제거합니다. `batch_write_numpy()`도 같은 이유로 bin field가 없는 dtype을 `ValueError`로 거부합니다.
 
 `batch_write(retry=2**32 - 1)`은 `retry.max_attempts == 2**32 - 1`을 알려 줍니다. 횟수가 `0`으로 넘어가지 않고 최댓값에서 멈춥니다.
