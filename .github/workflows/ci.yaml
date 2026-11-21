@@ -236,7 +236,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        server_version: ${{ github.event.inputs.server_version && fromJSON(format('["{0}"]', github.event.inputs.server_version)) || fromJSON('["7.2", "latest"]') }}
+        # Pinned minors, not `latest`: a failure here is then a change in
+        # this repository and not a server release that happened overnight.
+        # 7.2 is the oldest line tested (the client needs 6.4 or newer), 8.1
+        # is what `make run-aerospike-ce` starts, 8.2 is the newest.
+        server_version: ${{ github.event.inputs.server_version && fromJSON(format('["{0}"]', github.event.inputs.server_version)) || fromJSON('["7.2", "8.1", "8.2"]') }}
     services:
       aerospike:
         image: aerospike/aerospike-server:${{ matrix.server_version }}
