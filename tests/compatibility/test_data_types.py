@@ -1,6 +1,11 @@
 """Cross-client data type compatibility: write with one client, read with the other."""
 
+from typing import ClassVar
+
+import numpy as np
 import pytest
+
+aerospike = pytest.importorskip("aerospike")
 
 
 def _put_and_cross_read(writer, reader, key, bin_name, value):
@@ -221,3 +226,32 @@ class TestMixedComplex:
         assert bins["val"]["users"][0]["name"] == "Alice"
         assert bins["val"]["users"][1]["scores"] == [78, 82, 90]
         assert bins["val"]["metadata"]["tags"] == ["test", "compat"]
+
+
+class TestGeoJson:
+    """aerospike-py has no GeoJSON type to write with; it reads such a bin as its text."""
+
+    POINT: ClassVar[dict] = {"type": "Point", "coordinates": [1.0, 2.0]}
+
+    def test_official_write_rust_read(self, rust_client, official_client, cleanup):
+        key = ("test", "compat", "geojson_o2r")
+        cleanup.append(key)
+        official_client.put(key, {"g": aerospike.GeoJSON(self.POINT)})
+
+        text = rust_client.get(key).bins["g"]
+
+        assert isinstance(text, str)
+        assert aerospike.GeoJSON(text).unwrap() == self.POINT
+
+    def test_to_numpy_copies_the_text_into_a_bytes_field(self, rust_client, official_client, cleanup):
+        """``to_numpy`` refused the bin as an unsupported type while ``get`` returned it as ``str``."""
+        key = ("test", "compat", "geojson_numpy")
+        cleanup.append(key)
+        official_client.put(key, {"g": aerospike.GeoJSON(self.POINT), "n": 7})
+        text = rust_client.get(key).bins["g"]
+
+        result = rust_client.batch_read([key]).to_numpy(np.dtype([("g", "S96"), ("n", "i4")]))
+
+        assert result.result_codes.tolist() == [0]
+        assert result.batch_records["n"].tolist() == [7]
+        assert result.batch_records["g"][0] == text.encode()

@@ -18,17 +18,27 @@ Vectors and numerics
 Keys and rows
     Output row ``i`` is request ``i``, hit or miss. Only real user keys are
     indexed: a digest-only row is reachable by position only, and a repeated
-    user key points at its last row.
+    user key points at its last row. The key field of a write is one value: a
+    sub-array or a nested structure is refused.
+What is trusted
+    The layout the rows are copied through is NumPy's own: of the real
+    ``numpy.dtype`` on the way out, of the base ``numpy.ndarray`` on the way
+    in. An object that only describes itself as one cannot move a read or a
+    write outside the buffer.
 """
 
 import asyncio
 import math
+import subprocess
 import sys
+import textwrap
 
 import numpy as np
 import pytest
 
 from aerospike_py import exp
+from aerospike_py import hll_operations as hll
+from tests import AEROSPIKE_CONFIG
 from tests.helpers import invoke
 
 NS = "test"
@@ -561,3 +571,171 @@ class TestKeysAndRows:
         assert result.result_codes.tolist() == [0, 0]
         assert result.batch_records["v"].tolist() == [1, 2]
         assert result.get(801)["v"] == 2
+
+
+class TestTheKeyFieldIsOneValue:
+    """A sub-array key was written under the bytes of its elements, trailing zeros cut off.
+
+    ``('_key', 'i8', (1,))`` holding 5 went to the record of the bytes key
+    ``b"\\x05"``, not to the integer key 5 it addressed up to 0.14.x, and the
+    keys ``[1, 0]`` and ``[1]`` were one record.
+    """
+
+    @pytest.mark.parametrize(
+        "key_type",
+        [("i8", (1,)), ("i8", (2,)), ("S4", (2,)), ([("a", "i4"), ("b", "i4")],)],
+        ids=["one_int", "two_ints", "two_bytes", "nested_structure"],
+    )
+    async def test_anything_else_is_refused_and_nothing_is_written(self, any_client, any_cleanup, key_type):
+        await _put(any_client, any_cleanup, (NS, SET, 5), {"v": -1})
+        data = np.zeros(2, np.dtype([("_key", *key_type), ("v", "i4")]))
+        data["v"] = [10, 20]
+
+        with pytest.raises(TypeError, match="the key field '_key' must be a scalar integer or bytes field"):
+            await invoke(any_client, "batch_write_numpy", data, NS, SET)
+
+        assert (await invoke(any_client, "get", (NS, SET, 5))).bins == {"v": -1}
+        for stray in (b"", b"\x05", 0):
+            assert await _result_codes(any_client, [(NS, SET, stray)]) == [2]
+
+    async def test_a_custom_key_field_is_held_to_the_same_rule(self, any_client, any_cleanup):
+        data = np.zeros(1, np.dtype([("id", "i8", (1,)), ("v", "i4")]))
+
+        with pytest.raises(TypeError, match="the key field 'id' must be a scalar"):
+            await invoke(any_client, "batch_write_numpy", data, NS, SET, key_field="id")
+
+    async def test_a_sub_array_bin_next_to_a_scalar_key_is_still_a_vector(self, any_client, any_cleanup):
+        data = np.zeros(1, np.dtype([("_key", "i8"), ("vec", "f4", (3,))]))
+        data["_key"] = [9001]
+        data["vec"] = [[1.5, 2.5, 3.5]]
+        any_cleanup.append((NS, SET, 9001))
+
+        await invoke(any_client, "batch_write_numpy", data, NS, SET)
+
+        result = await _read(any_client, _keys([9001]), np.dtype([("vec", "f4", (3,))]))
+        assert result.batch_records["vec"].tolist() == [[1.5, 2.5, 3.5]]
+
+
+class TestAFieldOfNoBytes:
+    """NumPy has ``S0``, ``V0`` and ``(0,)`` sub-arrays. There is nothing in them to read or write."""
+
+    @pytest.mark.parametrize("empty", [("e", "S0"), ("e", "V0"), ("e", "f4", (0,))], ids=["S0", "V0", "no_elements"])
+    async def test_it_is_written_and_read_next_to_real_fields(self, any_client, any_cleanup, empty):
+        data = np.zeros(2, np.dtype([("_key", "i8"), empty, ("v", "i4")]))
+        data["_key"] = [9501, 9502]
+        data["v"] = [1, 2]
+        any_cleanup.extend(_keys([9501, 9502]))
+
+        written = await invoke(any_client, "batch_write_numpy", data, NS, SET)
+        result = await _read(any_client, _keys([9501, 9502]), np.dtype([empty, ("v", "i4")]))
+
+        assert [row.result for row in written.batch_records] == [0, 0]
+        assert result.result_codes.tolist() == [0, 0]
+        assert result.batch_records["v"].tolist() == [1, 2]
+        assert result.batch_records["e"].nbytes == 0
+
+
+class TestBytesOfEveryKind:
+    """What ``get()`` returns as ``bytes`` goes into a bytes field, whatever the server calls it."""
+
+    @pytest.mark.parametrize("spec", [("h", "S16"), ("h", "V300")], ids=["S16", "V300"])
+    async def test_an_hll_bin(self, any_client, any_cleanup, spec):
+        key = (NS, SET, 9101)
+        await _put(any_client, any_cleanup, key, {"ok": 1})
+        await invoke(any_client, "operate", key, [hll.hll_add("h", ["a", "b"], 8)])
+        stored = (await invoke(any_client, "get", key)).bins["h"]
+        assert isinstance(stored, bytes)
+
+        result = await _read(any_client, [key], np.dtype([spec, ("ok", "i4")]))
+
+        width = result.batch_records.dtype["h"].itemsize
+        assert result.result_codes.tolist() == [0]
+        assert result.batch_records["ok"].tolist() == [1]
+        assert result.batch_records["h"].tobytes() == stored[:width].ljust(width, b"\0")
+
+    async def test_an_hll_bin_into_a_vector_of_its_exact_length(self, any_client, any_cleanup):
+        key = (NS, SET, 9102)
+        await _put(any_client, any_cleanup, key, {"ok": 1})
+        await invoke(any_client, "operate", key, [hll.hll_add("h", ["a", "b"], 8)])
+        stored = (await invoke(any_client, "get", key)).bins["h"]
+
+        result = await _read(any_client, [key], np.dtype([("h", "u1", (len(stored),))]))
+
+        assert result.batch_records["h"].tobytes() == stored
+
+
+def _in_a_child(body: str) -> list[str]:
+    """Run ``body`` in an interpreter of its own and return what it printed.
+
+    The cases below guard a raw-pointer copy. If the guard went missing the
+    copy would run outside its buffer, and that is not something to try inside
+    the process that runs the rest of the suite.
+    """
+    script = textwrap.dedent(
+        f"""
+            import numpy as np
+            import aerospike_py
+
+            client = aerospike_py.client({AEROSPIKE_CONFIG!r}).connect()
+            NS, SET = {NS!r}, {SET!r}
+            """
+    ) + textwrap.dedent(body)
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr[-2000:]
+    return done.stdout.strip().splitlines()
+
+
+class TestTheLayoutIsNumpysOwn:
+    def test_to_numpy_writes_through_the_dtype_numpy_allocates(self, client, cleanup):
+        """A dtype-like object once had its own ``fields`` believed over the array NumPy made of it."""
+        key = (NS, SET, 9201)
+        cleanup.append(key)
+        client.put(key, {"v": 7})
+
+        printed = _in_a_child(
+            """
+            class Lying:
+                dtype = np.dtype([("v", "i1")])  # what np.zeros(n, Lying()) allocates: 1 byte a row
+                names = ("v",)
+                fields = {"v": (np.dtype("i8"), 4096)}  # what it claims: 8 bytes, 4096 into the row
+                itemsize = 8192
+                kind = "V"
+
+            handle = client.batch_read([(NS, SET, 9201)] * 64)
+            result = handle.to_numpy(Lying())
+            print(result.batch_records.dtype.itemsize, result.batch_records.nbytes)
+            print(result.batch_records["v"].tolist() == [7] * 64)
+            """
+        )
+
+        assert printed == ["1 64", "True"]
+
+    def test_batch_write_numpy_reads_the_rows_the_array_has(self, client, cleanup):
+        """An array subclass once had its ``len()`` believed over its buffer."""
+        cleanup.extend((NS, SET, k) for k in range(9300, 9310))
+
+        printed = _in_a_child(
+            """
+            class Longer(np.ndarray):
+                def __len__(self):
+                    return 1_000_000
+
+            data = np.zeros(2, np.dtype([("_key", "i8"), ("v", "i4")])).view(Longer)
+            data["_key"] = [9300, 9301]
+            data["v"] = [1, 2]
+            result = client.batch_write_numpy(data, NS, SET)
+            print(len(result.batch_records), [row.result for row in result.batch_records])
+            print([client.get((NS, SET, k)).bins for k in (9300, 9301)])
+            """
+        )
+
+        assert printed == ["2 [0, 0]", "[{'v': 1}, {'v': 2}]"]
+
+    def test_a_record_array_is_written_like_the_array_it_is(self, client, cleanup):
+        cleanup.extend((NS, SET, k) for k in (9401, 9402))
+        data = np.rec.array([(9401, 1), (9402, 2)], dtype=[("_key", "i8"), ("v", "i4")])
+
+        result = client.batch_write_numpy(data, NS, SET)
+
+        assert [row.result for row in result.batch_records] == [0, 0]
+        assert [client.get((NS, SET, k)).bins for k in (9401, 9402)] == [{"v": 1}, {"v": 2}]

@@ -7,7 +7,8 @@
 //!   sub-array.
 //!
 //! In every case nothing is written outside the field, and a refused value
-//! writes nothing.
+//! writes nothing. That includes a field of no bytes (`S0`, `V0`, a `(0,)`
+//! sub-array), which NumPy allows and dtype parsing lets through.
 
 #![no_main]
 use _aerospike::fuzzing::{field, write_then_read, DtypeKind, Input, Output};
@@ -23,8 +24,8 @@ fuzz_target!(|data: &[u8]| {
     let payload = &data[6..];
 
     let (kind, base_itemsize, elements, is_vector) = match data[0] % 5 {
-        0 => (DtypeKind::FixedBytes, size.max(1), 1, false),
-        1 => (DtypeKind::VoidBytes, size.max(1), 1, false),
+        0 => (DtypeKind::FixedBytes, size, 1, false),
+        1 => (DtypeKind::VoidBytes, size, 1, false),
         2 => (DtypeKind::Int, 1 << (size & 3), (size >> 2) % 65, true),
         3 => (DtypeKind::Uint, 1 << (size & 3), (size >> 2) % 65, true),
         _ => (

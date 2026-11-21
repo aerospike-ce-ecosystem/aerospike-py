@@ -630,7 +630,9 @@ unsafe fn write_value_to_buffer(
     if field.is_numeric_vector() {
         match value {
             Value::Nil => return Ok(()),
-            Value::Blob(bytes) => {
+            // An HLL bin and a value of a particle type the client does not
+            // interpret reach Python as `bytes` everywhere else; here too.
+            Value::Blob(bytes) | Value::Hll(bytes) | Value::Unknown(_, bytes) => {
                 if bytes.len() != field.itemsize {
                     return Err(PyValueError::new_err(format!(
                         "vector length mismatch for field '{}': the stored blob has {} bytes, \
@@ -709,7 +711,7 @@ unsafe fn write_value_to_buffer(
                 ))),
             }
         }
-        Value::Blob(bytes) => match field.kind {
+        Value::Blob(bytes) | Value::Hll(bytes) | Value::Unknown(_, bytes) => match field.kind {
             DtypeKind::FixedBytes | DtypeKind::VoidBytes => {
                 // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
                 unsafe { write_bytes_to_buffer(row_ptr, field, bytes) }
@@ -721,7 +723,7 @@ unsafe fn write_value_to_buffer(
                 field.name
             ))),
         },
-        Value::String(s) => match field.kind {
+        Value::String(s) | Value::GeoJson(s) => match field.kind {
             DtypeKind::FixedBytes | DtypeKind::VoidBytes => {
                 // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
                 unsafe { write_bytes_to_buffer(row_ptr, field, s.as_bytes()) }
@@ -834,7 +836,15 @@ pub fn batch_to_numpy_py(
     let np = py.import("numpy")?;
     let n = results.len();
 
-    // 1. Parse dtype fields
+    // 1. Parse dtype fields.
+    //
+    // From the dtype NumPy makes of the argument, not from the argument: the
+    // rows below are written through raw pointers at the offsets parsed here,
+    // into the array `np.zeros` allocates. Anything with a `dtype` attribute
+    // passes for a dtype in NumPy, and its own `fields` / `itemsize` need not
+    // agree with what NumPy allocates for it. Parsed from the real dtype the
+    // two cannot differ.
+    let dtype_obj = &np.call_method1("dtype", (dtype_obj,))?;
     let (fields, row_stride) = parse_dtype_fields(dtype_obj)?;
 
     // Overflow check: ensure n * row_stride does not overflow usize
@@ -1236,7 +1246,7 @@ fn checked_row_offset(index: usize, row_stride: isize) -> PyResult<isize> {
 /// * `set_name` - default set name (used when ``_set`` field is absent)
 /// * `key_field` - name of the dtype field to use as the user key (default: ``"_key"``)
 pub fn numpy_to_records(
-    _py: Python<'_>,
+    py: Python<'_>,
     data_array: &Bound<'_, PyAny>,
     expected_dtype: Option<&Bound<'_, PyAny>>,
     namespace: &str,
@@ -1249,6 +1259,37 @@ pub fn numpy_to_records(
             data_array.get_type().name()?
         )));
     }
+    // The rows are read through a raw pointer, `len` rows of `dtype.itemsize`
+    // bytes. An exact `numpy.ndarray` cannot misreport either; a subclass, or
+    // any object that only looks like an array, can override `__len__`,
+    // `dtype` or `__array_interface__` and send the reads past the buffer.
+    // `numpy.asarray` returns the base-class view of the same memory (no
+    // copy), whose attributes are NumPy's own.
+    let data_array = &py.import("numpy")?.call_method1("asarray", (data_array,))?;
+    records_of_array(data_array, expected_dtype, namespace, set_name, key_field)
+}
+
+/// Whether the field `name` of a structured dtype is itself structured, like
+/// `('pos', [('x', 'f4'), ('y', 'f4')])`. Such a field has `kind == 'V'` just
+/// as a plain `V<N>` field has, and field names of its own.
+fn is_structured_field(dtype: &Bound<'_, PyAny>, name: &str) -> PyResult<bool> {
+    let field_dtype = dtype.getattr("fields")?.get_item(name)?.get_item(0)?;
+    if !field_dtype.hasattr("names")? {
+        return Ok(false);
+    }
+    Ok(!field_dtype.getattr("names")?.is_none())
+}
+
+/// [`numpy_to_records`] for an array whose `dtype`, `len()` and
+/// `__array_interface__` can be trusted to describe its buffer — an exact
+/// `numpy.ndarray`, which is what the caller above makes of its argument.
+fn records_of_array(
+    data_array: &Bound<'_, PyAny>,
+    expected_dtype: Option<&Bound<'_, PyAny>>,
+    namespace: &str,
+    set_name: &str,
+    key_field: &str,
+) -> PyResult<Vec<(Key, Vec<Bin>)>> {
     let dtype_obj = data_array.getattr("dtype")?;
     if let Some(expected) = expected_dtype.filter(|d| !d.is_none()) {
         if !dtype_obj.eq(expected)? {
@@ -1292,6 +1333,18 @@ pub fn numpy_to_records(
             key_field
         ))
     })?;
+    // A key is one value. A sub-array field is read as the bytes of all its
+    // elements, so a `(1,)` integer key would be written under a bytes key —
+    // another record than the integer key it was up to 0.14.x — and trimming
+    // the trailing zero bytes, as is done for fixed-width bytes keys, would
+    // make [1, 0] and [1] the same key. A nested structured field is read as
+    // its raw bytes in the same way.
+    if key_fi.is_subarray || is_structured_field(dtype_obj, key_field)? {
+        return Err(PyTypeError::new_err(format!(
+            "the key field '{key_field}' must be a scalar integer or bytes field, not a sub-array \
+             or a nested structure; declare it as one value, for example ('{key_field}', 'i8')"
+        )));
+    }
 
     // Check for optional _namespace and _set fields
     let ns_field = fields.iter().find(|f| f.name == "_namespace");
@@ -1429,11 +1482,13 @@ pub mod fuzzing {
     }
 
     /// A field as dtype parsing hands it to the buffer functions, or `None`
-    /// for a shape dtype parsing refuses: an element width with no scalar, an
-    /// empty field, a field that is not a whole number of elements.
+    /// for a shape dtype parsing refuses: an element width with no scalar.
     ///
     /// `elements` is the sub-array length; a field that is not a sub-array has
     /// one element. Bytes fields have one element of `base_itemsize` bytes.
+    ///
+    /// A field of no bytes at all is a field like any other: NumPy has `S0`,
+    /// `V0` and `('v', 'f4', (0,))`, and dtype parsing lets them through.
     pub fn field(
         kind: DtypeKind,
         base_itemsize: usize,
@@ -1444,11 +1499,11 @@ pub mod fuzzing {
         let width_ok = match kind {
             DtypeKind::Int | DtypeKind::Uint => matches!(base_itemsize, 1 | 2 | 4 | 8),
             DtypeKind::Float => matches!(base_itemsize, 2 | 4 | 8),
-            DtypeKind::FixedBytes | DtypeKind::VoidBytes => base_itemsize >= 1,
+            DtypeKind::FixedBytes | DtypeKind::VoidBytes => true,
         };
         let elements = if is_subarray { elements } else { 1 };
         let itemsize = base_itemsize.checked_mul(elements)?;
-        if !width_ok || elements == 0 || itemsize > MAX_ITEMSIZE || offset > MAX_OFFSET {
+        if !width_ok || itemsize > MAX_ITEMSIZE || offset > MAX_OFFSET {
             return None;
         }
         Some(FieldInfo {
@@ -2367,7 +2422,7 @@ def make_reverse_slice():
                 .call0()
                 .expect("step slice construction should succeed");
 
-            let records = numpy_to_records(py, &sliced, Some(&dtype), "test", "demo", "_key")
+            let records = records_of_array(&sliced, Some(&dtype), "test", "demo", "_key")
                 .expect("positive-stride slice should convert");
             assert_eq!(records.len(), 2);
             assert_eq!(records[0].0.user_key(), Some(&Value::Int(1)));
@@ -2399,7 +2454,7 @@ def make_reverse_slice():
                 .call0()
                 .expect("reverse slice construction should succeed");
 
-            let records = numpy_to_records(py, &reversed, Some(&dtype), "test", "demo", "_key")
+            let records = records_of_array(&reversed, Some(&dtype), "test", "demo", "_key")
                 .expect("negative-stride slice should convert");
             assert_eq!(records.len(), 3);
             assert_eq!(records[0].0.user_key(), Some(&Value::Int(3)));
@@ -2790,7 +2845,7 @@ def make_reverse_slice():
         Python::attach(|py| {
             let module = fake_numpy_stride_module(py).unwrap();
             let array = module.getattr("make_step_slice").unwrap().call0().unwrap();
-            let records = numpy_to_records(py, &array, None, "test", "demo", "_key")
+            let records = records_of_array(&array, None, "test", "demo", "_key")
                 .expect("the dtype argument is optional");
             assert_eq!(records.len(), 2);
             assert_eq!(records[0].0.user_key(), Some(&Value::Int(1)));
@@ -2804,7 +2859,7 @@ def make_reverse_slice():
             let module = fake_numpy_stride_module(py).unwrap();
             let array = module.getattr("make_step_slice").unwrap().call0().unwrap();
             let other = module.getattr("make_other_dtype").unwrap().call0().unwrap();
-            let err = numpy_to_records(py, &array, Some(&other), "test", "demo", "_key")
+            let err = records_of_array(&array, Some(&other), "test", "demo", "_key")
                 .expect_err("a declared dtype that differs from data.dtype must be rejected");
             assert!(err.is_instance_of::<PyValueError>(py));
             assert!(err.to_string().contains("_dtype does not match"));
