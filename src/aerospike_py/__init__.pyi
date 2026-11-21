@@ -837,6 +837,12 @@ class Client:
                 ``policy={"total_timeout": 30000}`` — the client never lengthens
                 the budget on your behalf.
 
+                ``retry`` cannot be combined with ``policy["max_retries"]``.
+                The two would multiply — each of the ``retry + 1`` attempts
+                re-sent ``max_retries`` times underneath — so giving both
+                raises ``InvalidArgError``. A batch write starts from
+                ``max_retries = 0``.
+
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
@@ -922,6 +928,12 @@ class Client:
                 actually get ``N + 1`` attempts, raise it yourself with
                 ``policy={"total_timeout": 30000}`` — the client never lengthens
                 the budget on your behalf.
+
+                ``retry`` cannot be combined with ``policy["max_retries"]``.
+                The two would multiply — each of the ``retry + 1`` attempts
+                re-sent ``max_retries`` times underneath — so giving both
+                raises ``InvalidArgError``. A batch write starts from
+                ``max_retries = 0``.
 
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
@@ -1992,6 +2004,12 @@ class AsyncClient:
                 ``policy={"total_timeout": 30000}`` — the client never lengthens
                 the budget on your behalf.
 
+                ``retry`` cannot be combined with ``policy["max_retries"]``.
+                The two would multiply — each of the ``retry + 1`` attempts
+                re-sent ``max_retries`` times underneath — so giving both
+                raises ``InvalidArgError``. A batch write starts from
+                ``max_retries = 0``.
+
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
@@ -2058,6 +2076,12 @@ class AsyncClient:
                 actually get ``N + 1`` attempts, raise it yourself with
                 ``policy={"total_timeout": 30000}`` — the client never lengthens
                 the budget on your behalf.
+
+                ``retry`` cannot be combined with ``policy["max_retries"]``.
+                The two would multiply — each of the ``retry + 1`` attempts
+                re-sent ``max_retries`` times underneath — so giving both
+                raises ``InvalidArgError``. A batch write starts from
+                ``max_retries = 0``.
 
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,

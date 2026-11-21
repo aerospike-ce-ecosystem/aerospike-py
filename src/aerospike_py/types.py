@@ -163,6 +163,12 @@ class WritePolicy(TypedDict, total=False):
 class BatchPolicy(TypedDict, total=False):
     socket_timeout: int
     total_timeout: int
+    # Automatic re-sends inside the Rust client. Default: 2 for a batch that
+    # only reads (``batch_read``, a ``batch_operate`` whose operations all
+    # read), 0 for a batch that writes, deletes or runs a UDF — a re-sent
+    # increment or UDF call would be applied twice. ``batch_write`` has its
+    # own ``retry=`` argument, which re-sends only the records that failed;
+    # giving both raises ``InvalidArgError``.
     max_retries: int
     sleep_between_retries: int
     timeout_delay: int

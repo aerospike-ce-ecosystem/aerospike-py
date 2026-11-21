@@ -1271,7 +1271,11 @@ impl PyClient {
             namespace, set_name, retry
         );
         let client = self.get_client()?.clone();
-        let batch_policy = crate::policy::batch_policy::parse_batch_policy(policy)?;
+        let batch_policy = crate::policy::batch_policy::parse_batch_policy(
+            policy,
+            crate::policy::batch_policy::BatchKind::Write,
+        )?;
+        crate::policy::batch_policy::reject_doubled_retry(retry, &batch_policy)?;
         #[allow(clippy::let_unit_value)]
         let parent_ctx = client_common::extract_parent_context(py);
         let conn_info = self.connection_info.clone();

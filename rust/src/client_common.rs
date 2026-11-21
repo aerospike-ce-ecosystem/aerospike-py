@@ -21,7 +21,7 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 use crate::operate_result::OrderedPlan;
 use crate::operations::{py_ops_to_rust, py_ops_to_rust_checked, py_ops_to_rust_ordered};
 use crate::policy::admin_policy::parse_admin_policy;
-use crate::policy::batch_policy::parse_batch_policy;
+use crate::policy::batch_policy::{parse_batch_policy, reject_doubled_retry, BatchKind};
 use crate::policy::read_policy::{parse_read_policy, DEFAULT_READ_POLICY};
 use crate::policy::write_policy::parse_write_policy;
 use crate::tracing::ConnectionInfo;
@@ -498,7 +498,7 @@ pub fn prepare_batch_read_args(
     policy: Option<&Bound<'_, PyDict>>,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchReadArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
+    let batch_policy = parse_batch_policy(policy, BatchKind::Read)?;
     let read_policy = parse_batch_read_policy(policy)?;
     let bins_selector = match bins {
         None => Bins::All,
@@ -560,7 +560,14 @@ pub fn prepare_batch_operate_args(
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchOperateArgs> {
     let (rust_ops, has_write) = py_ops_to_rust_checked(ops)?;
-    let batch_policy = parse_batch_policy(policy)?;
+    // An op list that only reads is sent as a batch read and may be retried
+    // like one; anything that writes starts from the no-retry defaults.
+    let kind = if has_write {
+        BatchKind::Write
+    } else {
+        BatchKind::Read
+    };
+    let batch_policy = parse_batch_policy(policy, kind)?;
     let read_policy = parse_batch_read_policy(policy)?;
     let rust_keys = py_to_keys(py, keys)?;
 
@@ -622,7 +629,7 @@ pub fn prepare_batch_remove_args(
     policy: Option<&Bound<'_, PyDict>>,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchRemoveArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
+    let batch_policy = parse_batch_policy(policy, BatchKind::Write)?;
     // Parse the batch-level delete policy once and share it via Arc; the
     // common "no per-record meta" path bumps refcount instead of cloning.
     let base_delete_policy = Arc::new(parse_batch_delete_policy(policy)?);
@@ -729,7 +736,7 @@ pub fn prepare_batch_apply_args(
     policy: Option<&Bound<'_, PyDict>>,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchApplyArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
+    let batch_policy = parse_batch_policy(policy, BatchKind::Write)?;
     // Parse the batch-level UDF policy once and share via Arc; the no-meta
     // fast path bumps refcount instead of cloning.
     let base_udf_policy = Arc::new(parse_batch_udf_policy(policy)?);
@@ -863,7 +870,8 @@ pub fn prepare_batch_write_args(
     retry: u32,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchWriteGenericArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
+    let batch_policy = parse_batch_policy(policy, BatchKind::Write)?;
+    reject_doubled_retry(retry, &batch_policy)?;
     // Parse batch-level write policy once (TTL default for all records).
     // Wrap in Arc so the common "all records share the batch policy" path
     // reuses a single allocation via Arc::clone (refcount bump) rather than

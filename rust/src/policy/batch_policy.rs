@@ -15,10 +15,35 @@ use super::{
     parse_read_mode_ap, parse_read_touch_ttl, parse_record_exists_action, parse_replica,
 };
 
-/// Parse a Python policy dict into a BatchPolicy
-pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchPolicy> {
+/// Which defaults a batch call starts from.
+///
+/// The parent `BatchPolicy` is one type for every batch call, but the right
+/// number of automatic retries is not: a read can be sent again freely, while
+/// a write, delete or UDF call that is re-sent after the server already
+/// applied it is applied twice (issue #453).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchKind {
+    /// Every row only reads. Starts from `BatchPolicy::default()`, which
+    /// retries (`max_retries` 2).
+    Read,
+    /// At least one row writes, deletes or runs a UDF. Starts from
+    /// `BatchPolicy::write_default()`, which does not retry (`max_retries` 0).
+    Write,
+}
+
+/// Parse a Python policy dict into a BatchPolicy.
+///
+/// `kind` only picks the starting defaults; a `max_retries` in the dict wins
+/// for either kind.
+pub fn parse_batch_policy(
+    policy_dict: Option<&Bound<'_, PyDict>>,
+    kind: BatchKind,
+) -> PyResult<BatchPolicy> {
     trace!("Parsing batch policy");
-    let mut policy = BatchPolicy::default();
+    let mut policy = match kind {
+        BatchKind::Read => BatchPolicy::default(),
+        BatchKind::Write => BatchPolicy::write_default(),
+    };
 
     let dict = match policy_dict {
         Some(d) => d,
@@ -53,6 +78,28 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
     policy.base_policy.filter_expression = extract_filter_expression(dict)?;
 
     Ok(policy)
+}
+
+/// Reject `retry=N` together with a `max_retries` in the batch policy.
+///
+/// The two would multiply: every one of the `retry + 1` client-side attempts
+/// would itself be re-sent `max_retries` times inside aerospike-core, and the
+/// inner re-sends ignore which rows already succeeded. `retry=` re-sends only
+/// the rows that failed, so it is the one to use for `batch_write`.
+///
+/// A write batch starts from `max_retries` 0, so a non-zero value here is one
+/// the caller asked for.
+pub fn reject_doubled_retry(retry: u32, policy: &BatchPolicy) -> PyResult<()> {
+    if retry > 0 && policy.base_policy.max_retries > 0 {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "retry={retry} and policy['max_retries']={} were both given; they would multiply \
+             into up to {} sends per record. Use retry= alone: it re-sends only the records \
+             that failed.",
+            policy.base_policy.max_retries,
+            (u64::from(retry) + 1).saturating_mul(policy.base_policy.max_retries as u64 + 1),
+        )));
+    }
+    Ok(())
 }
 
 /// Map a Python ``int`` to an [`aerospike_core::Concurrency`] variant.
@@ -456,7 +503,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("replica", 0i32).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).unwrap();
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).unwrap();
             assert_eq!(
                 p.base_policy.replica,
                 aerospike_core::policy::Replica::Master
@@ -471,7 +518,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("timeout_delay", 500u32).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).unwrap();
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).unwrap();
             assert_eq!(p.base_policy.timeout_delay, 500);
         });
     }
@@ -483,14 +530,14 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("sleep_between_retries", 250u32).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).unwrap();
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).unwrap();
             assert_eq!(p.base_policy.sleep_between_retries, 250);
         });
     }
 
     #[test]
     fn parse_batch_policy_default_concurrency_is_parallel() {
-        let p = parse_batch_policy(None).expect("parse ok");
+        let p = parse_batch_policy(None, BatchKind::Read).expect("parse ok");
         assert!(matches!(p.concurrency, Concurrency::Parallel));
     }
 
@@ -501,7 +548,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("concurrency", 0i64).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).expect("parse ok");
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).expect("parse ok");
             assert!(matches!(p.concurrency, Concurrency::Sequential));
         });
     }
@@ -513,7 +560,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("concurrency", 1i64).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).expect("parse ok");
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).expect("parse ok");
             assert!(matches!(p.concurrency, Concurrency::Parallel));
         });
     }
@@ -525,7 +572,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("concurrency", -1i64).unwrap();
             });
-            assert!(parse_batch_policy(Some(&d)).is_err());
+            assert!(parse_batch_policy(Some(&d), BatchKind::Read).is_err());
         });
     }
 
@@ -536,7 +583,94 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("concurrency", 4i64).unwrap();
             });
-            assert!(parse_batch_policy(Some(&d)).is_err());
+            assert!(parse_batch_policy(Some(&d), BatchKind::Read).is_err());
+        });
+    }
+
+    // ── BatchKind: who retries by default (issue #453) ──────────
+
+    #[test]
+    fn a_read_batch_retries_by_default_and_a_write_batch_does_not() {
+        let read = parse_batch_policy(None, BatchKind::Read).unwrap();
+        let write = parse_batch_policy(None, BatchKind::Write).unwrap();
+        assert_eq!(read.base_policy.max_retries, 2);
+        assert_eq!(
+            write.base_policy.max_retries, 0,
+            "a re-sent increment or UDF call is applied twice"
+        );
+    }
+
+    #[test]
+    fn the_kind_changes_nothing_but_the_retry_default() {
+        let read = parse_batch_policy(None, BatchKind::Read).unwrap();
+        let write = parse_batch_policy(None, BatchKind::Write).unwrap();
+        assert_eq!(
+            read.base_policy.total_timeout,
+            write.base_policy.total_timeout
+        );
+        assert_eq!(
+            read.base_policy.socket_timeout,
+            write.base_policy.socket_timeout
+        );
+        assert_eq!(
+            read.base_policy.sleep_between_retries,
+            write.base_policy.sleep_between_retries
+        );
+    }
+
+    #[test]
+    fn an_explicit_max_retries_wins_for_either_kind() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| d.set_item("max_retries", 5u32).unwrap());
+            for kind in [BatchKind::Read, BatchKind::Write] {
+                let p = parse_batch_policy(Some(&d), kind).unwrap();
+                assert_eq!(p.base_policy.max_retries, 5, "{kind:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_policy_without_max_retries_keeps_the_kind_default() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| d.set_item("total_timeout", 3000u32).unwrap());
+            let write = parse_batch_policy(Some(&d), BatchKind::Write).unwrap();
+            assert_eq!(write.base_policy.max_retries, 0);
+            assert_eq!(write.base_policy.total_timeout, 3000);
+        });
+    }
+
+    #[test]
+    fn retry_together_with_max_retries_is_rejected() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| d.set_item("max_retries", 2u32).unwrap());
+            let policy = parse_batch_policy(Some(&d), BatchKind::Write).unwrap();
+
+            let err = reject_doubled_retry(3, &policy).expect_err("both were given");
+            assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
+            let message = err.to_string();
+            assert!(
+                message.contains("retry=3")
+                    && message.contains("max_retries")
+                    && message.contains("12"),
+                "the message names both settings and the product, got: {message}"
+            );
+        });
+    }
+
+    #[test]
+    fn either_retry_setting_alone_is_accepted() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| d.set_item("max_retries", 2u32).unwrap());
+            let with_max_retries = parse_batch_policy(Some(&d), BatchKind::Write).unwrap();
+            assert!(reject_doubled_retry(0, &with_max_retries).is_ok());
+
+            let default_policy = parse_batch_policy(None, BatchKind::Write).unwrap();
+            assert!(reject_doubled_retry(3, &default_policy).is_ok());
+            assert!(reject_doubled_retry(0, &default_policy).is_ok());
         });
     }
 
@@ -548,7 +682,7 @@ mod tests {
                 d.set_item("read_mode_ap", 1i32).unwrap();
                 d.set_item("read_touch_ttl_percent", 80i64).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).unwrap();
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).unwrap();
             assert_eq!(p.base_policy.read_mode_ap, aerospike_core::ReadModeAp::All);
             assert!(matches!(
                 p.base_policy.read_touch_ttl,
