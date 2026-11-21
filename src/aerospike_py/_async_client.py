@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import logging
 import threading
@@ -61,13 +62,31 @@ async def _in_thread_to_completion(function, argument, stop: threading.Event):
     cancellation is raised after the worker has finished what it was doing. When
     the ``CancelledError`` reaches the caller, nothing of ``function`` is running
     any more and nothing of it will start.
+
+    ``function`` must look at ``stop`` before it does anything: a call that is
+    still waiting for a thread when the cancellation arrives is not waited for.
+
+    The worker is a plain future of the executor and not a task. A task would
+    be cancelled together with the caller by anything that cancels every task
+    of the loop (``asyncio.run()`` on its way out does), and a cancelled task
+    reports itself done while its thread is still running.
     """
-    worker = asyncio.ensure_future(asyncio.to_thread(function, argument))
+    loop = asyncio.get_running_loop()
+    context = contextvars.copy_context()
+    started = threading.Event()
+
+    def run():
+        started.set()
+        return context.run(function, argument)
+
+    worker = loop.run_in_executor(None, run)
     try:
         return await asyncio.shield(worker)
     except asyncio.CancelledError:
         stop.set()
-        while not worker.done():
+        # Not started: when it does start it finds ``stop`` set (it was set
+        # before ``started`` was looked at) and returns without doing anything.
+        while started.is_set() and not worker.done():
             try:
                 await asyncio.shield(worker)
             except asyncio.CancelledError:
@@ -76,7 +95,7 @@ async def _in_thread_to_completion(function, argument, stop: threading.Event):
                 continue
             except BaseException:  # the cancellation outranks whatever the worker raised
                 break
-        if not worker.cancelled():
+        if worker.done() and not worker.cancelled():
             worker.exception()  # retrieved, so asyncio does not log it as unhandled
         raise
 
@@ -92,13 +111,23 @@ class AsyncRecordStream:
     which, in CPython, is the moment an ``async for`` loop is left with
     ``break`` or by an exception and nothing else refers to the stream.
 
+    Every record is handed out once. Several tasks may iterate the same
+    stream: each record goes to one of them.
+
     Memory stays bounded whatever the pace of the consumer: at most
     ``record_queue_size`` records (default 1024) wait in the client, plus the
-    batch being handed out. A consumer that stops reading for longer than the
-    query's ``socket_timeout`` loses the query: the server gives up on a client
-    that does not read.
+    batch being handed out. While they wait the server is not read from. If
+    the consumer pauses for longer than the server is willing to wait, the
+    server drops the connection and the client fetches the rest again when
+    reading resumes, without repeating a record; a query that is dropped more
+    often than its ``max_retries`` allows fails.
 
-    Cancelling a task that is waiting for the next record closes the stream.
+    Cancelling a task that is waiting for the next record closes the stream:
+    a record the read had already taken cannot be put back. A later read on
+    that stream raises ``RuntimeError`` instead of ending the iteration, so
+    that records lost this way cannot be mistaken for the end of the query.
+    ``asyncio.wait_for(anext(stream), ...)`` cancels the read when it times
+    out; to bound a wait, put the timeout around the whole loop.
     """
 
     #: How many records are taken from the client in one go. Records beyond the
@@ -110,35 +139,55 @@ class AsyncRecordStream:
         self._inner = inner
         self._batch: list = []
         self._position = 0
+        # Held by the task that fetches the next batch; the others wait for it
+        # and then find the batch it fetched.
+        self._refill = asyncio.Lock()
+        self._read_was_cancelled = False
 
     def __aiter__(self) -> "AsyncRecordStream":
         return self
 
     async def __anext__(self) -> Record:
-        if self._position >= len(self._batch):
-            batch = await self._next_batch()
-            if batch is None:
-                raise StopAsyncIteration
-            self._batch = batch
-            self._position = 0
+        while self._position >= len(self._batch):
+            async with self._refill:
+                if self._position < len(self._batch):
+                    break  # another task fetched while this one waited
+                batch = await self._next_batch()
+                if batch is None or self._inner.closed:
+                    raise StopAsyncIteration
+                self._batch = batch
+                self._position = 0
         raw = self._batch[self._position]
         self._position += 1
         return _wrap_record(raw)
 
     async def _next_batch(self) -> list | None:
         """The records that have arrived (at least one), or ``None`` at the end."""
+        if self._read_was_cancelled:
+            raise RuntimeError(
+                "this stream was closed because a read on it was cancelled, and records may be missing; "
+                "open a new stream with query.stream()"
+            )
         try:
             return await self._inner.next_batch(self._BATCH)
         except asyncio.CancelledError:
             # A record the read had already taken when the cancellation arrived
-            # cannot be put back. Ending the stream here is what keeps a
-            # cancelled read from silently skipping records.
+            # cannot be put back. Ending the stream here, and refusing later
+            # reads, is what keeps a cancelled read from silently skipping
+            # records.
+            self._read_was_cancelled = True
             self.close()
             raise
 
     def close(self) -> None:
         """Stop the query and drop the records not yet handed out. Idempotent."""
         self._inner.close()
+        self._batch = []
+        self._position = 0
+
+    def _abandon(self) -> None:
+        """Stop the query without recording a duration for it: the caller's code failed, not the query."""
+        self._inner.abandon()
         self._batch = []
         self._position = 0
 
@@ -212,8 +261,12 @@ class AsyncQuery:
                 try:
                     result = callback(record)
                 except BaseException as exc:
+                    # Carried to the awaiting task by hand and raised there. A
+                    # future cannot carry every exception: ``StopIteration``
+                    # set on one is refused or replaced, depending on the
+                    # Python version.
                     raised_by_callback.append(exc)
-                    raise
+                    return False
                 if _says_stop(result):
                     return False
             return True
@@ -221,16 +274,22 @@ class AsyncQuery:
         stream = self.stream(policy)
         try:
             while (batch := await stream._next_batch()) is not None:
-                if not await _in_thread_to_completion(deliver, batch, stop):
+                goes_on = await _in_thread_to_completion(deliver, batch, stop)
+                if raised_by_callback:
+                    raise raised_by_callback[0]
+                if not goes_on:
                     break
         except Exception as exc:
             # What the caller's own callback raised is the caller's to handle,
             # not a sign of a bug in this library.
-            if not any(exc is raised for raised in raised_by_callback):
+            if not raised_by_callback:
                 _maybe_log("AsyncQuery.foreach", exc)
             raise
         finally:
-            stream.close()
+            if raised_by_callback:
+                stream._abandon()
+            else:
+                stream.close()
 
 
 # ---------------------------------------------------------------------------

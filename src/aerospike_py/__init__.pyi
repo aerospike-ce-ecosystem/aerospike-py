@@ -2701,18 +2701,36 @@ class AsyncRecordStream:
     depend on the interpreter.
 
     Stopping takes effect when a node next hands records to the client. A scan
-    whose records are flowing stops within milliseconds; a rate-limited one
-    (``records_per_second``) keeps its connection until the server sends its
-    next block, at most the query's ``socket_timeout``.
+    whose records are flowing stops within milliseconds. A rate-limited one
+    (``records_per_second``) is sent in blocks that are far apart, and it stays
+    listed on the server until the next block is due: 45 seconds at 50 records
+    per second in one measurement. ``socket_timeout`` does not shorten that.
+
+    Every record is handed out once, also when a node's connection fails in
+    the middle and the client fetches part of the set again. Several tasks may
+    iterate the same stream: each record goes to one of them.
 
     Memory stays bounded whatever the pace of the consumer: at most
     ``record_queue_size`` records (default 1024) wait in the client, plus the
     batch being handed out, and the server is not read from while they wait. A
-    consumer that stops reading for longer than the query's ``socket_timeout``
-    (30 seconds by default) loses the query: the server gives up on a client
-    that does not read.
+    consumer may pause for longer than ``socket_timeout``: if the server drops
+    the connection meanwhile, the client fetches the rest again when reading
+    resumes, without repeating a record. A query that is dropped more often
+    than its ``max_retries`` allows fails, and ``total_timeout``, when set,
+    covers the consumer's time as well: when it runs out the next read raises
+    ``AerospikeTimeoutError``.
 
-    Cancelling a task that is waiting for the next record closes the stream.
+    Cancelling a task that is waiting for the next record closes the stream:
+    a record the read had already taken cannot be put back. A later read on
+    that stream raises ``RuntimeError`` instead of ending the iteration, so
+    that records lost this way cannot be mistaken for the end of the query.
+    ``asyncio.wait_for(anext(stream), ...)`` cancels the read when it times
+    out; to bound a wait, put the timeout around the whole loop.
+
+    Closing the client does not stop a stream that is already running: it
+    reads on to its end with the connections it holds. A stream that has not
+    been read from yet fails on its first read. Close streams before the
+    client.
 
     Example:
         ```python
@@ -2859,17 +2877,27 @@ class AsyncQuery:
         scan. Returning ``False`` stops fetching from the server, so it bounds
         both time and memory — use it for "scan until I find the first match".
 
+        Every record reaches the callback once, also when a node's connection
+        fails in the middle and the client fetches part of the set again.
+
         The callback is a plain function and runs in a worker thread, off the
         event loop, so it may block — write to a file, call a sync client —
         without stalling other tasks. It cannot be awaited: a coroutine function
         is refused with ``TypeError``. To await something for each record, use
-        ``async for record in query``.
+        ``async for record in query``. Callbacks never overlap, but they do not
+        all run on the same thread: the loop's default executor picks one for
+        each batch of records, so do not keep state in thread-locals.
+
+        An exception raised by the callback stops the query and is raised from
+        ``foreach`` as it is, ``StopIteration`` included.
 
         **Cancellation.** Cancelling the awaiting task stops the query. A
         callback that is running when the cancellation arrives cannot be
         interrupted; it runs to its end, no further callback starts, and only
         then is ``CancelledError`` raised. When the caller sees the
-        cancellation, nothing of this call is running any more.
+        cancellation, nothing of this call is running any more. That holds for
+        the cancellation of every task at once too, as ``asyncio.run`` does on
+        Ctrl-C.
 
         **A failing query may raise after processing part of the result set.**
         The scan stays open for as long as the callbacks take, so a query error

@@ -9,7 +9,8 @@ callbacks to the end of the scan.
 What these tests pin:
 
 - every way of reading delivers every record once, also when the client has
-  to fetch part of the set again because a node's connection failed;
+  to fetch part of the set again because a node's connection failed, and when
+  several tasks read the same stream;
 - every way of leaving early — ``break``, ``close()``, ``async with``, a
   callback returning ``False`` or raising, cancelling the task — stops the query
   **on the server**, within a moment and not when the server's socket timeout
@@ -216,6 +217,27 @@ class TestARoundTheClientHasToFetchAgain:
         self._assert_every_record_once([record.bins["v"] for record in records], seeded)
 
 
+class TestSeveralTasksOnOneStream:
+    async def test_each_record_goes_to_one_of_them(self, async_client, seeded):
+        stream = async_client.query(NS, SET_NAME).stream()
+
+        async def take() -> list[int]:
+            taken = []
+            async for record in stream:
+                taken.append(record.bins["v"])
+                # Let another task in while this one is in the middle of a
+                # batch: that task fetching the next batch once replaced the
+                # one this task had not finished.
+                await asyncio.sleep(0)
+            return taken
+
+        parts = await asyncio.gather(*(take() for _ in range(4)))
+
+        seen = [value for part in parts for value in part]
+        assert len(seen) == seeded, "tasks reading the same stream lost or repeated records"
+        assert set(seen) == set(range(seeded))
+
+
 class TestNothingIsSentBeforeTheFirstRead:
     async def test_an_unread_stream_costs_nothing(self, async_client, client, seeded):
         before = _query_count()
@@ -274,7 +296,13 @@ class TestLeavingEarlyStopsTheQuery:
         await _wait_until_no_job(client)
 
     async def test_cancelling_a_waiting_read_closes_the_stream(self, async_client, client, seeded):
-        """A cancelled read may have taken records that cannot be put back, so the stream ends there."""
+        """A cancelled read may have taken records that cannot be put back, so the stream ends there.
+
+        And it does not end quietly. ``asyncio.wait_for(anext(stream), ...)``
+        cancels the read when it times out; if the next read simply ended the
+        iteration, a loop around it would finish with records missing and no
+        sign of it.
+        """
         stream = async_client.query(NS, SET_NAME).stream(THROTTLED)
         reader = asyncio.ensure_future(stream.__anext__())
         await asyncio.sleep(0.2)
@@ -285,6 +313,15 @@ class TestLeavingEarlyStopsTheQuery:
         with pytest.raises(asyncio.CancelledError):
             await reader
         assert stream.closed
+        with pytest.raises(RuntimeError, match="a read on it was cancelled"):
+            await stream.__anext__()
+
+    async def test_a_stream_the_caller_closed_ends_quietly(self, async_client, seeded):
+        stream = async_client.query(NS, SET_NAME).stream()
+        await stream.__anext__()
+
+        stream.close()
+
         with pytest.raises(StopAsyncIteration):
             await stream.__anext__()
 
@@ -359,7 +396,6 @@ class TestForeach:
 
     async def test_an_exception_from_the_callback_is_not_reported_as_a_bug(self, any_client, seeded, caplog):
         """The caller's callback raised; that says nothing about this library (issue #445)."""
-        from tests.helpers import invoke
 
         def explode(_record):
             raise RuntimeError("boom")
@@ -369,11 +405,24 @@ class TestForeach:
 
         assert [r.getMessage()[:120] for r in caplog.records if "may be a bug in aerospike-py" in r.getMessage()] == []
 
+    async def test_a_callback_raising_stop_iteration_neither_hangs_nor_is_reported(self, async_client, seeded, caplog):
+        """A future cannot carry ``StopIteration``; the exception is carried to the caller another way.
+
+        Leaving a coroutine it becomes ``RuntimeError``, as Python does for every
+        ``StopIteration`` that escapes one.
+        """
+
+        def callback(_record):
+            raise StopIteration
+
+        with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError, match="StopIteration"):
+            await asyncio.wait_for(async_client.query(NS, SET_NAME).foreach(callback), timeout=10)
+
+        assert [r.getMessage()[:120] for r in caplog.records if "may be a bug in aerospike-py" in r.getMessage()] == []
+
     async def test_numpy_false_stops_like_false(self, any_client, seeded):
         """A comparison on a NumPy scalar returns ``numpy.bool``; both clients read it as a bool."""
         np = pytest.importorskip("numpy")
-        from tests.helpers import invoke
-
         calls = 0
 
         def never(_record):
@@ -386,8 +435,6 @@ class TestForeach:
         assert calls == 1
 
     async def test_only_a_bool_stops(self, any_client, seeded):
-        from tests.helpers import invoke
-
         calls = 0
 
         def falsy_but_not_false(_record):
@@ -485,6 +532,38 @@ class TestCancellingForeach:
         assert started == 1, "a callback started after the cancellation had been raised"
         await _wait_until_no_job(client)
 
+    async def test_cancelling_every_task_of_the_loop_still_waits_for_the_callback(self, async_client, client, seeded):
+        """What ``asyncio.run()`` does on its way out, and what shutdown code usually does.
+
+        The worker that runs the callback must not be a task: cancelled along
+        with everything else, it would report itself done while its thread was
+        still inside the callback.
+        """
+        entered = threading.Event()
+        release = threading.Event()
+        finished = 0
+
+        def callback(_record):
+            nonlocal finished
+            entered.set()
+            release.wait(10)
+            finished += 1
+
+        task = asyncio.ensure_future(async_client.query(NS, SET_NAME).foreach(callback))
+        await _wait_for(entered.is_set)
+
+        for other in asyncio.all_tasks() - {asyncio.current_task()}:
+            other.cancel()
+        await asyncio.sleep(0.1)
+        still_running = not task.done()
+        release.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert still_running, "the cancellation was raised while a callback was still running"
+        assert finished == 1
+        await _wait_until_no_job(client)
+
 
 class TestASlowConsumer:
     async def test_a_paused_consumer_bounds_what_is_fetched_and_loses_nothing(self, async_client, client, seeded):
@@ -535,6 +614,19 @@ class TestTelemetry:
         async for _ in async_client.query(NS, SET_NAME):
             break
         assert _query_count() == before + 2, "a query its caller stopped is an operation, and not a failed one"
+
+    async def test_a_callback_that_raises_is_no_outcome_of_the_query(self, any_client, seeded):
+        """The caller's code failed, not the query: nothing is recorded, by either client."""
+
+        def explode(_record):
+            raise RuntimeError("boom")
+
+        before = _query_count()
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await invoke(any_client.query(NS, SET_NAME), "foreach", explode)
+
+        assert _query_count() == before
 
     async def test_a_failed_start_is_counted_under_its_error_type(self, async_client):
         wanted = ('db_namespace="no_such_namespace"', 'db_operation_name="query"')
