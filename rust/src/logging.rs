@@ -5,6 +5,7 @@
 //! when the Python GIL is unavailable (e.g. during shutdown).
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
+use pyo3::exceptions::PyKeyboardInterrupt;
 use pyo3::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -17,6 +18,28 @@ fn rust_to_python_level(level: Level) -> u32 {
         Level::Info => 20,
         Level::Debug => 10,
         Level::Trace => 5,
+    }
+}
+
+/// Ctrl-C arrived while a message was being handed to Python's `logging`.
+///
+/// Python delivers a signal to the first Python code the main thread runs
+/// after it arrived. While the main thread is inside a long call of this
+/// library, a sync query for instance, that code is the forwarding of a log
+/// message, so the `KeyboardInterrupt` is raised in here, where nothing can
+/// pass it on: a logger has no caller to raise to. Dropped like a failure of
+/// the logging call, the interrupt was simply lost, and a scan that the user
+/// had interrupted ran to its end and returned normally.
+///
+/// It is not a failure of logging. The interrupt is asked for again, so that
+/// it is raised in the next Python code that is not this bridge: the callback
+/// of a `foreach`, or the caller's own code when the call returns.
+fn interrupted_while_logging(level: Level, target: &str, message: &str) {
+    // SAFETY: only sets the flag a SIGINT sets. Safe from any thread, with or
+    // without the GIL.
+    unsafe { pyo3::ffi::PyErr_SetInterrupt() };
+    if level <= Level::Warn {
+        eprintln!("[aerospike-py/{level}] {target}: {message}");
     }
 }
 
@@ -51,10 +74,19 @@ impl Log for PyLogger {
         // If we can't (e.g., during shutdown), fall back to stderr for
         // WARN/ERROR messages so critical diagnostics are not lost.
         match Python::try_attach(|py| -> PyResult<()> {
-            let logging = py.import("logging")?;
-            let logger = logging.call_method1("getLogger", (target,))?;
-            logger.call_method1("log", (level, &message))?;
-            Ok(())
+            let forwarded = (|| -> PyResult<()> {
+                let logging = py.import("logging")?;
+                let logger = logging.call_method1("getLogger", (target,))?;
+                logger.call_method1("log", (level, &message))?;
+                Ok(())
+            })();
+            match forwarded {
+                Err(interrupt) if interrupt.is_instance_of::<PyKeyboardInterrupt>(py) => {
+                    interrupted_while_logging(record.level(), target, &message);
+                    Ok(())
+                }
+                other => other,
+            }
         }) {
             Some(Ok(())) => {} // Successfully forwarded to Python
             None => {
