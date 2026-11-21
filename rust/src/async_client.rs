@@ -774,7 +774,9 @@ impl PyAsyncClient {
             a.function
         );
 
+        let limiter = self.limiter.clone();
         future_into_py_panic_safe(py, "AsyncClient.apply", async move {
+            let _permit = limiter.acquire_named("apply").await?;
             let result = client_ops::do_apply(&client, &a).await?;
             Python::attach(|py| client_common::batch_udf_value_to_py(py, result.as_ref()))
         })

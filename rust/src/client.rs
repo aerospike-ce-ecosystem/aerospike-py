@@ -786,8 +786,14 @@ impl PyClient {
             a.module,
             a.function
         );
+        let limiter = self.limiter.clone();
         let result = catch_panic_sync("Client.apply", || {
-            py.detach(|| RUNTIME.block_on(client_ops::do_apply(&client, &a)))
+            py.detach(|| {
+                RUNTIME.block_on(async {
+                    let _permit = limiter.acquire_named("apply").await?;
+                    client_ops::do_apply(&client, &a).await
+                })
+            })
         })?;
         client_common::batch_udf_value_to_py(py, result.as_ref())
     }
