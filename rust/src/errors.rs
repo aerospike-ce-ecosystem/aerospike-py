@@ -364,6 +364,11 @@ impl ErrorClass {
                 ResultCode::BinTypeError => "BinTypeError",
                 ResultCode::BinNotFound => "BinNotFound",
                 ResultCode::FilteredOut => "FilteredOut",
+                // The codes a server under load answers many rows with: named
+                // here so that labelling them allocates nothing.
+                ResultCode::DeviceOverload => "DeviceOverload",
+                ResultCode::KeyBusy => "KeyBusy",
+                ResultCode::PartitionUnavailable => "PartitionUnavailable",
                 // Kept apart from the client's own "Timeout": the server
                 // answered, with result code 9.
                 ResultCode::Timeout => "ServerTimeout",

@@ -225,10 +225,15 @@ pub async fn do_operate_ordered(client: &AsClient, args: &OperateArgs) -> PyResu
 /// `Client::batch` writes each result into the operation it belongs to and
 /// returns only whether the call as a whole failed, so the rows exist either
 /// way: one per operation, in request order.
+///
+/// Deliberately not `into_iter().map(..).collect()`: the standard library
+/// would collect in place, into the allocation of `ops`. A `BatchOperation`
+/// is 672 bytes and a `BatchRecord` 408, so every result would carry 264
+/// bytes of unused capacity per row for as long as Python holds it.
 fn collect_rows(ops: Vec<BatchOperation>) -> Vec<BatchRecord> {
-    ops.into_iter()
-        .map(BatchOperation::into_batch_record)
-        .collect()
+    let mut rows = Vec::with_capacity(ops.len());
+    rows.extend(ops.into_iter().map(BatchOperation::into_batch_record));
+    rows
 }
 
 /// Give its key back to every row that lost it.
@@ -1565,6 +1570,22 @@ mod tests {
             RowOutcome::NoResponse,
             "an operation that was never run has no outcome, and that is not OK"
         );
+    }
+
+    #[test]
+    fn test_the_rows_do_not_keep_the_request_buffer() {
+        // Collected in place, the rows would sit in the operations'
+        // allocation: capacity for about 1.6 rows per row, held for as long
+        // as Python holds the result.
+        let policy = aerospike_core::BatchReadPolicy::default();
+        let ops: Vec<BatchOperation> = (0..1000)
+            .map(|i| BatchOperation::read(&policy, test_key(&i.to_string()), Bins::All))
+            .collect();
+
+        let rows = collect_rows(ops);
+
+        assert_eq!(rows.len(), 1000);
+        assert_eq!(rows.capacity(), rows.len());
     }
 
     #[test]

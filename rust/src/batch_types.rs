@@ -284,17 +284,41 @@ impl PendingBatchRecords {
 ///
 /// Runs on the error path only. If the conversion itself fails the original
 /// exception is raised unchanged and the reason is logged.
+///
+/// The rows are built under the GIL. With the async client this runs inside
+/// the batch future, on a runtime worker, and a worker that waits for the GIL
+/// behind a busy event loop serves nobody else meanwhile. A whole-call
+/// failure is what a node going down produces, for many calls at once, so the
+/// wait would land on the requests to the healthy nodes at the worst moment.
+/// [`off_the_runtime`] lets the runtime carry on while this thread waits.
 pub(crate) fn attach_partial_result(err: PyErr, rows: PendingBatchRecords) -> PyErr {
-    Python::attach(|py| {
-        let attached = rows
-            .into_batch_records(py)
-            .and_then(|batch| Py::new(py, batch))
-            .and_then(|batch| err.value(py).setattr("partial_result", batch));
-        if let Err(attach_err) = attached {
-            debug!("failed to attach the partial batch result to the exception: {attach_err}");
-        }
+    off_the_runtime(|| {
+        Python::attach(|py| {
+            let attached = rows
+                .into_batch_records(py)
+                .and_then(|batch| Py::new(py, batch))
+                .and_then(|batch| err.value(py).setattr("partial_result", batch));
+            if let Err(attach_err) = attached {
+                debug!("failed to attach the partial batch result to the exception: {attach_err}");
+            }
+        });
     });
     err
+}
+
+/// Run blocking work from inside a future without holding up the runtime.
+///
+/// On a worker of the multi-thread runtime the worker's other tasks are
+/// handed to another thread first (`block_in_place`). Anywhere else (the sync
+/// client's `block_on` thread, a test without a runtime) the work just runs.
+fn off_the_runtime<R>(work: impl FnOnce() -> R) -> R {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(work)
+        }
+        _ => work(),
+    }
 }
 
 impl<'py> IntoPyObject<'py> for PendingBatchRecords {
@@ -412,6 +436,10 @@ pub struct PyLazyBatchRecords {
     /// Under the GIL it's effectively uncontended; under free-threaded
     /// CPython it provides real mutual exclusion during first materialisation.
     cached_dict: Mutex<Option<Py<PyDict>>>,
+    /// What [`distinct_dict_keys`] returned for `inner`, computed on the
+    /// first `len()`. The rows never change, so neither does the count, and
+    /// a caller that asks for the length in a loop hashes the keys once.
+    distinct_keys: std::sync::OnceLock<Option<usize>>,
 }
 
 impl PyLazyBatchRecords {
@@ -424,6 +452,7 @@ impl PyLazyBatchRecords {
             inner: Arc::new(results),
             into_pyobject_at: None,
             cached_dict: Mutex::new(None),
+            distinct_keys: std::sync::OnceLock::new(),
         }
     }
 
@@ -437,6 +466,7 @@ impl PyLazyBatchRecords {
             inner,
             into_pyobject_at,
             cached_dict: Mutex::new(None),
+            distinct_keys: std::sync::OnceLock::new(),
         }
     }
 
@@ -479,7 +509,10 @@ impl PyLazyBatchRecords {
                 return Ok(dict.bind(py).len());
             }
         }
-        match distinct_dict_keys(&self.inner) {
+        match *self
+            .distinct_keys
+            .get_or_init(|| distinct_dict_keys(&self.inner))
+        {
             Some(count) => Ok(count),
             // A user key of a type the Rust pass does not model: let the
             // Python dict decide what counts as the same key.
