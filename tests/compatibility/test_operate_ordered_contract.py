@@ -244,6 +244,53 @@ CASES: list[Case] = [
         rust_ops=None,
         expected=[("x", None), ("r", 6)],
     ),
+    # ── a list read that finds nil, in a request that only reads ──────
+    # The server leaves such a read out. The binding once gave the bin's one
+    # answer to every operation that named the bin, which reported l[0] as 5.
+    Case(
+        id="list_read_of_a_nil_element_is_omitted",
+        initial={"l": [None, 5]},
+        official_ops=lambda: [off_lop.list_get("l", 0), off_lop.list_get("l", 1)],
+        rust_ops=lambda: [rust_lop.list_get("l", 0), rust_lop.list_get("l", 1)],
+        expected=[("l", 5)],
+    ),
+    Case(
+        id="nil_element_between_two_values",
+        initial={"l": [7, None, 9]},
+        official_ops=lambda: [off_lop.list_get("l", 0), off_lop.list_get("l", 1), off_lop.list_get("l", 2)],
+        rust_ops=lambda: [rust_lop.list_get("l", 0), rust_lop.list_get("l", 1), rust_lop.list_get("l", 2)],
+        expected=[("l", 7), ("l", 9)],
+    ),
+    Case(
+        id="nil_elements_of_two_bins_keep_the_order_of_the_answers",
+        initial={"l": [None, 5], "k": [5, None]},
+        official_ops=lambda: [
+            off_lop.list_get("l", 0),
+            off_lop.list_get("k", 0),
+            off_lop.list_get("l", 1),
+            off_lop.list_get("k", 1),
+        ],
+        rust_ops=lambda: [
+            rust_lop.list_get("l", 0),
+            rust_lop.list_get("k", 0),
+            rust_lop.list_get("l", 1),
+            rust_lop.list_get("k", 1),
+        ],
+        expected=[("k", 5), ("l", 5)],
+    ),
+    Case(
+        id="list_read_that_returns_nothing_then_list_size",
+        initial={"l": [1, 2, 3]},
+        official_ops=lambda: [
+            off_lop.list_get_by_index("l", 0, aerospike.LIST_RETURN_NONE),
+            off_lop.list_size("l"),
+        ],
+        rust_ops=lambda: [
+            rust_lop.list_get_by_index("l", 0, aerospike_py.LIST_RETURN_NONE),
+            rust_lop.list_size("l"),
+        ],
+        expected=[("l", 3)],
+    ),
 ]
 
 BINDING_CASES = [case for case in CASES if case.rust_ops is not None]

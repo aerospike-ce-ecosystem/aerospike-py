@@ -445,8 +445,15 @@ pub fn prepare_operate_ordered_args(
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<OperateOrderedArgs> {
     let rust_key = py_to_key(key)?;
-    let write_policy = parse_write_policy(policy, meta)?;
+    let mut write_policy = parse_write_policy(policy, meta)?;
     let (rust_ops, plan) = py_ops_to_rust_ordered(ops)?;
+    // One answer per operation, also for an operation that has none. Without
+    // it the server leaves out a read that found nothing (a missing bin, a
+    // list element that is nil) from a request that only reads, and the
+    // answers that do come carry no position: which operation each belongs to
+    // could then only be guessed. aerospike-core already asks for this
+    // whenever the request writes; asking does not turn a read into a write.
+    write_policy.respond_per_each_op = true;
 
     Ok(OperateOrderedArgs {
         args: OperateArgs {

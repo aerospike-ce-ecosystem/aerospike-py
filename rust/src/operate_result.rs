@@ -6,10 +6,11 @@
 //! # What the server sends, and what Python gets
 //!
 //! Rust client 3.0 asks the server to answer **every** operation whenever the
-//! request contains a write, and reports the answers twice on the record:
-//! `results` holds one value per answered operation in request order (`Nil`
-//! for an operation that returns nothing), and `bins` groups the same answers
-//! by bin name, a bin answered more than once holding a `MultiResult`.
+//! request contains a write, and `operate_ordered` asks for it always. The
+//! answers are reported twice on the record: `results` holds one value per
+//! answered operation in request order (`Nil` for an operation that returns
+//! nothing), and `bins` groups the same answers by bin name, a bin answered
+//! more than once holding a `MultiResult`.
 //!
 //! The official Python client asks for every answer only when the request
 //! contains a map, bit, HLL or expression operation. That difference must not
@@ -105,10 +106,14 @@ impl OrderedPlan {
                     }
                 }
             }
-            // Fewer answers than operations. That only happens for a request
-            // of plain reads (any write makes the server answer everything),
-            // where the server leaves out a bin that does not exist. The
-            // answers are then matched to the operations bin by bin.
+            // Fewer answers than operations: the server left some out, and
+            // the ones it sent carry no position. `operate_ordered` asks for
+            // one answer per operation, so this is a server that did not
+            // comply. Which operation an answer belongs to cannot be known
+            // then; each bin's answers go to the first operations that name
+            // it, and no bin gets more entries than it has answers. (Handing
+            // the last answer to every further operation, as this once did,
+            // reported `list_get(l, 0)` as 5 when only `l[1]` was.)
             _ => {
                 for (position, bin) in self.bins.iter().enumerate() {
                     let Some(name) = bin else { continue };
@@ -118,13 +123,12 @@ impl OrderedPlan {
                         .count();
                     match record.bins.get(name.as_str()) {
                         Some(Value::MultiResult(answers)) => {
-                            // A read of the same bin gives the same value, so
-                            // an operation beyond the answers reuses the last.
-                            if let Some(value) = answers.get(earlier).or(answers.last()) {
+                            if let Some(value) = answers.get(earlier) {
                                 keep(name, value);
                             }
                         }
-                        Some(value) => keep(name, value),
+                        Some(value) if earlier == 0 => keep(name, value),
+                        Some(_) => {}
                         None => keep(name, &NIL),
                     }
                 }
@@ -388,17 +392,17 @@ mod tests {
     }
 
     #[test]
-    fn a_bin_answered_once_serves_every_read_of_it() {
+    fn a_bin_never_gets_more_entries_than_it_has_answers() {
+        // Two list reads of one bin, one answer: the other read found nil and
+        // the server left it out. Reporting the answer for both would claim a
+        // value for an element that has none.
         let plan = plan(&[
             (OP_READ, Some("c")),
             (OP_READ, Some("nope")),
             (OP_READ, Some("c")),
         ]);
         let record = answered(&[("c", Value::Int(3))]);
-        assert_eq!(
-            pairs(&plan.entries(&record)),
-            vec![("c", Value::Int(3)), ("c", Value::Int(3))]
-        );
+        assert_eq!(pairs(&plan.entries(&record)), vec![("c", Value::Int(3))]);
     }
 
     #[test]
