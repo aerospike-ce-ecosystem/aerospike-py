@@ -25,7 +25,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, Semaphore};
 
 use crate::errors::as_to_pyerr;
-use crate::panic_safety::future_into_py_panic_safe;
+use crate::panic_safety::{catch_panic_sync, future_into_py_panic_safe};
 use crate::types::record::record_to_py;
 
 /// What a query hands over: a record, or the error that ended it.
@@ -819,12 +819,17 @@ impl GatheredRecords {
         let Some(gathered) = lock(&self.records).take() else {
             return Ok(PyList::empty(py));
         };
-        let records = if gathered.unconverted.is_empty() {
-            gathered.converted
-        } else {
-            convert_records(py, &gathered.unconverted, gathered.wrap.as_deref())?
-        };
-        PyList::new(py, records)
+        // A panic in here is the `RustPanicError` it is on the way of a
+        // larger result, not PyO3's own `PanicException`, which is no
+        // `Exception` and passes every `except Exception`.
+        catch_panic_sync("RecordStream.read_all", || {
+            let records = if gathered.unconverted.is_empty() {
+                gathered.converted
+            } else {
+                convert_records(py, &gathered.unconverted, gathered.wrap.as_deref())?
+            };
+            PyList::new(py, records)
+        })
     }
 }
 

@@ -36,7 +36,7 @@ from typing import ClassVar
 import pytest
 
 import aerospike_py
-from aerospike_py import exp
+from aerospike_py import _async_client, exp
 from tests.helpers import invoke
 
 NS = "test"
@@ -157,6 +157,55 @@ class TestEveryRecordOnce:
             assert len(records) == seeded
             assert {record.bins["v"] for record in records} == set(range(seeded))
             assert all(type(record) is aerospike_py.Record for record in records[:100])
+
+    @pytest.mark.parametrize("wanted", [200, 3000], ids=["converted_when_taken", "converted_in_chunks"])
+    async def test_a_panic_while_records_are_converted_is_raised(self, async_client, seeded, wanted, monkeypatch):
+        """A panic in the conversion reaches the caller as ``RustPanicError``, whatever the size of the result.
+
+        PyO3 resumes a panic when Python code it called raises its
+        ``PanicException``, so a ``Record`` constructor that raises it makes
+        the conversion panic. A small result used to be converted after the
+        awaited call was over, where nothing caught the panic and the
+        ``await`` stayed pending for ever.
+        """
+        try:
+            await async_client.get((NS, SET_NAME, object()))  # an error makes PyO3 create the class
+        except Exception:
+            pass
+        # One class per PyO3 extension in the process; another extension's is
+        # an ordinary exception to this one.
+        candidates = [cls for cls in BaseException.__subclasses__() if cls.__name__ == "PanicException"]
+        assert candidates, "PyO3 has made no PanicException in this process"
+        original = _async_client._wrap_record
+        outcomes = []
+
+        for panic in candidates:
+            calls = 0
+
+            def panicking(raw, panic=panic):
+                nonlocal calls
+                calls += 1
+                if calls == 100:
+                    raise panic("a panic in the Record constructor")
+                return original(raw)
+
+            monkeypatch.setattr(_async_client, "_wrap_record", panicking)
+            query = async_client.query(NS, SET_NAME)
+            query.select("v")
+            try:
+                await asyncio.wait_for(
+                    query.results({"filter_expression": exp.lt(exp.int_bin("v"), exp.int_val(wanted))}), 10
+                )
+                outcomes.append("returned")
+            except BaseException as exc:  # PanicException is no Exception
+                outcomes.append(type(exc).__name__)
+            finally:
+                monkeypatch.setattr(_async_client, "_wrap_record", original)
+
+        assert "RustPanicError" in outcomes, outcomes
+        assert set(outcomes) <= {"RustPanicError", "PanicException"}, outcomes
+        # And no turn in the conversion line went with it.
+        assert len(await asyncio.wait_for(async_client.query(NS, SET_NAME).results(), 30)) == seeded
 
     @pytest.mark.parametrize("wanted", [5, 3000])
     async def test_the_result_is_the_callers_alone(self, async_client, seeded, wanted):
