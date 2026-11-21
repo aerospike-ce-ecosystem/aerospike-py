@@ -432,7 +432,7 @@ invalid exists value: 9 (valid: POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONL
 
 ## Records with a language-specific blob are readable
 
-Old clients stored a value that has no Aerospike type with their own language's serializer, under a particle type of its own: `JAVA_BLOB` (7), `CSHARP_BLOB` (8), `PYTHON_BLOB` (9, a pickle), `RUBY_BLOB` (10), `PHP_BLOB` (11), `ERLANG_BLOB` (12). Clusters that have been running long enough still hold such records. With 0.14.x, any read of a record with such a bin raised `RustPanicError`, so the whole record was unreadable. In 0.15 the bin is returned as `bytes` holding the raw payload, the other bins are read normally, and a warning is logged. `get()`, `batch_read()` and scans all behave this way (issue #280).
+Old clients stored a value that has no Aerospike type with their own language's serializer, under a particle type of its own: `JAVA_BLOB` (7), `CSHARP_BLOB` (8), `PYTHON_BLOB` (9, a pickle), `RUBY_BLOB` (10), `PHP_BLOB` (11), `ERLANG_BLOB` (12). Clusters that have been running long enough still hold such records. With 0.14.x, any read of a record with such a bin raised `RustPanicError`, so the whole record was unreadable. In 0.15 the bin is returned as `bytes` holding the raw payload, the other bins are read normally, and the first such value of each type is logged as a warning (later ones at debug level, so a scan over old data does not flood the log). `get()`, `batch_read()` and scans all behave this way (issue #280).
 
 ```python
 import logging
@@ -453,7 +453,7 @@ except aerospike_py.RustPanicError as exc:
 RustPanicError: Rust panic in `Client.get`: internal error: entered unreachable code
 
 # 0.15
-WARNING:_aerospike::types::value:bin value has particle type 9, which this client does not interpret; returning its 26 raw bytes
+WARNING:_aerospike::types::value:bin value has particle type 9, which this client does not interpret; returning its 26 raw bytes (further values of this type are logged at debug level)
 7 bytes
 {'answer': 42}
 ```

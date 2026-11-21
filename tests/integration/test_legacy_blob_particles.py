@@ -7,8 +7,9 @@ pickle) and so on. Rust client 2.x hit ``unreachable!()`` on such a bin; up to
 before that it aborted the process.
 
 Rust client 3.0 hands the payload over as it is. A bin of a particle type the
-client does not interpret is returned as ``bytes``, with a warning in the log,
-and the rest of the record is read normally. What the bytes mean is the
+client does not interpret is returned as ``bytes`` and the rest of the record
+is read normally. The first value of each such type is announced in the log at
+WARNING, later ones at DEBUG. What the bytes mean is the
 application's to decide: for ``PYTHON_BLOB`` they are a pickle.
 
 The records are put on the server by ``tests/legacy_blob.py``, which speaks the
@@ -17,6 +18,9 @@ wire protocol, because no current client writes these types.
 
 import logging
 import pickle
+import subprocess
+import sys
+import textwrap
 
 import pytest
 
@@ -84,15 +88,54 @@ class TestPythonBlob:
         seeded = [record for record in records if record.bins.get("legacy") == PAYLOAD]
         assert len(seeded) >= len(keys)
 
-    def test_it_is_logged_as_a_warning_not_raised(self, client, cleanup, caplog):
+    def test_it_is_logged_not_raised(self, client, cleanup, caplog):
+        """At WARNING for the first value of the type in this process, at DEBUG after that."""
         key = (NS, SET_NAME, "warned")
         cleanup.append(key)
         _seed(client, key, PYTHON_BLOB)
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             client.get(key)
 
         assert f"particle type {PYTHON_BLOB}" in caplog.text
+
+    def test_only_the_first_value_of_a_type_is_a_warning(self, client, cleanup):
+        """A scan over old data meets such a value in every record: one warning, not one per record.
+
+        Which read is the first depends on what the process has read before, so
+        this runs in a process of its own.
+        """
+        key = (NS, SET_NAME, "warned_once")
+        cleanup.append(key)
+        _seed(client, key, PYTHON_BLOB)
+        script = textwrap.dedent(
+            f"""
+            import logging
+
+            import aerospike_py
+            from tests import AEROSPIKE_CONFIG
+
+            levels = []
+
+            class Collect(logging.Handler):
+                def emit(self, record):
+                    if "particle type {PYTHON_BLOB}" in record.getMessage():
+                        levels.append(record.levelname)
+
+            logging.getLogger().addHandler(Collect())
+            logging.getLogger().setLevel(logging.DEBUG)
+            client = aerospike_py.client(AEROSPIKE_CONFIG).connect()
+            for _ in range(3):
+                client.get({key!r})
+            client.close()
+            print(",".join(levels))
+            """
+        )
+
+        done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=False)
+
+        assert done.returncode == 0, done.stderr
+        assert done.stdout.strip().splitlines()[-1] == "WARNING,DEBUG,DEBUG"
 
     def test_writing_the_bytes_back_stores_an_ordinary_blob(self, client, cleanup, caplog):
         """Read-modify-write converts the bin: what is stored afterwards needs no warning."""
@@ -100,9 +143,9 @@ class TestPythonBlob:
         cleanup.append(key)
         _seed(client, key, PYTHON_BLOB)
         client.put(key, {"legacy": client.get(key).bins["legacy"]})
-        caplog.clear()  # the read above was of the legacy bin and warned
+        caplog.clear()  # the read above was of the legacy bin and was logged
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             record = client.get(key)
 
         assert record.bins["legacy"] == PAYLOAD

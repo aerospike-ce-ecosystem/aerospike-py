@@ -432,7 +432,7 @@ invalid exists value: 9 (valid: POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONL
 
 ## 언어별 blob이 담긴 record를 읽을 수 있습니다 {#records-with-a-language-specific-blob-are-readable}
 
-예전 client는 Aerospike type이 없는 값을 자기 언어의 serializer로 직렬화해 고유한 particle type으로 저장했습니다: `JAVA_BLOB`(7), `CSHARP_BLOB`(8), `PYTHON_BLOB`(9, pickle), `RUBY_BLOB`(10), `PHP_BLOB`(11), `ERLANG_BLOB`(12). 오래 운영된 cluster에는 이런 record가 아직 남아 있습니다. 0.14.x에서는 이런 bin이 있는 record를 읽기만 해도 `RustPanicError`가 발생해 record 전체를 읽을 수 없었습니다. 0.15에서는 그 bin을 raw payload를 담은 `bytes`로 반환하고, 나머지 bin은 평소대로 읽으며, warning을 log로 남깁니다. `get()`, `batch_read()`, scan 모두 이렇게 동작합니다(issue #280).
+예전 client는 Aerospike type이 없는 값을 자기 언어의 serializer로 직렬화해 고유한 particle type으로 저장했습니다: `JAVA_BLOB`(7), `CSHARP_BLOB`(8), `PYTHON_BLOB`(9, pickle), `RUBY_BLOB`(10), `PHP_BLOB`(11), `ERLANG_BLOB`(12). 오래 운영된 cluster에는 이런 record가 아직 남아 있습니다. 0.14.x에서는 이런 bin이 있는 record를 읽기만 해도 `RustPanicError`가 발생해 record 전체를 읽을 수 없었습니다. 0.15에서는 그 bin을 raw payload를 담은 `bytes`로 반환하고, 나머지 bin은 평소대로 읽으며, type마다 처음 만난 값만 warning으로 남깁니다(그 뒤로는 debug level이라, 오래된 data를 scan해도 log가 넘치지 않습니다). `get()`, `batch_read()`, scan 모두 이렇게 동작합니다(issue #280).
 
 ```python
 import logging
@@ -453,7 +453,7 @@ except aerospike_py.RustPanicError as exc:
 RustPanicError: Rust panic in `Client.get`: internal error: entered unreachable code
 
 # 0.15
-WARNING:_aerospike::types::value:bin value has particle type 9, which this client does not interpret; returning its 26 raw bytes
+WARNING:_aerospike::types::value:bin value has particle type 9, which this client does not interpret; returning its 26 raw bytes (further values of this type are logged at debug level)
 7 bytes
 {'answer': 42}
 ```

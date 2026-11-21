@@ -1,12 +1,17 @@
 //! Bidirectional conversion between Python objects and `aerospike_core::Value`.
 
 use aerospike_core::{IndexMap, Value};
-use log::warn;
+use log::{debug, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Maximum recursion depth for nested list/dict values to prevent stack overflow.
 const MAX_NESTING_DEPTH: usize = 64;
+
+/// Whether a value of each particle type the client does not interpret has
+/// already been announced in the log (indexed by the particle type).
+static UNKNOWN_PARTICLE_ANNOUNCED: [AtomicBool; 256] = [const { AtomicBool::new(false) }; 256];
 
 /// Convert a Python object to an Aerospike Value
 pub fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
@@ -146,11 +151,24 @@ pub fn value_to_py(py: Python<'_>, val: &Value) -> PyResult<Py<PyAny>> {
         // 3.0 hands over the raw payload, which is returned as `bytes` so the
         // rest of the record stays readable.
         Value::Unknown(particle_type, bytes) => {
-            warn!(
-                "bin value has particle type {particle_type}, which this client does not \
-                 interpret; returning its {} raw bytes",
-                bytes.len()
-            );
+            // Once per particle type and process at WARNING: a scan over old
+            // data meets such a value in every record, and a warning for each
+            // would bury the log and slow the scan down.
+            if UNKNOWN_PARTICLE_ANNOUNCED[usize::from(*particle_type)].swap(true, Ordering::Relaxed)
+            {
+                debug!(
+                    "bin value has particle type {particle_type}, which this client does not \
+                     interpret; returning its {} raw bytes",
+                    bytes.len()
+                );
+            } else {
+                warn!(
+                    "bin value has particle type {particle_type}, which this client does not \
+                     interpret; returning its {} raw bytes (further values of this type are \
+                     logged at debug level)",
+                    bytes.len()
+                );
+            }
             Ok(PyBytes::new(py, bytes).into_any().unbind())
         }
         // `Value` is non-exhaustive: a variant added by a newer Rust client
