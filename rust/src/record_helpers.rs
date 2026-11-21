@@ -1,15 +1,13 @@
 //! Helpers for converting Aerospike records and batch results to Python objects.
 
-use aerospike_core::{Error as AsError, Record, ResultCode};
+use aerospike_core::{Error as AsError, Record};
 use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyDict, PyTuple};
 use std::time::Duration;
 
 use crate::errors::as_to_pyerr;
-use crate::types::key::key_to_py;
 use crate::types::record::record_to_py_with_key;
-use crate::types::value::value_to_py;
 
 /// Extract the TTL from a Record as seconds (u32).
 ///
@@ -81,7 +79,7 @@ impl<'py> IntoPyObject<'py> for PendingExists {
                 let tuple = PyTuple::new(py, [self.key_py, meta])?;
                 Ok(tuple.into_any())
             }
-            Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => {
+            Err(e) if crate::errors::is_key_not_found(&e) => {
                 let tuple = PyTuple::new(py, [self.key_py, py.None()])?;
                 Ok(tuple.into_any())
             }
@@ -90,11 +88,28 @@ impl<'py> IntoPyObject<'py> for PendingExists {
     }
 }
 
-/// Deferred ordered record → Python conversion for `operate_ordered`.
-///
-/// Returns `(key, meta, [(bin_name, value), ...])` with bin order preserved.
+/// Deferred `operate` result → Python conversion: `(key, meta, {bin: value})`.
+pub struct PendingOperateRecord {
+    pub record: Record,
+    pub key_py: Py<PyAny>,
+}
+
+impl<'py> IntoPyObject<'py> for PendingOperateRecord {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        crate::operate_result::operate_record_to_py(py, &self.record, self.key_py)
+            .map(|obj| obj.into_bound(py))
+    }
+}
+
+/// Deferred `operate_ordered` result → Python conversion:
+/// `(key, meta, [(bin_name, value), ...])` in request order.
 pub struct PendingOrderedRecord {
     pub record: Record,
+    pub plan: crate::operate_result::OrderedPlan,
     pub key_py: Py<PyAny>,
 }
 
@@ -104,29 +119,8 @@ impl<'py> IntoPyObject<'py> for PendingOrderedRecord {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let key_py = match &self.record.key {
-            Some(k) => key_to_py(py, k)?,
-            None => self.key_py,
-        };
-        let meta = record_to_meta(py, &self.record)?;
-        let bin_items: Vec<Py<PyAny>> = self
-            .record
-            .bins
-            .iter()
-            .map(|(name, value)| {
-                let tuple = PyTuple::new(
-                    py,
-                    [
-                        name.as_str().into_pyobject(py)?.into_any().unbind(),
-                        value_to_py(py, value)?,
-                    ],
-                )?;
-                Ok(tuple.into_any().unbind())
-            })
-            .collect::<PyResult<_>>()?;
-        let ordered_bins = PyList::new(py, &bin_items)?;
-        let result = PyTuple::new(py, [key_py, meta, ordered_bins.into_any().unbind()])?;
-        Ok(result.into_any())
+        crate::operate_result::ordered_record_to_py(py, &self.record, &self.plan, self.key_py)
+            .map(|obj| obj.into_bound(py))
     }
 }
 

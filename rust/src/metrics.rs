@@ -72,7 +72,7 @@ pub fn init_internal_stage_from_env() {
     INTERNAL_STAGE_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
-use aerospike_core::{Error as AsError, ResultCode};
+use aerospike_core::Error as AsError;
 use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::histogram::Histogram;
@@ -180,29 +180,15 @@ impl<'a> OperationTimer<'a> {
 
 /// Classify an `aerospike_core::Error` into a short error-type string for metric labels.
 ///
-/// Returns `Cow::Borrowed` for known error types (zero alloc) and `Cow::Owned`
-/// only for unknown `ResultCode` variants.
+/// The label is [`ErrorClass::label`](crate::errors::ErrorClass::label): the
+/// same classification the Python exception and the OpenTelemetry span use,
+/// so a failure counted here under `error_type="Connection"` is the one a
+/// caller catches as `ClusterError` with `error_type == "Connection"`.
+///
+/// Returns `Cow::Borrowed` for the common classes (zero alloc) and
+/// `Cow::Owned` only for a server result code without a dedicated label.
 pub fn error_type_from_aerospike_error(err: &AsError) -> Cow<'static, str> {
-    match err {
-        AsError::Connection(_) => Cow::Borrowed("Connection"),
-        AsError::Timeout(_) => Cow::Borrowed("Timeout"),
-        AsError::InvalidArgument(_) => Cow::Borrowed("InvalidArgument"),
-        AsError::ServerError(rc, _, _) => match rc {
-            ResultCode::KeyNotFoundError => Cow::Borrowed("KeyNotFoundError"),
-            ResultCode::KeyExistsError => Cow::Borrowed("KeyExistsError"),
-            ResultCode::GenerationError => Cow::Borrowed("GenerationError"),
-            ResultCode::RecordTooBig => Cow::Borrowed("RecordTooBig"),
-            ResultCode::BinTypeError => Cow::Borrowed("BinTypeError"),
-            ResultCode::BinNotFound => Cow::Borrowed("BinNotFound"),
-            ResultCode::FilteredOut => Cow::Borrowed("FilteredOut"),
-            ResultCode::Timeout => Cow::Borrowed("Timeout"),
-            _ => Cow::Owned(format!("{:?}", rc)),
-        },
-        AsError::InvalidNode(_) => Cow::Borrowed("InvalidNode"),
-        AsError::NoMoreConnections => Cow::Borrowed("NoMoreConnections"),
-        AsError::MaxErrorRate(_) => Cow::Borrowed("MaxErrorRate"),
-        _ => Cow::Borrowed("Unknown"),
-    }
+    crate::errors::ErrorClass::of(err).label()
 }
 
 /// Record an internal stage duration for fine-grained profiling.

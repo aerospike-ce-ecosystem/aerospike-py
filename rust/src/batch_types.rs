@@ -5,16 +5,96 @@
 //! Python until the user accesses `br.record`. This reduces GIL hold time by
 //! 70-80% for large batches where not all records' bins are accessed.
 
+use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
-use aerospike_core::{BatchRecord, Record, ResultCode};
+use aerospike_core::{BatchRecord, Error as AsError, Record};
 use log::{debug, trace};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use crate::errors::result_code_to_int;
+use crate::errors::{ErrorClass, CLIENT_SIDE_RESULT_CODE};
 use crate::types::key::key_to_py;
 use crate::types::record::record_to_py_with_key;
+
+// ── Row outcome ──────────────────────────────────────────────────
+
+/// `error_type` of a row that no node answered.
+pub(crate) const NO_RESPONSE_LABEL: &str = "NoResponse";
+
+/// What happened to one row of a batch call.
+///
+/// Rust client 3.0 no longer stores a result code on the row. A row holds the
+/// failure itself (an `Error`), and has three states: failed when the error is
+/// set, successful when it is not and a record is present, and unanswered when
+/// neither is. Every consumer of a batch result — `BatchRecord.result`, the
+/// dict / list / NumPy views, `found_count`, the write retry loop — reads the
+/// state through this type, so they cannot disagree about which rows worked.
+///
+/// A row is successful only when the server said so. An unanswered row is
+/// **not** reported as OK: with Rust client 2.x a row without a result code
+/// was treated as a success, which made a row nobody answered look written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowOutcome {
+    /// The server answered and the operation succeeded.
+    Ok,
+    /// The row failed, either with a server result code or on the client side
+    /// (timeout, connection loss, ...).
+    Failed(ErrorClass),
+    /// No node answered for this row and no failure was recorded for it.
+    NoResponse,
+}
+
+impl RowOutcome {
+    #[inline]
+    pub(crate) fn of(br: &BatchRecord) -> Self {
+        Self::from_parts(br.error(), br.record.is_some())
+    }
+
+    /// The outcome of a row with this error and record presence. Split out of
+    /// [`of`](Self::of) because a failed `BatchRecord` cannot be built outside
+    /// aerospike-core, while an `Error` can.
+    #[inline]
+    pub(crate) fn from_parts(error: Option<&AsError>, has_record: bool) -> Self {
+        match (error, has_record) {
+            // A failed UDF row keeps a record (its FAILURE bin) next to the
+            // error; the error decides.
+            (Some(e), _) => Self::Failed(ErrorClass::of(e)),
+            (None, true) => Self::Ok,
+            (None, false) => Self::NoResponse,
+        }
+    }
+
+    /// `BatchRecord.result`: `0` on success, the server's wire code when a
+    /// server answered with a failure, and the client-side sentinel `-1`
+    /// otherwise. `error_type` tells the `-1` cases apart.
+    pub(crate) fn result_code(self) -> i32 {
+        match self {
+            Self::Ok => 0,
+            Self::Failed(class) => class.result_code(),
+            Self::NoResponse => CLIENT_SIDE_RESULT_CODE,
+        }
+    }
+
+    /// `BatchRecord.error_type`: `None` on success, otherwise the same label
+    /// the exception, the metrics and the trace use for this failure.
+    pub(crate) fn error_type(self) -> Option<Cow<'static, str>> {
+        match self {
+            Self::Ok => None,
+            Self::Failed(class) => Some(class.label()),
+            Self::NoResponse => Some(Cow::Borrowed(NO_RESPONSE_LABEL)),
+        }
+    }
+}
+
+/// Whether the server answered this row with success.
+///
+/// The same judgement as `RowOutcome::of(br) == RowOutcome::Ok`, without
+/// classifying the error of a failed row. Used on the per-row hot paths.
+#[inline]
+pub(crate) fn row_ok(br: &BatchRecord) -> bool {
+    br.error().is_none() && br.record.is_some()
+}
 
 // ── Lazy record cell ─────────────────────────────────────────────
 
@@ -26,6 +106,11 @@ use crate::types::record::record_to_py_with_key;
 /// is impossible and the Mutex is effectively uncontended. Under
 /// free-threaded CPython (3.13t, 3.14t) the Mutex provides real mutual
 /// exclusion during first-access conversion and caching.
+///
+/// `Pending` holds the `Record` inline. It is the state every row starts in,
+/// and the cell already lives inside the row's own Python object, so boxing
+/// the record would add one heap allocation per batch row and save nothing.
+#[allow(clippy::large_enum_variant)]
 enum LazyRecordCell {
     /// Raw Rust Record awaiting lazy conversion.
     Pending { record: Record, key_py: Py<PyAny> },
@@ -69,6 +154,8 @@ pub struct PyBatchRecord {
     record_cell: Mutex<LazyRecordCell>,
     #[pyo3(get)]
     in_doubt: bool,
+    /// `None` for a successful row, otherwise the failure's class label.
+    error_type: Option<Cow<'static, str>>,
 }
 
 #[pymethods]
@@ -92,6 +179,15 @@ impl PyBatchRecord {
             )
         })?;
         guard.to_python(py)
+    }
+
+    /// What kind of failure this row had: `None` when it succeeded, otherwise
+    /// the same name an exception carries in `error_type` (`"KeyNotFoundError"`,
+    /// `"Timeout"`, `"Connection"`, ...), or `"NoResponse"` when no node
+    /// answered for the row.
+    #[getter]
+    fn error_type(&self) -> Option<&str> {
+        self.error_type.as_deref()
     }
 }
 
@@ -125,8 +221,16 @@ pub struct PyBatchRecords {
 /// `batch_write`, `batch_write_numpy`, and `batch_remove`.
 pub struct PendingBatchRecords {
     pub results: Vec<BatchRecord>,
-    /// `Some` only for `batch_write` / `batch_write_numpy` with `retry > 0`.
+    /// `Some` only for `batch_write` / `batch_write_numpy`.
     pub retry_stats: Option<crate::client_ops::BatchWriteRetryStats>,
+    /// Ascending indices of failed rows to report as `in_doubt` although the
+    /// row itself does not say so.
+    ///
+    /// Only the `retry=` loop fills this. A row holds the result of the last
+    /// attempt that sent its record; when an earlier attempt may have been
+    /// applied and the last one failed without being in doubt itself, the
+    /// record is still in doubt, and the row cannot express that.
+    pub in_doubt_rows: Vec<usize>,
 }
 
 impl PendingBatchRecords {
@@ -135,8 +239,37 @@ impl PendingBatchRecords {
         Self {
             results,
             retry_stats: None,
+            in_doubt_rows: Vec::new(),
         }
     }
+
+    /// Convert into the Python `BatchRecords` container (lazy bins).
+    pub fn into_batch_records(self, py: Python<'_>) -> PyResult<PyBatchRecords> {
+        build_batch_records(py, self.results, self.retry_stats, &self.in_doubt_rows)
+    }
+}
+
+/// Attach the rows of a batch call that failed as a whole to its exception,
+/// as `partial_result` (a `BatchRecords`).
+///
+/// The exception is the one the failure has always raised. What is new is
+/// that the rows are not thrown away: `exc.partial_result.batch_records` has
+/// one entry per requested record, in request order, and each says whether it
+/// succeeded, failed with a server code, or got no answer.
+///
+/// Runs on the error path only. If the conversion itself fails the original
+/// exception is raised unchanged and the reason is logged.
+pub(crate) fn attach_partial_result(err: PyErr, rows: PendingBatchRecords) -> PyErr {
+    Python::attach(|py| {
+        let attached = rows
+            .into_batch_records(py)
+            .and_then(|batch| Py::new(py, batch))
+            .and_then(|batch| err.value(py).setattr("partial_result", batch));
+        if let Err(attach_err) = attached {
+            debug!("failed to attach the partial batch result to the exception: {attach_err}");
+        }
+    });
+    err
 }
 
 impl<'py> IntoPyObject<'py> for PendingBatchRecords {
@@ -145,7 +278,7 @@ impl<'py> IntoPyObject<'py> for PendingBatchRecords {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let batch = batch_to_batch_records_py_with_retry(py, self.results, self.retry_stats)?;
+        let batch = self.into_batch_records(py)?;
         Ok(Py::new(py, batch)?.into_bound(py).into_any())
     }
 }
@@ -608,10 +741,7 @@ impl PyLazyBatchRecords {
 
     /// Count of records with successful result code (no conversion needed).
     fn found_count(&self) -> usize {
-        self.inner
-            .iter()
-            .filter(|br| matches!(&br.result_code, None | Some(ResultCode::Ok)))
-            .count()
+        self.inner.iter().filter(|br| row_ok(br)).count()
     }
 
     /// Dict-style ``lazy_records.keys()`` view — user keys of records
@@ -687,10 +817,7 @@ impl PyBatchReadIter {
 /// Used by `__getitem__` and `__next__`.
 fn single_batch_record_to_py(py: Python<'_>, br: &BatchRecord) -> PyResult<Py<PyBatchRecord>> {
     let key_py = key_to_py(py, &br.key)?;
-    let result_code = match &br.result_code {
-        Some(rc) => result_code_to_int(rc),
-        None => 0,
-    };
+    let outcome = RowOutcome::of(br);
     let record_cell = match &br.record {
         Some(record) => LazyRecordCell::Pending {
             record: record.clone(),
@@ -702,9 +829,10 @@ fn single_batch_record_to_py(py: Python<'_>, br: &BatchRecord) -> PyResult<Py<Py
         py,
         PyBatchRecord {
             key: key_py,
-            result: result_code,
+            result: outcome.result_code(),
             record_cell: Mutex::new(record_cell),
-            in_doubt: br.in_doubt,
+            in_doubt: br.in_doubt(),
+            error_type: outcome.error_type(),
         },
     )
 }
@@ -715,9 +843,7 @@ fn single_batch_record_to_py(py: Python<'_>, br: &BatchRecord) -> PyResult<Py<Py
 /// Shared by [`batch_to_dict_py`] and [`distinct_dict_keys`] so the Mapping
 /// length can never disagree with the Mapping contents.
 fn row_in_dict_view(br: &BatchRecord) -> bool {
-    br.key.user_key.is_some()
-        && matches!(&br.result_code, None | Some(ResultCode::Ok))
-        && br.record.is_some()
+    br.key.user_key().is_some() && row_ok(br)
 }
 
 /// Count the distinct user keys among the rows the dict views include.
@@ -738,7 +864,7 @@ fn distinct_dict_keys(results: &[BatchRecord]) -> Option<usize> {
         if !row_in_dict_view(br) {
             continue;
         }
-        let key = match br.key.user_key.as_ref()? {
+        let key = match br.key.user_key().as_ref()? {
             aerospike_core::Value::Int(i) => DictKey::Int(*i),
             aerospike_core::Value::String(s) => DictKey::Str(s.as_str()),
             aerospike_core::Value::Blob(b) => DictKey::Bytes(b.as_slice()),
@@ -780,7 +906,7 @@ pub fn batch_to_dict_py<'py>(
         } else {
             None
         };
-        let key_str = match &br.key.user_key {
+        let key_str = match &br.key.user_key() {
             Some(aerospike_core::Value::String(s)) => s.into_pyobject(py)?.into_any(),
             Some(aerospike_core::Value::Int(i)) => i.into_pyobject(py)?.into_any(),
             Some(v) => value_to_py(py, v)?.into_bound(py),
@@ -791,7 +917,7 @@ pub fn batch_to_dict_py<'py>(
         }
 
         // Skip per-record errors even if a body was returned (e.g. FilteredOut, RecordTooBig)
-        if !matches!(&br.result_code, None | Some(ResultCode::Ok)) {
+        if br.error().is_some() {
             continue;
         }
         if let Some(record) = &br.record {
@@ -886,7 +1012,7 @@ pub fn batch_to_list_py<'py>(
     let out = PyList::empty(py);
     for br in results {
         // Per-record errors (e.g. FilteredOut, RecordTooBig) → None slot.
-        if !matches!(&br.result_code, None | Some(ResultCode::Ok)) {
+        if br.error().is_some() {
             out.append(py.None())?;
             continue;
         }
@@ -936,7 +1062,7 @@ pub fn collect_user_keys<'py>(
     results
         .iter()
         .map(|br| -> PyResult<Bound<'py, PyAny>> {
-            match &br.key.user_key {
+            match &br.key.user_key() {
                 Some(aerospike_core::Value::String(s)) => Ok(s.into_pyobject(py)?.into_any()),
                 Some(aerospike_core::Value::Int(i)) => Ok(i.into_pyobject(py)?.into_any()),
                 Some(v) => Ok(value_to_py(py, v)?.into_bound(py)),
@@ -954,32 +1080,32 @@ pub fn batch_to_batch_records_py(
     py: Python<'_>,
     results: Vec<BatchRecord>,
 ) -> PyResult<PyBatchRecords> {
-    batch_to_batch_records_py_with_retry(py, results, None)
+    build_batch_records(py, results, None, &[])
 }
 
-/// As [`batch_to_batch_records_py`], additionally carrying retry statistics.
-///
-/// Only `batch_write` / `batch_write_numpy` with `retry > 0` pass `Some`; every
-/// other batch call has no retry loop to report on.
-pub fn batch_to_batch_records_py_with_retry(
+/// As [`batch_to_batch_records_py`], additionally carrying what the
+/// `batch_write` retry loop has to report: its statistics, and the failed rows
+/// that an earlier attempt left in doubt (`in_doubt_rows`, ascending).
+fn build_batch_records(
     py: Python<'_>,
     results: Vec<BatchRecord>,
     retry_stats: Option<crate::client_ops::BatchWriteRetryStats>,
+    in_doubt_rows: &[usize],
 ) -> PyResult<PyBatchRecords> {
     trace!(
         "Converting {} batch records to Python (lazy bins)",
         results.len()
     );
     let mut batch_records = Vec::with_capacity(results.len());
+    let mut forced_in_doubt = in_doubt_rows.iter().copied().peekable();
 
-    for br in results {
+    for (index, br) in results.into_iter().enumerate() {
         // Only convert key immediately (lightweight, always needed for routing)
         let key_py = key_to_py(py, &br.key)?;
 
-        let result_code = match &br.result_code {
-            Some(rc) => result_code_to_int(rc),
-            None => 0,
-        };
+        let outcome = RowOutcome::of(&br);
+        let forced = forced_in_doubt.next_if_eq(&index).is_some();
+        let in_doubt = br.in_doubt() || (forced && outcome != RowOutcome::Ok);
 
         // LAZY: store raw Rust Record; convert only on first `br.record` access
         let record_cell = match br.record {
@@ -992,9 +1118,10 @@ pub fn batch_to_batch_records_py_with_retry(
 
         let batch_record = PyBatchRecord {
             key: key_py,
-            result: result_code,
+            result: outcome.result_code(),
             record_cell: Mutex::new(record_cell),
-            in_doubt: br.in_doubt,
+            in_doubt,
+            error_type: outcome.error_type(),
         };
 
         batch_records.push(Py::new(py, batch_record)?);
@@ -1031,38 +1158,24 @@ mod tests {
     /// The digest is a zero-filled placeholder — sufficient for unit tests
     /// that don't perform any server-side lookup.
     fn make_digest_only_batch_record() -> BatchRecord {
-        let key = aerospike_core::Key {
-            namespace: "test".to_string(),
-            set_name: "demo".to_string(),
-            user_key: None,
-            digest: [0u8; 20],
-        };
+        let key = aerospike_core::Key::with_digest("test", "demo", None, [0u8; 20]);
         make_batch_record_inner(key)
     }
 
+    /// A row the server answered with success and no bins.
+    ///
+    /// Built through aerospike-core's public API only: a new row is
+    /// unanswered, and giving it a record is what an answer does.
     fn make_batch_record_inner(key: aerospike_core::Key) -> BatchRecord {
-        #[repr(C)]
-        struct BatchRecordMirror {
-            key: aerospike_core::Key,
-            record: Option<Record>,
-            result_code: Option<ResultCode>,
-            in_doubt: bool,
-            has_write: bool,
-        }
-
-        static_assertions::assert_eq_size!(BatchRecordMirror, BatchRecord);
-        static_assertions::assert_eq_align!(BatchRecordMirror, BatchRecord);
-
-        let mirror = BatchRecordMirror {
-            key,
-            record: None,
-            result_code: Some(ResultCode::Ok),
-            in_doubt: false,
-            has_write: false,
-        };
-        // SAFETY: `BatchRecordMirror` mirrors `BatchRecord`'s field types and
-        // order exactly; size + alignment are asserted above. Test-only.
-        unsafe { std::mem::transmute(mirror) }
+        let mut row = BatchRecord::new(key, false);
+        row.record = Some(Record::new(
+            None,
+            aerospike_core::IndexMap::new(),
+            None,
+            0,
+            0,
+        ));
+        row
     }
 
     /// A poisoned `record_cell` mutex (left behind by a panic during a
@@ -1080,6 +1193,7 @@ mod tests {
                     result: 0,
                     record_cell: Mutex::new(LazyRecordCell::None),
                     in_doubt: false,
+                    error_type: None,
                 },
             )
             .expect("construct PyBatchRecord");

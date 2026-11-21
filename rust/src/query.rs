@@ -225,6 +225,17 @@ fn build_statement(
 
     let mut stmt = Statement::new(namespace, set_name, bins_selector);
 
+    // The server takes one secondary-index filter per query. Rust client 2.x
+    // collected filters in a list and rejected a second one when the statement
+    // was validated; 3.0 holds a single filter, where a second `set_filter`
+    // would silently replace the first. Keep rejecting it.
+    if predicates.len() > 1 {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "Invalid argument: a query takes at most one where() predicate, got {}",
+            predicates.len()
+        )));
+    }
+
     for pred in predicates {
         let filter = match pred {
             Predicate::Equals { bin, val } => Filter::equal(bin.as_str(), val.clone()),
@@ -245,7 +256,7 @@ fn build_statement(
                 ));
             }
         };
-        stmt.add_filter(filter);
+        stmt.set_filter(filter);
     }
 
     Ok(stmt)

@@ -6,7 +6,7 @@
 //! these dicts; this module recursively converts them to Rust `Expression` values.
 
 use aerospike_core::expressions::{self, ExpType, Expression};
-use aerospike_core::Value;
+use aerospike_core::{RegexFlags, Value};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
@@ -120,7 +120,14 @@ fn py_to_expression_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Expr
             let regex: String = get_required(dict, "regex")?;
             let flags: i64 = get_required(dict, "flags")?;
             let bin_expr = parse_sub_expr(dict, "bin", depth)?;
-            Ok(expressions::regex_compare(regex, flags, bin_expr))
+            // `from_bits` keeps every bit the caller set, so the Python
+            // `REGEX_*` constants and any combination of them pass through
+            // unchanged.
+            Ok(expressions::regex_compare(
+                regex,
+                RegexFlags::from_bits(flags),
+                bin_expr,
+            ))
         }
 
         // ── Control flow ──
@@ -359,16 +366,16 @@ fn parse_sub_expr_list(
 /// Map a Python integer to an [`ExpType`] enum variant used by key expressions.
 fn int_to_exp_type(val: i64) -> PyResult<ExpType> {
     match val {
-        0 => Ok(ExpType::NIL),
-        1 => Ok(ExpType::BOOL),
-        2 => Ok(ExpType::INT),
-        3 => Ok(ExpType::STRING),
-        4 => Ok(ExpType::LIST),
-        5 => Ok(ExpType::MAP),
-        6 => Ok(ExpType::BLOB),
-        7 => Ok(ExpType::FLOAT),
-        8 => Ok(ExpType::GEO),
-        9 => Ok(ExpType::HLL),
+        0 => Ok(ExpType::Nil),
+        1 => Ok(ExpType::Bool),
+        2 => Ok(ExpType::Int),
+        3 => Ok(ExpType::String),
+        4 => Ok(ExpType::List),
+        5 => Ok(ExpType::Map),
+        6 => Ok(ExpType::Blob),
+        7 => Ok(ExpType::Float),
+        8 => Ok(ExpType::Geo),
+        9 => Ok(ExpType::Hll),
         _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "Invalid ExpType value: {val}. Expected 0-9."
         ))),

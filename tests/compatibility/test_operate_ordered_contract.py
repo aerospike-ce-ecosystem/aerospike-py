@@ -248,39 +248,6 @@ CASES: list[Case] = [
 
 BINDING_CASES = [case for case in CASES if case.rust_ops is not None]
 
-# Rust client 2.2 returns the bins of an ``operate`` as a ``HashMap``: repeated
-# bins collapse into one entry, request order is lost, and an operation without
-# a value leaves no trace. The binding cannot pass these cases until it is built
-# on Rust client 3.0, which reports one result per operation in request order.
-# ``strict=True`` turns an unexpected pass into a failure so the mark cannot
-# outlive the port.
-_NEEDS_RUST_CLIENT_3 = frozenset(
-    {
-        "reads_keep_request_order_and_duplicates",
-        "list_append_then_read_keeps_both_results",
-        "list_append_then_list_size",
-        "map_read_makes_write_appear_as_none",
-        "map_write_makes_write_appear_as_none",
-        "map_put_then_map_size",
-        "missing_bin_read_appears_as_none_with_map_op",
-        "increment_read_and_map_op",
-        "bit_read_makes_write_appear_as_none",
-        "hll_ops_make_write_appear_as_none",
-    }
-)
-
-
-def _param(case: Case) -> Any:
-    marks = []
-    if case.id in _NEEDS_RUST_CLIENT_3:
-        marks.append(
-            pytest.mark.xfail(
-                strict=True,
-                reason="Rust client 2.2 returns operate bins as a HashMap (aerospike-client-rust#183)",
-            )
-        )
-    return pytest.param(case, id=case.id, marks=marks)
-
 
 def _fresh_key(case: Case, who: str) -> tuple[str, str, str]:
     return (NS, SET, f"{case.id}:{who}")
@@ -319,7 +286,7 @@ def test_official_client_returns_the_recorded_value(case: Case, official_client,
     assert ordered == case.expected
 
 
-@pytest.mark.parametrize("case", [_param(case) for case in BINDING_CASES])
+@pytest.mark.parametrize("case", [pytest.param(case, id=case.id) for case in BINDING_CASES])
 def test_sync_client_matches_official(case: Case, rust_client, official_client, cleanup):
     official_key = _fresh_key(case, "official")
     rust_key = _fresh_key(case, "sync")
@@ -338,7 +305,7 @@ def test_sync_client_matches_official(case: Case, rust_client, official_client, 
     assert result.meta.gen == expected_gen
 
 
-@pytest.mark.parametrize("case", [_param(case) for case in BINDING_CASES])
+@pytest.mark.parametrize("case", [pytest.param(case, id=case.id) for case in BINDING_CASES])
 async def test_async_client_matches_official(case: Case, async_rust_client, official_client, cleanup):
     official_key = _fresh_key(case, "official")
     rust_key = _fresh_key(case, "async")

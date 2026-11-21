@@ -8,8 +8,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use super::{
-    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_consistency_level,
-    parse_generation_policy, parse_read_touch_ttl, parse_record_exists_action,
+    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_generation_policy,
+    parse_read_mode_ap, parse_read_touch_ttl, parse_record_exists_action,
 };
 
 /// Build a [`WritePolicy`] carrying aerospike-py's write defaults.
@@ -171,7 +171,7 @@ pub fn parse_write_policy(
 
     // Read mode AP (BasePolicy field — operate() with read ops can use this)
     if let Some(val) = dict.get_item("read_mode_ap")? {
-        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?)?;
+        policy.base_policy.read_mode_ap = parse_read_mode_ap(val.extract::<i32>()?)?;
     }
     // Read touch TTL percent (BasePolicy field)
     if let Some(val) = dict.get_item("read_touch_ttl_percent")? {

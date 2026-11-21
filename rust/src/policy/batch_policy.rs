@@ -1,7 +1,7 @@
 //! Batch policy parsing from Python dicts.
 
 use aerospike_core::{
-    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchUDFPolicy, BatchWritePolicy, Concurrency,
+    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchUdfPolicy, BatchWritePolicy, Concurrency,
     GenerationPolicy,
 };
 use log::trace;
@@ -11,8 +11,8 @@ use pyo3::types::PyDict;
 
 use super::write_policy::parse_ttl;
 use super::{
-    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_consistency_level,
-    parse_generation_policy, parse_read_touch_ttl, parse_record_exists_action, parse_replica,
+    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_generation_policy,
+    parse_read_mode_ap, parse_read_touch_ttl, parse_record_exists_action, parse_replica,
 };
 
 /// Parse a Python policy dict into a BatchPolicy
@@ -37,10 +37,10 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
     });
 
     if let Some(val) = dict.get_item("replica")? {
-        policy.replica = parse_replica(val.extract::<i32>()?)?;
+        policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_mode_ap")? {
-        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?)?;
+        policy.base_policy.read_mode_ap = parse_read_mode_ap(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
         policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
@@ -50,7 +50,7 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
         policy.concurrency = parse_concurrency(val.extract::<i64>()?)?;
     }
 
-    policy.filter_expression = extract_filter_expression(dict)?;
+    policy.base_policy.filter_expression = extract_filter_expression(dict)?;
 
     Ok(policy)
 }
@@ -213,16 +213,16 @@ pub fn apply_record_meta_for_delete(
     Ok(policy)
 }
 
-/// Parse the per-record-policy dict into a [`BatchUDFPolicy`].
+/// Parse the per-record-policy dict into a [`BatchUdfPolicy`].
 ///
 /// Covers `commit_level`, `expiration` (via the user-facing `ttl` key,
 /// matching the `WritePolicy` parser convention), `key` (send_key),
 /// `durable_delete`, and `filter_expression`. UDFs may write — keeping
 /// the same field surface as `BatchWritePolicy` minus `gen`/`exists`
 /// keeps the parsers consistent for downstream `apply_record_meta_for_apply`.
-pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchUDFPolicy> {
+pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchUdfPolicy> {
     trace!("Parsing batch UDF policy");
-    let mut policy = BatchUDFPolicy::default();
+    let mut policy = BatchUdfPolicy::default();
 
     let dict = match policy_dict {
         Some(d) => d,
@@ -248,7 +248,7 @@ pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResu
     Ok(policy)
 }
 
-/// Apply per-record meta to a [`BatchUDFPolicy`], overriding the batch-level
+/// Apply per-record meta to a [`BatchUdfPolicy`], overriding the batch-level
 /// default. Per-record settings always win.
 ///
 /// Supported meta keys (single flat `BatchUDFMeta` dict, mirroring
@@ -257,9 +257,9 @@ pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResu
 /// extracted separately by `prepare_batch_apply_args` — they affect
 /// the UDF call shape, not the policy.
 pub fn apply_record_meta_for_apply(
-    base: &BatchUDFPolicy,
+    base: &BatchUdfPolicy,
     meta: &Bound<'_, PyDict>,
-) -> PyResult<BatchUDFPolicy> {
+) -> PyResult<BatchUdfPolicy> {
     let mut policy = base.clone();
 
     if let Some(ttl) = meta.get_item("ttl")? {
@@ -457,7 +457,10 @@ mod tests {
                 d.set_item("replica", 0i32).unwrap();
             });
             let p = parse_batch_policy(Some(&d)).unwrap();
-            assert_eq!(p.replica, aerospike_core::policy::Replica::Master);
+            assert_eq!(
+                p.base_policy.replica,
+                aerospike_core::policy::Replica::Master
+            );
         });
     }
 
@@ -546,13 +549,10 @@ mod tests {
                 d.set_item("read_touch_ttl_percent", 80i64).unwrap();
             });
             let p = parse_batch_policy(Some(&d)).unwrap();
-            assert_eq!(
-                p.base_policy.consistency_level,
-                aerospike_core::ConsistencyLevel::ConsistencyAll
-            );
+            assert_eq!(p.base_policy.read_mode_ap, aerospike_core::ReadModeAp::All);
             assert!(matches!(
                 p.base_policy.read_touch_ttl,
-                aerospike_core::ReadTouchTTL::Percent(80)
+                aerospike_core::ReadTouchTtl::Percent(80)
             ));
         });
     }
@@ -582,7 +582,7 @@ mod tests {
         let p = parse_batch_read_policy(None).expect("parse ok");
         assert!(matches!(
             p.read_touch_ttl,
-            aerospike_core::ReadTouchTTL::ServerDefault
+            aerospike_core::ReadTouchTtl::ServerDefault
         ));
         assert!(p.filter_expression.is_none());
     }
@@ -597,7 +597,7 @@ mod tests {
             let p = parse_batch_read_policy(Some(&d)).expect("parse ok");
             assert!(matches!(
                 p.read_touch_ttl,
-                aerospike_core::ReadTouchTTL::Percent(80)
+                aerospike_core::ReadTouchTtl::Percent(80)
             ));
         });
     }
@@ -674,7 +674,7 @@ mod tests {
         });
     }
 
-    // ── BatchUDFPolicy ───────────────────────────────────────────────────
+    // ── BatchUdfPolicy ───────────────────────────────────────────────────
 
     #[test]
     fn parse_batch_udf_policy_default_when_dict_is_none() {
@@ -718,7 +718,7 @@ mod tests {
     fn apply_record_meta_for_apply_overrides_ttl_and_send_key() {
         Python::initialize();
         Python::attach(|py| {
-            let base = BatchUDFPolicy::default();
+            let base = BatchUdfPolicy::default();
             let meta = build_dict(py, |d| {
                 d.set_item("ttl", 3600i64).unwrap();
                 d.set_item("key", 1i32).unwrap();
@@ -733,7 +733,7 @@ mod tests {
     fn apply_record_meta_for_apply_per_record_wins_over_base() {
         Python::initialize();
         Python::attach(|py| {
-            let base = BatchUDFPolicy {
+            let base = BatchUdfPolicy {
                 send_key: false,
                 commit_level: CommitLevel::CommitAll,
                 ..Default::default()

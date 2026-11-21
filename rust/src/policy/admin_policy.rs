@@ -27,11 +27,11 @@ fn code_to_privilege_code(code: u8) -> PyResult<PrivilegeCode> {
         0 => Ok(PrivilegeCode::UserAdmin),
         1 => Ok(PrivilegeCode::SysAdmin),
         2 => Ok(PrivilegeCode::DataAdmin),
-        3 => Ok(PrivilegeCode::UDFAdmin),
-        4 => Ok(PrivilegeCode::SIndexAdmin),
+        3 => Ok(PrivilegeCode::UdfAdmin),
+        4 => Ok(PrivilegeCode::SindexAdmin),
         10 => Ok(PrivilegeCode::Read),
         11 => Ok(PrivilegeCode::ReadWrite),
-        12 => Ok(PrivilegeCode::ReadWriteUDF),
+        12 => Ok(PrivilegeCode::ReadWriteUdf),
         13 => Ok(PrivilegeCode::Write),
         14 => Ok(PrivilegeCode::Truncate),
         _ => Err(crate::errors::InvalidArgError::new_err(format!(
@@ -52,11 +52,11 @@ fn name_to_privilege_code(name: &str) -> PyResult<PrivilegeCode> {
         "user-admin" => Ok(PrivilegeCode::UserAdmin),
         "sys-admin" => Ok(PrivilegeCode::SysAdmin),
         "data-admin" => Ok(PrivilegeCode::DataAdmin),
-        "udf-admin" => Ok(PrivilegeCode::UDFAdmin),
-        "sindex-admin" => Ok(PrivilegeCode::SIndexAdmin),
+        "udf-admin" => Ok(PrivilegeCode::UdfAdmin),
+        "sindex-admin" => Ok(PrivilegeCode::SindexAdmin),
         "read" => Ok(PrivilegeCode::Read),
         "read-write" => Ok(PrivilegeCode::ReadWrite),
-        "read-write-udf" => Ok(PrivilegeCode::ReadWriteUDF),
+        "read-write-udf" => Ok(PrivilegeCode::ReadWriteUdf),
         "write" => Ok(PrivilegeCode::Write),
         "truncate" => Ok(PrivilegeCode::Truncate),
         _ => Err(crate::errors::InvalidArgError::new_err(format!(
@@ -74,11 +74,11 @@ fn privilege_code_to_int(code: &PrivilegeCode) -> u8 {
         PrivilegeCode::UserAdmin => 0,
         PrivilegeCode::SysAdmin => 1,
         PrivilegeCode::DataAdmin => 2,
-        PrivilegeCode::UDFAdmin => 3,
-        PrivilegeCode::SIndexAdmin => 4,
+        PrivilegeCode::UdfAdmin => 3,
+        PrivilegeCode::SindexAdmin => 4,
         PrivilegeCode::Read => 10,
         PrivilegeCode::ReadWrite => 11,
-        PrivilegeCode::ReadWriteUDF => 12,
+        PrivilegeCode::ReadWriteUdf => 12,
         PrivilegeCode::Write => 13,
         PrivilegeCode::Truncate => 14,
         _ => 255,
@@ -282,14 +282,14 @@ mod tests {
             assert_eq!(parsed.len(), 10);
             assert!(matches!(parsed[0].code, PrivilegeCode::Read));
             assert!(matches!(parsed[1].code, PrivilegeCode::ReadWrite));
-            assert!(matches!(parsed[2].code, PrivilegeCode::ReadWriteUDF));
+            assert!(matches!(parsed[2].code, PrivilegeCode::ReadWriteUdf));
             assert!(matches!(parsed[3].code, PrivilegeCode::Write));
             assert!(matches!(parsed[4].code, PrivilegeCode::Truncate));
             assert!(matches!(parsed[5].code, PrivilegeCode::UserAdmin));
             assert!(matches!(parsed[6].code, PrivilegeCode::SysAdmin));
             assert!(matches!(parsed[7].code, PrivilegeCode::DataAdmin));
-            assert!(matches!(parsed[8].code, PrivilegeCode::UDFAdmin));
-            assert!(matches!(parsed[9].code, PrivilegeCode::SIndexAdmin));
+            assert!(matches!(parsed[8].code, PrivilegeCode::UdfAdmin));
+            assert!(matches!(parsed[9].code, PrivilegeCode::SindexAdmin));
         });
     }
 
@@ -309,7 +309,7 @@ mod tests {
             assert!(matches!(parsed[0].code, PrivilegeCode::Read));
             assert!(matches!(parsed[1].code, PrivilegeCode::ReadWrite));
             assert!(matches!(parsed[2].code, PrivilegeCode::SysAdmin));
-            assert!(matches!(parsed[3].code, PrivilegeCode::ReadWriteUDF));
+            assert!(matches!(parsed[3].code, PrivilegeCode::ReadWriteUdf));
         });
     }
 

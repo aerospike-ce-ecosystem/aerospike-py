@@ -8,9 +8,7 @@ pub mod write_policy;
 use aerospike_core::expressions::Expression;
 use aerospike_core::policy::{QueryDuration, Replica};
 use aerospike_core::query::PartitionFilter;
-use aerospike_core::{
-    CommitLevel, ConsistencyLevel, GenerationPolicy, ReadTouchTTL, RecordExistsAction,
-};
+use aerospike_core::{CommitLevel, GenerationPolicy, ReadModeAp, ReadTouchTtl, RecordExistsAction};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -119,13 +117,13 @@ pub(crate) fn parse_replica(val: i32) -> PyResult<Replica> {
     }
 }
 
-/// Map a `POLICY_READ_MODE_AP_*` integer constant to a [`ConsistencyLevel`].
+/// Map a `POLICY_READ_MODE_AP_*` integer constant to a [`ReadModeAp`].
 ///
 /// Unknown values are rejected with `InvalidArgError`.
-pub(crate) fn parse_consistency_level(val: i32) -> PyResult<ConsistencyLevel> {
+pub(crate) fn parse_read_mode_ap(val: i32) -> PyResult<ReadModeAp> {
     match val {
-        0 => Ok(ConsistencyLevel::ConsistencyOne),
-        1 => Ok(ConsistencyLevel::ConsistencyAll),
+        0 => Ok(ReadModeAp::One),
+        1 => Ok(ReadModeAp::All),
         _ => Err(unknown_policy_value(
             "read_mode_ap",
             val,
@@ -141,7 +139,7 @@ pub(crate) fn parse_query_duration(val: i32) -> PyResult<QueryDuration> {
     match val {
         0 => Ok(QueryDuration::Long),
         1 => Ok(QueryDuration::Short),
-        2 => Ok(QueryDuration::LongRelaxAP),
+        2 => Ok(QueryDuration::LongRelaxAp),
         _ => Err(unknown_policy_value(
             "expected_duration",
             val,
@@ -168,16 +166,16 @@ pub fn parse_partition_filter(dict: &Bound<'_, PyDict>) -> PyResult<Option<Parti
     Ok(Some(pf.clone_inner()))
 }
 
-/// Convert a `read_touch_ttl_percent` integer to a [`ReadTouchTTL`] enum.
+/// Convert a `read_touch_ttl_percent` integer to a [`ReadTouchTtl`] enum.
 ///
 /// Special values: `0` = `ServerDefault`, `-1` = `DontReset`, `1..=100` = `Percent(N)`.
 /// Out-of-range values return an `InvalidArgError` rather than silently clamping —
 /// this surfaces config typos early and matches the strictness of `parse_ttl`.
-pub(crate) fn parse_read_touch_ttl(val: i64) -> PyResult<ReadTouchTTL> {
+pub(crate) fn parse_read_touch_ttl(val: i64) -> PyResult<ReadTouchTtl> {
     match val {
-        0 => Ok(ReadTouchTTL::ServerDefault),
-        -1 => Ok(ReadTouchTTL::DontReset),
-        n if (1..=100).contains(&n) => Ok(ReadTouchTTL::Percent(n as u8)),
+        0 => Ok(ReadTouchTtl::ServerDefault),
+        -1 => Ok(ReadTouchTtl::DontReset),
+        n if (1..=100).contains(&n) => Ok(ReadTouchTtl::Percent(n as u8)),
         n => Err(crate::errors::InvalidArgError::new_err(format!(
             "read_touch_ttl_percent out of range: {n} (valid: 0=ServerDefault, -1=DontReset, 1-100=Percent)"
         ))),
@@ -213,18 +211,9 @@ mod tests {
 
     #[test]
     fn parse_consistency_level_known_and_unknown() {
-        assert_eq!(
-            parse_consistency_level(0).unwrap(),
-            ConsistencyLevel::ConsistencyOne
-        );
-        assert_eq!(
-            parse_consistency_level(1).unwrap(),
-            ConsistencyLevel::ConsistencyAll
-        );
-        assert_invalid_arg(
-            parse_consistency_level(99),
-            "invalid read_mode_ap value: 99",
-        );
+        assert_eq!(parse_read_mode_ap(0).unwrap(), ReadModeAp::One);
+        assert_eq!(parse_read_mode_ap(1).unwrap(), ReadModeAp::All);
+        assert_invalid_arg(parse_read_mode_ap(99), "invalid read_mode_ap value: 99");
     }
 
     #[test]
@@ -277,23 +266,23 @@ mod tests {
     fn parse_read_touch_ttl_special_values() {
         assert!(matches!(
             parse_read_touch_ttl(0).unwrap(),
-            ReadTouchTTL::ServerDefault
+            ReadTouchTtl::ServerDefault
         ));
         assert!(matches!(
             parse_read_touch_ttl(-1).unwrap(),
-            ReadTouchTTL::DontReset
+            ReadTouchTtl::DontReset
         ));
         assert!(matches!(
             parse_read_touch_ttl(50).unwrap(),
-            ReadTouchTTL::Percent(50)
+            ReadTouchTtl::Percent(50)
         ));
         assert!(matches!(
             parse_read_touch_ttl(1).unwrap(),
-            ReadTouchTTL::Percent(1)
+            ReadTouchTtl::Percent(1)
         ));
         assert!(matches!(
             parse_read_touch_ttl(100).unwrap(),
-            ReadTouchTTL::Percent(100)
+            ReadTouchTtl::Percent(100)
         ));
     }
 

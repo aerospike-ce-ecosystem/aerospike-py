@@ -17,7 +17,10 @@
 //!   +-- InvalidArgError
 //! ```
 
-use aerospike_core::{Error as AsError, ResultCode};
+use std::borrow::Cow;
+use std::fmt::Write as _;
+
+use aerospike_core::{ClientResultCode, Error as AsError, ErrorKind, ResultCode};
 use log::debug;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
@@ -32,17 +35,28 @@ use pyo3::prelude::*;
 /// code and tests can classify "no server code" without hard-coding the literal.
 pub const CLIENT_SIDE_RESULT_CODE: i32 = -1;
 
-/// Attach the structured integer `result_code` (ADR-0027) to an exception
-/// instance so callers classify errors by a stable code instead of parsing the
-/// message string. The GIL is acquired only on the (exceptional) error path to
-/// materialise the exception value and set the attribute; on the rare chance the
-/// assignment fails it is logged and the original error is still raised. The
-/// per-instance value shadows the class-level default set in
-/// [`register_exceptions`].
-fn attach_result_code(err: PyErr, code: i32) -> PyErr {
+/// Attach the structured classification to an exception instance so callers
+/// can tell failures apart without parsing the message string:
+///
+/// - `result_code` (ADR-0027): the server wire code, or
+///   [`CLIENT_SIDE_RESULT_CODE`] when no server answered;
+/// - `error_type`: the class name that the Prometheus `error_type` label and
+///   the OpenTelemetry `error.type` attribute also carry;
+/// - `in_doubt`: whether a write may have been applied even though it failed.
+///
+/// The GIL is acquired only on the (exceptional) error path to materialise the
+/// exception value and set the attributes; on the rare chance an assignment
+/// fails it is logged and the original error is still raised. The per-instance
+/// values shadow the class-level defaults set in [`register_exceptions`].
+fn attach_error_info(err: PyErr, class: ErrorClass, in_doubt: bool) -> PyErr {
     Python::attach(|py| {
-        if let Err(set_err) = err.value(py).setattr("result_code", code) {
-            debug!("failed to attach result_code={code} to exception: {set_err}");
+        let value = err.value(py);
+        let set = value
+            .setattr("result_code", class.result_code())
+            .and_then(|()| value.setattr("error_type", class.label().as_ref()))
+            .and_then(|()| value.setattr("in_doubt", in_doubt));
+        if let Err(set_err) = set {
+            debug!("failed to attach error info for {class:?} to exception: {set_err}");
         }
     });
     err
@@ -208,101 +222,205 @@ pyo3::create_exception!(
 
 /// Map an `aerospike_core::ResultCode` to its integer wire-protocol value.
 ///
-/// Every variant is mapped explicitly to the wire code defined in the server's
-/// `proto.h` (mirroring `ResultCode::from_u8` in aerospike-core), so that
-/// `BatchRecord.result` and error messages always carry the real server code.
-/// `Unknown(code)` carries the raw byte through. The match is exhaustive — a
-/// new aerospike-core variant fails the build instead of silently collapsing
-/// to a meaningless `-1`.
+/// The conversion is aerospike-core's own (`u8::from`), so every code — also
+/// one a newer server adds, which arrives as `Unknown(code)` — reports the
+/// value the server put on the wire. `BatchRecord.result` and error messages
+/// therefore always carry the real server code.
 pub(crate) fn result_code_to_int(rc: &ResultCode) -> i32 {
-    match rc {
-        ResultCode::Ok => 0,
-        ResultCode::ServerError => 1,
-        ResultCode::KeyNotFoundError => 2,
-        ResultCode::GenerationError => 3,
-        ResultCode::ParameterError => 4,
-        ResultCode::KeyExistsError => 5,
-        ResultCode::BinExistsError => 6,
-        ResultCode::ClusterKeyMismatch => 7,
-        ResultCode::ServerMemError => 8,
-        ResultCode::Timeout => 9,
-        ResultCode::AlwaysForbidden => 10,
-        ResultCode::PartitionUnavailable => 11,
-        ResultCode::BinTypeError => 12,
-        ResultCode::RecordTooBig => 13,
-        ResultCode::KeyBusy => 14,
-        ResultCode::ScanAbort => 15,
-        ResultCode::UnsupportedFeature => 16,
-        ResultCode::BinNotFound => 17,
-        ResultCode::DeviceOverload => 18,
-        ResultCode::KeyMismatch => 19,
-        ResultCode::InvalidNamespace => 20,
-        ResultCode::BinNameTooLong => 21,
-        ResultCode::FailForbidden => 22,
-        ResultCode::ElementNotFound => 23,
-        ResultCode::ElementExists => 24,
-        ResultCode::EnterpriseOnly => 25,
-        ResultCode::OpNotApplicable => 26,
-        ResultCode::FilteredOut => 27,
-        ResultCode::LostConflict => 28,
-        ResultCode::XDRKeyBusy => 32,
-        ResultCode::QueryEnd => 50,
-        ResultCode::SecurityNotSupported => 51,
-        ResultCode::SecurityNotEnabled => 52,
-        ResultCode::SecuritySchemeNotSupported => 53,
-        ResultCode::InvalidCommand => 54,
-        ResultCode::InvalidField => 55,
-        ResultCode::IllegalState => 56,
-        ResultCode::InvalidUser => 60,
-        ResultCode::UserAlreadyExists => 61,
-        ResultCode::InvalidPassword => 62,
-        ResultCode::ExpiredPassword => 63,
-        ResultCode::ForbiddenPassword => 64,
-        ResultCode::InvalidCredential => 65,
-        ResultCode::ExpiredSession => 66,
-        ResultCode::InvalidRole => 70,
-        ResultCode::RoleAlreadyExists => 71,
-        ResultCode::InvalidPrivilege => 72,
-        ResultCode::InvalidAllowlist => 73,
-        ResultCode::QuotasNotEnabled => 74,
-        ResultCode::InvalidQuota => 75,
-        ResultCode::NotAuthenticated => 80,
-        ResultCode::RoleViolation => 81,
-        ResultCode::NotAllowlisted => 82,
-        ResultCode::QuotaExceeded => 83,
-        ResultCode::UdfBadResponse => 100,
-        ResultCode::BatchDisabled => 150,
-        ResultCode::BatchMaxRequestsExceeded => 151,
-        ResultCode::BatchQueuesFull => 152,
-        ResultCode::InvalidGeojson => 160,
-        ResultCode::IndexFound => 200,
-        ResultCode::IndexNotFound => 201,
-        ResultCode::IndexOom => 202,
-        ResultCode::IndexNotReadable => 203,
-        ResultCode::IndexGeneric => 204,
-        ResultCode::IndexNameMaxLen => 205,
-        ResultCode::IndexMaxCount => 206,
-        ResultCode::QueryAborted => 210,
-        ResultCode::QueryQueueFull => 211,
-        ResultCode::QueryTimeout => 212,
-        ResultCode::QueryGeneric => 213,
-        ResultCode::QueryNetioErr => 214,
-        ResultCode::QueryDuplicate => 215,
-        ResultCode::Unknown(code) => *code as i32,
+    i32::from(u8::from(*rc))
+}
+
+/// What kind of failure an `aerospike_core::Error` is.
+///
+/// This is the one classification the binding uses. The Python exception
+/// type, the `result_code` / `error_type` / `in_doubt` attributes on it, the
+/// Prometheus `error_type` label and the OpenTelemetry `error.type` attribute
+/// are all derived from it, so the three views of an error cannot disagree
+/// about what happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorClass {
+    /// The server answered with a non-OK result code. A server-reported
+    /// timeout is `Server(ResultCode::Timeout)`, not [`ClientTimeout`](Self::ClientTimeout).
+    Server(ResultCode),
+    /// The client's own deadline elapsed before an answer arrived.
+    ClientTimeout,
+    /// More than one attempt was made and the retry budget ran out with every
+    /// attempt timing out.
+    RetriesExhausted,
+    /// The connection to a node was lost or could not be made. Includes raw
+    /// I/O errors: a node going down surfaces as one.
+    Connection,
+    /// A node's connection pool has no connection to give.
+    NoMoreConnections,
+    /// The per-node circuit breaker refused the command without sending it.
+    MaxErrorRate,
+    /// The target node is not an active member of the cluster.
+    InvalidNode,
+    /// The caller passed an invalid argument or an unknown namespace.
+    InvalidArgument,
+    /// A user-defined function failed.
+    Udf,
+    /// A scan or query record stream ended before it was complete.
+    StreamTerminated,
+    /// The server sent something the client could not interpret.
+    BadResponse,
+    /// A client-side failure with no more specific class.
+    Client,
+    /// A kind this binding has no name for: aerospike-core is newer than the
+    /// mapping below. The only class that is reported as a possible bug.
+    Unknown,
+}
+
+impl ErrorClass {
+    /// Classify one error by its own kind, ignoring what caused it.
+    fn of_kind(err: &AsError) -> Self {
+        match err.kind() {
+            ErrorKind::Server { rc, .. } => Self::Server(*rc),
+            ErrorKind::Timeout => {
+                // The retry loop reports an exhausted budget as a timeout that
+                // carries MAX_RETRIES_EXCEEDED. With a single attempt that is
+                // simply the attempt timing out, so it only counts as
+                // "retries exhausted" once a retry actually happened.
+                let exhausted = err.client_result_code()
+                    == Some(ClientResultCode::MaxRetriesExceeded)
+                    && err.iteration().is_some_and(|tries| tries > 1);
+                if exhausted {
+                    Self::RetriesExhausted
+                } else {
+                    Self::ClientTimeout
+                }
+            }
+            ErrorKind::Connection | ErrorKind::Io(_) => Self::Connection,
+            ErrorKind::ConnectionPoolEmpty | ErrorKind::NoMoreConnections => {
+                Self::NoMoreConnections
+            }
+            ErrorKind::MaxErrorRate => Self::MaxErrorRate,
+            ErrorKind::InvalidNode => Self::InvalidNode,
+            ErrorKind::InvalidArgument | ErrorKind::InvalidNamespace => Self::InvalidArgument,
+            ErrorKind::UdfBadResponse => Self::Udf,
+            ErrorKind::StreamTerminated => Self::StreamTerminated,
+            ErrorKind::BadResponse
+            | ErrorKind::ParsePeers
+            | ErrorKind::InvalidUtf8(_)
+            | ErrorKind::ParseAddr(_)
+            | ErrorKind::ParseInt(_) => Self::BadResponse,
+            ErrorKind::Client | ErrorKind::Commit { .. } => Self::Client,
+            _ => Self::Unknown,
+        }
     }
+
+    /// Classify an error, looking through the two wrappers aerospike-core
+    /// puts around the real failure.
+    ///
+    /// - When the retry budget runs out, the error on top is a timeout and its
+    ///   cause is the failure of the last attempt. A node that is down is
+    ///   then a `Connection` failure three levels of indirection away from
+    ///   what the caller sees. Rust client 2.x returned the last attempt's
+    ///   error itself, and so does this.
+    /// - `Error::chain_error` puts a context message in front of a failure,
+    ///   which makes the top error a plain client error.
+    ///
+    /// In both cases the first cause with a more specific class decides.
+    pub fn of(err: &AsError) -> Self {
+        let own = Self::of_kind(err);
+        let own_is_timeout = matches!(own, Self::ClientTimeout | Self::RetriesExhausted);
+        if !own_is_timeout && own != Self::Client {
+            return own;
+        }
+        let mut cause = err.cause();
+        while let Some(c) = cause {
+            let class = Self::of_kind(c);
+            let more_specific = if own_is_timeout {
+                // A timeout on top of timeouts is still that timeout.
+                !matches!(
+                    class,
+                    Self::ClientTimeout | Self::RetriesExhausted | Self::Client | Self::Unknown
+                )
+            } else {
+                !matches!(class, Self::Client | Self::Unknown)
+            };
+            if more_specific {
+                return class;
+            }
+            cause = c.cause();
+        }
+        own
+    }
+
+    /// Short stable name of the class: the Prometheus `error_type` label, the
+    /// OpenTelemetry `error.type` attribute and the `error_type` attribute of
+    /// the Python exception.
+    ///
+    /// `Cow::Borrowed` (no allocation) for every class except a server result
+    /// code without a dedicated arm.
+    pub fn label(&self) -> Cow<'static, str> {
+        Cow::Borrowed(match self {
+            Self::Server(rc) => match rc {
+                ResultCode::KeyNotFoundError => "KeyNotFoundError",
+                ResultCode::KeyExistsError => "KeyExistsError",
+                ResultCode::GenerationError => "GenerationError",
+                ResultCode::RecordTooBig => "RecordTooBig",
+                ResultCode::BinTypeError => "BinTypeError",
+                ResultCode::BinNotFound => "BinNotFound",
+                ResultCode::FilteredOut => "FilteredOut",
+                // Kept apart from the client's own "Timeout": the server
+                // answered, with result code 9.
+                ResultCode::Timeout => "ServerTimeout",
+                other => return Cow::Owned(format!("{other:?}")),
+            },
+            Self::ClientTimeout => "Timeout",
+            Self::RetriesExhausted => "MaxRetriesExceeded",
+            Self::Connection => "Connection",
+            Self::NoMoreConnections => "NoMoreConnections",
+            Self::MaxErrorRate => "MaxErrorRate",
+            Self::InvalidNode => "InvalidNode",
+            Self::InvalidArgument => "InvalidArgument",
+            Self::Udf => "UdfBadResponse",
+            Self::StreamTerminated => "StreamTerminated",
+            Self::BadResponse => "BadResponse",
+            Self::Client => "Client",
+            Self::Unknown => "Unknown",
+        })
+    }
+
+    /// The `result_code` a Python exception of this class carries: the wire
+    /// code when a server answered, [`CLIENT_SIDE_RESULT_CODE`] otherwise.
+    ///
+    /// aerospike-core also gives client-side failures a negative code, but in
+    /// the Java client's numbering, which disagrees with the constants of the
+    /// official Python client (`-11` is "max retries exceeded" here and
+    /// something else there). Exposing it would invite wrong comparisons, so
+    /// every client-side failure keeps the single `-1` sentinel and is told
+    /// apart by `error_type` instead.
+    pub fn result_code(&self) -> i32 {
+        match self {
+            Self::Server(rc) => result_code_to_int(rc),
+            _ => CLIENT_SIDE_RESULT_CODE,
+        }
+    }
+}
+
+/// True when `err` is the server saying the record does not exist.
+pub(crate) fn is_key_not_found(err: &AsError) -> bool {
+    matches!(
+        err.kind(),
+        ErrorKind::Server {
+            rc: ResultCode::KeyNotFoundError,
+            ..
+        }
+    )
 }
 
 /// Map a server `ResultCode` (plus a pre-rendered message) to the most
 /// specific Python exception subclass.
 ///
-/// Shared by every `aerospike_core::Error` variant that carries a
-/// `ResultCode` — `ServerError`, `BatchError`, and `BatchLastError` — so a
-/// batch failure surfaces the same exception type as the equivalent
-/// single-record failure (e.g. a batch server timeout becomes
-/// `AerospikeTimeoutError`, not a generic `ClientError`).
-fn result_code_to_pyerr(rc: &ResultCode, msg: String) -> PyErr {
-    let code = result_code_to_int(rc);
-    let err = match rc {
+/// Every failure that carries a server result code goes through here — a
+/// single-record command and a batch row alike — so a batch failure surfaces
+/// the same exception type as the equivalent single-record failure (e.g. a
+/// batch server timeout becomes `AerospikeTimeoutError`, not a generic
+/// `ClientError`).
+fn result_code_exception(rc: &ResultCode, msg: String) -> PyErr {
+    match rc {
         // Record-level: specific subclasses
         ResultCode::KeyNotFoundError => RecordNotFound::new_err(msg),
         ResultCode::KeyExistsError => RecordExistsError::new_err(msg),
@@ -361,83 +479,114 @@ fn result_code_to_pyerr(rc: &ResultCode, msg: String) -> PyErr {
             );
             ServerError::new_err(msg)
         }
+    }
+}
+
+/// Prefixes aerospike-core puts in front of an error's own text. This module
+/// writes its own, so they are removed to avoid "Invalid argument: Invalid
+/// argument: ...".
+const CORE_MESSAGE_PREFIXES: &[&str] = &[
+    "Client Timeout: ",
+    "Unable to communicate with server cluster: ",
+    "Invalid argument: ",
+    "Invalid cluster node: ",
+    "Invalid namespace: ",
+    "Bad Server Response: ",
+];
+
+fn bare_message(err: &AsError) -> String {
+    let base = err.base_message();
+    for prefix in CORE_MESSAGE_PREFIXES {
+        if let Some(rest) = base.strip_prefix(prefix) {
+            return rest.to_string();
+        }
+    }
+    base
+}
+
+/// Render an error and its causes as one line of text.
+///
+/// `Display` on an aerospike-core error leads with its Java-numbered code
+/// ("Error -11"), which would be read as a `result_code`. This keeps the
+/// text, the node and the cause chain, and leaves the code out.
+pub(crate) fn describe(err: &AsError) -> String {
+    let mut out = bare_message(err);
+    if let Some(node) = err.node() {
+        let _ = write!(out, " [node={node}]");
+    }
+    let mut cause = err.cause();
+    while let Some(c) = cause {
+        let _ = write!(out, "; caused by: {}", c.base_message());
+        cause = c.cause();
+    }
+    out
+}
+
+/// Build the Python exception for a classified failure.
+///
+/// Split from [`as_to_pyerr`] so the mapping can be tested for every class:
+/// aerospike-core only lets its own code construct most error kinds.
+fn build_pyerr(class: ErrorClass, detail: &str, node: Option<&str>, in_doubt: bool) -> PyErr {
+    let doubt = if in_doubt { " [in_doubt]" } else { "" };
+    let exception = match class {
+        ErrorClass::Server(rc) => {
+            let code = result_code_to_int(&rc);
+            result_code_exception(&rc, format!("AEROSPIKE_ERR ({code}): {detail}{doubt}"))
+        }
+        ErrorClass::ClientTimeout | ErrorClass::RetriesExhausted => {
+            AerospikeTimeoutError::new_err(format!("Timeout: {detail}{doubt}"))
+        }
+        ErrorClass::Connection => {
+            ClusterError::new_err(format!("Connection error: {detail}{doubt}"))
+        }
+        ErrorClass::NoMoreConnections => {
+            ClusterError::new_err(format!("No more connections available: {detail}"))
+        }
+        // aerospike-core's per-node circuit breaker: once a node exceeds
+        // `ClientPolicy::max_error_rate` errors within one `error_rate_window`,
+        // commands aimed at it are refused client-side until the counter
+        // resets. That is a node-availability condition, so it belongs with
+        // the other ClusterError cases.
+        ErrorClass::MaxErrorRate => ClusterError::new_err(format!(
+            "Node circuit breaker tripped (max_error_rate exceeded) for node {}",
+            node.unwrap_or("<unknown>")
+        )),
+        ErrorClass::InvalidNode => ClusterError::new_err(format!("Invalid node: {detail}")),
+        ErrorClass::InvalidArgument => {
+            InvalidArgError::new_err(format!("Invalid argument: {detail}"))
+        }
+        ErrorClass::Udf => UDFError::new_err(format!("UDF error: {detail}{doubt}")),
+        ErrorClass::StreamTerminated => {
+            ClientError::new_err(format!("Record stream terminated: {detail}"))
+        }
+        ErrorClass::BadResponse => {
+            ClientError::new_err(format!("Bad server response: {detail}{doubt}"))
+        }
+        ErrorClass::Client | ErrorClass::Unknown => {
+            ClientError::new_err(format!("{detail}{doubt}"))
+        }
     };
-    // Carry the real server wire code on the exception instance (ADR-0027).
-    attach_result_code(err, code)
+    attach_error_info(exception, class, in_doubt)
 }
 
 /// Convert an `aerospike_core::Error` into the appropriate Python exception.
 ///
-/// Maps each error variant to the most specific exception subclass
-/// (e.g. `KeyNotFoundError` -> `RecordNotFound`), falling back to
-/// broader categories like `ServerError` or `ClientError`.
+/// The error is classified once ([`ErrorClass::of`]) and the exception type,
+/// its message and its `result_code` / `error_type` / `in_doubt` attributes
+/// all follow from that class.
 pub fn as_to_pyerr(err: AsError) -> PyErr {
     debug!("Mapping aerospike error: {}", err);
-    match &err {
-        // Client-side errors never carried a server response, so they cannot
-        // carry a real wire code; they surface the CLIENT_SIDE_RESULT_CODE
-        // sentinel (ADR-0027).
-        AsError::Connection(msg) => attach_result_code(
-            ClusterError::new_err(format!("Connection error: {msg}")),
-            CLIENT_SIDE_RESULT_CODE,
-        ),
-        AsError::Timeout(msg) => attach_result_code(
-            AerospikeTimeoutError::new_err(format!("Timeout: {msg}")),
-            CLIENT_SIDE_RESULT_CODE,
-        ),
-        AsError::InvalidArgument(msg) => attach_result_code(
-            InvalidArgError::new_err(format!("Invalid argument: {msg}")),
-            CLIENT_SIDE_RESULT_CODE,
-        ),
-        AsError::ServerError(rc, in_doubt, _node) => {
-            let code = result_code_to_int(rc);
-            let doubt_suffix = if *in_doubt { " [in_doubt]" } else { "" };
-            let msg = format!("AEROSPIKE_ERR ({code}): {err}{doubt_suffix}");
-            result_code_to_pyerr(rc, msg)
-        }
-        // Batch errors carry a real server ResultCode. Route them through the
-        // same mapping as ServerError so a batch KeyNotFoundError / Timeout /
-        // auth failure raises the precise exception type instead of falling
-        // through to a generic ClientError plus a spurious bug-report log.
-        AsError::BatchError(idx, rc, in_doubt, _msg)
-        | AsError::BatchLastError(idx, rc, in_doubt, _msg) => {
-            let code = result_code_to_int(rc);
-            let doubt_suffix = if *in_doubt { " [in_doubt]" } else { "" };
-            let msg = format!("AEROSPIKE_ERR ({code}) [batch_index={idx}]: {err}{doubt_suffix}");
-            result_code_to_pyerr(rc, msg)
-        }
-        AsError::InvalidNode(msg) => attach_result_code(
-            ClusterError::new_err(format!("Invalid node: {msg}")),
-            CLIENT_SIDE_RESULT_CODE,
-        ),
-        AsError::NoMoreConnections => attach_result_code(
-            ClusterError::new_err("No more connections available"),
-            CLIENT_SIDE_RESULT_CODE,
-        ),
-        // aerospike-core 2.1+ ships a per-node circuit breaker: once a node
-        // exceeds `ClientPolicy::max_error_rate` errors within one
-        // `error_rate_window`, commands aimed at it are refused client-side
-        // until the counter resets. That is a node-availability condition, so
-        // it belongs with the other ClusterError cases — and mapping it keeps
-        // it out of the catch-all, which would log a spurious "this may be a
-        // bug in aerospike-py, please file an issue" on every trip.
-        AsError::MaxErrorRate(addr) => attach_result_code(
-            ClusterError::new_err(format!(
-                "Node circuit breaker tripped (max_error_rate exceeded) for node {addr}"
-            )),
-            CLIENT_SIDE_RESULT_CODE,
-        ),
-        _ => {
-            crate::bug_report::log_unexpected_error(
-                "errors::as_to_pyerr",
-                &format!("Unmapped aerospike_core::Error variant: {err}"),
-            );
-            attach_result_code(
-                ClientError::new_err(format!("{err}")),
-                CLIENT_SIDE_RESULT_CODE,
-            )
-        }
+    let class = ErrorClass::of(&err);
+    if class == ErrorClass::Unknown {
+        // Only a kind this mapping has never heard of is worth a report. A
+        // node going down, a bad argument or a malformed response are things
+        // that happen to a correct client.
+        crate::bug_report::log_unexpected_error(
+            "errors::as_to_pyerr",
+            &format!("Unmapped aerospike_core::Error kind: {err}"),
+        );
     }
+    build_pyerr(class, &describe(&err), err.node(), err.in_doubt())
 }
 
 /// Build the `RecordNotFound` error raised when a delete targeted a record
@@ -450,9 +599,11 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
 /// `AEROSPIKE_ERR_RECORD_NOT_FOUND`), not the [`CLIENT_SIDE_RESULT_CODE`]
 /// sentinel (ADR-0027).
 pub(crate) fn record_not_found_for_delete() -> PyErr {
-    attach_result_code(
-        RecordNotFound::new_err("AEROSPIKE_ERR (2): Record not found"),
-        result_code_to_int(&ResultCode::KeyNotFoundError),
+    build_pyerr(
+        ErrorClass::Server(ResultCode::KeyNotFoundError),
+        "Record not found",
+        None,
+        false,
     )
 }
 
@@ -461,14 +612,31 @@ pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     // Base exceptions
     m.add("AerospikeError", py.get_type::<AerospikeError>())?;
-    // Expose a class-level default `result_code` on the base exception so every
+    // Expose class-level defaults on the base exception so every
     // AerospikeError subclass instance carries `.result_code: int` (ADR-0027),
-    // even those constructed outside `as_to_pyerr` (e.g. BackpressureError,
-    // RustPanicError, InvalidArgError from policy/query validation). Server
-    // errors override this per-instance with the real wire code; purely
-    // client-side errors keep this CLIENT_SIDE_RESULT_CODE sentinel.
-    py.get_type::<AerospikeError>()
-        .setattr("result_code", CLIENT_SIDE_RESULT_CODE)?;
+    // `.in_doubt: bool` and `.error_type: str`, even those constructed outside
+    // `as_to_pyerr` (e.g. BackpressureError, RustPanicError, InvalidArgError
+    // from policy/query validation). `as_to_pyerr` overrides all three
+    // per-instance; exceptions raised elsewhere keep these defaults, refined
+    // per class below where the class alone says what the failure was.
+    let base = py.get_type::<AerospikeError>();
+    base.setattr("result_code", CLIENT_SIDE_RESULT_CODE)?;
+    base.setattr("in_doubt", false)?;
+    base.setattr("error_type", "Client")?;
+    // Only a batch call that failed as a whole sets this, to the rows it did
+    // collect (a `BatchRecords`). `None` everywhere else, so a handler can
+    // read the attribute without first checking which call raised.
+    base.setattr("partial_result", py.None())?;
+    py.get_type::<InvalidArgError>()
+        .setattr("error_type", "InvalidArgument")?;
+    py.get_type::<AerospikeTimeoutError>()
+        .setattr("error_type", "Timeout")?;
+    py.get_type::<ClusterError>()
+        .setattr("error_type", "Connection")?;
+    py.get_type::<BackpressureError>()
+        .setattr("error_type", "Backpressure")?;
+    py.get_type::<RustPanicError>()
+        .setattr("error_type", "RustPanic")?;
     m.add("ClientError", py.get_type::<ClientError>())?;
     m.add("ServerError", py.get_type::<ServerError>())?;
     m.add("RecordError", py.get_type::<RecordError>())?;
@@ -512,356 +680,314 @@ pub fn register_exceptions(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_result_code_to_int_ok() {
-        assert_eq!(result_code_to_int(&ResultCode::Ok), 0);
+    fn attr<T: for<'a, 'py> FromPyObject<'a, 'py>>(py: Python<'_>, err: &PyErr, name: &str) -> T
+    where
+        for<'a, 'py> <T as FromPyObject<'a, 'py>>::Error: std::fmt::Debug,
+    {
+        err.value(py).getattr(name).unwrap().extract().unwrap()
     }
 
-    #[test]
-    fn test_result_code_to_int_key_not_found() {
-        assert_eq!(result_code_to_int(&ResultCode::KeyNotFoundError), 2);
-    }
+    // ── wire codes ──────────────────────────────────────────────
 
     #[test]
-    fn test_result_code_to_int_key_exists() {
-        assert_eq!(result_code_to_int(&ResultCode::KeyExistsError), 5);
-    }
-
-    #[test]
-    fn test_result_code_to_int_timeout() {
-        assert_eq!(result_code_to_int(&ResultCode::Timeout), 9);
-    }
-
-    #[test]
-    fn test_result_code_to_int_index_found() {
-        assert_eq!(result_code_to_int(&ResultCode::IndexFound), 200);
-    }
-
-    #[test]
-    fn test_result_code_to_int_index_not_found() {
-        assert_eq!(result_code_to_int(&ResultCode::IndexNotFound), 201);
-    }
-
-    #[test]
-    fn test_result_code_to_int_query_aborted() {
-        assert_eq!(result_code_to_int(&ResultCode::QueryAborted), 210);
-    }
-
-    #[test]
-    fn test_result_code_to_int_unknown() {
-        assert_eq!(result_code_to_int(&ResultCode::Unknown(250)), 250);
-    }
-
-    #[test]
-    fn test_result_code_to_int_query_timeout() {
-        // QueryTimeout previously fell through to the catch-all `-1`.
-        assert_eq!(result_code_to_int(&ResultCode::QueryTimeout), 212);
-    }
-
-    #[test]
-    fn test_result_code_to_int_previously_unmapped_codes() {
-        // These variants previously collapsed to the meaningless `-1` catch-all,
-        // so BatchRecord.result and error messages lost the real wire code.
-        // Each must now carry its proto.h wire value.
-        assert_eq!(
-            result_code_to_int(&ResultCode::BatchMaxRequestsExceeded),
-            151
-        );
-        assert_eq!(result_code_to_int(&ResultCode::BatchQueuesFull), 152);
-        assert_eq!(result_code_to_int(&ResultCode::IndexOom), 202);
-        assert_eq!(result_code_to_int(&ResultCode::IndexNotReadable), 203);
-        assert_eq!(result_code_to_int(&ResultCode::IndexGeneric), 204);
-        assert_eq!(result_code_to_int(&ResultCode::IndexNameMaxLen), 205);
-        assert_eq!(result_code_to_int(&ResultCode::IndexMaxCount), 206);
-        assert_eq!(result_code_to_int(&ResultCode::QueryQueueFull), 211);
-        assert_eq!(result_code_to_int(&ResultCode::QueryGeneric), 213);
-        assert_eq!(result_code_to_int(&ResultCode::QueryNetioErr), 214);
-        assert_eq!(result_code_to_int(&ResultCode::QueryDuplicate), 215);
-        assert_eq!(result_code_to_int(&ResultCode::ExpiredSession), 66);
-        assert_eq!(result_code_to_int(&ResultCode::InvalidPassword), 62);
-        assert_eq!(result_code_to_int(&ResultCode::QuotaExceeded), 83);
-        assert_eq!(result_code_to_int(&ResultCode::UserAlreadyExists), 61);
-        assert_eq!(result_code_to_int(&ResultCode::IllegalState), 56);
-    }
-
-    #[test]
-    fn test_result_code_to_int_no_longer_returns_minus_one() {
-        // The `-1` catch-all is gone. Every named variant must map to its real
-        // non-negative wire code; only an `Unknown` byte can still be passed
-        // through verbatim. Spot-check a representative variant from each range.
-        for rc in [
-            ResultCode::Ok,
-            ResultCode::ServerError,
-            ResultCode::Timeout,
-            ResultCode::ElementExists,
-            ResultCode::XDRKeyBusy,
-            ResultCode::QueryEnd,
-            ResultCode::IllegalState,
-            ResultCode::ExpiredSession,
-            ResultCode::QuotaExceeded,
-            ResultCode::UdfBadResponse,
-            ResultCode::BatchQueuesFull,
-            ResultCode::InvalidGeojson,
-            ResultCode::IndexMaxCount,
-            ResultCode::QueryDuplicate,
+    fn result_code_to_int_reports_the_wire_value() {
+        for (rc, wire) in [
+            (ResultCode::Ok, 0),
+            (ResultCode::KeyNotFoundError, 2),
+            (ResultCode::GenerationError, 3),
+            (ResultCode::KeyExistsError, 5),
+            (ResultCode::Timeout, 9),
+            (ResultCode::RecordTooBig, 13),
+            (ResultCode::DeviceOverload, 18),
+            (ResultCode::FilteredOut, 27),
+            (ResultCode::XdrKeyBusy, 32),
+            (ResultCode::NotAuthenticated, 80),
+            (ResultCode::UdfBadResponse, 100),
+            (ResultCode::BatchQueuesFull, 152),
+            (ResultCode::IndexFound, 200),
+            (ResultCode::IndexNotFound, 201),
+            (ResultCode::QueryAborted, 210),
+            (ResultCode::QueryTimeout, 212),
         ] {
-            assert!(
-                result_code_to_int(&rc) >= 0,
-                "result_code_to_int must not return -1 for {rc:?}"
-            );
+            assert_eq!(result_code_to_int(&rc), wire, "{rc:?}");
         }
     }
 
+    /// A code this client has no name for must keep its wire value, never
+    /// collapse to the client-side sentinel.
     #[test]
-    fn test_security_result_codes_map_to_admin_error() {
-        // Password/session/role/quota security codes must surface as AdminError
-        // so callers catching auth failures do not silently miss them.
+    fn unknown_result_code_keeps_its_wire_value() {
+        assert_eq!(result_code_to_int(&ResultCode::Unknown(123)), 123);
+        assert_eq!(result_code_to_int(&ResultCode::from(250u8)), 250);
+    }
+
+    // ── classification of constructible errors ──────────────────
+
+    #[test]
+    fn invalid_argument_is_not_a_client_bug() {
+        let err = AsError::invalid_argument("bad bin name");
+        assert_eq!(ErrorClass::of(&err), ErrorClass::InvalidArgument);
+    }
+
+    /// Issue #445: an I/O error — what a node going down looks like — used to
+    /// fall through to the "this may be a bug in aerospike-py" branch.
+    #[test]
+    fn io_error_is_a_connection_failure() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset by peer");
+        let err: AsError = io.into();
+        assert_eq!(ErrorClass::of(&err), ErrorClass::Connection);
+        assert_eq!(ErrorClass::of(&err).label(), "Connection");
+    }
+
+    #[test]
+    fn plain_client_error_is_client() {
+        let err = AsError::client_error("something client-side");
+        assert_eq!(ErrorClass::of(&err), ErrorClass::Client);
+    }
+
+    /// `chain_error` puts a context message in front of the real failure.
+    #[test]
+    fn context_wrapper_is_classified_by_its_cause() {
+        let io = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "broken pipe");
+        let err = AsError::from(io).chain_error("while sending the batch");
+        assert_eq!(ErrorClass::of(&err), ErrorClass::Connection);
+
+        let err = AsError::invalid_argument("bad key").chain_error("while building the command");
+        assert_eq!(ErrorClass::of(&err), ErrorClass::InvalidArgument);
+
+        let err = AsError::client_error("inner").chain_error("outer");
+        assert_eq!(ErrorClass::of(&err), ErrorClass::Client);
+    }
+
+    #[test]
+    fn describe_keeps_the_cause_chain_and_drops_core_prefixes() {
+        let err = AsError::invalid_argument("bad bin name");
+        assert_eq!(describe(&err), "bad bin name");
+
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset by peer");
+        let text = describe(&AsError::from(io).chain_error("while sending the batch"));
+        assert!(text.starts_with("while sending the batch"), "{text}");
+        assert!(text.contains("caused by:"), "{text}");
+        assert!(text.contains("reset by peer"), "{text}");
+        // The Java-numbered code of `Display` must not leak into the text.
+        assert!(!text.contains("Error -"), "{text}");
+    }
+
+    // ── labels ──────────────────────────────────────────────────
+
+    #[test]
+    fn labels_tell_the_timeout_flavours_apart() {
+        assert_eq!(ErrorClass::ClientTimeout.label(), "Timeout");
+        assert_eq!(ErrorClass::RetriesExhausted.label(), "MaxRetriesExceeded");
+        assert_eq!(
+            ErrorClass::Server(ResultCode::Timeout).label(),
+            "ServerTimeout"
+        );
+        assert_eq!(ErrorClass::Connection.label(), "Connection");
+    }
+
+    #[test]
+    fn server_labels_are_the_result_code_names() {
+        assert_eq!(
+            ErrorClass::Server(ResultCode::KeyNotFoundError).label(),
+            "KeyNotFoundError"
+        );
+        assert_eq!(
+            ErrorClass::Server(ResultCode::DeviceOverload).label(),
+            "DeviceOverload"
+        );
+        assert!(matches!(
+            ErrorClass::Server(ResultCode::KeyExistsError).label(),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn a_client_side_failure_is_never_a_missing_record() {
+        // `exists()` and the metrics treat "record not found" as an answer.
+        // Only the server can give that answer.
+        assert!(!is_key_not_found(&AsError::client_error("not found")));
+        assert!(!is_key_not_found(&AsError::invalid_argument("bad key")));
+    }
+
+    // ── Python exceptions ───────────────────────────────────────
+
+    #[test]
+    fn server_errors_map_to_their_exception_and_wire_code() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = build_pyerr(
+                ErrorClass::Server(ResultCode::KeyNotFoundError),
+                "Key not found",
+                None,
+                false,
+            );
+            assert!(err.is_instance_of::<RecordNotFound>(py));
+            assert_eq!(attr::<i32>(py, &err, "result_code"), 2);
+            assert_eq!(attr::<String>(py, &err, "error_type"), "KeyNotFoundError");
+            assert!(!attr::<bool>(py, &err, "in_doubt"));
+            assert!(err.to_string().contains("AEROSPIKE_ERR (2)"));
+
+            let err = build_pyerr(
+                ErrorClass::Server(ResultCode::GenerationError),
+                "Generation error",
+                None,
+                false,
+            );
+            assert!(err.is_instance_of::<RecordGenerationError>(py));
+            assert_eq!(attr::<i32>(py, &err, "result_code"), 3);
+        });
+    }
+
+    #[test]
+    fn security_result_codes_map_to_admin_error() {
         Python::initialize();
         Python::attach(|py| {
             for rc in [
+                ResultCode::InvalidUser,
+                ResultCode::NotAuthenticated,
+                ResultCode::RoleViolation,
                 ResultCode::InvalidPassword,
                 ResultCode::ExpiredSession,
-                ResultCode::InvalidCredential,
-                ResultCode::UserAlreadyExists,
-                ResultCode::InvalidRole,
                 ResultCode::QuotaExceeded,
                 ResultCode::NotAllowlisted,
             ] {
-                let err = as_to_pyerr(AsError::ServerError(rc, false, String::new()));
-                assert!(
-                    err.is_instance_of::<AdminError>(py),
-                    "security result code {rc:?} must map to AdminError"
-                );
-            }
-        });
-    }
-
-    #[test]
-    fn test_server_timeout_maps_to_timeout_error() {
-        // A server-side Timeout result code must surface as AerospikeTimeoutError,
-        // not the generic ServerError it previously fell through to.
-        Python::initialize();
-        Python::attach(|py| {
-            let err = as_to_pyerr(AsError::ServerError(
-                ResultCode::Timeout,
-                false,
-                String::new(),
-            ));
-            assert!(
-                err.is_instance_of::<AerospikeTimeoutError>(py),
-                "server Timeout result code must map to AerospikeTimeoutError"
-            );
-        });
-    }
-
-    #[test]
-    fn test_query_timeout_maps_to_timeout_error() {
-        Python::initialize();
-        Python::attach(|py| {
-            let err = as_to_pyerr(AsError::ServerError(
-                ResultCode::QueryTimeout,
-                false,
-                String::new(),
-            ));
-            assert!(
-                err.is_instance_of::<AerospikeTimeoutError>(py),
-                "QueryTimeout result code must map to AerospikeTimeoutError"
-            );
-        });
-    }
-
-    #[test]
-    fn test_batch_error_maps_by_result_code() {
-        // BatchError / BatchLastError carry a real server ResultCode and must
-        // map to the same precise exception type as ServerError, instead of
-        // collapsing to a generic ClientError.
-        Python::initialize();
-        Python::attach(|py| {
-            let not_found = as_to_pyerr(AsError::BatchError(
-                3,
-                ResultCode::KeyNotFoundError,
-                false,
-                "node".into(),
-            ));
-            assert!(
-                not_found.is_instance_of::<RecordNotFound>(py),
-                "batch KeyNotFoundError must map to RecordNotFound"
-            );
-
-            let timeout = as_to_pyerr(AsError::BatchLastError(
-                0,
-                ResultCode::Timeout,
-                true,
-                "node".into(),
-            ));
-            assert!(
-                timeout.is_instance_of::<AerospikeTimeoutError>(py),
-                "batch Timeout must map to AerospikeTimeoutError"
-            );
-
-            let big = as_to_pyerr(AsError::BatchError(
-                7,
-                ResultCode::RecordTooBig,
-                false,
-                "node".into(),
-            ));
-            assert!(
-                big.is_instance_of::<RecordTooBig>(py),
-                "batch RecordTooBig must map to RecordTooBig"
-            );
-        });
-    }
-
-    #[test]
-    fn test_batch_error_message_includes_index_and_in_doubt() {
-        // The rendered message must surface the batch index and the in_doubt
-        // flag so callers can retry/diagnose the failed sub-request.
-        Python::initialize();
-        Python::attach(|py| {
-            let err = as_to_pyerr(AsError::BatchLastError(
-                5,
-                ResultCode::ServerError,
-                true,
-                "node".into(),
-            ));
-            let text = err.value(py).to_string();
-            assert!(
-                text.contains("batch_index=5"),
-                "batch error message must include the batch index: {text}"
-            );
-            assert!(
-                text.contains("in_doubt"),
-                "in_doubt batch error message must be flagged: {text}"
-            );
-        });
-    }
-
-    /// Read the structured `.result_code` attribute off a mapped exception.
-    fn result_code_of(py: Python<'_>, err: &PyErr) -> i32 {
-        err.value(py)
-            .getattr("result_code")
-            .expect("mapped exception must expose a result_code attribute")
-            .extract::<i32>()
-            .expect("result_code must be an int")
-    }
-
-    #[test]
-    fn test_server_error_carries_result_code() {
-        // Representative server errors must carry their real wire code on the
-        // exception instance so callers classify by code, not message string
-        // (ADR-0027).
-        Python::initialize();
-        Python::attach(|py| {
-            let cases = [
-                (ResultCode::KeyNotFoundError, 2), // record-not-found
-                (ResultCode::KeyExistsError, 5),   // key-exists
-                (ResultCode::FailForbidden, 22),   // forbidden
-                (ResultCode::RecordTooBig, 13),
-                (ResultCode::Timeout, 9), // server-side timeout
-            ];
-            for (rc, expected) in cases {
-                let err = as_to_pyerr(AsError::ServerError(rc, false, String::new()));
+                let err = build_pyerr(ErrorClass::Server(rc), "denied", None, false);
+                assert!(err.is_instance_of::<AdminError>(py), "{rc:?}");
                 assert_eq!(
-                    result_code_of(py, &err),
-                    expected,
-                    "ServerError({rc:?}) must expose result_code {expected}"
+                    attr::<i32>(py, &err, "result_code"),
+                    result_code_to_int(&rc)
                 );
             }
         });
     }
 
+    /// Server and client timeouts are the same exception type, and are told
+    /// apart by `result_code` (9 versus -1) and `error_type`.
     #[test]
-    fn test_batch_error_carries_result_code() {
-        // Batch failures must expose the same structured code as their
-        // single-record equivalents.
+    fn timeouts_share_a_type_and_differ_in_code_and_label() {
         Python::initialize();
         Python::attach(|py| {
-            let err = as_to_pyerr(AsError::BatchError(
-                3,
-                ResultCode::KeyNotFoundError,
+            let server = build_pyerr(
+                ErrorClass::Server(ResultCode::Timeout),
+                "Timeout",
+                None,
                 false,
-                "node".into(),
-            ));
-            assert_eq!(result_code_of(py, &err), 2);
-
-            let err = as_to_pyerr(AsError::BatchLastError(
-                0,
-                ResultCode::Timeout,
-                true,
-                "node".into(),
-            ));
-            assert_eq!(result_code_of(py, &err), 9);
-        });
-    }
-
-    #[test]
-    fn test_client_side_errors_carry_sentinel_result_code() {
-        // Client-side failures never received a server response, so they carry
-        // the CLIENT_SIDE_RESULT_CODE sentinel (-1) rather than a real wire code.
-        Python::initialize();
-        Python::attach(|py| {
-            let cases = [
-                as_to_pyerr(AsError::Timeout("client".into())), // client timeout
-                as_to_pyerr(AsError::Connection("refused".into())),
-                as_to_pyerr(AsError::InvalidArgument("bad".into())),
-                as_to_pyerr(AsError::InvalidNode("gone".into())),
-                as_to_pyerr(AsError::NoMoreConnections),
-                as_to_pyerr(AsError::MaxErrorRate("127.0.0.1:3000".into())),
-            ];
-            for err in &cases {
-                assert_eq!(
-                    result_code_of(py, err),
-                    CLIENT_SIDE_RESULT_CODE,
-                    "client-side error must expose the -1 sentinel result_code"
-                );
-            }
-        });
-    }
-
-    #[test]
-    fn test_max_error_rate_maps_to_cluster_error() {
-        // The per-node circuit breaker added in aerospike-core 2.1 must land on
-        // ClusterError, not on the catch-all that tells users to file a bug.
-        Python::initialize();
-        Python::attach(|py| {
-            let err = as_to_pyerr(AsError::MaxErrorRate("127.0.0.1:3000".into()));
-            assert!(
-                err.is_instance_of::<ClusterError>(py),
-                "MaxErrorRate must raise ClusterError, got {err}"
             );
-            assert!(err.to_string().contains("127.0.0.1:3000"));
+            assert!(server.is_instance_of::<AerospikeTimeoutError>(py));
+            assert_eq!(attr::<i32>(py, &server, "result_code"), 9);
+            assert_eq!(attr::<String>(py, &server, "error_type"), "ServerTimeout");
+
+            let query = build_pyerr(
+                ErrorClass::Server(ResultCode::QueryTimeout),
+                "Query timeout",
+                None,
+                false,
+            );
+            assert!(query.is_instance_of::<AerospikeTimeoutError>(py));
+            assert_eq!(attr::<i32>(py, &query, "result_code"), 212);
+
+            let client = build_pyerr(ErrorClass::ClientTimeout, "deadline elapsed", None, true);
+            assert!(client.is_instance_of::<AerospikeTimeoutError>(py));
+            assert_eq!(
+                attr::<i32>(py, &client, "result_code"),
+                CLIENT_SIDE_RESULT_CODE
+            );
+            assert_eq!(attr::<String>(py, &client, "error_type"), "Timeout");
+            assert!(attr::<bool>(py, &client, "in_doubt"));
+            assert!(client.to_string().ends_with("[in_doubt]"));
+
+            let exhausted = build_pyerr(ErrorClass::RetriesExhausted, "after 3 tries", None, false);
+            assert!(exhausted.is_instance_of::<AerospikeTimeoutError>(py));
+            assert_eq!(
+                attr::<i32>(py, &exhausted, "result_code"),
+                CLIENT_SIDE_RESULT_CODE
+            );
+            assert_eq!(
+                attr::<String>(py, &exhausted, "error_type"),
+                "MaxRetriesExceeded"
+            );
         });
     }
 
     #[test]
-    fn test_unknown_result_code_passed_through() {
-        // An Unknown server byte with no dedicated subclass still carries its
-        // raw wire value on the exception instance.
+    fn node_and_connection_failures_are_cluster_errors() {
         Python::initialize();
         Python::attach(|py| {
-            let err = as_to_pyerr(AsError::ServerError(
-                ResultCode::Unknown(240),
+            for class in [
+                ErrorClass::Connection,
+                ErrorClass::NoMoreConnections,
+                ErrorClass::MaxErrorRate,
+                ErrorClass::InvalidNode,
+            ] {
+                let err = build_pyerr(class, "detail", Some("BB9: 10.0.0.1:3000"), false);
+                assert!(err.is_instance_of::<ClusterError>(py), "{class:?}");
+                assert_eq!(
+                    attr::<i32>(py, &err, "result_code"),
+                    CLIENT_SIDE_RESULT_CODE
+                );
+                assert_eq!(attr::<String>(py, &err, "error_type"), class.label());
+            }
+            let breaker = build_pyerr(
+                ErrorClass::MaxErrorRate,
+                "x",
+                Some("BB9: 10.0.0.1:3000"),
                 false,
-                String::new(),
-            ));
-            assert_eq!(result_code_of(py, &err), 240);
+            );
+            assert!(breaker.to_string().contains("BB9: 10.0.0.1:3000"));
         });
     }
 
     #[test]
-    fn test_delete_not_found_carries_record_not_found_code() {
-        // `delete()` of a missing record is reported by the server as
-        // KEY_NOT_FOUND_ERROR (2), but aerospike-core collapses that response
-        // into `Ok(false)`, so `do_remove` builds the exception itself. It must
-        // carry the real wire code 2 — the message already says
-        // "AEROSPIKE_ERR (2)" and the documented ADR-0027 classification
-        // pattern is `exc.result_code == AEROSPIKE_ERR_RECORD_NOT_FOUND` — not
-        // the -1 client-side sentinel.
+    fn remaining_classes_keep_the_existing_hierarchy() {
+        Python::initialize();
+        Python::attach(|py| {
+            let invalid = build_pyerr(ErrorClass::InvalidArgument, "bad", None, false);
+            assert!(invalid.is_instance_of::<InvalidArgError>(py));
+            assert_eq!(
+                invalid.to_string(),
+                "InvalidArgError: Invalid argument: bad"
+            );
+
+            let udf = build_pyerr(ErrorClass::Udf, "boom", None, false);
+            assert!(udf.is_instance_of::<UDFError>(py));
+
+            for class in [
+                ErrorClass::StreamTerminated,
+                ErrorClass::BadResponse,
+                ErrorClass::Client,
+                ErrorClass::Unknown,
+            ] {
+                let err = build_pyerr(class, "detail", None, false);
+                assert!(err.is_instance_of::<ClientError>(py), "{class:?}");
+                assert!(!err.is_instance_of::<ClusterError>(py), "{class:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn io_error_converts_to_a_cluster_error() {
+        Python::initialize();
+        Python::attach(|py| {
+            let io = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset by peer");
+            let err = as_to_pyerr(io.into());
+            assert!(err.is_instance_of::<ClusterError>(py));
+            assert_eq!(attr::<String>(py, &err, "error_type"), "Connection");
+            assert!(err.to_string().contains("reset by peer"));
+        });
+    }
+
+    #[test]
+    fn delete_not_found_carries_record_not_found_code() {
         Python::initialize();
         Python::attach(|py| {
             let err = record_not_found_for_delete();
             assert!(err.is_instance_of::<RecordNotFound>(py));
-            assert_eq!(result_code_of(py, &err), 2);
+            assert_eq!(attr::<i32>(py, &err, "result_code"), 2);
+            assert_eq!(
+                err.to_string(),
+                "RecordNotFound: AEROSPIKE_ERR (2): Record not found"
+            );
         });
     }
 }

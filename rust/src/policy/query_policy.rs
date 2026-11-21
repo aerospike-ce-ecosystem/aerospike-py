@@ -7,8 +7,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use super::{
-    extract_filter_expression, extract_policy_fields, parse_consistency_level,
-    parse_partition_filter, parse_query_duration, parse_read_touch_ttl, parse_replica,
+    extract_filter_expression, extract_policy_fields, parse_partition_filter, parse_query_duration,
+    parse_read_mode_ap, parse_read_touch_ttl, parse_replica,
 };
 
 /// Parse a Python policy dict into a `(QueryPolicy, PartitionFilter)` pair.
@@ -42,10 +42,10 @@ pub fn parse_query_policy(
     });
 
     if let Some(val) = dict.get_item("replica")? {
-        policy.replica = parse_replica(val.extract::<i32>()?)?;
+        policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_mode_ap")? {
-        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?)?;
+        policy.base_policy.read_mode_ap = parse_read_mode_ap(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
         policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
@@ -66,7 +66,7 @@ mod tests {
     use super::*;
     use crate::types::partition_filter::partition_filter_by_range;
     use aerospike_core::policy::{QueryDuration, Replica};
-    use aerospike_core::{ConsistencyLevel, ReadTouchTTL};
+    use aerospike_core::{ReadModeAp, ReadTouchTtl};
 
     fn build_dict<'py>(
         py: Python<'py>,
@@ -93,7 +93,7 @@ mod tests {
                 d.set_item("replica", 2i32).unwrap();
             });
             let (p, _) = parse_query_policy(Some(&d)).unwrap();
-            assert_eq!(p.replica, Replica::PreferRack);
+            assert_eq!(p.base_policy.replica, Replica::PreferRack);
         });
     }
 
@@ -130,13 +130,10 @@ mod tests {
                 d.set_item("read_touch_ttl_percent", 75i64).unwrap();
             });
             let (p, _) = parse_query_policy(Some(&d)).unwrap();
-            assert_eq!(
-                p.base_policy.consistency_level,
-                ConsistencyLevel::ConsistencyAll
-            );
+            assert_eq!(p.base_policy.read_mode_ap, ReadModeAp::All);
             assert!(matches!(
                 p.base_policy.read_touch_ttl,
-                ReadTouchTTL::Percent(75)
+                ReadTouchTtl::Percent(75)
             ));
         });
     }

@@ -23,7 +23,6 @@ use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use crate::errors::result_code_to_int;
 use crate::record_helpers::record_ttl_seconds;
 use crate::types::key::compute_bytes_key_digest;
 use crate::types::value::value_to_py;
@@ -902,7 +901,7 @@ pub fn batch_to_numpy_py(
     // 5. Fill data / meta / result_codes buffers WITHOUT the GIL.
     //
     // Every operation inside the loop is either pure Rust
-    // (`result_code_to_int`, `record_ttl_seconds`, `Value` matching) or a
+    // (`RowOutcome`, `record_ttl_seconds`, `Value` matching) or a
     // raw memory write (`ptr::write_unaligned`). Nothing touches the
     // Python interpreter, so another thread (e.g. a sibling FastAPI worker
     // running torch inference) can hold the GIL while this thread fills
@@ -935,9 +934,12 @@ pub fn batch_to_numpy_py(
         let rc_ptr = unsafe { rc_addr.as_ptr() };
 
         for (i, br) in results.iter().enumerate() {
-            let result_code = match &br.result_code {
-                Some(rc) => result_code_to_int(rc),
-                None => 0,
+            // The same judgement every other batch view uses: a row is OK
+            // only when a server said so.
+            let result_code = if crate::batch_types::row_ok(br) {
+                0
+            } else {
+                crate::batch_types::RowOutcome::of(br).result_code()
             };
 
             // SAFETY: rc_ptr points to an i32 array of length n; i < n.
@@ -1001,7 +1003,7 @@ pub fn batch_to_numpy_py(
     //    same user key was requested more than once, the last row wins.
     let key_map = PyDict::new(py);
     for (i, br) in results.iter().enumerate() {
-        if let Some(v) = &br.key.user_key {
+        if let Some(v) = &br.key.user_key() {
             key_map.set_item(value_to_py(py, v)?, i)?;
         }
     }
@@ -1352,12 +1354,7 @@ pub fn numpy_to_records(
         let key = match &key_value {
             Value::Blob(bytes_data) => {
                 let digest = compute_bytes_key_digest(&set, bytes_data);
-                Key {
-                    namespace: ns,
-                    set_name: set,
-                    user_key: Some(key_value),
-                    digest,
-                }
+                Key::with_digest(ns, set, Some(key_value), digest)
             }
             _ => Key::new(ns, set, key_value)
                 .map_err(|e| PyValueError::new_err(format!("Invalid key at row {}: {}", i, e)))?,
@@ -2251,12 +2248,12 @@ def make_reverse_slice():
             let records = numpy_to_records(py, &sliced, Some(&dtype), "test", "demo", "_key")
                 .expect("positive-stride slice should convert");
             assert_eq!(records.len(), 2);
-            assert_eq!(records[0].0.user_key, Some(Value::Int(1)));
+            assert_eq!(records[0].0.user_key(), Some(&Value::Int(1)));
             assert_eq!(
                 records[0].1,
                 vec![Bin::new("value".to_string(), Value::Int(10))]
             );
-            assert_eq!(records[1].0.user_key, Some(Value::Int(3)));
+            assert_eq!(records[1].0.user_key(), Some(&Value::Int(3)));
             assert_eq!(
                 records[1].1,
                 vec![Bin::new("value".to_string(), Value::Int(30))]
@@ -2283,17 +2280,17 @@ def make_reverse_slice():
             let records = numpy_to_records(py, &reversed, Some(&dtype), "test", "demo", "_key")
                 .expect("negative-stride slice should convert");
             assert_eq!(records.len(), 3);
-            assert_eq!(records[0].0.user_key, Some(Value::Int(3)));
+            assert_eq!(records[0].0.user_key(), Some(&Value::Int(3)));
             assert_eq!(
                 records[0].1,
                 vec![Bin::new("value".to_string(), Value::Int(30))]
             );
-            assert_eq!(records[1].0.user_key, Some(Value::Int(2)));
+            assert_eq!(records[1].0.user_key(), Some(&Value::Int(2)));
             assert_eq!(
                 records[1].1,
                 vec![Bin::new("value".to_string(), Value::Int(20))]
             );
-            assert_eq!(records[2].0.user_key, Some(Value::Int(1)));
+            assert_eq!(records[2].0.user_key(), Some(&Value::Int(1)));
             assert_eq!(
                 records[2].1,
                 vec![Bin::new("value".to_string(), Value::Int(10))]
@@ -2674,7 +2671,7 @@ def make_reverse_slice():
             let records = numpy_to_records(py, &array, None, "test", "demo", "_key")
                 .expect("the dtype argument is optional");
             assert_eq!(records.len(), 2);
-            assert_eq!(records[0].0.user_key, Some(Value::Int(1)));
+            assert_eq!(records[0].0.user_key(), Some(&Value::Int(1)));
         });
     }
 

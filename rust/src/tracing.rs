@@ -269,12 +269,17 @@ pub(crate) mod otel_impl {
         span: &opentelemetry::trace::SpanRef<'_>,
         err: &aerospike_core::Error,
     ) {
-        let error_type = crate::metrics::error_type_from_aerospike_error(err);
-        span.set_attribute(KeyValue::new("error.type", error_type.into_owned()));
-        span.set_status(Status::error(format!("{err}")));
+        // One classification for the span, the metric label and the Python
+        // exception: see `errors::ErrorClass`.
+        let class = crate::errors::ErrorClass::of(err);
+        span.set_attribute(KeyValue::new("error.type", class.label().into_owned()));
+        span.set_status(Status::error(crate::errors::describe(err)));
 
-        if let aerospike_core::Error::ServerError(rc, _, _) = err {
+        if let crate::errors::ErrorClass::Server(rc) = class {
             span.set_attribute(KeyValue::new("db.response.status_code", format!("{rc:?}")));
+        }
+        if err.in_doubt() {
+            span.set_attribute(KeyValue::new("aerospike.in_doubt", true));
         }
     }
 }
@@ -447,11 +452,7 @@ macro_rules! traced_exists_op {
                 let result = $body;
                 match &result {
                     Ok(_) => timer.finish(""),
-                    Err(aerospike_core::Error::ServerError(
-                        aerospike_core::ResultCode::KeyNotFoundError,
-                        _,
-                        _,
-                    )) => timer.finish(""),
+                    Err(e) if $crate::errors::is_key_not_found(e) => timer.finish(""),
                     Err(e) => {
                         let err_type = $crate::metrics::error_type_from_aerospike_error(e);
                         timer.finish(&err_type);
@@ -466,11 +467,7 @@ macro_rules! traced_exists_op {
                 let span_ref = opentelemetry::trace::TraceContextExt::span(&_cx);
                 match &result {
                     Ok(_) => {}
-                    Err(aerospike_core::Error::ServerError(
-                        aerospike_core::ResultCode::KeyNotFoundError,
-                        _,
-                        _,
-                    )) => {}
+                    Err(e) if $crate::errors::is_key_not_found(e) => {}
                     Err(e) => {
                         $crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
                     }
@@ -489,11 +486,7 @@ macro_rules! traced_exists_op {
                 let result = $body;
                 match &result {
                     Ok(_) => timer.finish(""),
-                    Err(aerospike_core::Error::ServerError(
-                        aerospike_core::ResultCode::KeyNotFoundError,
-                        _,
-                        _,
-                    )) => timer.finish(""),
+                    Err(e) if $crate::errors::is_key_not_found(e) => timer.finish(""),
                     Err(e) => {
                         let err_type = $crate::metrics::error_type_from_aerospike_error(e);
                         timer.finish(&err_type);
@@ -520,11 +513,7 @@ macro_rules! traced_exists_op {
             let result = $body;
             match &result {
                 Ok(_) => timer.finish(""),
-                Err(aerospike_core::Error::ServerError(
-                    aerospike_core::ResultCode::KeyNotFoundError,
-                    _,
-                    _,
-                )) => timer.finish(""),
+                Err(e) if $crate::errors::is_key_not_found(e) => timer.finish(""),
                 Err(e) => {
                     let err_type = $crate::metrics::error_type_from_aerospike_error(e);
                     timer.finish(&err_type);

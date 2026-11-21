@@ -21,6 +21,7 @@ mod logging;
 pub mod metrics;
 #[deny(unsafe_op_in_unsafe_fn)]
 mod numpy_support;
+mod operate_result;
 mod operations;
 pub mod panic_safety;
 mod policy;

@@ -6,12 +6,14 @@
 
 use aerospike_core::{
     operations,
-    operations::bitwise::{self as bit_ops, BitPolicy, BitwiseOverflowActions, BitwiseResizeFlags},
-    operations::hll::{self as hll_ops, HLLPolicy},
-    operations::lists::{
-        self as list_ops, ListOrderType, ListPolicy, ListReturnType, ListSortFlags,
+    operations::bitwise::{
+        self as bit_ops, BitPolicy, BitwiseOverflowActions, BitwiseResizeFlags, BitwiseWriteFlags,
     },
-    operations::maps::{self as map_ops, MapOrder, MapPolicy, MapReturnType, MapWriteMode},
+    operations::hll::{self as hll_ops, HllPolicy, HllWriteFlags},
+    operations::lists::{
+        self as list_ops, ListOrderType, ListPolicy, ListReturnType, ListSortFlags, ListWriteFlags,
+    },
+    operations::maps::{self as map_ops, MapOrder, MapPolicy, MapReturnType, MapWriteFlags},
     operations::Operation,
     Bin, Value,
 };
@@ -20,6 +22,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use crate::constants::*;
+use crate::operate_result::OrderedPlan;
 use crate::types::value::py_to_value;
 
 // ── Helper functions ────────────────────────────────────────────
@@ -122,14 +125,14 @@ fn get_val_end(dict: &Bound<'_, PyDict>) -> PyResult<Value> {
 /// codes loudly instead. `0`/`NONE` stays valid (no change for correct callers).
 fn int_to_list_return_type(v: i32) -> PyResult<ListReturnType> {
     match v {
-        0 => Ok(ListReturnType::None),
-        1 => Ok(ListReturnType::Index),
-        2 => Ok(ListReturnType::ReverseIndex),
-        3 => Ok(ListReturnType::Rank),
-        4 => Ok(ListReturnType::ReverseRank),
-        5 => Ok(ListReturnType::Count),
-        7 => Ok(ListReturnType::Values),
-        13 => Ok(ListReturnType::Exists),
+        0 => Ok(ListReturnType::NONE),
+        1 => Ok(ListReturnType::INDEX),
+        2 => Ok(ListReturnType::REVERSE_INDEX),
+        3 => Ok(ListReturnType::RANK),
+        4 => Ok(ListReturnType::REVERSE_RANK),
+        5 => Ok(ListReturnType::COUNT),
+        7 => Ok(ListReturnType::VALUES),
+        13 => Ok(ListReturnType::EXISTS),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "list operation 'return_type' must be one of \
              0=NONE, 1=INDEX, 2=REVERSE_INDEX, 3=RANK, 4=REVERSE_RANK, \
@@ -149,8 +152,8 @@ fn int_to_list_return_type(v: i32) -> PyResult<ListReturnType> {
 /// `LIST_SORT_DROP_DUPLICATES` = 2) are valid; reject anything else loudly.
 fn int_to_list_sort_flags(v: i32) -> PyResult<ListSortFlags> {
     match v {
-        0 => Ok(ListSortFlags::Default),
-        2 => Ok(ListSortFlags::DropDuplicates),
+        0 => Ok(ListSortFlags::DEFAULT),
+        2 => Ok(ListSortFlags::DROP_DUPLICATES),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "list_sort 'sort_flags' must be one of \
              0=LIST_SORT_DEFAULT, 2=LIST_SORT_DROP_DUPLICATES; got {other}"
@@ -166,16 +169,16 @@ fn int_to_list_sort_flags(v: i32) -> PyResult<ListSortFlags> {
 /// valid (no change for correct callers).
 fn int_to_map_return_type(v: i32) -> PyResult<MapReturnType> {
     match v {
-        0 => Ok(MapReturnType::None),
-        1 => Ok(MapReturnType::Index),
-        2 => Ok(MapReturnType::ReverseIndex),
-        3 => Ok(MapReturnType::Rank),
-        4 => Ok(MapReturnType::ReverseRank),
-        5 => Ok(MapReturnType::Count),
-        6 => Ok(MapReturnType::Key),
-        7 => Ok(MapReturnType::Value),
-        8 => Ok(MapReturnType::KeyValue),
-        13 => Ok(MapReturnType::Exists),
+        0 => Ok(MapReturnType::NONE),
+        1 => Ok(MapReturnType::INDEX),
+        2 => Ok(MapReturnType::REVERSE_INDEX),
+        3 => Ok(MapReturnType::RANK),
+        4 => Ok(MapReturnType::REVERSE_RANK),
+        5 => Ok(MapReturnType::COUNT),
+        6 => Ok(MapReturnType::KEY),
+        7 => Ok(MapReturnType::VALUE),
+        8 => Ok(MapReturnType::KEY_VALUE),
+        13 => Ok(MapReturnType::EXISTS),
         other => Err(pyo3::exceptions::PyValueError::new_err(format!(
             "map operation 'return_type' must be one of \
              0=NONE, 1=INDEX, 2=REVERSE_INDEX, 3=RANK, 4=REVERSE_RANK, \
@@ -205,10 +208,12 @@ fn parse_list_policy(dict: &Bound<'_, PyDict>) -> PyResult<ListPolicy> {
             1 => ListOrderType::Ordered,
             _ => ListOrderType::Unordered,
         };
-        Ok(ListPolicy {
-            attributes: order_type,
-            flags,
-        })
+        // `from_bits` keeps every bit the caller set, so a write flag the
+        // server knows but this client does not name is still sent.
+        Ok(ListPolicy::new(
+            order_type,
+            ListWriteFlags::from_bits(flags),
+        ))
     } else {
         Ok(ListPolicy::default())
     }
@@ -236,22 +241,25 @@ fn parse_map_policy(dict: &Bound<'_, PyDict>) -> PyResult<MapPolicy> {
             3 => MapOrder::KeyValueOrdered,
             _ => MapOrder::Unordered,
         };
-        let mode = match write_mode {
-            1 => MapWriteMode::CreateOnly,
-            2 => MapWriteMode::UpdateOnly,
-            _ => MapWriteMode::Update,
+        // Rust client 3.0 replaced the `MapWriteMode` enum with write flags.
+        // The Python `write_mode` values keep their meaning: 1 creates only,
+        // 2 updates only, anything else is a plain update.
+        let flags = match write_mode {
+            1 => MapWriteFlags::CREATE_ONLY,
+            2 => MapWriteFlags::UPDATE_ONLY,
+            _ => MapWriteFlags::DEFAULT,
         };
-        Ok(MapPolicy::new(map_order, mode))
+        Ok(MapPolicy::new(map_order, flags))
     } else {
         Ok(MapPolicy::default())
     }
 }
 
 /// Parse an optional `hll_policy` sub-dict from an operation dict.
-fn parse_hll_policy(dict: &Bound<'_, PyDict>) -> PyResult<HLLPolicy> {
+fn parse_hll_policy(dict: &Bound<'_, PyDict>) -> PyResult<HllPolicy> {
     if let Some(policy_obj) = dict.get_item("hll_policy")? {
         if policy_obj.is_none() {
-            return Ok(HLLPolicy::default());
+            return Ok(HllPolicy::default());
         }
         let policy_dict = policy_obj.cast::<PyDict>()?;
         let flags: i64 = policy_dict
@@ -259,9 +267,14 @@ fn parse_hll_policy(dict: &Bound<'_, PyDict>) -> PyResult<HLLPolicy> {
             .map(|v| v.extract())
             .transpose()?
             .unwrap_or(0);
-        Ok(HLLPolicy { flags })
+        let flags = u8::try_from(flags).map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "hll_policy 'flags' must fit in 8 bits (0-255), got {flags}"
+            ))
+        })?;
+        Ok(HllPolicy::new(HllWriteFlags::from_bits(flags)))
     } else {
-        Ok(HLLPolicy::default())
+        Ok(HllPolicy::default())
     }
 }
 
@@ -272,7 +285,7 @@ fn parse_bit_policy(dict: &Bound<'_, PyDict>) -> PyResult<BitPolicy> {
             return Ok(BitPolicy::default());
         }
         let flags: u8 = flags_obj.extract()?;
-        Ok(BitPolicy::new(flags))
+        Ok(BitPolicy::new(BitwiseWriteFlags::from_bits(flags)))
     } else {
         Ok(BitPolicy::default())
     }
@@ -356,17 +369,17 @@ fn get_resize_flags(dict: &Bound<'_, PyDict>) -> PyResult<Option<BitwiseResizeFl
         .get_item("resize_flags")?
         .map(|v| v.extract())
         .transpose()?;
-    // `BitwiseResizeFlags` is a plain enum in aerospike-core — it cannot
-    // represent OR-composed flags. An unrecognized value (e.g. the composed
-    // `GROW_ONLY | FROM_FRONT` == 3) previously collapsed to `Default`,
-    // silently dropping every requested flag — a resize meant to grow-only
-    // could then shrink and truncate data. Reject it loudly instead.
+    // This binding accepts one resize flag per call, as its constants are
+    // documented. An unrecognized value (e.g. the composed
+    // `GROW_ONLY | FROM_FRONT` == 3) once collapsed to `Default`, silently
+    // dropping every requested flag — a resize meant to grow-only could then
+    // shrink and truncate data. It is rejected loudly instead.
     flags
         .map(|f| match f {
-            0 => Ok(BitwiseResizeFlags::Default),
-            1 => Ok(BitwiseResizeFlags::FromFront),
-            2 => Ok(BitwiseResizeFlags::GrowOnly),
-            4 => Ok(BitwiseResizeFlags::ShrinkOnly),
+            0 => Ok(BitwiseResizeFlags::DEFAULT),
+            1 => Ok(BitwiseResizeFlags::FROM_FRONT),
+            2 => Ok(BitwiseResizeFlags::GROW_ONLY),
+            4 => Ok(BitwiseResizeFlags::SHRINK_ONLY),
             other => Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "bit_resize 'resize_flags' must be a single flag \
                  (0=DEFAULT, 1=FROM_FRONT, 2=GROW_ONLY, 4=SHRINK_ONLY); \
@@ -512,6 +525,23 @@ pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> 
 /// write op ("Batch write operations do not contain a write") before sending
 /// anything, so an all-read op list has to be issued as a batch read instead.
 pub fn py_ops_to_rust_checked(ops_list: &Bound<'_, PyList>) -> PyResult<(Vec<Operation>, bool)> {
+    convert_ops(ops_list, None)
+}
+
+/// Like [`py_ops_to_rust`], but also returns what `operate_ordered` needs to
+/// lay out its result: the bin each operation names and the kind of request.
+pub fn py_ops_to_rust_ordered(
+    ops_list: &Bound<'_, PyList>,
+) -> PyResult<(Vec<Operation>, OrderedPlan)> {
+    let mut plan = OrderedPlan::with_capacity(ops_list.len());
+    let (ops, _) = convert_ops(ops_list, Some(&mut plan))?;
+    Ok((ops, plan))
+}
+
+fn convert_ops(
+    ops_list: &Bound<'_, PyList>,
+    mut plan: Option<&mut OrderedPlan>,
+) -> PyResult<(Vec<Operation>, bool)> {
     trace!("Converting {} Python operations to Rust", ops_list.len());
     let mut rust_ops: Vec<Operation> = Vec::with_capacity(ops_list.len());
     let mut has_write = false;
@@ -535,6 +565,10 @@ pub fn py_ops_to_rust_checked(ops_list: &Bound<'_, PyList>) -> PyResult<(Vec<Ope
             .filter(|v| !v.is_none())
             .map(|v| py_to_value(&v))
             .transpose()?;
+
+        if let Some(plan) = plan.as_deref_mut() {
+            plan.note(op_code, bin_name.as_deref());
+        }
 
         let op = match op_code {
             // ── Basic operations ─────────────────────────────
@@ -808,9 +842,13 @@ pub fn py_ops_to_rust_checked(ops_list: &Bound<'_, PyList>) -> PyResult<(Vec<Ope
                 // value" error, even though the real bug was a missing
                 // top-level `val` key.
                 let v = require_hll_value(val, "map_put_items")?;
-                // Convert Value::HashMap to HashMap
+                // A Python dict arrives as `OrderedMap`. The other two map
+                // variants are accepted as well so the arm does not depend on
+                // which one the value conversion happens to produce.
                 match v {
+                    Value::OrderedMap(map) => map_ops::put_items(&policy, &name, map),
                     Value::HashMap(map) => map_ops::put_items(&policy, &name, map),
+                    Value::SortedMap(map) => map_ops::put_items(&policy, &name, map),
                     _ => {
                         return Err(pyo3::exceptions::PyValueError::new_err(
                             "map_put_items requires a dict value",
@@ -1089,7 +1127,12 @@ pub fn py_ops_to_rust_checked(ops_list: &Bound<'_, PyList>) -> PyResult<(Vec<Ope
                 let byte_size = get_byte_size(dict)?;
                 let resize_flags = get_resize_flags(dict)?;
                 let policy = parse_bit_policy(dict)?;
-                bit_ops::resize(&name, byte_size, resize_flags, &policy)
+                bit_ops::resize(
+                    &name,
+                    byte_size,
+                    resize_flags.unwrap_or(BitwiseResizeFlags::DEFAULT),
+                    &policy,
+                )
             }
             OP_BIT_INSERT => {
                 let name = require_bin(&bin_name, "bit_insert")?;
@@ -1305,20 +1348,18 @@ mod tests {
                 .is_none());
 
             for (raw, expected) in [
-                (0, BitwiseResizeFlags::Default),
-                (1, BitwiseResizeFlags::FromFront),
-                (2, BitwiseResizeFlags::GrowOnly),
-                (4, BitwiseResizeFlags::ShrinkOnly),
+                (0, BitwiseResizeFlags::DEFAULT),
+                (1, BitwiseResizeFlags::FROM_FRONT),
+                (2, BitwiseResizeFlags::GROW_ONLY),
+                (4, BitwiseResizeFlags::SHRINK_ONLY),
             ] {
                 let d = PyDict::new(py);
                 d.set_item("resize_flags", raw).unwrap();
                 let got = get_resize_flags(&d)
                     .expect("known flag should parse")
                     .expect("flag is present");
-                // BitwiseResizeFlags is not PartialEq; compare via discriminant.
                 assert_eq!(
-                    std::mem::discriminant(&got),
-                    std::mem::discriminant(&expected),
+                    got, expected,
                     "resize_flags {raw} should map to the matching flag"
                 );
             }
@@ -1392,14 +1433,12 @@ mod tests {
     #[test]
     fn int_to_list_sort_flags_accepts_known_codes() {
         for (raw, expected) in [
-            (0, ListSortFlags::Default),
-            (2, ListSortFlags::DropDuplicates),
+            (0, ListSortFlags::DEFAULT),
+            (2, ListSortFlags::DROP_DUPLICATES),
         ] {
             let got = int_to_list_sort_flags(raw).expect("known sort flag should parse");
-            // ListSortFlags is not PartialEq; compare via discriminant.
             assert_eq!(
-                std::mem::discriminant(&got),
-                std::mem::discriminant(&expected),
+                got, expected,
                 "sort_flags {raw} should map to the matching flag"
             );
         }

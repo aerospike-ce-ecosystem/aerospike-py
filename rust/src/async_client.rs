@@ -85,7 +85,9 @@ use crate::errors::as_to_pyerr;
 use crate::panic_safety::future_into_py_panic_safe;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::{parse_backpressure_config, parse_client_policy};
-use crate::record_helpers::{PendingExists, PendingOrderedRecord, PendingRecord};
+use crate::record_helpers::{
+    PendingExists, PendingOperateRecord, PendingOrderedRecord, PendingRecord,
+};
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
 
@@ -354,7 +356,8 @@ impl PyAsyncClient {
         let limiter = self.limiter.clone();
         debug!(
             "async put: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         future_into_py_panic_safe(py, "AsyncClient.put", async move {
             let _permit = limiter.acquire_named("put").await?;
@@ -375,7 +378,8 @@ impl PyAsyncClient {
         let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
         debug!(
             "async get: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let key_py = key_to_py(py, &args.key)?;
 
@@ -401,7 +405,8 @@ impl PyAsyncClient {
             client_common::prepare_select_args(py, key, bins, policy, &self.connection_info)?;
         debug!(
             "async select: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let key_py = key_to_py(py, &args.key)?;
 
@@ -425,7 +430,8 @@ impl PyAsyncClient {
         let args = client_common::prepare_exists_args(py, key, policy, &self.connection_info)?;
         debug!(
             "async exists: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let key_py = key_to_py(py, &args.key)?;
 
@@ -451,7 +457,8 @@ impl PyAsyncClient {
             client_common::prepare_remove_args(py, key, meta, policy, &self.connection_info)?;
         debug!(
             "async remove: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         future_into_py_panic_safe(py, "AsyncClient.remove", async move {
             let _permit = limiter.acquire_named("remove").await?;
@@ -475,7 +482,8 @@ impl PyAsyncClient {
             client_common::prepare_touch_args(py, key, val, meta, policy, &self.connection_info)?;
         debug!(
             "async touch: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         future_into_py_panic_safe(py, "AsyncClient.touch", async move {
             let _permit = limiter.acquire_named("touch").await?;
@@ -510,7 +518,9 @@ impl PyAsyncClient {
         let limiter = self.limiter.clone();
         debug!(
             "async increment: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         future_into_py_panic_safe(py, "AsyncClient.increment", async move {
             let _permit = limiter.acquire_named("increment").await?;
@@ -534,8 +544,8 @@ impl PyAsyncClient {
             client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
             "async operate: ns={} set={} ops_count={}",
-            args.key.namespace,
-            args.key.set_name,
+            args.key.namespace(),
+            args.key.set_name(),
             args.ops.len()
         );
         let key_py = key_to_py(py, &args.key)?;
@@ -543,7 +553,7 @@ impl PyAsyncClient {
         future_into_py_panic_safe(py, "AsyncClient.operate", async move {
             let _permit = limiter.acquire_named("operate").await?;
             let record = client_ops::do_operate(&client, &args).await?;
-            Ok(PendingRecord { record, key_py })
+            Ok(PendingOperateRecord { record, key_py })
         })
     }
 
@@ -573,7 +583,9 @@ impl PyAsyncClient {
         )?;
         debug!(
             "async append: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         future_into_py_panic_safe(py, "AsyncClient.append", async move {
             let _permit = limiter.acquire_named("append").await?;
@@ -605,7 +617,9 @@ impl PyAsyncClient {
         )?;
         debug!(
             "async prepend: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         future_into_py_panic_safe(py, "AsyncClient.prepend", async move {
             let _permit = limiter.acquire_named("prepend").await?;
@@ -653,12 +667,19 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let limiter = self.limiter.clone();
-        let args =
-            client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
+        let client_common::OperateOrderedArgs { args, plan } =
+            client_common::prepare_operate_ordered_args(
+                py,
+                key,
+                ops,
+                meta,
+                policy,
+                &self.connection_info,
+            )?;
         debug!(
             "async operate_ordered: ns={} set={} ops_count={}",
-            args.key.namespace,
-            args.key.set_name,
+            args.key.namespace(),
+            args.key.set_name(),
             args.ops.len()
         );
         let pre_key_py = key_to_py(py, &args.key)?;
@@ -668,6 +689,7 @@ impl PyAsyncClient {
             let record = client_ops::do_operate_ordered(&client, &args).await?;
             Ok(PendingOrderedRecord {
                 record,
+                plan,
                 key_py: pre_key_py,
             })
         })
@@ -746,7 +768,10 @@ impl PyAsyncClient {
         let a = client_common::prepare_apply_args(key, module, function, args, policy)?;
         debug!(
             "async apply UDF: ns={} set={} module={} function={}",
-            a.key.namespace, a.key.set_name, a.module, a.function
+            a.key.namespace(),
+            a.key.set_name(),
+            a.module,
+            a.function
         );
 
         future_into_py_panic_safe(py, "AsyncClient.apply", async move {
@@ -878,7 +903,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_write", async move {
             let _permit = limiter.acquire_named("batch_write").await?;
-            let (results, retry_stats) = client_ops::do_batch_write(
+            client_ops::do_batch_write(
                 &client,
                 &args.batch_policy,
                 &args.records,
@@ -889,11 +914,7 @@ impl PyAsyncClient {
                 args.max_retries,
                 "batch_write",
             )
-            .await?;
-            Ok(PendingBatchRecords {
-                results,
-                retry_stats: Some(retry_stats),
-            })
+            .await
         })
     }
 
@@ -941,7 +962,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_write_numpy", async move {
             let _permit = limiter.acquire_named("batch_write_numpy").await?;
-            let (results, retry_stats) = client_ops::do_batch_write(
+            client_ops::do_batch_write(
                 &client,
                 &batch_policy,
                 &records,
@@ -952,11 +973,7 @@ impl PyAsyncClient {
                 retry,
                 "batch_write_numpy",
             )
-            .await?;
-            Ok(PendingBatchRecords {
-                results,
-                retry_stats: Some(retry_stats),
-            })
+            .await
         })
     }
 

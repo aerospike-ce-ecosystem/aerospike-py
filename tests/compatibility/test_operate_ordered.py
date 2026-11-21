@@ -1,10 +1,11 @@
 """operate_ordered compatibility tests.
 
 Verifies that operate_ordered returns correctly ordered results as
-a list of (bin_name, value) tuples, matching the official client's behavior.
+a list of (bin_name, value) tuples, matching the official client's behavior:
+one entry per operation that returned a value, in request order, with a bin
+that is answered several times appearing once per answer.
 
-Key concern: operations.rs uses HashMap iteration for bins (line 808-818),
-which may not preserve operation ordering.
+The full table of request shapes lives in ``test_operate_ordered_contract.py``.
 """
 
 import pytest
@@ -21,17 +22,10 @@ from aerospike_helpers.operations import operations as off_ops  # noqa: E402
 NS = "test"
 SET = "compat_oo"
 
-# Upstream aerospike-client-rust uses HashMap for Record.bins,
-# which loses insertion order and collapses duplicate keys.
-# See: https://github.com/aerospike/aerospike-client-rust/issues/183
-#      https://github.com/aerospike/aerospike-client-rust/pull/184
-_SKIP_UPSTREAM = "upstream aerospike-client-rust HashMap bin ordering issue (aerospike-client-rust#183)"
-
 
 class TestOperateOrderedBinOrdering:
     """Verify that READ operations return in the correct order."""
 
-    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_multiple_reads_preserve_order(self, rust_client, official_client, cleanup):
         """Multiple READ ops should return in operation order."""
         key = (NS, SET, "oo_read_order")
@@ -70,13 +64,10 @@ class TestOperateOrderedBinOrdering:
         o_values = [val for _, val in o_ordered]
         assert r_values == o_values
 
-    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_same_bin_multiple_reads(self, rust_client, official_client, cleanup):
-        """BUG: Reading the same bin multiple times should appear as separate entries.
+        """Reading the same bin twice gives two entries, not one entry holding a list.
 
-        Rust client collapses same-bin results:
-        - Rust: [('counter', [100, 101])] - collapsed to 1 entry with list
-        - Official: [('counter', 100), ('counter', 101)] - 2 separate entries
+        ``[('counter', 100), ('counter', 101)]``, as the official client returns.
         """
         key_r = (NS, SET, "oo_same_bin_r")
         key_o = (NS, SET, "oo_same_bin_o")
@@ -100,18 +91,14 @@ class TestOperateOrderedBinOrdering:
         ]
         _, _, o_ordered = official_client.operate_ordered(key_o, off_op_list)
 
-        # Official returns separate entries for each read
-        assert len(r_ordered) == len(o_ordered), (
-            f"Entry count mismatch: rust={r_ordered}, official={o_ordered}. "
-            "Rust collapses same-bin entries into a single list."
-        )
+        assert r_ordered == o_ordered == [("counter", 100), ("counter", 101)]
 
 
 class TestOperateOrderedMixedOps:
     """INCR + APPEND + READ mixed operations."""
 
     def test_incr_append_read_mixed(self, rust_client, official_client, cleanup):
-        """BUG: Mixed INCR/APPEND/READ operations in operate_ordered.
+        """Mixed INCR/APPEND/READ operations in operate_ordered.
 
         Note: This test uses separate keys to avoid data contamination.
         """
@@ -183,7 +170,6 @@ class TestOperateOrderedReturnTypes:
             assert len(item) == 2
             assert isinstance(item[0], str)
 
-    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_return_structure_matches_official(self, rust_client, official_client, cleanup):
         """Both clients should return the same structure."""
         key = (NS, SET, "oo_struct_cmp")
@@ -210,13 +196,10 @@ class TestOperateOrderedReturnTypes:
 class TestOperateOrderedWithCDT:
     """CDT operations within operate_ordered."""
 
-    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_list_ops_in_ordered(self, rust_client, official_client, cleanup):
-        """BUG: CDT list operations same-bin results should be separate entries.
+        """List operations on one bin give one entry each.
 
-        Rust client collapses same-bin results into a single entry with
-        a list value: [('items', [4, 4])] instead of expected
-        [('items', 4), ('items', 4)].
+        ``[('items', 4), ('items', 4)]``, not a single entry holding ``[4, 4]``.
         """
         key_r = (NS, SET, "oo_cdt_list_r")
         key_o = (NS, SET, "oo_cdt_list_o")
@@ -238,15 +221,10 @@ class TestOperateOrderedWithCDT:
         ]
         _, _, o_ordered = official_client.operate_ordered(key_o, off_op_list)
 
-        # Official: [('items', 4), ('items', 4)] - two separate entries
-        # Rust bug: [('items', [4, 4])] - collapsed into one
-        assert len(r_ordered) == len(o_ordered), (
-            f"Entry count mismatch: rust={r_ordered}, official={o_ordered}. Rust collapses same-bin results."
-        )
+        assert r_ordered == o_ordered == [("items", 4), ("items", 4)]
 
-    @pytest.mark.skip(reason=_SKIP_UPSTREAM)
     def test_map_ops_in_ordered(self, rust_client, official_client, cleanup):
-        """BUG: CDT map operations same-bin results should be separate entries."""
+        """Map operations on one bin give one entry each."""
         key_r = (NS, SET, "oo_cdt_map_r")
         key_o = (NS, SET, "oo_cdt_map_o")
         cleanup.append(key_r)
@@ -267,8 +245,4 @@ class TestOperateOrderedWithCDT:
         ]
         _, _, o_ordered = official_client.operate_ordered(key_o, off_op_list)
 
-        # Official: [('mymap', 3), ('mymap', 3)] - separate entries
-        # Rust bug: [('mymap', [3, 3])] - collapsed
-        assert len(r_ordered) == len(o_ordered), (
-            f"Entry count mismatch: rust={r_ordered}, official={o_ordered}. Rust collapses same-bin results."
-        )
+        assert r_ordered == o_ordered == [("mymap", 3), ("mymap", 3)]

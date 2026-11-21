@@ -8,13 +8,13 @@ const CLOSING: u8 = 3;
 
 use crate::client_common;
 use crate::client_ops;
-use aerospike_core::{Client as AsClient, Error as AsError, ResultCode};
+use aerospike_core::Client as AsClient;
 use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::backpressure::OperationLimiter;
-use crate::batch_types::{batch_to_batch_records_py, batch_to_batch_records_py_with_retry};
+use crate::batch_types::batch_to_batch_records_py;
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::catch_panic_sync;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
@@ -24,7 +24,6 @@ use crate::runtime::RUNTIME;
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
 use crate::types::record::record_to_py_with_key;
-use crate::types::value::value_to_py;
 
 /// Synchronous Aerospike client exposed to Python as `Client`.
 ///
@@ -234,7 +233,11 @@ impl PyClient {
             client_common::prepare_put_args(py, key, bins, meta, policy, &self.connection_info)?;
         let client = self.get_client()?;
         let limiter = self.limiter.clone();
-        debug!("put: ns={} set={}", args.key.namespace, args.key.set_name);
+        debug!(
+            "put: ns={} set={}",
+            args.key.namespace(),
+            args.key.set_name()
+        );
         catch_panic_sync("Client.put", || {
             py.detach(|| {
                 RUNTIME.block_on(async {
@@ -256,7 +259,11 @@ impl PyClient {
         let client = self.get_client()?;
         let limiter = self.limiter.clone();
         let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
-        debug!("get: ns={} set={}", args.key.namespace, args.key.set_name);
+        debug!(
+            "get: ns={} set={}",
+            args.key.namespace(),
+            args.key.set_name()
+        );
         let key_py = key_to_py(py, &args.key)?;
         let record = catch_panic_sync("Client.get", || {
             py.detach(|| {
@@ -283,7 +290,8 @@ impl PyClient {
             client_common::prepare_select_args(py, key, bins, policy, &self.connection_info)?;
         debug!(
             "select: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let key_py = key_to_py(py, &args.key)?;
         let limiter = self.limiter.clone();
@@ -310,7 +318,8 @@ impl PyClient {
         let args = client_common::prepare_exists_args(py, key, policy, &self.connection_info)?;
         debug!(
             "exists: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let key_py = key_to_py(py, &args.key)?;
         let limiter = self.limiter.clone();
@@ -329,7 +338,7 @@ impl PyClient {
                 let tuple = PyTuple::new(py, [key_py, meta])?;
                 Ok(tuple.into_any().unbind())
             }
-            Err(AsError::ServerError(ResultCode::KeyNotFoundError, _, _)) => {
+            Err(e) if crate::errors::is_key_not_found(&e) => {
                 let tuple = PyTuple::new(py, [key_py, py.None()])?;
                 Ok(tuple.into_any().unbind())
             }
@@ -351,7 +360,8 @@ impl PyClient {
             client_common::prepare_remove_args(py, key, meta, policy, &self.connection_info)?;
         debug!(
             "remove: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let limiter = self.limiter.clone();
         catch_panic_sync("Client.remove", || {
@@ -377,7 +387,11 @@ impl PyClient {
         let client = self.get_client()?;
         let args =
             client_common::prepare_touch_args(py, key, val, meta, policy, &self.connection_info)?;
-        debug!("touch: ns={} set={}", args.key.namespace, args.key.set_name);
+        debug!(
+            "touch: ns={} set={}",
+            args.key.namespace(),
+            args.key.set_name()
+        );
         let limiter = self.limiter.clone();
         catch_panic_sync("Client.touch", || {
             py.detach(|| {
@@ -412,7 +426,9 @@ impl PyClient {
         )?;
         debug!(
             "append: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         let limiter = self.limiter.clone();
         catch_panic_sync("Client.append", || {
@@ -448,7 +464,9 @@ impl PyClient {
         )?;
         debug!(
             "prepend: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         let limiter = self.limiter.clone();
         catch_panic_sync("Client.prepend", || {
@@ -487,7 +505,9 @@ impl PyClient {
         let client = self.get_client()?;
         debug!(
             "increment: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         let limiter = self.limiter.clone();
         catch_panic_sync("Client.increment", || {
@@ -545,8 +565,8 @@ impl PyClient {
             client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
             "operate: ns={} set={} ops_count={}",
-            args.key.namespace,
-            args.key.set_name,
+            args.key.namespace(),
+            args.key.set_name(),
             args.ops.len()
         );
         let key_py = key_to_py(py, &args.key)?;
@@ -559,7 +579,7 @@ impl PyClient {
                 })
             })
         })?;
-        record_to_py_with_key(py, &record, key_py)
+        crate::operate_result::operate_record_to_py(py, &record, key_py)
     }
 
     /// Perform multiple operations on a single record, returning ordered results
@@ -573,12 +593,19 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?;
-        let args =
-            client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
+        let client_common::OperateOrderedArgs { args, plan } =
+            client_common::prepare_operate_ordered_args(
+                py,
+                key,
+                ops,
+                meta,
+                policy,
+                &self.connection_info,
+            )?;
         debug!(
             "operate_ordered: ns={} set={} ops_count={}",
-            args.key.namespace,
-            args.key.set_name,
+            args.key.namespace(),
+            args.key.set_name(),
             args.ops.len()
         );
         let pre_key_py = key_to_py(py, &args.key)?;
@@ -592,34 +619,7 @@ impl PyClient {
             })
         })?;
 
-        let key_py = match &record.key {
-            Some(k) => key_to_py(py, k)?,
-            None => pre_key_py,
-        };
-
-        let meta_dict_obj = record_to_meta(py, &record)?;
-
-        let bin_items: Vec<Py<PyAny>> = record
-            .bins
-            .iter()
-            .map(|(name, value)| {
-                let tuple = PyTuple::new(
-                    py,
-                    [
-                        name.as_str().into_pyobject(py)?.into_any().unbind(),
-                        value_to_py(py, value)?,
-                    ],
-                )?;
-                Ok(tuple.into_any().unbind())
-            })
-            .collect::<PyResult<_>>()?;
-        let ordered_bins = PyList::new(py, &bin_items)?;
-
-        let result = PyTuple::new(
-            py,
-            [key_py, meta_dict_obj, ordered_bins.into_any().unbind()],
-        )?;
-        Ok(result.into_any().unbind())
+        crate::operate_result::ordered_record_to_py(py, &record, &plan, pre_key_py)
     }
 
     // ── Query / Index ─────────────────────────────────────
@@ -781,7 +781,10 @@ impl PyClient {
         let a = client_common::prepare_apply_args(key, module, function, args, policy)?;
         debug!(
             "apply UDF: ns={} set={} module={} function={}",
-            a.key.namespace, a.key.set_name, a.module, a.function
+            a.key.namespace(),
+            a.key.set_name(),
+            a.module,
+            a.function
         );
         let result = catch_panic_sync("Client.apply", || {
             py.detach(|| RUNTIME.block_on(client_ops::do_apply(&client, &a)))
@@ -1222,7 +1225,7 @@ impl PyClient {
             &self.connection_info,
         )?;
         let limiter = self.limiter.clone();
-        let (results, retry_stats) = catch_panic_sync("Client.batch_write", || {
+        let pending = catch_panic_sync("Client.batch_write", || {
             py.detach(|| {
                 RUNTIME.block_on(async {
                     let _permit = limiter.acquire_named("batch_write").await?;
@@ -1241,7 +1244,7 @@ impl PyClient {
                 })
             })
         })?;
-        let batch = batch_to_batch_records_py_with_retry(py, results, Some(retry_stats))?;
+        let batch = pending.into_batch_records(py)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 
@@ -1291,7 +1294,7 @@ impl PyClient {
         let set = set_name.to_string();
 
         let limiter = self.limiter.clone();
-        let (results, retry_stats) = catch_panic_sync("Client.batch_write_numpy", || {
+        let pending = catch_panic_sync("Client.batch_write_numpy", || {
             py.detach(|| {
                 RUNTIME.block_on(async {
                     let _permit = limiter.acquire_named("batch_write_numpy").await?;
@@ -1311,7 +1314,7 @@ impl PyClient {
             })
         })?;
 
-        let batch = batch_to_batch_records_py_with_retry(py, results, Some(retry_stats))?;
+        let batch = pending.into_batch_records(py)?;
         Ok(Py::new(py, batch)?.into_any())
     }
 
