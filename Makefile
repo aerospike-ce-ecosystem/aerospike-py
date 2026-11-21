@@ -34,6 +34,22 @@ run-aerospike-ce: ## Start Aerospike CE container (RUNTIME=docker|podman)
 stop-aerospike-ce: ## Stop and remove Aerospike CE container
 	$(RUNTIME) compose -f compose.local.yaml down 2>/dev/null || true
 
+.PHONY: run-aerospike-multinode
+run-aerospike-multinode: ## Start the two-node Aerospike CE cluster (ports 18720, 18721)
+	$(RUNTIME) compose -f compose.multinode.yaml up -d
+	@echo "Waiting for both nodes to form the cluster..."
+	@for i in $$(seq 1 60); do \
+		if $(RUNTIME) exec aerospike-node-1 asinfo -v statistics 2>/dev/null | tr ';' '\n' | grep -q '^cluster_size=2$$'; then \
+			echo "cluster_size=2"; exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo "the two nodes did not form a cluster within 60s" >&2; exit 1
+
+.PHONY: stop-aerospike-multinode
+stop-aerospike-multinode: ## Stop and remove the two-node cluster
+	$(RUNTIME) compose -f compose.multinode.yaml down 2>/dev/null || true
+
 # ---------------------------------------------------------------------------
 # Lint & Format
 # ---------------------------------------------------------------------------
@@ -76,6 +92,10 @@ test-concurrency: build run-aerospike-ce ## Run concurrency/thread-safety tests
 .PHONY: test-compat
 test-compat: build run-aerospike-ce ## Run compatibility tests (vs official C client)
 	uvx --with tox-uv tox -e compat
+
+.PHONY: test-multinode
+test-multinode: build run-aerospike-multinode ## Run the node-failure scenarios (kills and restarts node 2)
+	uvx --with tox-uv tox -e multinode
 
 .PHONY: test-all
 test-all: build run-aerospike-ce ## Run all tests

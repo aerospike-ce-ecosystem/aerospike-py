@@ -175,6 +175,15 @@ commands = [
     ["pytest", "tests/integration/test_batch_retry_transport.py", "-v", "-m", "destructive"],
 ]
 
+# Two-node failure scenarios: a node is killed while the other keeps
+# answering. Needs the cluster of compose.multinode.yaml
+# (`make run-aerospike-multinode`) and skips itself without it.
+[tool.tox.env.multinode]
+dependency_groups = ["test-integration"]
+commands = [
+    ["pytest", "tests/multinode/", "-v", "-m", "destructive"],
+]
+
 [tool.tox.env.concurrency]
 commands = [["pytest", "tests/concurrency/", "-v", "--ignore=tests/concurrency/test_freethreading.py"]]
 
