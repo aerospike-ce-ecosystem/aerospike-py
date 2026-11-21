@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 
 from aerospike_py.numpy_batch import NumpyBatchRecords
+from tests.helpers import CLOCK_SKEW_SECONDS
 
 NS = "test"
 SET = "np_edge"
@@ -487,7 +488,7 @@ class TestBatchWriteNumpyTTL:
             _, meta, _ = client.get(k)
             assert meta is not None
             assert meta.ttl > 0
-            assert meta.ttl <= ttl_seconds
+            assert meta.ttl <= ttl_seconds + CLOCK_SKEW_SECONDS
 
 
 # ── dtype byte order ────────────────────────────────────────────────

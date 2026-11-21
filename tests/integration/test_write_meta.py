@@ -10,6 +10,7 @@ unit tests rather than here.
 import pytest
 
 import aerospike_py
+from tests.helpers import CLOCK_SKEW_SECONDS
 
 
 class TestWriteMetaExists:
@@ -101,7 +102,7 @@ class TestWriteMetaKeyAndCommitLevel:
 
         _, new_meta, _ = client.get(key)
         assert new_meta.gen == meta.gen + 1
-        assert 0 < new_meta.ttl <= 3600
+        assert 0 < new_meta.ttl <= 3600 + CLOCK_SKEW_SECONDS
 
         # The stale generation is now rejected (CAS semantics preserved).
         with pytest.raises(aerospike_py.RecordGenerationError):

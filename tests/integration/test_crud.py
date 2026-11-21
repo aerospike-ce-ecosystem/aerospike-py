@@ -1,6 +1,7 @@
 """Integration tests for CRUD operations (requires Aerospike server)."""
 
 import aerospike_py
+from tests.helpers import CLOCK_SKEW_SECONDS
 
 
 class TestPutGet:
@@ -33,7 +34,7 @@ class TestPutGet:
         _, meta, _ = client.get(key)
 
         assert meta.ttl > 0
-        assert meta.ttl <= 300
+        assert meta.ttl <= 300 + CLOCK_SKEW_SECONDS
 
     def test_put_various_types(self, client, cleanup):
         key = ("test", "demo", "test_types")

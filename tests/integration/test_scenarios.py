@@ -9,7 +9,7 @@ import pytest
 
 import aerospike_py
 from tests import AEROSPIKE_CONFIG
-from tests.helpers import invoke
+from tests.helpers import CLOCK_SKEW_SECONDS, invoke
 
 # ═══════════════════════════════════════════════════════════════════
 # Connection Workflow  (sync + async)
@@ -271,7 +271,7 @@ class TestTTLScenarios:
 
         await invoke(any_client, "put", key, {"val": 1}, meta={"ttl": 600})
         _, meta, _ = await invoke(any_client, "get", key)
-        assert 0 < meta.ttl <= 600
+        assert 0 < meta.ttl <= 600 + CLOCK_SKEW_SECONDS
 
     async def test_ttl_touch_extends(self, any_client, any_cleanup):
         """Touch should extend TTL."""
