@@ -1002,11 +1002,13 @@ pub fn batch_to_numpy_py(
     //    value the caller never used, and could shadow a real key. When the
     //    same user key was requested more than once, the last row wins.
     let key_map = PyDict::new(py);
-    for (i, br) in results.iter().enumerate() {
-        if let Some(v) = &br.key.user_key() {
-            key_map.set_item(value_to_py(py, v)?, i)?;
+    crate::stage_timer!("key_index", "batch_read", {
+        for (i, br) in results.iter().enumerate() {
+            if let Some(v) = &br.key.user_key() {
+                key_map.set_item(value_to_py(py, v)?, i)?;
+            }
         }
-    }
+    });
 
     // 7. Construct NumpyBatchRecords Python object
     let numpy_batch_mod = py.import("aerospike_py.numpy_batch")?;

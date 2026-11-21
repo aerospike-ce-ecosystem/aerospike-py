@@ -949,19 +949,23 @@ impl PyAsyncClient {
         let parent_ctx = client_common::extract_parent_context(py);
         let conn_info = self.connection_info.clone();
 
-        let raw_records = crate::numpy_support::numpy_to_records(
-            py, data, _dtype, namespace, set_name, key_field,
-        )?;
+        let raw_records = crate::stage_timer!("row_parse", "batch_write_numpy", {
+            crate::numpy_support::numpy_to_records(
+                py, data, _dtype, namespace, set_name, key_field,
+            )?
+        });
         // Share one BatchWritePolicy allocation across every record via Arc;
         // `numpy_to_records` never emits per-record meta, so the same policy
         // applies to all N rows.
         let write_policy = Arc::new(crate::policy::batch_policy::parse_batch_write_policy(
             policy,
         )?);
-        let records: Vec<_> = raw_records
-            .into_iter()
-            .map(|(k, b)| (k, b, Arc::clone(&write_policy)))
-            .collect();
+        let records: Vec<_> = crate::stage_timer!("attach_policy", "batch_write_numpy", {
+            raw_records
+                .into_iter()
+                .map(|(k, b)| (k, b, Arc::clone(&write_policy)))
+                .collect()
+        });
 
         let ns = namespace.to_string();
         let set = set_name.to_string();

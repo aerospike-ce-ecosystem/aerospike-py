@@ -533,22 +533,26 @@ pub async fn do_batch_write(
 ) -> PyResult<PendingBatchRecords> {
     // Fast path: no retry — build ops directly, no cache overhead
     if max_retries == 0 {
-        let mut batch_ops: Vec<BatchOperation> = records
-            .iter()
-            .map(|(key, bins, write_policy)| {
-                let ops: Vec<aerospike_core::operations::Operation> =
-                    bins.iter().map(aerospike_core::operations::put).collect();
-                BatchOperation::write(write_policy, key.clone(), ops)
-            })
-            .collect();
-        let outcome = traced_op!(
-            op_name,
-            ns,
-            set,
-            parent_ctx,
-            conn_info,
-            client.batch(batch_policy, &mut batch_ops).await
-        );
+        let mut batch_ops: Vec<BatchOperation> = crate::stage_timer!("build_ops", op_name, {
+            records
+                .iter()
+                .map(|(key, bins, write_policy)| {
+                    let ops: Vec<aerospike_core::operations::Operation> =
+                        bins.iter().map(aerospike_core::operations::put).collect();
+                    BatchOperation::write(write_policy, key.clone(), ops)
+                })
+                .collect()
+        });
+        let outcome = crate::stage_timer!("io", op_name, {
+            traced_op!(
+                op_name,
+                ns,
+                set,
+                parent_ctx,
+                conn_info,
+                client.batch(batch_policy, &mut batch_ops).await
+            )
+        });
         let results = finish_batch(batch_ops, outcome, records.iter().map(|(key, _, _)| key))?;
         return Ok(PendingBatchRecords {
             results,
