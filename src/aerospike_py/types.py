@@ -68,9 +68,25 @@ class BatchRecord(NamedTuple):
     """Single record result from a batch write/operate/remove operation."""
 
     key: AerospikeKey | None
+
     result: int
+    """``0`` when the server reported success, the server's result code when it
+    reported a failure (``2`` record not found, ``27`` filtered out, ...), and
+    ``-1`` when no server answered for this record."""
+
     record: Record | None
+
     in_doubt: bool = False
+    """The record failed, but the write may have been applied: the request was
+    sent and the answer never came back."""
+
+    error_type: str | None = None
+    """``None`` on success. Otherwise the kind of failure, by the same name an
+    exception carries in ``error_type``: a server result code
+    (``"KeyNotFoundError"``, ``"FilteredOut"``, ``"DeviceOverload"``, ...), a
+    client-side failure (``"Timeout"``, ``"Connection"``, ...), or
+    ``"NoResponse"`` when no node answered for the record. This is what tells
+    the ``-1`` results apart."""
 
 
 class BatchRetryInfo(NamedTuple):
@@ -84,11 +100,9 @@ class BatchRetryInfo(NamedTuple):
     The defaults describe a call that issued exactly one batch and never
     retried, which is what every non-``batch_write`` batch method reports.
 
-    **Only available when the call returned.** If *every* attempt fails at the
-    transport level there are no per-record results, so the last error is raised
-    instead and these counters never reach you — the retry budget was still
-    spent, and only the client log records it. Truncation is therefore visible
-    when the batch partly succeeded and invisible when it wholly failed.
+    A call that raises reports them too: when a record still has no answer
+    from a server after the last attempt, the exception's ``partial_result``
+    is a ``BatchWriteResult`` whose ``retry`` holds these counters.
     """
 
     attempts: int = 1
@@ -105,7 +119,12 @@ class BatchRetryInfo(NamedTuple):
 
 
 class BatchWriteResult(NamedTuple):
-    """Container for batch write/operate/remove results."""
+    """Container for batch write/operate/remove results.
+
+    Also the type of ``exc.partial_result`` when a batch call — ``batch_read``
+    included — fails as a whole: one ``BatchRecord`` per requested record, in
+    request order.
+    """
 
     batch_records: list[BatchRecord]
     retry: BatchRetryInfo = BatchRetryInfo()

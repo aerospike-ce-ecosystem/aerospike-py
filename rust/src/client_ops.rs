@@ -370,6 +370,14 @@ fn is_retryable_client_failure(class: ErrorClass) -> bool {
     )
 }
 
+/// Whether another attempt may get past this failure.
+fn failure_may_pass(class: ErrorClass) -> bool {
+    match class {
+        ErrorClass::Server(rc) => is_retryable_result_code(&rc),
+        other => is_retryable_client_failure(other),
+    }
+}
+
 /// Whether sending this `put` a second time gives the same end state as
 /// sending it once.
 ///
@@ -407,8 +415,10 @@ fn judge_row(outcome: RowOutcome, in_doubt: bool, idempotent: bool) -> RowJudgem
     let (transient, unanswered) = match outcome {
         RowOutcome::Ok => return RowJudgement::default(),
         RowOutcome::NoResponse => (true, true),
-        RowOutcome::Failed(ErrorClass::Server(rc)) => (is_retryable_result_code(&rc), false),
-        RowOutcome::Failed(class) => (is_retryable_client_failure(class), true),
+        RowOutcome::Failed(class) => (
+            failure_may_pass(class),
+            !matches!(class, ErrorClass::Server(_)),
+        ),
     };
     RowJudgement {
         failed: true,
@@ -481,7 +491,9 @@ impl BatchWriteRetryStats {
 ///   never re-sent.
 /// - A record is sent again when its failure is transient — a retryable
 ///   server code, or no answer because of a timeout or a lost connection — and
-///   a second send cannot do harm. A plain `put` overwrites its bins, so
+///   a second send cannot do harm. A call that failed in a way that would
+///   repeat (an unknown namespace, an invalid argument) is not attempted
+///   again. A plain `put` overwrites its bins, so
 ///   sending it twice is safe. A `CREATE_ONLY` or generation-checked put whose
 ///   first send may have been applied (`in_doubt`) is left alone: the second
 ///   send would fail for a write that went through.
@@ -564,6 +576,7 @@ pub async fn do_batch_write(
         op_name,
         retry_op_name: format!("{}_retry", op_name),
         start: std::time::Instant::now(),
+        call_would_fail_again: std::sync::atomic::AtomicBool::new(false),
     };
     let BatchWriteOutcome {
         mut rows,
@@ -651,6 +664,11 @@ struct ClusterAttempts<'a> {
     op_name: &'a str,
     retry_op_name: String,
     start: std::time::Instant,
+    /// The last attempt failed as a whole in a way that would repeat (an
+    /// unknown namespace, an invalid argument). aerospike-core then returns
+    /// before it has marked the rows, which leaves them looking merely
+    /// unanswered; this keeps them from being sent again for nothing.
+    call_would_fail_again: std::sync::atomic::AtomicBool,
 }
 
 impl BatchWriteAttempts for ClusterAttempts<'_> {
@@ -689,13 +707,24 @@ impl BatchWriteAttempts for ClusterAttempts<'_> {
         } else {
             &self.retry_op_name
         };
+        let mut call_class: Option<ErrorClass> = None;
         let outcome: PyResult<()> = traced_op!(
             attempt_op_name,
             self.ns,
             self.set,
             self.parent_ctx,
             self.conn_info,
-            self.client.batch(self.batch_policy, &mut attempt_ops).await
+            {
+                let result = self.client.batch(self.batch_policy, &mut attempt_ops).await;
+                if let Err(e) = &result {
+                    call_class = Some(ErrorClass::of(e));
+                }
+                result
+            }
+        );
+        self.call_would_fail_again.store(
+            call_class.is_some_and(|class| !failure_may_pass(class)),
+            std::sync::atomic::Ordering::Relaxed,
         );
         let mut rows = collect_rows(attempt_ops);
         if outcome.is_err() {
@@ -713,9 +742,22 @@ impl BatchWriteAttempts for ClusterAttempts<'_> {
         if crate::batch_types::row_ok(row) {
             return RowJudgement::default();
         }
+        let outcome = RowOutcome::of(row);
+        if outcome == RowOutcome::NoResponse
+            && self
+                .call_would_fail_again
+                .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return RowJudgement {
+                failed: true,
+                retry: false,
+                in_doubt: false,
+                unanswered: true,
+            };
+        }
         judge_row(
-            RowOutcome::of(row),
-            row.in_doubt(),
+            outcome,
+            crate::batch_types::row_in_doubt(row, outcome),
             put_is_idempotent(&self.records[index].2),
         )
     }
@@ -1411,6 +1453,20 @@ mod tests {
     }
 
     #[test]
+    fn test_only_a_failure_that_may_pass_is_worth_another_attempt() {
+        assert!(failure_may_pass(ErrorClass::Connection));
+        assert!(failure_may_pass(ErrorClass::ClientTimeout));
+        assert!(failure_may_pass(ErrorClass::Server(
+            ResultCode::DeviceOverload
+        )));
+        // An unknown namespace or a bad argument fails the same way again.
+        assert!(!failure_may_pass(ErrorClass::InvalidArgument));
+        assert!(!failure_may_pass(ErrorClass::Server(
+            ResultCode::KeyExistsError
+        )));
+    }
+
+    #[test]
     fn test_a_row_nobody_answered_is_retried() {
         let judgement = judge_row(RowOutcome::NoResponse, false, CONDITIONAL);
         assert!(judgement.failed && judgement.retry && judgement.unanswered);
@@ -1563,7 +1619,8 @@ mod tests {
     fn refused(rc: ResultCode) -> Row {
         Row {
             outcome: server(rc),
-            // aerospike-core marks a server-side timeout in doubt.
+            // A server that gave up waiting may already have taken the
+            // write: `row_in_doubt` reports such a row in doubt.
             in_doubt: rc == ResultCode::Timeout,
         }
     }

@@ -8,11 +8,13 @@ from typing import Any
 
 from typing import TYPE_CHECKING
 
+from aerospike_py._aerospike import AerospikeError
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
 from aerospike_py._client import (
     _wrap_batch_write_result,
+    _wrap_partial_result,
     _wrap_exists,
     _wrap_operate_ordered,
     _wrap_record,
@@ -199,7 +201,11 @@ class AsyncClient:
                 print(user_key, bins_dict)
             ```
         """
-        return await self._inner.batch_read(keys, bins, policy)
+        try:
+            return await self._inner.batch_read(keys, bins, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
 
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
@@ -243,7 +249,11 @@ class AsyncClient:
                     print(f"Failed: {br.key}, code={br.result}")
             ```
         """
-        raw = await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        try:
+            raw = await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_write")
@@ -252,17 +262,29 @@ class AsyncClient:
 
         See :meth:`AsyncClient.batch_write` in ``__init__.pyi`` for full documentation.
         """
-        raw = await self._inner.batch_write(records, policy, retry)
+        try:
+            raw = await self._inner.batch_write(records, policy, retry)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_operate")
     async def batch_operate(self, keys, ops, policy=None) -> BatchWriteResult:
-        raw = await self._inner.batch_operate(keys, ops, policy)
+        try:
+            raw = await self._inner.batch_operate(keys, ops, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_remove")
     async def batch_remove(self, keys, policy=None) -> BatchWriteResult:
-        raw = await self._inner.batch_remove(keys, policy)
+        try:
+            raw = await self._inner.batch_remove(keys, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.ping")
@@ -349,7 +371,11 @@ class AsyncClient:
 
     @catch_unexpected("AsyncClient.batch_apply")
     async def batch_apply(self, keys, module, function, args=None, policy=None) -> BatchWriteResult:
-        raw = await self._inner.batch_apply(keys, module, function, args, policy)
+        try:
+            raw = await self._inner.batch_apply(keys, module, function, args, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     # -- Admin: User --

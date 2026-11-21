@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from aerospike_py._aerospike import AerospikeError
 from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import Query as _NativeQuery
 from aerospike_py._bug_report import catch_unexpected
@@ -63,7 +64,13 @@ def _wrap_operate_ordered(raw: tuple) -> OperateOrderedResult:
 def _wrap_batch_record(br) -> BatchRecordTuple:
     key = _wrap_key(br.key)
     record = _wrap_record(br.record) if br.record is not None else None
-    return BatchRecordTuple(key=key, result=br.result, record=record, in_doubt=br.in_doubt)
+    return BatchRecordTuple(
+        key=key,
+        result=br.result,
+        record=record,
+        in_doubt=br.in_doubt,
+        error_type=br.error_type,
+    )
 
 
 _NO_RETRIES = BatchRetryInfo()
@@ -82,6 +89,24 @@ def _wrap_batch_write_result(raw) -> BatchWriteResult:
         batch_records=[_wrap_batch_record(br) for br in raw.batch_records],
         retry=_NO_RETRIES if info is None else BatchRetryInfo(*info),
     )
+
+
+def _wrap_partial_result(exc: BaseException) -> None:
+    """Give the rows of a failed batch call the shape a successful call returns.
+
+    A batch call that fails as a whole still knows what happened to each
+    record. The native layer attaches those rows to the exception as
+    ``partial_result``; this turns them into the ``BatchWriteResult`` every
+    batch method documents, so a handler reads ``exc.partial_result`` the way
+    it reads a return value.
+    """
+    raw = getattr(exc, "partial_result", None)
+    if raw is None or isinstance(raw, BatchWriteResult):
+        return
+    try:
+        exc.partial_result = _wrap_batch_write_result(raw)  # type: ignore[attr-defined]
+    except Exception:  # the original failure must be the one that is raised
+        logger.debug("could not wrap the partial batch result", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +233,11 @@ class Client(_NativeClient):
                 print(user_key, bins_dict)
             ```
         """
-        return super().batch_read(keys, bins, policy)
+        try:
+            return super().batch_read(keys, bins, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
 
     @catch_unexpected("Client.batch_write_numpy")
     def batch_write_numpy(self, data, namespace, set_name, _dtype=None, key_field="_key", policy=None, retry=0):
@@ -247,7 +276,11 @@ class Client(_NativeClient):
                     print(f"Failed: {br.key}, code={br.result}")
             ```
         """
-        raw = super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        try:
+            raw = super().batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("Client.batch_write")
@@ -256,17 +289,29 @@ class Client(_NativeClient):
 
         See :meth:`Client.batch_write` in ``__init__.pyi`` for full documentation.
         """
-        raw = super().batch_write(records, policy, retry)
+        try:
+            raw = super().batch_write(records, policy, retry)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("Client.batch_operate")
     def batch_operate(self, keys, ops, policy=None) -> BatchWriteResult:
-        raw = super().batch_operate(keys, ops, policy)
+        try:
+            raw = super().batch_operate(keys, ops, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("Client.batch_remove")
     def batch_remove(self, keys, policy=None) -> BatchWriteResult:
-        raw = super().batch_remove(keys, policy)
+        try:
+            raw = super().batch_remove(keys, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("Client.put")
@@ -337,7 +382,11 @@ class Client(_NativeClient):
 
     @catch_unexpected("Client.batch_apply")
     def batch_apply(self, keys, module, function, args=None, policy=None) -> BatchWriteResult:
-        raw = super().batch_apply(keys, module, function, args, policy)
+        try:
+            raw = super().batch_apply(keys, module, function, args, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     # -- Admin: User --

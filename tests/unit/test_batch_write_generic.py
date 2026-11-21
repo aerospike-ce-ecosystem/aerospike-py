@@ -15,7 +15,13 @@ class TestBatchRecordInDoubt:
         assert "in_doubt" in BatchRecord._fields
 
     def test_batch_record_field_order(self):
-        assert BatchRecord._fields == ("key", "result", "record", "in_doubt")
+        """New fields go at the end: the first four keep their positions."""
+        assert BatchRecord._fields == ("key", "result", "record", "in_doubt", "error_type")
+
+    def test_fields_added_after_record_have_defaults(self):
+        """A caller that builds a BatchRecord from three values keeps working."""
+        row = BatchRecord(None, 0, None)
+        assert (row.in_doubt, row.error_type) == (False, None)
 
 
 class TestBatchWriteSignature:

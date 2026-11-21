@@ -8,7 +8,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
-use aerospike_core::{BatchRecord, Error as AsError, Record};
+use aerospike_core::{BatchRecord, Error as AsError, Record, ResultCode};
 use log::{debug, trace};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -85,6 +85,24 @@ impl RowOutcome {
             Self::NoResponse => Some(Cow::Borrowed(NO_RESPONSE_LABEL)),
         }
     }
+}
+
+/// Whether a failed row's write may have been applied anyway.
+///
+/// aerospike-core decides this for a failure on the client side: a request
+/// that was sent and never answered is in doubt. It does not for a row the
+/// *server* answered with `TIMEOUT`, and that is the same situation seen from
+/// the other end: the server gave up waiting, typically for a replica that is
+/// gone, after the master had already taken the write. A single-record write
+/// that ends this way is reported in doubt; a batch row has to be as well, or
+/// "failed, certainly not applied" would be said of a record that was written.
+pub(crate) fn row_in_doubt(br: &BatchRecord, outcome: RowOutcome) -> bool {
+    br.in_doubt() || (br.has_write() && server_gave_up_waiting(outcome))
+}
+
+/// The row was answered with the server's own `TIMEOUT` result code.
+pub(crate) fn server_gave_up_waiting(outcome: RowOutcome) -> bool {
+    outcome == RowOutcome::Failed(ErrorClass::Server(ResultCode::Timeout))
 }
 
 /// Whether the server answered this row with success.
@@ -831,7 +849,7 @@ fn single_batch_record_to_py(py: Python<'_>, br: &BatchRecord) -> PyResult<Py<Py
             key: key_py,
             result: outcome.result_code(),
             record_cell: Mutex::new(record_cell),
-            in_doubt: br.in_doubt(),
+            in_doubt: row_in_doubt(br, outcome),
             error_type: outcome.error_type(),
         },
     )
@@ -1105,7 +1123,7 @@ fn build_batch_records(
 
         let outcome = RowOutcome::of(&br);
         let forced = forced_in_doubt.next_if_eq(&index).is_some();
-        let in_doubt = br.in_doubt() || (forced && outcome != RowOutcome::Ok);
+        let in_doubt = row_in_doubt(&br, outcome) || (forced && outcome != RowOutcome::Ok);
 
         // LAZY: store raw Rust Record; convert only on first `br.record` access
         let record_cell = match br.record {
@@ -1176,6 +1194,113 @@ mod tests {
             0,
         ));
         row
+    }
+
+    // ── Row outcome ─────────────────────────────────────────────
+
+    #[test]
+    fn a_row_is_ok_only_when_a_server_said_so() {
+        let answered = make_batch_record(Value::Int(1));
+        assert_eq!(RowOutcome::of(&answered), RowOutcome::Ok);
+        assert!(row_ok(&answered));
+
+        // Rust client 2.x reported a row like this one as a success.
+        let never_answered = BatchRecord::new(
+            aerospike_core::Key::new("test", "demo", Value::Int(2)).unwrap(),
+            true,
+        );
+        assert_eq!(RowOutcome::of(&never_answered), RowOutcome::NoResponse);
+        assert!(!row_ok(&never_answered));
+    }
+
+    #[test]
+    fn the_error_decides_even_when_a_record_came_with_it() {
+        // A failed UDF row keeps its FAILURE bin next to the error.
+        let failure = AsError::client_error("udf failed");
+        assert_eq!(
+            RowOutcome::from_parts(Some(&failure), true),
+            RowOutcome::Failed(ErrorClass::Client)
+        );
+    }
+
+    #[test]
+    fn result_and_error_type_follow_the_outcome() {
+        let ok = RowOutcome::Ok;
+        assert_eq!((ok.result_code(), ok.error_type()), (0, None));
+
+        let missing = RowOutcome::Failed(ErrorClass::Server(ResultCode::KeyNotFoundError));
+        assert_eq!(missing.result_code(), 2);
+        assert_eq!(missing.error_type().as_deref(), Some("KeyNotFoundError"));
+
+        let filtered = RowOutcome::Failed(ErrorClass::Server(ResultCode::FilteredOut));
+        assert_eq!(filtered.result_code(), 27);
+        assert_eq!(filtered.error_type().as_deref(), Some("FilteredOut"));
+
+        let lost = RowOutcome::Failed(ErrorClass::Connection);
+        assert_eq!(lost.result_code(), CLIENT_SIDE_RESULT_CODE);
+        assert_eq!(lost.error_type().as_deref(), Some("Connection"));
+
+        let silent = RowOutcome::NoResponse;
+        assert_eq!(silent.result_code(), CLIENT_SIDE_RESULT_CODE);
+        assert_eq!(silent.error_type().as_deref(), Some(NO_RESPONSE_LABEL));
+    }
+
+    #[test]
+    fn only_the_servers_own_timeout_counts_as_giving_up() {
+        assert!(server_gave_up_waiting(RowOutcome::Failed(
+            ErrorClass::Server(ResultCode::Timeout)
+        )));
+        for other in [
+            RowOutcome::Ok,
+            RowOutcome::NoResponse,
+            RowOutcome::Failed(ErrorClass::ClientTimeout),
+            RowOutcome::Failed(ErrorClass::Server(ResultCode::DeviceOverload)),
+            RowOutcome::Failed(ErrorClass::Server(ResultCode::KeyExistsError)),
+        ] {
+            assert!(!server_gave_up_waiting(other), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn a_row_without_a_failure_is_never_in_doubt() {
+        let written = {
+            let mut row = BatchRecord::new(
+                aerospike_core::Key::new("test", "demo", Value::Int(1)).unwrap(),
+                true,
+            );
+            row.record = Some(Record::new(
+                None,
+                aerospike_core::IndexMap::new(),
+                None,
+                0,
+                0,
+            ));
+            row
+        };
+        assert!(!row_in_doubt(&written, RowOutcome::of(&written)));
+
+        let unanswered = BatchRecord::new(
+            aerospike_core::Key::new("test", "demo", Value::Int(2)).unwrap(),
+            true,
+        );
+        assert!(!row_in_doubt(&unanswered, RowOutcome::of(&unanswered)));
+    }
+
+    #[test]
+    fn a_read_row_the_server_timed_out_is_not_in_doubt() {
+        // Only a write can have been applied.
+        let read_row = BatchRecord::new(
+            aerospike_core::Key::new("test", "demo", Value::Int(1)).unwrap(),
+            false,
+        );
+        let timed_out = RowOutcome::Failed(ErrorClass::Server(ResultCode::Timeout));
+        assert!(!row_in_doubt(&read_row, timed_out));
+
+        let write_row = BatchRecord::new(
+            aerospike_core::Key::new("test", "demo", Value::Int(1)).unwrap(),
+            true,
+        );
+        assert!(row_in_doubt(&write_row, timed_out));
     }
 
     /// A poisoned `record_cell` mutex (left behind by a panic during a

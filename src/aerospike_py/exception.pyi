@@ -44,10 +44,29 @@ record-not-found, ``5`` for record-exists, ``22`` for forbidden), matching the
 client-side errors that never received a server response (connection failures,
 client timeouts, invalid arguments) expose the sentinel ``-1``.
 
+The ``-1`` cases are told apart by ``error_type``, and a write that failed
+says whether it may have been applied anyway::
+
+    try:
+        client.put(key, bins)
+    except aerospike_py.AerospikeError as exc:
+        if exc.error_type == "Timeout" and exc.in_doubt:
+            ...  # the write may be in; read before writing again
+
+A batch call that fails as a whole keeps the rows it did collect::
+
+    try:
+        client.batch_write(records)
+    except aerospike_py.AerospikeError as exc:
+        if exc.partial_result is not None:
+            done = [br.key for br in exc.partial_result.batch_records if br.result == 0]
+
 Deprecated aliases (emit ``DeprecationWarning`` on access; **removed in v1.0.0**):
     - ``TimeoutError`` -- use ``AerospikeTimeoutError`` instead.
     - ``IndexError`` -- use ``AerospikeIndexError`` instead.
 """
+
+from aerospike_py.types import BatchWriteResult
 
 class AerospikeError(Exception):
     """Base exception for all Aerospike errors.
@@ -56,9 +75,31 @@ class AerospikeError(Exception):
         result_code: Structured Aerospike server result code (ADR-0027). The
             real wire code for server errors (e.g. ``2`` = record-not-found);
             ``-1`` for client-side errors that never received a server response.
+        error_type: What kind of failure this is, by the same name the
+            Prometheus ``error_type`` label and the OpenTelemetry
+            ``error.type`` attribute carry. A server result code is named
+            after the code (``"KeyNotFoundError"``, ``"KeyExistsError"``,
+            ``"GenerationError"``, ``"FilteredOut"``, ``"DeviceOverload"``,
+            ...), with ``"ServerTimeout"`` for a timeout the server reported.
+            Client-side failures are ``"Timeout"`` (the client's own
+            deadline), ``"MaxRetriesExceeded"``, ``"Connection"``,
+            ``"NoMoreConnections"``, ``"MaxErrorRate"``, ``"InvalidNode"``,
+            ``"InvalidArgument"``, ``"UdfBadResponse"``,
+            ``"StreamTerminated"``, ``"BadResponse"``, ``"Backpressure"``,
+            ``"RustPanic"`` and ``"Client"``.
+        in_doubt: ``True`` when a write failed after it was sent, so the
+            server may have applied it. Always ``False`` for reads.
+        partial_result: The per-record rows of a batch call that failed as a
+            whole (a ``BatchWriteResult``), ``None`` for every other failure.
+            One entry per requested record, in request order: the records
+            other nodes answered keep their results, the rest say why they
+            have none (``result``, ``error_type``, ``in_doubt``).
     """
 
     result_code: int
+    error_type: str
+    in_doubt: bool
+    partial_result: BatchWriteResult | None
 
 class ClientError(AerospikeError):
     """Client-side error such as connection failure, misconfiguration, or internal error."""
@@ -93,13 +134,12 @@ class BackpressureError(ClientError):
 class RustPanicError(ClientError):
     """Raised when a native Rust panic was caught at a client API boundary.
 
-    The Python process survived; the operation did not complete. The most
-    common cause on legacy clusters is a record carrying a language-specific
-    blob particle type (``PYTHON_BLOB`` = 8, ``JAVA_BLOB`` = 5, etc.) that
-    ``aerospike-core`` 2.0.0 cannot decode. See issue #280.
+    The Python process survived; the operation did not complete.
 
-    Catch this per-record (in scans / batch reads) to skip the bad record
-    instead of failing the whole request.
+    Up to 0.14.x the usual cause was a record carrying a language-specific
+    blob particle type (``PYTHON_BLOB``, ``JAVA_BLOB``, ...), see issue #280.
+    Such a bin is now returned as ``bytes`` holding its raw payload, so this
+    exception means an actual defect: please report it.
     """
 
 class InvalidArgError(AerospikeError):

@@ -822,11 +822,14 @@ class Client:
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             retry: Maximum number of *retries* for failed records (default
                 ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
-                > 0, records that fail with transient errors (timeout, device
-                overload, key busy) are retried with exponential backoff (Full
-                Jitter, max 500 ms), and an attempt that fails at the transport
-                level (connection reset, node down) re-drives the batch instead
-                of raising immediately.
+                > 0, the records that failed with a transient error (timeout,
+                device overload, key busy, a lost connection, a node that is
+                down) are sent again with exponential backoff (Full Jitter,
+                max 500 ms). Only the records that failed are re-sent; a
+                record that already succeeded never is. A ``CREATE_ONLY`` or
+                generation-checked record whose first send may have been
+                applied (``in_doubt``) is not re-sent either: the second send
+                would fail for a write that went through.
 
                 **`retry` is bounded by `total_timeout`, which defaults to
                 1000 ms.** Retries stop once ``elapsed + backoff`` would reach
@@ -846,12 +849,13 @@ class Client:
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
-                ``unresolved``. Those counters only reach you when the call
-                returned — if *every* attempt fails at the transport level the
-                last error is raised instead, and the retries it did spend are
-                recorded only in the client log. Total wall-clock time may still exceed
-                ``total_timeout`` by up to one additional timeout window,
-                because the guard does not account for the in-flight attempt.
+                ``unresolved``. If a record still has no answer from a server
+                when the attempts run out, the call raises (``ClusterError``,
+                ``AerospikeTimeoutError``, ...) and ``exc.partial_result``
+                holds every row together with the same ``retry`` counters.
+                Total wall-clock time may still exceed ``total_timeout`` by up
+                to one additional timeout window, because the guard does not
+                account for the in-flight attempt.
 
                 Always check each ``BatchRecord.result`` code regardless of
                 whether the call returned successfully.
@@ -914,11 +918,14 @@ class Client:
                 ``respond_all_keys``).
             retry: Maximum number of *retries* for failed records (default
                 ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
-                > 0, records that fail with transient errors (timeout, device
-                overload, key busy) are retried with exponential backoff (Full
-                Jitter, max 500 ms), and an attempt that fails at the transport
-                level (connection reset, node down) re-drives the batch instead
-                of raising immediately.
+                > 0, the records that failed with a transient error (timeout,
+                device overload, key busy, a lost connection, a node that is
+                down) are sent again with exponential backoff (Full Jitter,
+                max 500 ms). Only the records that failed are re-sent; a
+                record that already succeeded never is. A ``CREATE_ONLY`` or
+                generation-checked record whose first send may have been
+                applied (``in_doubt``) is not re-sent either: the second send
+                would fail for a write that went through.
 
                 **`retry` is bounded by `total_timeout`, which defaults to
                 1000 ms.** Retries stop once ``elapsed + backoff`` would reach
@@ -938,12 +945,13 @@ class Client:
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
-                ``unresolved``. Those counters only reach you when the call
-                returned — if *every* attempt fails at the transport level the
-                last error is raised instead, and the retries it did spend are
-                recorded only in the client log. Total wall-clock time may still exceed
-                ``total_timeout`` by up to one additional timeout window,
-                because the guard does not account for the in-flight attempt.
+                ``unresolved``. If a record still has no answer from a server
+                when the attempts run out, the call raises (``ClusterError``,
+                ``AerospikeTimeoutError``, ...) and ``exc.partial_result``
+                holds every row together with the same ``retry`` counters.
+                Total wall-clock time may still exceed ``total_timeout`` by up
+                to one additional timeout window, because the guard does not
+                account for the in-flight attempt.
 
                 Always check each ``BatchRecord.result`` code regardless of
                 whether the call returned successfully.
@@ -1989,11 +1997,14 @@ class AsyncClient:
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             retry: Maximum number of *retries* for failed records (default
                 ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
-                > 0, records that fail with transient errors (timeout, device
-                overload, key busy) are retried with exponential backoff (Full
-                Jitter, max 500 ms), and an attempt that fails at the transport
-                level (connection reset, node down) re-drives the batch instead
-                of raising immediately.
+                > 0, the records that failed with a transient error (timeout,
+                device overload, key busy, a lost connection, a node that is
+                down) are sent again with exponential backoff (Full Jitter,
+                max 500 ms). Only the records that failed are re-sent; a
+                record that already succeeded never is. A ``CREATE_ONLY`` or
+                generation-checked record whose first send may have been
+                applied (``in_doubt``) is not re-sent either: the second send
+                would fail for a write that went through.
 
                 **`retry` is bounded by `total_timeout`, which defaults to
                 1000 ms.** Retries stop once ``elapsed + backoff`` would reach
@@ -2013,12 +2024,13 @@ class AsyncClient:
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
-                ``unresolved``. Those counters only reach you when the call
-                returned — if *every* attempt fails at the transport level the
-                last error is raised instead, and the retries it did spend are
-                recorded only in the client log. Total wall-clock time may still exceed
-                ``total_timeout`` by up to one additional timeout window,
-                because the guard does not account for the in-flight attempt.
+                ``unresolved``. If a record still has no answer from a server
+                when the attempts run out, the call raises (``ClusterError``,
+                ``AerospikeTimeoutError``, ...) and ``exc.partial_result``
+                holds every row together with the same ``retry`` counters.
+                Total wall-clock time may still exceed ``total_timeout`` by up
+                to one additional timeout window, because the guard does not
+                account for the in-flight attempt.
 
                 Always check each ``BatchRecord.result`` code regardless of
                 whether the call returned successfully.
@@ -2062,11 +2074,14 @@ class AsyncClient:
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             retry: Maximum number of *retries* for failed records (default
                 ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
-                > 0, records that fail with transient errors (timeout, device
-                overload, key busy) are retried with exponential backoff (Full
-                Jitter, max 500 ms), and an attempt that fails at the transport
-                level (connection reset, node down) re-drives the batch instead
-                of raising immediately.
+                > 0, the records that failed with a transient error (timeout,
+                device overload, key busy, a lost connection, a node that is
+                down) are sent again with exponential backoff (Full Jitter,
+                max 500 ms). Only the records that failed are re-sent; a
+                record that already succeeded never is. A ``CREATE_ONLY`` or
+                generation-checked record whose first send may have been
+                applied (``in_doubt``) is not re-sent either: the second send
+                would fail for a write that went through.
 
                 **`retry` is bounded by `total_timeout`, which defaults to
                 1000 ms.** Retries stop once ``elapsed + backoff`` would reach
@@ -2086,12 +2101,13 @@ class AsyncClient:
                 Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo))
                 to see what happened: ``attempts`` versus ``max_attempts``,
                 ``truncated_by_timeout``, and how many records are still
-                ``unresolved``. Those counters only reach you when the call
-                returned — if *every* attempt fails at the transport level the
-                last error is raised instead, and the retries it did spend are
-                recorded only in the client log. Total wall-clock time may still exceed
-                ``total_timeout`` by up to one additional timeout window,
-                because the guard does not account for the in-flight attempt.
+                ``unresolved``. If a record still has no answer from a server
+                when the attempts run out, the call raises (``ClusterError``,
+                ``AerospikeTimeoutError``, ...) and ``exc.partial_result``
+                holds every row together with the same ``retry`` counters.
+                Total wall-clock time may still exceed ``total_timeout`` by up
+                to one additional timeout window, because the guard does not
+                account for the in-flight attempt.
 
                 Always check each ``BatchRecord.result`` code regardless of
                 whether the call returned successfully.

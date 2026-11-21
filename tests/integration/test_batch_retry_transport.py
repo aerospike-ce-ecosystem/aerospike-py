@@ -111,6 +111,26 @@ def restartable_client():
             client.close()
 
 
+def _read_once_routable(client, key, timeout: float = 10.0):
+    """Read through a client that was connected before the server restarted.
+
+    A restarted container comes back with a new node id on the same address.
+    The Rust client checks the node's name on every cluster tend, drops the
+    node it knew when the name no longer matches, and learns the new one on
+    the following tend. For that one tend interval (one second by default) it
+    has no node to send a read to and raises ``ClusterError`` at once. A node
+    that keeps its id across the restart has no such gap.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return client.get(key)
+        except aerospike_py.ClusterError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+
+
 def _records(prefix, count=20):
     return [((NS, SET_NAME, f"{prefix}_{i}"), {"v": i}) for i in range(count)]
 
@@ -188,4 +208,4 @@ def test_batch_write_survives_a_node_restart(restartable_client):
 
     # The records really landed, rather than merely being reported as written.
     _wait_until_serving()
-    assert restartable_client.get((NS, SET_NAME, "restart_7")).bins == {"v": 7}
+    assert _read_once_routable(restartable_client, (NS, SET_NAME, "restart_7")).bins == {"v": 7}
