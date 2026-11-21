@@ -258,7 +258,8 @@ pub enum ErrorClass {
     InvalidNode,
     /// The caller passed an invalid argument or an unknown namespace.
     InvalidArgument,
-    /// A user-defined function failed.
+    /// A user-defined function failed: the server ran it (or could not find
+    /// it) and answered with `UDF_BAD_RESPONSE` and the failure text.
     Udf,
     /// A scan or query record stream ended before it was complete.
     StreamTerminated,
@@ -392,9 +393,14 @@ impl ErrorClass {
     /// something else there). Exposing it would invite wrong comparisons, so
     /// every client-side failure keeps the single `-1` sentinel and is told
     /// apart by `error_type` instead.
+    ///
+    /// A UDF failure is a server answer. aerospike-core reports it as a kind
+    /// of its own rather than as a server error, but the answer it stands for
+    /// carried `UDF_BAD_RESPONSE` (100), so that is the code.
     pub fn result_code(&self) -> i32 {
         match self {
             Self::Server(rc) => result_code_to_int(rc),
+            Self::Udf => result_code_to_int(&ResultCode::UdfBadResponse),
             _ => CLIENT_SIDE_RESULT_CODE,
         }
     }
@@ -951,6 +957,12 @@ mod tests {
 
             let udf = build_pyerr(ErrorClass::Udf, "boom", None, false);
             assert!(udf.is_instance_of::<UDFError>(py));
+            assert_eq!(
+                attr::<i32>(py, &udf, "result_code"),
+                100,
+                "the server answered UDF_BAD_RESPONSE; that is not a client-side failure"
+            );
+            assert_eq!(attr::<String>(py, &udf, "error_type"), "UdfBadResponse");
 
             for class in [
                 ErrorClass::StreamTerminated,
