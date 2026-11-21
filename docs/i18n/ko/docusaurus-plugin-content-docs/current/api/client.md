@@ -1355,7 +1355,7 @@ await query.foreach(process)
   </TabItem>
 </Tabs>
 
-`AsyncQuery.foreach()`의 callback은 event loop 밖의 worker thread에서 실행되는 일반 함수여야 하며, `async def` 함수를 넘기면 `TypeError`가 발생합니다. Callback은 서로 겹쳐 실행되지 않지만 모두 같은 thread에서 실행되지는 않으므로 thread-local에 상태를 두지 마세요. Callback이 발생시킨 exception은 query를 멈추고 `foreach()`에서 그대로 다시 발생합니다(`StopIteration` 포함). Await하는 task를 취소하면 query가 멈추고, 실행 중인 callback이 끝난 뒤에 `CancelledError`가 발생합니다.
+`AsyncQuery.foreach()`의 callback은 event loop 밖의 worker thread에서 실행되는 일반 함수여야 하며, `async def` 함수를 넘기면 `TypeError`가 발생합니다. Callback은 서로 겹쳐 실행되지 않지만 모두 같은 thread에서 실행되지는 않으므로 thread-local에 상태를 두지 마세요. Callback이 발생시킨 exception은 query를 멈추고 `foreach()`에서 그대로 다시 발생합니다. 단, `StopIteration`은 `StopIteration`을 `__cause__`로 가진 `RuntimeError`로 전달됩니다. Await하는 task를 취소하면 query가 멈추고, 실행 중인 callback이 끝난 뒤에 `CancelledError`가 발생합니다.
 
 ### `stream(policy=None)` (AsyncQuery)
 

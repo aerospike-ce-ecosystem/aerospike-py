@@ -2647,10 +2647,13 @@ class Query:
 
         Records are delivered **as they arrive**, so this is the API to reach
         for on a result set too large to hold in memory. Peak memory is bounded
-        by the client's internal record queue (``record_queue_size``, default
-        1024 records) rather than by the size of the result set, and the first
-        callback runs at the first record's latency rather than after the whole
-        scan. Returning ``False`` stops fetching from the server, so it bounds
+        by the client's internal record queue rather than by the size of the
+        result set: at most ``record_queue_size`` records (default 1024) per
+        query wait in the client, counting the queue and the records taken out
+        of it but not yet handed over, plus the batch being handed to Python
+        and one record for each node whose reader is waiting for room. The
+        first callback runs at the first record's latency rather than after
+        the whole scan. Returning ``False`` stops fetching from the server, so it bounds
         both time and memory — use it for "scan until I find the first match".
 
         Every record reaches the callback once, also when a node's connection
@@ -2723,8 +2726,11 @@ class AsyncRecordStream:
     iterate the same stream: each record goes to one of them.
 
     Memory stays bounded whatever the pace of the consumer: at most
-    ``record_queue_size`` records (default 1024) wait in the client, plus the
-    batch being handed out, and the server is not read from while they wait. A
+    ``record_queue_size`` records (default 1024) per query wait in the client,
+    counting the queue and the records taken out of it but not yet handed
+    over; on top of that come the batch being handed to Python and one record
+    for each node whose reader is waiting for room. The server is not read
+    from while they wait. A
     consumer may pause for longer than ``socket_timeout``: if the server drops
     the connection meanwhile, the client fetches the rest again when reading
     resumes, without repeating a record. A query that is dropped more often
@@ -2883,10 +2889,13 @@ class AsyncQuery:
 
         Records are delivered **as they arrive**, so this is the API to reach
         for on a result set too large to hold in memory. Peak memory is bounded
-        by the client's internal record queue (``record_queue_size``, default
-        1024 records) rather than by the size of the result set, and the first
-        callback runs at the first record's latency rather than after the whole
-        scan. Returning ``False`` stops fetching from the server, so it bounds
+        by the client's internal record queue rather than by the size of the
+        result set: at most ``record_queue_size`` records (default 1024) per
+        query wait in the client, counting the queue and the records taken out
+        of it but not yet handed over, plus the batch being handed to Python
+        and one record for each node whose reader is waiting for room. The
+        first callback runs at the first record's latency rather than after
+        the whole scan. Returning ``False`` stops fetching from the server, so it bounds
         both time and memory — use it for "scan until I find the first match".
 
         Every record reaches the callback once, also when a node's connection
@@ -2901,7 +2910,10 @@ class AsyncQuery:
         each batch of records, so do not keep state in thread-locals.
 
         An exception raised by the callback stops the query and is raised from
-        ``foreach`` as it is, ``StopIteration`` included.
+        ``foreach`` as it is, with one exception: a ``StopIteration`` reaches
+        the caller as ``RuntimeError`` ("coroutine raised StopIteration") with
+        the ``StopIteration`` as its ``__cause__``, which is what Python does
+        to a ``StopIteration`` that leaves a coroutine.
 
         **Cancellation.** Cancelling the awaiting task stops the query. A
         callback that is running when the cancellation arrives cannot be

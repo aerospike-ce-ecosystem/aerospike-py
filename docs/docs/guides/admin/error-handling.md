@@ -91,8 +91,8 @@ Every `AerospikeError` carries four attributes. Use them instead of the message 
 |-----------|---------|
 | `result_code` | The server's result code when a server answered (for example `2` record not found, `5` record exists, `100` UDF failed). `-1` when no server answered: a client timeout, a connection failure, an invalid argument. |
 | `error_type` | The kind of failure, by name. A server code is named after the code (`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, ...; `"ServerTimeout"` for a timeout the server reported). Client-side failures are `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"` or `"Client"`. This is what tells the `-1` cases apart. |
-| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. A write sent with `max_retries > 0` is the exception, see [Re-sent writes and `in_doubt`](#re-sent-writes-and-in_doubt). |
-| `partial_result` | For a batch call that failed as a whole: a `BatchWriteResult` with one row per requested record, in request order. `None` for every other failure. |
+| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. A write sent with `max_retries > 0` is the exception, see [Re-sent writes and `in_doubt`](#re-sent-writes-and-in_doubt). The exception of a batch call that failed as a whole is in doubt whenever any row of its `partial_result` is. |
+| `partial_result` | For a batch call that failed as a whole: a `BatchWriteResult` with one row per requested record, in request order. `None` for every other failure. When the call failed on several nodes, the exception is the error of one of them (the first whose share failed); the rows say what happened to each record. |
 
 ```python
 import aerospike_py
@@ -168,11 +168,13 @@ Every `BatchRecord` has `result`, `error_type` and `in_doubt`:
 
 `result` is `0` only when a server reported success for that record. A row is never counted as written because nothing came back.
 
-A write the server refused with a code worth a retry, `KEY_BUSY` (14), `DEVICE_OVERLOAD` (18) or `PARTITION_UNAVAILABLE` (11), is an answer: the row carries that code with `in_doubt == False`, and the call returns normally, also for a batch of one key. A single-record write refused this way (`put()` on a hot key, for example) raises `ServerError` with that `result_code`, an `error_type` of `"KeyBusy"`, `"DeviceOverload"` or `"PartitionUnavailable"`, and `in_doubt == False`.
+A write the server refused with a code worth a retry, `KEY_BUSY` (14), `DEVICE_OVERLOAD` (18) or `PARTITION_UNAVAILABLE` (11), is an answer: the row carries that code with `in_doubt == False`, and the call returns normally, also for a batch of one key. A single-record write refused this way (`put()` on a hot key, for example) raises `ServerError` with that `result_code`, an `error_type` of `"KeyBusy"`, `"DeviceOverload"` or `"PartitionUnavailable"`, and `in_doubt == False`. A `PARTITION_UNAVAILABLE` row of a write batch sent with `max_retries > 0` can be in doubt; see [Re-sent writes and `in_doubt`](#re-sent-writes-and-in_doubt).
 
 ### When the Whole Batch Fails
 
 A batch call that fails as a whole (for example, the node that owns some of the keys stops answering) raises an exception as before, and the exception carries the rows: `exc.partial_result` is a `BatchWriteResult` with one `BatchRecord` per requested record, in request order. Records that other nodes answered keep their results; the rest say why they have none. Every batch method sets it: `batch_read`, `batch_write`, `batch_write_numpy`, `batch_operate`, `batch_remove` and `batch_apply`.
+
+The exception has `in_doubt == True` whenever any row of its `partial_result` is in doubt. When the call failed on several nodes, the exception is the error of one of them (the first whose share failed), so its type and `result_code` can differ with the order of the records. Decide from the rows, which say what happened to each record.
 
 ```python
 from aerospike_py.exception import AerospikeError
@@ -239,9 +241,12 @@ Use the built-in `retry` parameter for automatic transient-failure retries with 
 Writes are not re-sent by default: `max_retries` is `0` for every write. When you set `max_retries > 0` on a write, the Rust client sends it again when its answer is lost. If the first send was applied, the second one meets its own work: a re-sent delete finds no record, a re-sent filtered write no longer matches, a re-sent UDF fails on what the first run left behind. The Rust client does not say whether a row was sent twice, so under such a policy:
 
 - a row of `batch_write`, `batch_operate` (with a write), `batch_remove` or `batch_apply` that ends in `KEY_NOT_FOUND` (2), `FILTERED_OUT` (27) or `UDF_BAD_RESPONSE` (100) has `in_doubt == True`;
+- so does a row of these calls with `PARTITION_UNAVAILABLE` (11) that the client gave the row itself, because it found no node for the record when the node's share was due to be sent again (the node was dropped from the cluster meanwhile, or the client was closed). The first send may have been applied. A row that a server refused with `PARTITION_UNAVAILABLE` at the first send is still `in_doubt == False`;
 - `remove()` that raises `RecordNotFound` carries `in_doubt == True`.
 
-The call does not know whether it changed the record, and says so. With the default policy nothing changes, and reads (`batch_read`) are never in doubt.
+The call does not know whether it changed the record, and says so; it still returns normally with such rows. With the default policy nothing changes, and reads (`batch_read`) are never in doubt.
+
+One case is not covered. A single-record write (`put()`, `remove()`, `operate()`, ...) with `max_retries > 0` whose client is closed while the write waits to be sent again raises `InvalidArgError` ("Partition map empty") with `in_doubt == False`, although the first send may have been applied. A node that goes down does not take this path: there the attempts run out and the error is in doubt. Do not close a client that has writes in flight.
 
 ```python
 import aerospike_py

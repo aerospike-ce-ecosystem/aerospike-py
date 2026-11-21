@@ -1527,10 +1527,13 @@ from the callback to stop iteration early.
 
 Records are delivered **as they arrive**, so this is the API to reach
 for on a result set too large to hold in memory. Peak memory is bounded
-by the client's internal record queue (``record_queue_size``, default
-1024 records) rather than by the size of the result set, and the first
-callback runs at the first record's latency rather than after the whole
-scan. Returning ``False`` stops fetching from the server, so it bounds
+by the client's internal record queue rather than by the size of the
+result set: at most ``record_queue_size`` records (default 1024) per
+query wait in the client, counting the queue and the records taken out
+of it but not yet handed over, plus the batch being handed to Python
+and one record for each node whose reader is waiting for room. The
+first callback runs at the first record's latency rather than after
+the whole scan. Returning ``False`` stops fetching from the server, so it bounds
 both time and memory — use it for "scan until I find the first match".
 
 Every record reaches the callback once, also when a node's connection

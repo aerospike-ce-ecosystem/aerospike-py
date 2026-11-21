@@ -91,8 +91,8 @@ except AerospikeError as e:
 |-----------|------|
 | `result_code` | Server가 응답했으면 server의 result code(예: `2` record 없음, `5` record 이미 존재, `100` UDF 실패). 어떤 server도 응답하지 않았으면 `-1`: client timeout, connection 실패, 잘못된 인자. |
 | `error_type` | 실패의 종류를 나타내는 이름. Server code는 code 이름을 따릅니다(`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, ...; server가 알린 timeout은 `"ServerTimeout"`). Client 쪽 실패는 `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"`, `"Client"` 중 하나입니다. `-1`인 경우들은 이 값으로 구분합니다. |
-| `in_doubt` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. `max_retries > 0`으로 보낸 write는 예외입니다. [다시 보낸 write와 `in_doubt`](#re-sent-writes-and-in_doubt)를 참고하세요. |
-| `partial_result` | 전체가 실패한 batch 호출이면 요청한 record마다 row 하나를 요청 순서대로 담은 `BatchWriteResult`. 그 밖의 실패에서는 `None`. |
+| `in_doubt` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. `max_retries > 0`으로 보낸 write는 예외입니다. [다시 보낸 write와 `in_doubt`](#re-sent-writes-and-in_doubt)를 참고하세요. 전체가 실패한 batch 호출의 exception은 `partial_result`의 row 중 하나라도 in doubt이면 in doubt입니다. |
+| `partial_result` | 전체가 실패한 batch 호출이면 요청한 record마다 row 하나를 요청 순서대로 담은 `BatchWriteResult`. 그 밖의 실패에서는 `None`. 호출이 여러 node에서 실패했다면 exception은 그중 한 node의 오류(몫이 처음 실패한 node)이고, 각 record에 무슨 일이 있었는지는 row가 알려 줍니다. |
 
 ```python
 import aerospike_py
@@ -167,11 +167,13 @@ for br in results.batch_records:
 
 `result`는 server가 그 record의 성공을 알린 경우에만 `0`입니다. 아무 응답이 없었다는 이유로 row가 쓰인 것으로 취급되는 일은 없습니다.
 
-Server가 retry할 만한 code인 `KEY_BUSY`(14), `DEVICE_OVERLOAD`(18), `PARTITION_UNAVAILABLE`(11)로 거절한 write는 응답입니다. 그 row는 해당 code와 `in_doubt == False`를 갖고, key가 하나뿐인 batch에서도 호출은 정상적으로 반환됩니다. 이렇게 거절된 단일 record write(예: hot key에 대한 `put()`)는 해당 `result_code`, `"KeyBusy"`·`"DeviceOverload"`·`"PartitionUnavailable"` 중 하나인 `error_type`, `in_doubt == False`를 가진 `ServerError`를 발생시킵니다.
+Server가 retry할 만한 code인 `KEY_BUSY`(14), `DEVICE_OVERLOAD`(18), `PARTITION_UNAVAILABLE`(11)로 거절한 write는 응답입니다. 그 row는 해당 code와 `in_doubt == False`를 갖고, key가 하나뿐인 batch에서도 호출은 정상적으로 반환됩니다. 이렇게 거절된 단일 record write(예: hot key에 대한 `put()`)는 해당 `result_code`, `"KeyBusy"`·`"DeviceOverload"`·`"PartitionUnavailable"` 중 하나인 `error_type`, `in_doubt == False`를 가진 `ServerError`를 발생시킵니다. `max_retries > 0`으로 보낸 write batch의 `PARTITION_UNAVAILABLE` row는 in doubt일 수 있습니다. [다시 보낸 write와 `in_doubt`](#re-sent-writes-and-in_doubt)를 참고하세요.
 
 ### Batch 전체가 실패할 때
 
 전체가 실패한 batch 호출(예: 일부 key를 가진 node가 응답을 멈춤)은 이전처럼 exception을 발생시키고, 그 exception이 row를 담고 있습니다. `exc.partial_result`는 요청한 record마다 `BatchRecord` 하나를 요청 순서대로 담은 `BatchWriteResult`입니다. 다른 node가 응답한 record는 결과를 그대로 갖고, 나머지는 결과가 없는 이유를 알려 줍니다. 모든 batch method가 이 값을 채웁니다: `batch_read`, `batch_write`, `batch_write_numpy`, `batch_operate`, `batch_remove`, `batch_apply`.
+
+`partial_result`의 row 중 하나라도 in doubt이면 exception도 `in_doubt == True`입니다. 호출이 여러 node에서 실패했다면 exception은 그중 한 node의 오류(몫이 처음 실패한 node)이므로, exception의 type과 `result_code`는 record 순서에 따라 달라질 수 있습니다. 판단은 각 record에 무슨 일이 있었는지 알려 주는 row로 하세요.
 
 ```python
 from aerospike_py.exception import AerospikeError
@@ -238,9 +240,12 @@ Exponential backoff로 transient failure를 자동으로 retry하려면 내장 `
 기본적으로 write는 다시 보내지 않습니다. 모든 write의 `max_retries`는 `0`입니다. Write에 `max_retries > 0`을 주면, 응답이 유실되었을 때 Rust client가 write를 다시 보냅니다. 첫 전송이 이미 적용되었다면 두 번째 전송은 자기가 한 일을 만납니다. 다시 보낸 delete는 record를 찾지 못하고, 다시 보낸 filter 있는 write는 더 이상 조건에 맞지 않으며, 다시 보낸 UDF는 첫 실행이 남긴 상태 때문에 실패합니다. Rust client는 row가 두 번 전송되었는지 알려 주지 않으므로, 이런 policy에서는 다음과 같습니다.
 
 - `batch_write`, write가 있는 `batch_operate`, `batch_remove`, `batch_apply`의 row가 `KEY_NOT_FOUND`(2), `FILTERED_OUT`(27), `UDF_BAD_RESPONSE`(100)로 끝나면 `in_doubt == True`입니다.
+- 이 호출들의 row 중, node 몫을 다시 보낼 때가 되었는데 그 record의 node를 찾지 못해(그사이 node가 cluster에서 빠졌거나 client가 닫힘) client가 직접 `PARTITION_UNAVAILABLE`(11)을 준 row도 그렇습니다. 첫 전송이 적용되었을 수 있습니다. 첫 전송에서 server가 `PARTITION_UNAVAILABLE`로 거절한 row는 여전히 `in_doubt == False`입니다.
 - `RecordNotFound`를 발생시킨 `remove()`는 `in_doubt == True`를 갖습니다.
 
-호출이 record를 바꿨는지 알 수 없고, 그렇다고 알려 주는 것입니다. 기본 policy에서는 아무것도 바뀌지 않고, 읽기(`batch_read`)는 결코 in doubt가 아닙니다.
+호출이 record를 바꿨는지 알 수 없고, 그렇다고 알려 주는 것입니다. 이런 row가 있어도 호출은 정상적으로 반환됩니다. 기본 policy에서는 아무것도 바뀌지 않고, 읽기(`batch_read`)는 결코 in doubt가 아닙니다.
+
+다루지 못하는 경우가 하나 있습니다. `max_retries > 0`인 단일 record write(`put()`, `remove()`, `operate()` 등)가 다시 보내지기를 기다리는 동안 client가 닫히면, 첫 전송이 적용되었을 수 있는데도 `in_doubt == False`인 `InvalidArgError`("Partition map empty")가 발생합니다. Node가 다운된 경우는 이 경로를 타지 않습니다. 이때는 시도 횟수가 다 소진되고 오류는 in doubt입니다. 진행 중인 write가 있는 client는 닫지 마세요.
 
 ```python
 import aerospike_py

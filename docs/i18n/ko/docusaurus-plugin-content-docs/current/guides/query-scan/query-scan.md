@@ -74,7 +74,9 @@ def limited(record: Record):
 query.foreach(limited)
 ```
 
-`foreach()`는 record가 도착하는 대로 callback에 넘깁니다. Client에서 대기하는 record는 최대 `record_queue_size`개(`QueryPolicy` field, 기본값 1024)이므로 결과 크기가 커져도 memory가 늘지 않습니다. Scan 도중 node의 connection이 끊겨 client가 set의 일부를 다시 가져오는 경우에도, 모든 record는 callback에 한 번씩만 전달됩니다. Callback이 `False`를 반환하거나 exception을 발생시키면 server의 scan도 멈춥니다. Scan이 실행되는 동안 record를 넘기기 때문에, query가 실패하면(timeout, node 장애) callback이 이미 일부 record를 처리한 뒤에 exception이 발생할 수 있습니다. Record를 모두 받거나 하나도 받지 않아야 한다면 `results()`를 사용하세요.
+`foreach()`는 record가 도착하는 대로 callback에 넘깁니다. Client에서 대기하는 record는 query마다 최대 `record_queue_size`개(`QueryPolicy` field, 기본값 1024)이며, queue에 있는 record와 queue에서 꺼냈지만 아직 넘겨주지 않은 record를 함께 셉니다. 여기에 Python으로 넘겨주는 중인 묶음과, 자리가 나기를 기다리는 reader가 있는 node마다 record 하나가 더해집니다. 결과 크기가 커져도 memory가 늘지 않습니다. Scan 도중 node의 connection이 끊겨 client가 set의 일부를 다시 가져오는 경우에도, 모든 record는 callback에 한 번씩만 전달됩니다. Callback이 `False`를 반환하거나 exception을 발생시키면 server의 scan도 멈춥니다. Scan이 실행되는 동안 record를 넘기기 때문에, query가 실패하면(timeout, node 장애) callback이 이미 일부 record를 처리한 뒤에 exception이 발생할 수 있습니다. Record를 모두 받거나 하나도 받지 않아야 한다면 `results()`를 사용하세요.
+
+Sync query 도중의 Ctrl-C는 이제 사라지지 않고 발생합니다. 0.14.x까지는 interrupt가 사라지고 query가 정상적으로 반환되었습니다. `foreach()`에서는 `KeyboardInterrupt`가 callback 안에서 발생해 scan을 멈추고, `results()`는 중간에 끊기지 않으며 반환된 뒤에 `KeyboardInterrupt`가 발생합니다.
 
 Callback이 exception을 발생시켜 멈춘 query는 metrics에 query의 결과로 기록되지 않습니다. 성공으로도 오류로도 세지 않습니다. 실패한 것은 query가 아니라 callback이기 때문입니다. Sync client와 async client 모두 같습니다.
 
@@ -114,7 +116,7 @@ async with query.stream({"max_records": 1000}) as records:
 
 - **첫 record를 요청하기 전에는 아무것도 보내지 않습니다.** `stream()`은 policy를 바로 검사하고, query는 첫 읽기에서 시작합니다.
 - **모든 record는 한 번씩만 넘겨줍니다.** 어떤 방법으로 읽든(`results()`, `foreach()`, `async for`) 같고, scan 도중 node의 connection이 끊겨 client가 set의 일부를 다시 가져오는 경우에도 같습니다.
-- **Memory 사용량이 제한됩니다.** Client에서 대기하는 record는 최대 `record_queue_size`개(기본값 1024)와 넘겨주는 중인 묶음뿐이고, 대기하는 동안에는 server에서 읽지 않습니다.
+- **Memory 사용량이 제한됩니다.** Client에서 대기하는 record는 query마다 최대 `record_queue_size`개(기본값 1024)이며, queue에 있는 record와 queue에서 꺼냈지만 아직 넘겨주지 않은 record를 함께 셉니다. 여기에 Python으로 넘겨주는 중인 묶음과, 자리가 나기를 기다리는 reader가 있는 node마다 record 하나가 더해집니다. 대기하는 동안에는 server에서 읽지 않습니다.
 - **Consumer는 잠시 멈춰도 됩니다.** Query의 `socket_timeout`보다 오래 읽지 않아도 됩니다. 그사이 server가 connection을 끊으면, 읽기를 다시 시작할 때 client가 나머지를 다시 가져오며 record를 중복해서 넘기지 않습니다. `max_retries`가 허용하는 것보다 많이 끊긴 query는 실패합니다. `total_timeout`을 설정했다면 consumer가 쓰는 시간도 여기에 포함됩니다. 시간이 다 되면 이미 넘겨준 record 다음의 읽기에서 `AerospikeTimeoutError`가 발생합니다.
 - **여러 task가 한 stream을 읽어도 됩니다.** 각 record는 그중 정확히 한 task에만 전달됩니다.
 
@@ -147,7 +149,7 @@ Client를 닫아도 이미 실행 중인 stream은 멈추지 않습니다. Strea
 
 Callback은 일반 함수입니다. Event loop 밖의 worker thread에서 실행되므로, 다른 task를 멈추지 않고 block할 수 있습니다(파일 쓰기, sync client 호출 등). Callback은 await되지 않습니다. `async def` 함수를 넘기면 `TypeError`가 발생합니다. Record마다 무언가를 await하려면 `async for record in query`를 사용하세요. Callback은 서로 겹쳐 실행되지 않지만, 모두 같은 thread에서 실행되지는 않습니다. Event loop의 기본 executor가 record 묶음마다 thread를 고르므로, thread-local에 상태를 두지 마세요.
 
-Callback이 발생시킨 exception은 query를 멈추고, `foreach()`에서 그대로 다시 발생합니다. `StopIteration`도 마찬가지입니다.
+Callback이 발생시킨 exception은 query를 멈추고, `foreach()`에서 그대로 다시 발생합니다. 예외는 `StopIteration` 하나입니다. 이것은 `StopIteration`을 `__cause__`로 가진 `RuntimeError`("coroutine raised StopIteration")로 호출자에게 전달됩니다. Coroutine을 빠져나가는 `StopIteration`에 Python이 하는 처리입니다.
 
 `foreach()`를 await하는 task가 취소되면, 이미 실행 중인 callback은 끝까지 실행되고, 새 callback은 시작되지 않으며, 그다음에야 `CancelledError`가 발생합니다. `asyncio.run`이 Ctrl-C에서 하듯 모든 task를 한꺼번에 취소할 때도 같습니다.
 

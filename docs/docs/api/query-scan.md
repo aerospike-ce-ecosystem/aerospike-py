@@ -32,7 +32,7 @@ Execute and return all matching records. All or nothing: a query that fails rais
 
 ### `foreach(callback, policy=None)`
 
-Execute and invoke `callback(record)` for each result as it arrives. Return `False` to stop early; that stops the scan on the server too. At most `record_queue_size` records (default 1024) wait in the client.
+Execute and invoke `callback(record)` for each result as it arrives. Return `False` to stop early; that stops the scan on the server too. At most `record_queue_size` records (default 1024) per query wait in the client, counting those taken out of the queue but not yet handed over; on top of that come the batch being handed to Python and one record for each node whose reader is waiting for room.
 
 ```python
 def process(record: Record) -> None:
@@ -41,7 +41,7 @@ def process(record: Record) -> None:
 query.foreach(process)
 ```
 
-On `AsyncQuery`, the callback runs in a worker thread and must be a plain function (an `async def` function raises `TypeError`). Callbacks never overlap, but they do not all run on the same thread, so do not keep state in thread-locals. An exception the callback raises stops the query and is raised from `foreach()` unchanged, `StopIteration` included. Cancelling the awaiting task stops the query; a running callback finishes first, also when `asyncio.run` cancels every task on Ctrl-C.
+On `AsyncQuery`, the callback runs in a worker thread and must be a plain function (an `async def` function raises `TypeError`). Callbacks never overlap, but they do not all run on the same thread, so do not keep state in thread-locals. An exception the callback raises stops the query and is raised from `foreach()` unchanged, except `StopIteration`, which reaches the caller as `RuntimeError` with the `StopIteration` as its `__cause__`, as Python does when one leaves a coroutine. Cancelling the awaiting task stops the query; a running callback finishes first, also when `asyncio.run` cancels every task on Ctrl-C.
 
 ### `stream(policy=None) -> AsyncRecordStream` (async only)
 
@@ -67,7 +67,7 @@ Returned by `AsyncQuery.stream()`; `async for record in query` uses one.
 | `await aclose()` | Same as `close()`; for `contextlib.aclosing` and similar helpers. |
 | `closed` | Whether `close()` has been called. |
 
-The query stops, on the client and on the server, when the stream ends, when `close()` is called, when the `async with` block is left, or when the stream is garbage collected. At most `record_queue_size` records (default 1024) wait in the client. Every record is handed out once, and several tasks may iterate the same stream: each record goes to one of them.
+The query stops, on the client and on the server, when the stream ends, when `close()` is called, when the `async with` block is left, or when the stream is garbage collected. At most `record_queue_size` records (default 1024) per query wait in the client, plus the batch being handed to Python and one record for each node whose reader is waiting for room. Every record is handed out once, and several tasks may iterate the same stream: each record goes to one of them.
 
 Cancelling a task that waits for the next record closes the stream. A later read on that stream raises `RuntimeError` instead of ending the iteration, because the cancelled read may already have taken records. A stream closed with `close()` simply ends. To bound a wait, put the timeout around the whole loop, not around one `anext()`.
 

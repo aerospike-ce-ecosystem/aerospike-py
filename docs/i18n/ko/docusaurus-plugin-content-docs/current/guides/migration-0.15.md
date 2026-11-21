@@ -201,7 +201,7 @@ Row의 결과를 구분하는 방법:
 
 `in_doubt`는 record가 실패했지만 write가 적용되었을 수도 있다는 뜻입니다. 요청은 보냈는데 응답이 돌아오지 않은 경우입니다. 다시 쓰기 전에 record를 읽어 확인하세요.
 
-Server가 retry할 만한 code인 `KEY_BUSY`(14), `DEVICE_OVERLOAD`(18), `PARTITION_UNAVAILABLE`(11)로 거절한 write는 응답입니다. 그 row는 해당 code와 `in_doubt == False`를 갖고, key가 하나뿐인 batch에서도 호출은 정상적으로 반환됩니다. 0.14.x와 같습니다. Write batch를 `max_retries > 0`으로 보내면 결과 세 가지가 더 in doubt로 보고됩니다. [두 번째 전송이 응답했을 수 있는 row](#rows-a-second-send-may-have-answered)를 참고하세요.
+Server가 retry할 만한 code인 `KEY_BUSY`(14), `DEVICE_OVERLOAD`(18), `PARTITION_UNAVAILABLE`(11)로 거절한 write는 응답입니다. 그 row는 해당 code와 `in_doubt == False`를 갖고, key가 하나뿐인 batch에서도 호출은 정상적으로 반환됩니다. 0.14.x와 같습니다. Write batch를 `max_retries > 0`으로 보내면 결과 네 가지가 더 in doubt로 보고됩니다. [두 번째 전송이 응답했을 수 있는 row](#rows-a-second-send-may-have-answered)를 참고하세요.
 
 ### 다섯 번째 field: `error_type`
 
@@ -249,6 +249,8 @@ k2 -1 NoResponse False
 ```
 
 이 경우 exception class도 바뀌었습니다. [없는 namespace](#an-unknown-namespace-raises-invalidargerror)를 참고하세요. `batch_write(retry=N)`이 exception을 발생시키면 `exc.partial_result.retry`에 그 호출의 retry counter가 들어 있습니다.
+
+`partial_result`의 row 중 하나라도 in doubt이면 exception도 `in_doubt == True`입니다. 호출이 여러 node에서 실패했다면 exception은 그중 한 node의 오류(몫이 처음 실패한 node)이므로, exception의 type과 `result_code`는 record 순서에 따라 달라질 수 있습니다. 각 record에 무슨 일이 있었는지는 row가 알려 줍니다.
 
 **대응:** 실패한 batch 호출을 catch하는 곳에서는 무엇을 다시 보낼지 정하기 전에 `exc.partial_result`를 확인하세요. `result == 0`인 row는 쓰였고, `in_doubt`인 row는 쓰였을 수도 있습니다.
 
@@ -321,7 +323,7 @@ runs: 1
 
 ### 두 번째 전송이 응답했을 수 있는 row {#rows-a-second-send-may-have-answered}
 
-Write에 `max_retries > 0`을 주면, 응답이 유실되었을 때 Rust client가 batch 중 한 node 몫을 다시 보냅니다. 첫 전송이 이미 적용되었다면 두 번째 전송은 자기가 한 일을 만납니다. 다시 보낸 delete는 record를 찾지 못하고, 다시 보낸 filter 있는 write는 더 이상 조건에 맞지 않으며, 다시 보낸 UDF는 첫 실행이 남긴 상태 때문에 실패합니다. Rust client는 row가 두 번 전송되었는지 알려 주지 않으므로, `batch_write`, write가 있는 `batch_operate`, `batch_remove`, `batch_apply`의 row가 `KEY_NOT_FOUND`(2), `FILTERED_OUT`(27), `UDF_BAD_RESPONSE`(100)로 끝나면 `in_doubt == True`로 보고됩니다. 호출이 record를 바꿨는지 알 수 없다는 뜻입니다. 이런 policy에서 `RecordNotFound`를 발생시킨 `remove()`도 `in_doubt == True`를 갖습니다.
+Write에 `max_retries > 0`을 주면, 응답이 유실되었을 때 Rust client가 batch 중 한 node 몫을 다시 보냅니다. 첫 전송이 이미 적용되었다면 두 번째 전송은 자기가 한 일을 만납니다. 다시 보낸 delete는 record를 찾지 못하고, 다시 보낸 filter 있는 write는 더 이상 조건에 맞지 않으며, 다시 보낸 UDF는 첫 실행이 남긴 상태 때문에 실패합니다. Rust client는 row가 두 번 전송되었는지 알려 주지 않으므로, `batch_write`, write가 있는 `batch_operate`, `batch_remove`, `batch_apply`의 row가 `KEY_NOT_FOUND`(2), `FILTERED_OUT`(27), `UDF_BAD_RESPONSE`(100)로 끝나면 `in_doubt == True`로 보고됩니다. 호출이 record를 바꿨는지 알 수 없다는 뜻입니다. Node 몫을 다시 보낼 때가 되었는데 그 record의 node를 찾지 못해(그사이 node가 cluster에서 빠졌거나 client가 닫힘) client가 직접 `PARTITION_UNAVAILABLE`(11)을 준 row도 마찬가지입니다. 첫 전송이 적용되었을 수 있기 때문입니다. 이런 row가 있어도 호출은 정상적으로 반환됩니다. 첫 전송에서 server가 `PARTITION_UNAVAILABLE`로 거절한 row는 그대로 `in_doubt == False`입니다. 이런 policy에서 `RecordNotFound`를 발생시킨 `remove()`도 `in_doubt == True`를 갖습니다.
 
 기본 policy(모든 write에서 `max_retries`는 `0`)에서는 아무것도 바뀌지 않고, 읽기(`batch_read`)는 결코 in doubt가 아닙니다. 예제는 [Error Handling](/docs/guides/error-handling#re-sent-writes-and-in_doubt)에 있습니다.
 
@@ -369,7 +371,7 @@ retry=2 and policy['max_retries']=1 were both given; they would multiply into up
 |---|---|
 | `result_code` | Server가 응답했으면 server의 result code, 어떤 server도 응답하지 않았으면 `-1`. |
 | `error_type` | 실패의 종류를 나타내는 이름. Server code는 code 이름을 따릅니다(`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, `"DeviceOverload"`, ...; server가 알린 timeout은 `"ServerTimeout"`). Client 쪽 실패는 `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"`, `"Client"` 중 하나입니다. |
-| `in_doubt` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. `max_retries > 0`으로 보낸 write는 예외입니다. [두 번째 전송이 응답했을 수 있는 row](#rows-a-second-send-may-have-answered)를 참고하세요. |
+| `in_doubt` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. `max_retries > 0`으로 보낸 write는 예외입니다. [두 번째 전송이 응답했을 수 있는 row](#rows-a-second-send-may-have-answered)를 참고하세요. 전체가 실패한 batch 호출의 exception은 row 중 하나라도 in doubt이면 in doubt입니다. |
 | `partial_result` | 전체가 실패한 batch 호출의 row. 그 밖에는 `None`. [위](#a-batch-call-that-fails-as-a-whole-keeps-its-rows)를 참고하세요. |
 
 `result_code == -1`은 여러 실패를 포함하며, `error_type`으로 구분합니다. 두 가지 실패에서는 exception class와 `error_type`이 바뀌었습니다.
@@ -673,7 +675,7 @@ print(len(handle), len(handle.to_dict()), handle.found_count(), len(handle.to_li
 
 `AsyncQuery.results()`와 `AsyncQuery.foreach()`는 이전에 worker thread에서 query를 실행했습니다. Task를 취소하면 `CancelledError`는 바로 발생했지만, thread는 scan이 끝날 때까지 record를 읽고 callback을 계속 호출했습니다. 0.15에서는 둘 다 query의 record stream을 await하며 읽으므로, task를 취소하면 client와 server 양쪽에서 query가 멈춥니다.
 
-`foreach()`는 여전히 worker thread에서 callback을 호출하므로 callback이 block되어도 됩니다. Callback은 서로 겹쳐 실행되지 않지만 모두 같은 thread에서 실행되지는 않습니다. Event loop의 기본 executor가 record 묶음마다 thread를 고르므로, thread-local에 상태를 두지 마세요. Callback이 발생시킨 exception은 query를 멈추고 `foreach()`에서 그대로 다시 발생합니다. `StopIteration`도 마찬가지입니다. Task가 취소되면 실행 중인 callback은 끝까지 실행되고, 새 callback은 시작되지 않으며, 그다음에야 `CancelledError`가 발생합니다. `asyncio.run`이 Ctrl-C에서 하듯 모든 task를 한꺼번에 취소할 때도 같습니다.
+`foreach()`는 여전히 worker thread에서 callback을 호출하므로 callback이 block되어도 됩니다. Callback은 서로 겹쳐 실행되지 않지만 모두 같은 thread에서 실행되지는 않습니다. Event loop의 기본 executor가 record 묶음마다 thread를 고르므로, thread-local에 상태를 두지 마세요. Callback이 발생시킨 exception은 query를 멈추고 `foreach()`에서 그대로 다시 발생합니다. `StopIteration`만은 coroutine을 빠져나갈 때 Python이 하듯 `StopIteration`을 `__cause__`로 가진 `RuntimeError`로 전달됩니다. Task가 취소되면 실행 중인 callback은 끝까지 실행되고, 새 callback은 시작되지 않으며, 그다음에야 `CancelledError`가 발생합니다. `asyncio.run`이 Ctrl-C에서 하듯 모든 task를 한꺼번에 취소할 때도 같습니다.
 
 ```python
 async def cancel_after_100(client):
@@ -708,7 +710,7 @@ callbacks when CancelledError was raised: 100, half a second later: 100
 
 ### `async for`와 `query.stream()`
 
-이제 `AsyncQuery`를 순회할 수 있습니다: `async for record in query`. `query.stream(policy)`도 같은 `AsyncRecordStream`을 반환하며, 이 객체는 async context manager이기도 하고 `close()`를 갖습니다. 첫 record를 요청하기 전에는 아무것도 보내지 않습니다. Consumer의 속도와 관계없이 client에서 대기하는 record는 최대 `record_queue_size`개(기본값 1024)이며, consumer가 `socket_timeout`보다 오래 멈춰도 됩니다. 읽기를 다시 시작하면 client가 나머지를 다시 가져오며 record를 중복해서 넘기지 않습니다. 여러 task가 같은 stream을 순회해도 되고, 각 record는 그중 한 task에만 전달됩니다. [Query 가이드](/docs/guides/query-scan#async-streaming)를 참고하세요.
+이제 `AsyncQuery`를 순회할 수 있습니다: `async for record in query`. `query.stream(policy)`도 같은 `AsyncRecordStream`을 반환하며, 이 객체는 async context manager이기도 하고 `close()`를 갖습니다. 첫 record를 요청하기 전에는 아무것도 보내지 않습니다. Consumer의 속도와 관계없이 client에서 대기하는 record는 query마다 최대 `record_queue_size`개(기본값 1024. 여기에 Python으로 넘겨주는 중인 묶음과, 자리가 나기를 기다리는 reader가 있는 node마다 record 하나가 더해집니다)이며, consumer가 `socket_timeout`보다 오래 멈춰도 됩니다. 읽기를 다시 시작하면 client가 나머지를 다시 가져오며 record를 중복해서 넘기지 않습니다. 여러 task가 같은 stream을 순회해도 되고, 각 record는 그중 한 task에만 전달됩니다. [Query 가이드](/docs/guides/query-scan#async-streaming)를 참고하세요.
 
 Stream으로 코드를 옮길 때 알아 둘 점이 두 가지 있습니다.
 

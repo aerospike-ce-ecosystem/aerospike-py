@@ -56,7 +56,7 @@ _, meta, bins = record     # tuple unpacking
 | `key` | `AerospikeKey \| None` | record key |
 | `result` | `int` | server가 성공을 알렸으면 `0`, 실패를 알렸으면 server의 result code(`2` not found, `27` filtered out, ...), 이 record에 대해 어떤 server도 응답하지 않았으면 `-1` |
 | `record` | `Record \| None` | record 데이터 (operation 실패 시 `None`) |
-| `in_doubt` | `bool` | record는 실패했지만 write가 적용되었을 수 있음: 요청은 보냈고 응답이 돌아오지 않음 (default `False`). Write batch에 `max_retries > 0`을 주었다면 `KEY_NOT_FOUND`, `FILTERED_OUT`, `UDF_BAD_RESPONSE`로 끝난 row도 in doubt ([다시 보낸 write와 `in_doubt`](../guides/admin/error-handling.md#re-sent-writes-and-in_doubt) 참고) |
+| `in_doubt` | `bool` | record는 실패했지만 write가 적용되었을 수 있음: 요청은 보냈고 응답이 돌아오지 않음 (default `False`). Write batch에 `max_retries > 0`을 주었다면 `KEY_NOT_FOUND`, `FILTERED_OUT`, `UDF_BAD_RESPONSE`로 끝난 row와, 다시 보낼 node를 찾지 못해 client가 직접 `PARTITION_UNAVAILABLE`을 준 row도 in doubt ([다시 보낸 write와 `in_doubt`](../guides/admin/error-handling.md#re-sent-writes-and-in_doubt) 참고) |
 | `error_type` | `str \| None` | 성공이면 `None`. 아니면 exception의 `error_type`과 같은 이름으로 나타낸 실패 종류: server code(`"KeyNotFoundError"`, `"FilteredOut"`, ...), client 쪽 실패(`"Timeout"`, `"Connection"`, ...), 어떤 node도 응답하지 않았으면 `"NoResponse"`. `-1`인 결과들을 구분해 줍니다. 0.15에서 추가되었으므로 `BatchRecord`를 이름 네 개로 unpack하던 코드는 다섯 개로 바꿔야 합니다. |
 
 ```python

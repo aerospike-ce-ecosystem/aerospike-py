@@ -74,7 +74,9 @@ def limited(record: Record):
 query.foreach(limited)
 ```
 
-`foreach()` hands records to the callback as they arrive. At most `record_queue_size` records (a `QueryPolicy` field, default 1024) wait in the client, so memory does not grow with the result set. Every record reaches the callback once, also when a node's connection fails in the middle of the scan and the client fetches part of the set again. Returning `False`, or raising from the callback, stops the scan on the server as well. Because records are delivered while the scan runs, a query that fails (a timeout, a node going away) can raise after the callback has already processed part of the records. Use `results()` when you need all records or none.
+`foreach()` hands records to the callback as they arrive. At most `record_queue_size` records (a `QueryPolicy` field, default 1024) per query wait in the client, counting the queue and the records taken out of it but not yet handed over; on top of that come the batch being handed to Python and one record for each node whose reader is waiting for room. Memory does not grow with the result set. Every record reaches the callback once, also when a node's connection fails in the middle of the scan and the client fetches part of the set again. Returning `False`, or raising from the callback, stops the scan on the server as well. Because records are delivered while the scan runs, a query that fails (a timeout, a node going away) can raise after the callback has already processed part of the records. Use `results()` when you need all records or none.
+
+Ctrl-C during a sync query is raised, no longer lost as it was up to 0.14.x, where the query returned normally. In `foreach()` the `KeyboardInterrupt` is raised in the callback, which stops the scan; `results()` is not cut short, and the `KeyboardInterrupt` is raised when it returns.
 
 A query stopped by a callback that raised is recorded in the metrics neither as a success nor as an error: the code that failed is the callback, not the query. This holds for the sync and the async client.
 
@@ -114,7 +116,7 @@ async with query.stream({"max_records": 1000}) as records:
 
 - **Nothing is sent before the first record is asked for.** `stream()` checks the policy right away; the query starts with the first read.
 - **Every record is handed out once**, with every way of reading (`results()`, `foreach()`, `async for`), also when a node's connection fails in the middle of the scan and the client fetches part of the set again.
-- **Memory stays bounded.** At most `record_queue_size` records (default 1024) wait in the client, plus the batch being handed out, and the server is not read from while they wait.
+- **Memory stays bounded.** At most `record_queue_size` records (default 1024) per query wait in the client, counting the queue and the records taken out of it but not yet handed over; on top of that come the batch being handed to Python and one record for each node whose reader is waiting for room. The server is not read from while they wait.
 - **A consumer may pause.** It may stop reading for longer than the query's `socket_timeout`: if the server drops the connection meanwhile, the client fetches the rest again when reading resumes, without repeating a record. A query that is dropped more often than its `max_retries` allows fails. `total_timeout`, when set, covers the consumer's time too: when it runs out, the next read raises `AerospikeTimeoutError`, after the records already delivered.
 - **Several tasks may read one stream.** Each record goes to exactly one of them.
 
@@ -147,7 +149,7 @@ Closing the client does not stop a stream that is already running: it reads on t
 
 The callback is a plain function. It runs in a worker thread, off the event loop, so it may block (write to a file, call a sync client) without stalling other tasks. It cannot be awaited: passing an `async def` function raises `TypeError`. To await something for each record, use `async for record in query`. Callbacks never overlap, but they do not all run on the same thread: the event loop's default executor picks one for each batch of records, so do not keep state in thread-locals.
 
-An exception raised by the callback stops the query and is raised from `foreach()` unchanged, `StopIteration` included.
+An exception raised by the callback stops the query and is raised from `foreach()` unchanged, with one exception: a `StopIteration` reaches the caller as `RuntimeError` ("coroutine raised StopIteration") with the `StopIteration` as its `__cause__`, which is what Python does to a `StopIteration` that leaves a coroutine.
 
 When the task that awaits `foreach()` is cancelled, a callback that is already running finishes, no further callback starts, and only then is `CancelledError` raised. This holds when every task is cancelled at once too, as `asyncio.run` does on Ctrl-C.
 

@@ -97,12 +97,24 @@ class AerospikeError(Exception):
             default): "record not found" for a delete, "filtered out" and a
             failed UDF can be the answer to a second send whose first one
             was applied. The client cannot tell whether it sent twice, so
-            these are reported in doubt under such a policy.
+            these are reported in doubt under such a policy. So is a write
+            batch row with "partition unavailable" that the client gave the
+            row itself because it found no node for the record when the
+            node's share was due to be sent again (the node was dropped
+            from the cluster, or the client was closed); the same code from
+            a server at the first send is a refusal, not in doubt.
+
+            The exception of a batch call that failed as a whole is in
+            doubt whenever any row of its ``partial_result`` is.
         partial_result: The per-record rows of a batch call that failed as a
             whole (a ``BatchWriteResult``), ``None`` for every other failure.
             One entry per requested record, in request order: the records
             other nodes answered keep their results, the rest say why they
-            have none (``result``, ``error_type``, ``in_doubt``).
+            have none (``result``, ``error_type``, ``in_doubt``). When the
+            call failed on several nodes, the exception is the error of one
+            of them (the first whose share failed), so its type and
+            ``result_code`` can differ with the order of the records; the
+            rows say what happened to each record.
     """
 
     result_code: int

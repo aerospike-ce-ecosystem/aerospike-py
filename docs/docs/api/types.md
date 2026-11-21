@@ -56,7 +56,7 @@ Returned by: batch operations (inside `BatchWriteResult.batch_records`)
 | `key` | `AerospikeKey \| None` | Record key |
 | `result` | `int` | `0` when the server reported success, the server's result code when it reported a failure (`2` not found, `27` filtered out, ...), `-1` when no server answered for this record |
 | `record` | `Record \| None` | Record data (`None` if operation failed) |
-| `in_doubt` | `bool` | The record failed, but the write may have been applied: the request was sent and the answer never came back (default `False`). With `max_retries > 0` on a write batch, a row that ends in `KEY_NOT_FOUND`, `FILTERED_OUT` or `UDF_BAD_RESPONSE` is in doubt too (see [Re-sent writes and `in_doubt`](../guides/admin/error-handling.md#re-sent-writes-and-in_doubt)) |
+| `in_doubt` | `bool` | The record failed, but the write may have been applied: the request was sent and the answer never came back (default `False`). With `max_retries > 0` on a write batch, a row that ends in `KEY_NOT_FOUND`, `FILTERED_OUT` or `UDF_BAD_RESPONSE` is in doubt too, and so is a `PARTITION_UNAVAILABLE` row the client gave the record itself when it found no node to send it to again (see [Re-sent writes and `in_doubt`](../guides/admin/error-handling.md#re-sent-writes-and-in_doubt)) |
 | `error_type` | `str \| None` | `None` on success. Otherwise the kind of failure, by the same name an exception carries in `error_type`: a server code (`"KeyNotFoundError"`, `"FilteredOut"`, ...), a client-side failure (`"Timeout"`, `"Connection"`, ...), or `"NoResponse"` when no node answered for the record. Tells the `-1` results apart. Added in 0.15: code that unpacks a `BatchRecord` into four names must take five. |
 
 ```python

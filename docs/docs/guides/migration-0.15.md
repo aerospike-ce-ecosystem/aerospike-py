@@ -201,7 +201,7 @@ How to tell the outcomes of a row apart:
 
 `in_doubt` means the record failed but the write may have been applied: the request was sent and the answer never came back. Read the record before you write it again.
 
-A write the server refused with a code worth a retry, `KEY_BUSY` (14), `DEVICE_OVERLOAD` (18) or `PARTITION_UNAVAILABLE` (11), is an answer: the row carries that code with `in_doubt == False`, and the call returns normally, also for a batch of one key. This is the same as in 0.14.x. When a write batch is sent with `max_retries > 0`, three more outcomes are reported in doubt; see [Rows a second send may have answered](#rows-a-second-send-may-have-answered).
+A write the server refused with a code worth a retry, `KEY_BUSY` (14), `DEVICE_OVERLOAD` (18) or `PARTITION_UNAVAILABLE` (11), is an answer: the row carries that code with `in_doubt == False`, and the call returns normally, also for a batch of one key. This is the same as in 0.14.x. When a write batch is sent with `max_retries > 0`, four more outcomes are reported in doubt; see [Rows a second send may have answered](#rows-a-second-send-may-have-answered).
 
 ### A fifth field: `error_type`
 
@@ -249,6 +249,8 @@ k2 -1 NoResponse False
 ```
 
 The exception class for this case changed too, see [An unknown namespace](#an-unknown-namespace-raises-invalidargerror). When `batch_write(retry=N)` raises, `exc.partial_result.retry` holds the retry counters of the call.
+
+The exception has `in_doubt == True` whenever any row of its `partial_result` is in doubt. When the call failed on several nodes, the exception is the error of one of them (the first whose share failed), so its type and `result_code` can differ with the order of the records; the rows say what happened to each record.
 
 **What to do:** where you catch a failed batch call, look at `exc.partial_result` before you decide what to send again. Rows with `result == 0` were written; rows with `in_doubt` may have been.
 
@@ -321,7 +323,7 @@ runs: 1
 
 ### Rows a second send may have answered
 
-With `max_retries > 0` on a write, the Rust client sends a node's share of a batch again when its answer is lost. If the first send was applied, the second one meets its own work: a re-sent delete finds no record, a re-sent filtered write no longer matches, a re-sent UDF fails on what the first run left behind. The Rust client does not say whether a row was sent twice, so a row of `batch_write`, `batch_operate` (with a write), `batch_remove` or `batch_apply` that ends in `KEY_NOT_FOUND` (2), `FILTERED_OUT` (27) or `UDF_BAD_RESPONSE` (100) is reported with `in_doubt == True`: the call does not know whether it changed the record. `remove()` that raises `RecordNotFound` under such a policy carries `in_doubt == True` too.
+With `max_retries > 0` on a write, the Rust client sends a node's share of a batch again when its answer is lost. If the first send was applied, the second one meets its own work: a re-sent delete finds no record, a re-sent filtered write no longer matches, a re-sent UDF fails on what the first run left behind. The Rust client does not say whether a row was sent twice, so a row of `batch_write`, `batch_operate` (with a write), `batch_remove` or `batch_apply` that ends in `KEY_NOT_FOUND` (2), `FILTERED_OUT` (27) or `UDF_BAD_RESPONSE` (100) is reported with `in_doubt == True`: the call does not know whether it changed the record. So is a row with `PARTITION_UNAVAILABLE` (11) that the client gave the row itself, because it found no node for the record when the node's share was due to be sent again (the node was dropped from the cluster meanwhile, or the client was closed): the first send may have been applied. The call still returns normally with such rows. A row that a server refused with `PARTITION_UNAVAILABLE` at the first send is unchanged, `in_doubt == False`. `remove()` that raises `RecordNotFound` under such a policy carries `in_doubt == True` too.
 
 With the default policy (`max_retries` is `0` for every write) nothing changes, and reads (`batch_read`) are never in doubt. See [Error Handling](/docs/guides/error-handling#re-sent-writes-and-in_doubt) for an example.
 
@@ -369,7 +371,7 @@ Every `AerospikeError` carries four attributes. 0.14.x had only `result_code`.
 |---|---|
 | `result_code` | The server's result code when a server answered; `-1` when no server answered. |
 | `error_type` | The kind of failure, by name. A server code is named after the code (`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, `"DeviceOverload"`, ...; `"ServerTimeout"` for a timeout the server reported). A failure on the client side is `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"` or `"Client"`. |
-| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. A write sent with `max_retries > 0` is the exception, see [Rows a second send may have answered](#rows-a-second-send-may-have-answered). |
+| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. A write sent with `max_retries > 0` is the exception, see [Rows a second send may have answered](#rows-a-second-send-may-have-answered). The exception of a batch call that failed as a whole is in doubt whenever any of its rows is. |
 | `partial_result` | The rows of a batch call that failed as a whole, `None` otherwise. See [above](#a-batch-call-that-fails-as-a-whole-keeps-its-rows). |
 
 `result_code == -1` covers several failures; `error_type` tells them apart. The exception class and `error_type` changed for two failures:
@@ -673,7 +675,7 @@ print(len(handle), len(handle.to_dict()), handle.found_count(), len(handle.to_li
 
 `AsyncQuery.results()` and `AsyncQuery.foreach()` used to run the query in a worker thread. Cancelling the task raised `CancelledError` at once while the thread went on reading records and calling the callback to the end of the scan. In 0.15 both read the query's record stream by awaiting it, so cancelling the task stops the query on the client and on the server.
 
-`foreach()` still calls its callback from a worker thread, so the callback may block. Callbacks never overlap, but they do not all run on the same thread: the event loop's default executor picks one for each batch of records, so do not keep state in thread-locals. An exception the callback raises stops the query and is raised from `foreach()` unchanged, `StopIteration` included. When the task is cancelled, a callback that is running finishes, no new one starts, and only then is `CancelledError` raised. That holds when every task is cancelled at once too, as `asyncio.run` does on Ctrl-C.
+`foreach()` still calls its callback from a worker thread, so the callback may block. Callbacks never overlap, but they do not all run on the same thread: the event loop's default executor picks one for each batch of records, so do not keep state in thread-locals. An exception the callback raises stops the query and is raised from `foreach()` unchanged; only a `StopIteration` reaches the caller as `RuntimeError` with the `StopIteration` as its `__cause__`, as Python does when one leaves a coroutine. When the task is cancelled, a callback that is running finishes, no new one starts, and only then is `CancelledError` raised. That holds when every task is cancelled at once too, as `asyncio.run` does on Ctrl-C.
 
 ```python
 async def cancel_after_100(client):
@@ -708,7 +710,7 @@ callbacks when CancelledError was raised: 100, half a second later: 100
 
 ### `async for` and `query.stream()`
 
-An `AsyncQuery` can now be iterated: `async for record in query`. `query.stream(policy)` returns the same thing, an `AsyncRecordStream`, which is also an async context manager and has `close()`. Nothing is sent before the first record is asked for. At most `record_queue_size` records (default 1024) wait in the client, whatever the pace of the consumer, and a consumer may pause for longer than `socket_timeout`: the client fetches the rest again when reading resumes, without repeating a record. Several tasks may iterate the same stream; each record goes to one of them. See the [Query guide](/docs/guides/query-scan#async-streaming).
+An `AsyncQuery` can now be iterated: `async for record in query`. `query.stream(policy)` returns the same thing, an `AsyncRecordStream`, which is also an async context manager and has `close()`. Nothing is sent before the first record is asked for. At most `record_queue_size` records (default 1024) per query wait in the client, whatever the pace of the consumer (plus the batch being handed to Python and one record for each node whose reader is waiting for room), and a consumer may pause for longer than `socket_timeout`: the client fetches the rest again when reading resumes, without repeating a record. Several tasks may iterate the same stream; each record goes to one of them. See the [Query guide](/docs/guides/query-scan#async-streaming).
 
 Two points to know when you move code to streams:
 
