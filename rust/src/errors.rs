@@ -323,10 +323,16 @@ impl ErrorClass {
     ///
     /// In both cases the first cause with a more specific class decides.
     pub fn of(err: &AsError) -> Self {
+        Self::decided_by(err).0
+    }
+
+    /// [`of`](Self::of), together with the error in the chain that decided
+    /// the class: `err` itself, or the cause that was looked through to.
+    fn decided_by(err: &AsError) -> (Self, &AsError) {
         let own = Self::of_kind(err);
         let own_is_timeout = matches!(own, Self::ClientTimeout | Self::RetriesExhausted);
         if !own_is_timeout && own != Self::Client {
-            return own;
+            return (own, err);
         }
         let mut cause = err.cause();
         while let Some(c) = cause {
@@ -341,11 +347,11 @@ impl ErrorClass {
                 !matches!(class, Self::Client | Self::Unknown)
             };
             if more_specific {
-                return class;
+                return (class, c);
             }
             cause = c.cause();
         }
-        own
+        (own, err)
     }
 
     /// Short stable name of the class: the Prometheus `error_type` label, the
@@ -608,27 +614,38 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
 /// Whether a write that failed with `err` may have been applied all the same:
 /// the `in_doubt` of the Python exception, of a batch row and of the span.
 ///
-/// aerospike-core decides this for every error, by one rule for a server's
-/// answer (in doubt only when an earlier attempt of the same command was sent
-/// and may have gone through) and another for everything else (in doubt as
-/// soon as the command was sent). It files a UDF failure under "everything
-/// else", so every failed `apply()` came out in doubt.
+/// aerospike-core decides this for every error in a chain, by one rule for a
+/// server's answer (in doubt only when the server timed out, or when an
+/// earlier attempt of the same command was sent and may have gone through)
+/// and another for everything else (in doubt as soon as the command was
+/// sent). Two kinds of server answer end up under "everything else", and are
+/// put right here:
 ///
-/// A UDF failure is a server's answer: the server could not find the
-/// function, or ran it, rolled the record back and said so. That is as
-/// definite as KEY_EXISTS, and the Java client treats it that way, so the rule
-/// for a server's answer is applied to it here.
+/// - **A UDF failure.** The server could not find the function, or ran it,
+///   rolled the record back and said so. That is as definite as KEY_EXISTS,
+///   and the Java client treats it that way.
+/// - **An answer that would have been worth a retry** (KEY_BUSY,
+///   DEVICE_OVERLOAD, PARTITION_UNAVAILABLE, the server's TIMEOUT) when no
+///   attempt is left. aerospike-core hands it over wrapped in an "attempts
+///   used up" error, which is a client-side failure and so says "in doubt" —
+///   for a write the server has just refused to queue. The class of such an
+///   error is the server's code ([`ErrorClass::of`] looks through the
+///   wrapper); the doubt has to be read off the same error, and that one was
+///   judged by the rule for a server's answer.
 pub(crate) fn may_have_been_applied(err: &AsError) -> bool {
     if !err.in_doubt() {
         return false;
     }
-    match udf_answer(err) {
+    if let Some(answer) = udf_answer(err) {
         // The retry loop files the error of every earlier attempt under the
         // final one, so "no earlier attempt" reads as "no sub-errors". An
         // earlier attempt that failed before it was sent is filed too, which
         // errs on the side of saying "in doubt".
-        Some(answer) => !answer.sub_errors().is_empty(),
-        None => true,
+        return !answer.sub_errors().is_empty();
+    }
+    match ErrorClass::decided_by(err) {
+        (ErrorClass::Server(_), answer) => answer.in_doubt(),
+        _ => true,
     }
 }
 

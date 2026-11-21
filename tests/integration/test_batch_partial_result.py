@@ -15,7 +15,13 @@ A whole-call failure needs a node to fail. Two are reachable on one healthy
 node without racing it: a namespace no node serves (nothing can be routed), and
 a UDF that is still running when the client's deadline passes. A node that
 stops while the others keep answering is covered by ``tests/multinode``.
+
+**An answer is not a failure of the call.** A server that refuses one record
+(``KEY_BUSY``) has answered for it; the call returns its rows, whatever the
+number of keys.
 """
+
+import asyncio
 
 import pytest
 
@@ -211,6 +217,103 @@ class TestDeadlineExpires:
         exc = excinfo.value
         assert (exc.result_code, exc.error_type, exc.in_doubt) == (-1, "Timeout", True)
         assert exc.partial_result is None, "not a batch call"
+
+
+class TestAnAnswerWorthARetryIsStillAnAnswer:
+    """``KEY_BUSY``: more writes wait for one record than the server lets wait, and it refuses the next.
+
+    Rust client 3.0 would send such a write again. When no attempt is left —
+    none is, for a write, by default — it reports "attempts used up" in place
+    of the answer. A key that is alone on its node is sent as a single-record
+    command, and there that report came back as the failure of the whole batch,
+    in doubt: for an answer that says the write was not applied. In a larger
+    batch the same answer was simply that row's result, as it was for a batch
+    of any size with Rust client 2.x.
+
+    The refusal is made on purpose: a UDF holds the record, and more writes
+    are sent at it than may queue up behind (``transaction-pending-limit``, 20
+    by default).
+    """
+
+    BURST = 30
+    REFUSED = (aerospike_py.AEROSPIKE_ERR_KEY_BUSY, "KeyBusy", False)
+
+    async def _while_the_record_is_busy(self, client, hot, make):
+        """The outcomes of ``BURST`` calls sent at ``hot`` while a UDF holds it."""
+        patient = {"total_timeout": 0, "socket_timeout": 30_000}
+        holding = asyncio.ensure_future(client.apply(hot, "slow_udf", "spin", [SPIN_ROUNDS], policy=patient))
+        await asyncio.sleep(0.1)
+        outcomes = await asyncio.gather(*(make(i) for i in range(self.BURST)), return_exceptions=True)
+        try:
+            await holding
+        except aerospike_py.AerospikeError:
+            pass  # the server gave the UDF up; it held the record long enough all the same
+        return outcomes
+
+    async def _until_one_is_refused(self, client, hot, make, was_refused):
+        """Repeat the burst until the server refused a call. Every outcome of every burst is returned.
+
+        A burst that arrives before the UDF has the record is simply served, so
+        one burst proves nothing on a slow machine; a refusal is the point.
+        """
+        seen = []
+        for _ in range(8):
+            outcomes = await self._while_the_record_is_busy(client, hot, make)
+            seen.extend(outcomes)
+            if any(was_refused(outcome) for outcome in outcomes):
+                return seen
+            await asyncio.sleep(1.1)  # stay under the node's error-rate limit
+        pytest.fail("the server never answered KEY_BUSY: this test proved nothing")
+
+    async def test_put_raises_the_servers_answer(self, async_client, async_cleanup, slow_udf):
+        hot = (NS, SET_NAME, "busy_put")
+        async_cleanup.append(hot)
+        await async_client.put(hot, {"v": 0})
+
+        outcomes = await self._until_one_is_refused(
+            async_client,
+            hot,
+            lambda i: async_client.put(hot, {"v": i}),
+            lambda outcome: isinstance(outcome, aerospike_py.AerospikeError),
+        )
+
+        failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+        assert {type(failure) for failure in failures} == {aerospike_py.ServerError}, failures
+        assert {(f.result_code, f.error_type, f.in_doubt) for f in failures} == {self.REFUSED}
+
+    @pytest.mark.parametrize("keys", [1, 2], ids=["one_key", "two_keys"])
+    @pytest.mark.parametrize("method", ["batch_write", "batch_operate"])
+    async def test_a_batch_returns_it_as_the_rows_result(self, async_client, async_cleanup, slow_udf, method, keys):
+        hot = (NS, SET_NAME, f"busy_{method}_{keys}")
+        others = [(NS, SET_NAME, f"busy_{method}_{keys}_other_{i}") for i in range(keys - 1)]
+        async_cleanup.extend([hot, *others])
+        await async_client.batch_write([(key, {"v": 0}) for key in (hot, *others)])
+
+        def call(i):
+            if method == "batch_write":
+                return async_client.batch_write([(key, {"v": i}) for key in (hot, *others)])
+            increment = [{"op": aerospike_py.OPERATOR_INCR, "bin": "v", "val": 1}]
+            return async_client.batch_operate([hot, *others], increment)
+
+        def hot_row(outcome):
+            return (
+                outcome.batch_records[0].result,
+                outcome.batch_records[0].error_type,
+                outcome.batch_records[0].in_doubt,
+            )
+
+        outcomes = await self._until_one_is_refused(
+            async_client,
+            hot,
+            call,
+            lambda outcome: isinstance(outcome, BaseException) or hot_row(outcome) == self.REFUSED,
+        )
+
+        raised = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+        assert raised == [], "a record the server refused is a row, not a failure of the call"
+        assert {hot_row(outcome) for outcome in outcomes} == {(0, None, False), self.REFUSED}
+        for outcome in outcomes:
+            assert [(row.result, row.in_doubt) for row in outcome.batch_records[1:]] == [(0, False)] * (keys - 1)
 
 
 class TestRetryCountersOnAFailedCall:

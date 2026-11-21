@@ -260,6 +260,15 @@ fn restore_keys<'k>(rows: &mut [BatchRecord], keys: impl Iterator<Item = &'k Key
 /// the exception as `partial_result` instead of being dropped: the exception
 /// type is the one this failure always raised, and the caller who wants to
 /// know which records are done can now find out.
+///
+/// Not every error of the call is such a failure. aerospike-core sends a key
+/// that is alone on its node as a single-record command, and when the server
+/// answers that one with a code worth a retry (KEY_BUSY, DEVICE_OVERLOAD, ...)
+/// and no attempt is left, the answer comes back as the error of the whole
+/// call. In a larger batch the same answer is just that row's result, and it
+/// was with Rust client 2.x for a batch of any size. So the call fails only
+/// when a row is left without a server's answer; otherwise every row says
+/// what happened to its record and the call returns them.
 fn finish_batch<'k>(
     ops: Vec<BatchOperation>,
     outcome: PyResult<()>,
@@ -270,12 +279,24 @@ fn finish_batch<'k>(
         Ok(()) => Ok(rows),
         Err(err) => {
             restore_keys(&mut rows, keys);
+            if rows.iter().all(row_has_a_server_answer) {
+                return Ok(rows);
+            }
             Err(crate::batch_types::attach_partial_result(
                 err,
                 PendingBatchRecords::without_retry(rows),
             ))
         }
     }
+}
+
+/// Whether a server said what happened to this row's record: success, or a
+/// result code of its own.
+fn row_has_a_server_answer(row: &BatchRecord) -> bool {
+    matches!(
+        RowOutcome::of(row),
+        RowOutcome::Ok | RowOutcome::Failed(ErrorClass::Server(_))
+    )
 }
 
 /// Read multiple records in a batch.
