@@ -87,8 +87,10 @@ class AerospikeError(Exception):
             ``"InvalidArgument"``, ``"UdfBadResponse"``,
             ``"StreamTerminated"``, ``"BadResponse"``, ``"Backpressure"``,
             ``"RustPanic"`` and ``"Client"``.
-        in_doubt: ``True`` when a write failed after it was sent, so the
-            server may have applied it. Always ``False`` for reads.
+        in_doubt: ``True`` when a write was sent and no definite answer came
+            back, so the server may have applied it. ``False`` when the
+            server answered with a failure (record exists, a failed UDF,
+            ...), and always for reads.
         partial_result: The per-record rows of a batch call that failed as a
             whole (a ``BatchWriteResult``), ``None`` for every other failure.
             One entry per requested record, in request order: the records
