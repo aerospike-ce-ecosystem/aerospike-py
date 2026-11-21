@@ -61,7 +61,7 @@ import aerospike_py as aerospike
 
 ### Batch Concurrency
 
-batch request 가 cluster node 들에 fan out 되는 방식 제어. [`BatchPolicy`](types.md#batchpolicy) 의 ``concurrency`` key. 다른 integer 값은 parse 시 ``ValueError``. (aerospike-core 2.0 에는 `MaxThreads(n)` variant 없음.)
+batch request 가 cluster node 들에 fan out 되는 방식 제어. [`BatchPolicy`](types.md#batchpolicy) 의 ``concurrency`` key. 다른 integer 값은 parse 시 ``ValueError``. (aerospike-core 3.0 에는 `MaxThreads(n)` variant 없음.)
 
 | Constant | Value | 설명 |
 |----------|-------|-------------|

@@ -129,7 +129,7 @@ asyncio.run(main())
 | `batch_records` | `np.ndarray` | 사용자 지정 dtype을 사용하는 structured array |
 | `meta` | `np.ndarray` | dtype `[("gen", "u4"), ("ttl", "u4")]` 의 structured array |
 | `result_codes` | `np.ndarray` | per-record result code 의 `int32` array (0 = success) |
-| `_map` | `dict` | key 기반 lookup 을 위한 `{primary_key: index}` 매핑 |
+| `_map` | `dict` | key 기반 lookup 을 위한 `{primary_key: index}` 매핑. 실제 user key만 index됩니다: digest만으로 요청한 row는 위치로만 접근할 수 있고, 두 번 요청한 user key는 마지막 row를 가리킵니다. |
 
 ### Method
 
@@ -143,14 +143,14 @@ asyncio.run(main())
 |------------|------|---------|-----------------|
 | Signed int | `i` | `"i1"`, `"i2"`, `"i4"`, `"i8"` | `Int(i64)` — target size 로 truncate |
 | Unsigned int | `u` | `"u1"`, `"u2"`, `"u4"`, `"u8"` | `Int(i64)` — unsigned 로 cast |
-| Float | `f` | `"f2"`, `"f4"`, `"f8"` | `Float(f64)` — target precision 으로 cast |
+| Float | `f` | `"f2"`, `"f4"`, `"f8"` | `Float(f64)` — target precision 으로 cast. `f2`/`f4`에 담기에 너무 큰 유한값은 `OverflowError` (NaN과 ±inf는 유지) |
 | Fixed bytes | `S` | `"S8"`, `"S16"` | `Blob(bytes)` 또는 `String` — truncate/zero-pad |
 | Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` — truncate/zero-pad |
-| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` — raw copy (예: vector embedding) |
+| Sub-array | — | `("f4", (128,))` | field 크기와 정확히 같은 `Blob(bytes)` (예: vector embedding). 다른 길이는 `ValueError`. Scalar는 원소가 하나인 `(1,)` field만 채울 수 있음 |
 
 :::tip[지원 안 되는 dtype]
 
-Unicode string (`U`) 과 Python object (`O`) 는 `TypeError` 로 reject. string 데이터에는 `S` (fixed bytes) 사용.
+Unicode string (`U`), Python object (`O`, structured field 안에 중첩된 것 포함), 가변 길이 `StringDType`, named field가 없는 dtype은 `TypeError`로, native가 아닌 byte order는 `ValueError`로 reject. string 데이터에는 `S` (fixed bytes) 사용.
 
 :::
 

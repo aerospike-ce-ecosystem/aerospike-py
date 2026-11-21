@@ -142,6 +142,16 @@ When enabled:
 - `aerospike_py.BackpressureError` is raised only if
   `operation_queue_timeout_ms` expires before a slot frees up.
 
+**What takes a slot:** every single-record command (`get`, `put`, `operate`,
+`operate_ordered`, `increment`, ..., and the UDF call `apply()`) and every batch
+command (`batch_read`, `batch_write`, `batch_write_numpy`, `batch_operate`,
+`batch_remove`, `batch_apply`). A command holds its slot from the moment it is
+sent until its answer has arrived. Query and scan streams take no slot: a stream
+stays open for as long as its consumer reads, and a consumer that looks
+something up for each record would otherwise wait for a slot its own stream
+holds. Info, truncate, UDF registration, index and admin commands take no slot
+either. Bound the number of concurrent scans in your application.
+
 **Choose a value:** keep it close to, but no higher than,
 `max_conns_per_node` (default `256`). For a three-node cluster, start at `64`.
 This conservative value protects the pool while preserving throughput.

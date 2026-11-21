@@ -38,6 +38,35 @@ Exception
         └── FilteredOut
 ```
 
+## Attributes
+
+Every exception in the hierarchy carries these attributes:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `result_code` | `int` | The server's result code when a server answered (for example `2` record not found, `5` record exists, `100` UDF failed), matching the `AEROSPIKE_ERR_*` constants. `-1` when no server answered: a client timeout, a connection failure, an invalid argument. |
+| `error_type` | `str` | The kind of failure, by the same name the Prometheus `error_type` label and the OpenTelemetry `error.type` attribute carry. A server code is named after the code (`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, `"DeviceOverload"`, ...), with `"ServerTimeout"` for a timeout the server reported. Client-side failures are `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"` and `"Client"`. This is what tells the `-1` cases apart. |
+| `in_doubt` | `bool` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. |
+| `partial_result` | `BatchWriteResult \| None` | The per-record rows of a batch call that failed as a whole: one `BatchRecord` per requested record, in request order. `None` for every other failure. |
+
+```python
+import aerospike_py
+
+try:
+    client.put(key, bins)
+except aerospike_py.AerospikeError as exc:
+    if exc.result_code == aerospike_py.AEROSPIKE_ERR_RECORD_EXISTS:
+        ...
+    elif exc.error_type == "Timeout" and exc.in_doubt:
+        ...  # the write may be in; read before writing again
+
+try:
+    client.batch_write(records)
+except aerospike_py.AerospikeError as exc:
+    if exc.partial_result is not None:
+        done = [br.key for br in exc.partial_result.batch_records if br.result == 0]
+```
+
 ## Reference
 
 ### Base
@@ -76,7 +105,7 @@ Exception
 | `QueryError` | Query execution error |
 | `QueryAbortedError` | Query aborted |
 | `AdminError` | Admin operation error |
-| `UDFError` | UDF error |
+| `UDFError` | A UDF the server could not run (`result_code == 100`, `AEROSPIKE_ERR_UDF`). Up to 0.14.x this surfaced as `ClientError` with `-1`. |
 
 :::note
 `TimeoutError` and `IndexError` are deprecated aliases for `AerospikeTimeoutError` and `AerospikeIndexError` to avoid shadowing Python builtins.

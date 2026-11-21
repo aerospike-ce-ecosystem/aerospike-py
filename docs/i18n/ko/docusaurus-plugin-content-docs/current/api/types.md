@@ -54,9 +54,10 @@ _, meta, bins = record     # tuple unpacking
 | Field | Type | 설명 |
 |-------|------|-------------|
 | `key` | `AerospikeKey \| None` | record key |
-| `result` | `int` | per-record result code (0 = success) |
+| `result` | `int` | server가 성공을 알렸으면 `0`, 실패를 알렸으면 server의 result code(`2` not found, `27` filtered out, ...), 이 record에 대해 어떤 server도 응답하지 않았으면 `-1` |
 | `record` | `Record \| None` | record 데이터 (operation 실패 시 `None`) |
-| `in_doubt` | `bool` | transient error 에도 불구하고 write 가 완료되었을 수 있는지 (default `False`) |
+| `in_doubt` | `bool` | record는 실패했지만 write가 적용되었을 수 있음: 요청은 보냈고 응답이 돌아오지 않음 (default `False`) |
+| `error_type` | `str \| None` | 성공이면 `None`. 아니면 exception의 `error_type`과 같은 이름으로 나타낸 실패 종류: server code(`"KeyNotFoundError"`, `"FilteredOut"`, ...), client 쪽 실패(`"Timeout"`, `"Connection"`, ...), 어떤 node도 응답하지 않았으면 `"NoResponse"`. `-1`인 결과들을 구분해 줍니다. 0.15에서 추가되었으므로 `BatchRecord`를 이름 네 개로 unpack하던 코드는 다섯 개로 바꿔야 합니다. |
 
 ```python
 results = client.batch_operate(keys, ops)
@@ -72,6 +73,22 @@ for br in results.batch_records:
 | Field | Type | 설명 |
 |-------|------|-------------|
 | `batch_records` | `list[BatchRecord]` | per-record 결과 |
+| `retry` | `BatchRetryInfo` | `batch_write` / `batch_write_numpy`의 `retry=N` loop가 한 일(`attempts`, `max_attempts`, `truncated_by_timeout`, `unresolved`). Retry하지 않는 method는 기본값. |
+
+Batch 호출(`batch_read` 포함)이 전체적으로 실패했을 때 `exc.partial_result`의 type이기도 합니다. 요청한 record마다 `BatchRecord` 하나를 요청 순서대로 담습니다.
+
+### `BatchRetryInfo`
+
+`batch_write` / `batch_write_numpy`의 client 쪽 retry loop(`retry=N`)가 실제로 한 일. `BatchWriteResult.retry`에 들어 있고, 호출이 exception을 발생시키면 `exc.partial_result.retry`에도 있습니다. `retry=N`은 `N + 1`번 시도를 요청하지만, loop는 `total_timeout`(기본값 1000 ms)이 다 되면 멈춥니다.
+
+| Field | Type | Default | 설명 |
+|-------|------|---------|------|
+| `attempts` | `int` | `1` | 첫 시도를 포함해 실제로 보낸 시도 횟수. 항상 `>= 1`. |
+| `max_attempts` | `int` | `1` | 호출자가 요청한 시도 횟수: `1 + retry`. |
+| `truncated_by_timeout` | `bool` | `False` | `max_attempts`에 이르기 전에 `total_timeout` 때문에 retry가 멈춤. |
+| `unresolved` | `int` | `0` | loop가 끝났을 때 아직 retry 가능한 실패 code를 가진 record 수. |
+
+기본값은 batch를 정확히 한 번 보내고 retry하지 않은 호출을 나타내며, 다른 모든 batch method가 이 값을 보고합니다.
 
 ### `BatchRecords`
 
@@ -83,10 +100,10 @@ for br in results.batch_records:
 
 | Method / Property | Type | 설명 |
 |-------------------|------|-------------|
-| `to_dict()` | `dict[UserKey, dict[str, Any]]` | `dict[user_key, bins_dict]` 로 materialise. digest-only 와 failed record 제외. |
+| `to_dict()` | `dict[UserKey, dict[str, Any]]` | `dict[user_key, bins_dict]` 로 materialise. digest-only 와 failed record 제외. Cached view의 얕은 복사본을 반환하므로 bins dict는 handle과 공유됩니다. 바꾸기 전에 복사하세요. |
 | `to_numpy(dtype)` | `NumpyBatchRecords` | structured array 로 materialise. `dtype` **은 `np.dtype` object 여야 함** (예: `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). structured dtype 의 각 field name 이 동명 bin 으로 매핑; list-of-tuples shorthand 와 single-field string 은 auto-promote 안 됨 — 먼저 `np.dtype(...)` 로 wrap. per-record fill loop 가 GIL 해제 (`py.detach`) 상태로 실행되어 sibling 작업 (torch inference, 다른 asyncio task) 이 buffer fill 중 GIL 보유 가능. **실패/missing read (`result_code != 0`) 는 row 가 dtype zero value 로 남음 — downstream math 전에 항상 `result_codes` 로 mask.** |
 | `batch_records` | `list[BatchRecord]` | 호환 path: lazy NamedTuple 변환. |
-| `found_count()` | `int` | 성공 record 수 (변환 불필요). |
+| `found_count()` | `int` | 성공 row 수 (변환 불필요). Key가 아니라 row를 셉니다: 두 번 요청해 두 번 찾은 user key는 2로 세고, 성공한 digest-only row도 셉니다. |
 | `keys()` | `dict_keys` | dict-style key view, `to_dict().keys()` 와 mirror (missing/failed record 제외). |
 | `all_user_keys()` | `list[UserKey \| None]` | 모든 batch record 의 `user_key` 를 request 순서로 — `batch_records` 와 `NumpyBatchRecords` data array 와 positional align. digest-only request (`user_key` element 없음) 는 slot 에 `None` yield, 그래서 `zip(handle.all_user_keys(), handle.batch_records)` 가 항상 모든 record 를 requested key 와 pair. |
 | `iter_records()` | `Iterator[BatchRecord]` | 모든 record (digest-only 와 failed 포함) 를 삽입 순서로 순회. |
@@ -94,7 +111,7 @@ for br in results.batch_records:
 | `lazy_records[user_key]` | `dict[str, Any]` | dict-style item 접근 (`__getitem__`). |
 | `user_key in lazy_records` | `bool` | dict-style membership (`__contains__`). |
 | `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | dict-style `get`, 선택적 default; `dict.get` 의미 mirror. |
-| `len(lazy_records)` | `int` | dict-view cardinality — `len(lazy_records.to_dict())` 와 매칭 (성공한 read, `user_key` 와 `record` body 보유). 빠름: pure-Rust filter+count, PyDict 할당 없음. raw record 수 (missing read / per-record failure 포함) 는 `len(lazy_records.batch_records)`. |
+| `len(lazy_records)` | `int` | dict view에 있는 서로 다른 key의 수 — user key를 두 번 요청하거나 두 set에서 요청해도 항상 `len(lazy_records.to_dict())`와 같습니다. 빠름: pure-Rust pass, PyDict 할당 없음. 성공 row 수는 `found_count()`, raw row 수 (missing read / per-record failure 포함) 는 `len(lazy_records.batch_records)`. |
 | `release_cache()` | `None` | 첫 Mapping 접근 / `to_dict()` 가 빌드한 cached `PyDict` 를 drop, raw Rust record 는 유지 (그래서 `batch_records`, `iter_records()`, `all_user_keys()`, `found_count()`, `to_numpy(dtype)` 가 계속 동작). 이후 Mapping 접근이 cache 를 lazy 하게 rebuild. 더 이상 필요 없는 대형 batch materialisation 후 유용. |
 
 ### `ExistsResult`
@@ -130,7 +147,7 @@ if result.meta is not None:
 |-------|------|-------------|
 | `key` | `AerospikeKey \| None` | record key |
 | `meta` | `RecordMetadata \| None` | record metadata |
-| `ordered_bins` | `list[BinTuple]` | 순서 보존된 operation 결과 |
+| `ordered_bins` | `list[BinTuple]` | 응답한 operation마다 항목 하나, 요청 순서대로. 두 번 응답한 bin은 두 번 나타납니다. 값이 없는 operation이 `(bin, None)`으로 나타나는 경우는 [0.15로 업그레이드](../guides/migration-0.15.md#operate_ordered-returns-one-entry-per-operation)를 참고하세요. |
 
 ### `BinTuple`
 
@@ -170,8 +187,8 @@ if result.meta is not None:
 | `auth_mode` | `int` | `AUTH_INTERNAL` | `AUTH_INTERNAL`, `AUTH_EXTERNAL`, `AUTH_PKI` |
 | `user` | `str` | | auth username |
 | `password` | `str` | | auth password |
-| `timeout` | `int` | `1000` | connection timeout (ms) |
-| `idle_timeout` | `int` | | connection idle timeout (ms) |
+| `timeout` | `int` | `30000` | connection timeout (ms) |
+| `idle_timeout` | `int` | `30000` | connection idle timeout (ms) |
 | `max_conns_per_node` | `int` | `100` | node 당 최대 connection |
 | `min_conns_per_node` | `int` | `0` | pre-warm connection |
 | `tend_interval` | `int` | `1000` | cluster tend interval (ms) |
@@ -224,7 +241,7 @@ if result.meta is not None:
 |-------|------|---------|-------------|
 | `socket_timeout` | `int` | `30000` | socket timeout (ms) |
 | `total_timeout` | `int` | `1000` | 총 transaction timeout (ms) |
-| `max_retries` | `int` | `2` | 최대 retry |
+| `max_retries` | `int` | `2` / `0` | Rust client 내부의 자동 재전송. 읽기만 하는 batch(`batch_read`, operation이 모두 읽기인 `batch_operate`)는 `2`, write·삭제·UDF를 실행하는 batch(`batch_write`, `batch_write_numpy`, `batch_remove`, `batch_apply`, write가 있는 `batch_operate`)는 `0`입니다. 다시 보낸 increment나 UDF 호출은 두 번 적용되기 때문입니다. `batch_write`에는 자체 `retry=` 인자가 있으며, `retry=N`과 0이 아닌 `max_retries`를 함께 주면 `InvalidArgError`가 발생합니다. |
 | `sleep_between_retries` | `int` | `0` | retry 간 sleep (ms) |
 | `timeout_delay` | `int` | `0` | deadline 이후 request timeout 까지의 delay (ms). |
 | `concurrency` | `int` | `BATCH_CONCURRENCY_PARALLEL` | per-node dispatch mode: `BATCH_CONCURRENCY_SEQUENTIAL` (한 번에 한 node) 또는 `BATCH_CONCURRENCY_PARALLEL` (모든 node 병렬 — default). [Batch Concurrency constants](constants.md#batch-concurrency) 참조. 다른 값은 `ValueError`. |

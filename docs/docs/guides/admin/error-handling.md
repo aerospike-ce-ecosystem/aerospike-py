@@ -83,6 +83,33 @@ except AerospikeError as e:
     raise
 ```
 
+## What an Exception Tells You
+
+Every `AerospikeError` carries four attributes. Use them instead of the message text, which can change between releases.
+
+| Attribute | Meaning |
+|-----------|---------|
+| `result_code` | The server's result code when a server answered (for example `2` record not found, `5` record exists, `100` UDF failed). `-1` when no server answered: a client timeout, a connection failure, an invalid argument. |
+| `error_type` | The kind of failure, by name. A server code is named after the code (`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, ...; `"ServerTimeout"` for a timeout the server reported). Client-side failures are `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"` or `"Client"`. This is what tells the `-1` cases apart. |
+| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. |
+| `partial_result` | For a batch call that failed as a whole: a `BatchWriteResult` with one row per requested record, in request order. `None` for every other failure. |
+
+```python
+import aerospike_py
+
+try:
+    client.put(key, bins)
+except aerospike_py.AerospikeError as exc:
+    if exc.result_code == aerospike_py.AEROSPIKE_ERR_RECORD_EXISTS:
+        ...  # the server answered: the record is there
+    elif exc.error_type == "Timeout" and exc.in_doubt:
+        ...  # the write may be in; read the record before writing again
+    else:
+        raise
+```
+
+The Prometheus `error_type` label and the OpenTelemetry `error.type` attribute use the same names as `exc.error_type`, so a dashboard and an `except` clause classify a failure the same way.
+
 ## Batch Error Handling
 
 Batch operations do not raise exceptions for individual record failures. Instead, each `BatchRecord` carries its own result code:
@@ -116,13 +143,52 @@ from aerospike_py.exception import AerospikeError
 try:
     results = client.batch_operate(keys, operations)
 except AerospikeError:
-    # Entire batch failed (e.g., cluster unavailable)
+    # Entire batch failed (e.g., cluster unavailable); see below
     raise
 
 for br in results.batch_records:
     if br.result != 0:
-        logger.warning("Key %s failed (code=%d)", br.key, br.result)
+        logger.warning("Key %s failed (code=%d, %s)", br.key, br.result, br.error_type)
 ```
+
+### What Each Row Says
+
+Every `BatchRecord` has `result`, `error_type` and `in_doubt`:
+
+| Outcome | `result` | `error_type` | `in_doubt` |
+|---------|----------|--------------|------------|
+| Success | `0` | `None` | `False` |
+| Record not found | `2` | `"KeyNotFoundError"` | `False` |
+| Excluded by `filter_expression` | `27` | `"FilteredOut"` | `False` |
+| Other failure the server reported | its code | named after the code | `False` |
+| Server reported a timeout | `9` | `"ServerTimeout"` | `True` for a write |
+| Request sent, the client stopped waiting | `-1` | `"Timeout"` | `True` for a write |
+| Transport failure | `-1` | `"Connection"`, `"InvalidNode"`, ... | `True` for a write that had been sent |
+| No node answered for the record | `-1` | `"NoResponse"` | `False` |
+
+`result` is `0` only when a server reported success for that record. A row is never counted as written because nothing came back.
+
+### When the Whole Batch Fails
+
+A batch call that fails as a whole (for example, the node that owns some of the keys stops answering) raises an exception as before, and the exception carries the rows: `exc.partial_result` is a `BatchWriteResult` with one `BatchRecord` per requested record, in request order. Records that other nodes answered keep their results; the rest say why they have none. Every batch method sets it: `batch_read`, `batch_write`, `batch_write_numpy`, `batch_operate`, `batch_remove` and `batch_apply`.
+
+```python
+from aerospike_py.exception import AerospikeError
+
+try:
+    results = client.batch_write(records)
+except AerospikeError as exc:
+    if exc.partial_result is None:
+        raise  # refused before anything was attempted (e.g. a bad policy value)
+    rows = exc.partial_result.batch_records
+    written = [br.key for br in rows if br.result == 0]
+    unsure = [br.key for br in rows if br.in_doubt]           # read before re-sending
+    not_sent = [br.key for br in rows if br.error_type == "NoResponse"]
+    logger.warning("batch failed: %d written, %d in doubt, %d unanswered",
+                   len(written), len(unsure), len(not_sent))
+```
+
+When `batch_write(..., retry=N)` raises, `exc.partial_result.retry` holds the retry counters of the call.
 
 ### `batch_write` and the `in_doubt` Flag
 
@@ -163,7 +229,7 @@ if retry_records:
 ```
 
 :::tip
-Use the built-in `retry` parameter for automatic transient-failure retries with exponential backoff: `client.batch_write(records, retry=3)`. For non-idempotent operations where duplicates are unacceptable, keep `retry=0` (default) and handle retries manually using the `in_doubt` flag as shown above.
+Use the built-in `retry` parameter for automatic transient-failure retries with exponential backoff: `client.batch_write(records, retry=3)`. It re-sends only the records that failed, never one that succeeded, and never a `CREATE_ONLY` or generation-checked record that is in doubt. It is bounded by `total_timeout` (default 1000 ms), and it cannot be combined with a non-zero `policy["max_retries"]` (that raises `InvalidArgError`). Write batches (`batch_write`, `batch_write_numpy`, `batch_remove`, `batch_apply`, a writing `batch_operate`) do not re-send anything by themselves: their `max_retries` defaults to `0`.
 :::
 
 ### Async Batch Read
@@ -367,7 +433,7 @@ client.put(key, bins, policy=write_policy)
 |-------|------|---------|-------------|
 | `socket_timeout` | `int` | `30000` | Timeout per socket call (ms) |
 | `total_timeout` | `int` | `1000` | Total timeout including retries (ms) |
-| `max_retries` | `int` | `2` reads / `0` writes | Maximum number of retries. Writes default to `0` — see the note below. |
+| `max_retries` | `int` | `2` reads / `0` writes | Maximum number of retries. Writes default to `0` — see the note below. Batches follow the same rule: `2` for `batch_read` and a read-only `batch_operate`, `0` for every batch that writes, deletes or runs a UDF. |
 | `sleep_between_retries` | `int` | `0` | Delay between retries (ms) |
 
 :::warning[Writes do not retry by default]
@@ -402,10 +468,13 @@ Set `total_timeout` higher than `socket_timeout * (max_retries + 1)` to allow al
 | 12 | `AEROSPIKE_ERR_BIN_TYPE` | `BinTypeError` |
 | 13 | `AEROSPIKE_ERR_RECORD_TOO_BIG` | `RecordTooBig` |
 | 17 | `AEROSPIKE_ERR_BIN_NOT_FOUND` | `BinNotFound` |
+| 20 | `AEROSPIKE_ERR_INVALID_NAMESPACE` | (batch row of a key in a namespace the cluster does not have; a single-record command raises `InvalidArgError`) |
 | 21 | `AEROSPIKE_ERR_BIN_NAME` | `BinNameError` |
 | 27 | `AEROSPIKE_ERR_FILTERED_OUT` | `FilteredOut` |
+| 100 | `AEROSPIKE_ERR_UDF` | `UDFError` |
 | 200 | `AEROSPIKE_ERR_INDEX_FOUND` | `IndexFoundError` |
 | 201 | `AEROSPIKE_ERR_INDEX_NOT_FOUND` | `IndexNotFound` |
 | 210 | `AEROSPIKE_ERR_QUERY_ABORTED` | `QueryAbortedError` |
+| -1 | — | No server answered; see `error_type` |
 
 See [Exceptions API Reference](../../api/exceptions.md) and [Constants](../../api/constants.md) for full lists.

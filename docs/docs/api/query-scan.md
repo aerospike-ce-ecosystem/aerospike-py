@@ -24,15 +24,15 @@ Select specific bins to return.
 
 ### `where(predicate)`
 
-Set a predicate filter. Requires a secondary index on the bin.
+Set a predicate filter. Requires a secondary index on the bin. A query takes one predicate: a second `where()` raises `InvalidArgError` when the query runs.
 
 ### `results(policy=None) -> list[Record]`
 
-Execute and return all matching records.
+Execute and return all matching records. All or nothing: a query that fails raises and returns no records.
 
 ### `foreach(callback, policy=None)`
 
-Execute and invoke `callback(record)` for each result. Return `False` to stop early.
+Execute and invoke `callback(record)` for each result as it arrives. Return `False` to stop early; that stops the scan on the server too. At most `record_queue_size` records (default 1024) wait in the client.
 
 ```python
 def process(record: Record) -> None:
@@ -40,6 +40,38 @@ def process(record: Record) -> None:
 
 query.foreach(process)
 ```
+
+On `AsyncQuery`, the callback runs in a worker thread and must be a plain function (an `async def` function raises `TypeError`). Cancelling the awaiting task stops the query; a running callback finishes first.
+
+### `stream(policy=None) -> AsyncRecordStream` (async only)
+
+Open the query as an async iterator of records. `async for record in query` does the same. Nothing is sent until the first record is asked for. The stream is also an async context manager and has `close()`, `aclose()` and `closed`; leaving it early stops the query on the server.
+
+```python
+async with query.stream({"max_records": 1000}) as records:
+    async for record in records:
+        await handle(record)
+```
+
+See [Async streaming](../guides/query-scan/query-scan.md#async-streaming) for when the query stops and how much memory it uses.
+
+### `AsyncRecordStream`
+
+Returned by `AsyncQuery.stream()`; `async for record in query` uses one.
+
+| Member | Description |
+|--------|-------------|
+| `async for record in stream` | The records, one at a time, as they arrive. |
+| `async with stream as records` | Closes the stream when the block is left. |
+| `close()` | Stop the query and drop the records not yet handed out. Idempotent. |
+| `await aclose()` | Same as `close()`; for `contextlib.aclosing` and similar helpers. |
+| `closed` | Whether `close()` has been called. |
+
+The query stops, on the client and on the server, when the stream ends, when `close()` is called, when the `async with` block is left, or when the stream is garbage collected. Cancelling a task that waits for the next record closes the stream. At most `record_queue_size` records (default 1024) wait in the client.
+
+### Leaving a query early
+
+Every way of leaving a query before its end stops the scan on the server at once, on the sync and the async client: a `foreach()` callback returning `False` or raising, `break` out of `async for`, `close()`, cancellation, an error in the stream. Up to 0.14.x the server went on scanning until its socket timeout (30 seconds by default). A rate-limited scan (`records_per_second`) stops when the server sends its next block, at most `socket_timeout` later.
 
 ---
 
@@ -60,16 +92,21 @@ from aerospike_py import predicates
 
 ### Geospatial
 
+Each example builds its own query: a query takes one `where()` predicate.
+
 ```python
 # Points within a polygon
 region = '{"type":"Polygon","coordinates":[[[126.9,37.5],[126.9,37.6],[127.0,37.6],[127.0,37.5],[126.9,37.5]]]}'
+query = client.query("test", "places")
 query.where(predicates.geo_within_geojson_region("location", region))
 
 # Points within radius
+query = client.query("test", "places")
 query.where(predicates.geo_within_radius("location", 37.5665, 126.978, 5000.0))
 
 # Regions containing a point
 point = '{"type":"Point","coordinates":[126.978, 37.5665]}'
+query = client.query("test", "areas")
 query.where(predicates.geo_contains_geojson_point("coverage", point))
 ```
 

@@ -61,7 +61,7 @@ import aerospike_py as aerospike
 
 ### Batch Concurrency
 
-Controls how a batch request fans out across cluster nodes. Used as the ``concurrency`` key on [`BatchPolicy`](types.md#batchpolicy). Other integer values raise ``ValueError`` at parse time. (aerospike-core 2.0 has no `MaxThreads(n)` variant.)
+Controls how a batch request fans out across cluster nodes. Used as the ``concurrency`` key on [`BatchPolicy`](types.md#batchpolicy). Other integer values raise ``ValueError`` at parse time. (aerospike-core 3.0 has no `MaxThreads(n)` variant.)
 
 | Constant | Value | Description |
 |----------|-------|-------------|

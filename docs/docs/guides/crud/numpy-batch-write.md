@@ -191,7 +191,7 @@ The same dtype kinds supported by `batch_read().to_numpy(dtype)` are supported f
 | Float | `f` | `"f4"`, `"f8"` | `Float(f64)` |
 | Fixed bytes | `S` | `"S8"`, `"S16"` | `Blob(bytes)` or `String` |
 | Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` |
-| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` |
+| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` — also for shape `(1,)`, which 0.14.x stored as a scalar; see [Upgrading to 0.15](../migration-0.15.md#one-element-vectors-are-stored-as-a-blob) before switching writers |
 
 :::tip[Unsupported dtypes]
 
@@ -478,7 +478,7 @@ results: BatchWriteResult = client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
-    _dtype: np.dtype,
+    _dtype: np.dtype | None = None,
     key_field: str = "_key",
     policy: dict | None = None,
     retry: int = 0,
@@ -489,7 +489,7 @@ results: BatchWriteResult = await client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
-    _dtype: np.dtype,
+    _dtype: np.dtype | None = None,
     key_field: str = "_key",
     policy: dict | None = None,
     retry: int = 0,
@@ -498,14 +498,14 @@ results: BatchWriteResult = await client.batch_write_numpy(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `data` | `np.ndarray` | required | Structured numpy array with record data |
+| `data` | `np.ndarray` | required | Structured numpy array with record data. Its own `data.dtype` defines the layout. |
 | `namespace` | `str` | required | Target Aerospike namespace |
 | `set_name` | `str` | required | Target set name |
-| `_dtype` | `np.dtype` | required | Structured dtype describing the array layout |
+| `_dtype` | `np.dtype \| None` | `None` | Optional dtype the array is expected to have. When given and different from `data.dtype`, `ValueError` is raised before anything is sent. |
 | `key_field` | `str` | `"_key"` | Name of the dtype field to use as the record user key |
-| `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides |
-| `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). `0` = no retry. |
+| `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides. `max_retries` defaults to `0` and cannot be combined with `retry`. |
+| `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). `0` = no retry. Only records that failed are re-sent; a `CREATE_ONLY` or generation-checked record that is `in_doubt` is not. Giving a non-zero `policy["max_retries"]` as well raises `InvalidArgError`. |
 
-**Returns:** `BatchWriteResult` — NamedTuple with `batch_records: list[BatchRecord]`. Each `BatchRecord` carries `key`, `result` (0=success), `record` (a `Record` or `None`), and `in_doubt` (transport-ambiguity flag).
+**Returns:** `BatchWriteResult` — NamedTuple with `batch_records: list[BatchRecord]` and `retry` (`BatchRetryInfo`). Each `BatchRecord` carries `key`, `result` (`0` success, the server's code, or `-1` when no server answered), `record` (a `Record` or `None`), `in_doubt` (the write may have been applied) and `error_type` (`None` on success, otherwise the kind of failure). If the call fails as a whole, the exception's `partial_result` holds these rows.
 
 **See also:** [NumPy Batch Read Guide](./numpy-batch.md) for reading records back into numpy arrays.
