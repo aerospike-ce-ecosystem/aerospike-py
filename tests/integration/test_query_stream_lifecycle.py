@@ -35,6 +35,7 @@ from typing import ClassVar
 import pytest
 
 import aerospike_py
+from aerospike_py import exp
 from tests.helpers import invoke
 
 NS = "test"
@@ -131,6 +132,30 @@ class TestEveryRecordOnce:
 
         assert {record.bins["v"] for record in records} == set(range(seeded))
         assert len(records) == seeded
+
+    @pytest.mark.parametrize("wanted", [0, 1, 256, 257, 1023, 1024, 1025, 3000])
+    async def test_results_of_every_size(self, async_client, seeded, wanted):
+        """A small result is converted when it is delivered, a larger one in chunks on the way."""
+        query = async_client.query(NS, SET_NAME)
+        query.select("v")
+
+        records = await query.results({"filter_expression": exp.lt(exp.int_bin("v"), exp.int_val(wanted))})
+
+        assert all(type(record) is aerospike_py.Record for record in records)
+        assert sorted(record.bins["v"] for record in records) == list(range(wanted))
+
+    async def test_several_results_at_once_each_get_every_record(self, async_client, seeded):
+        """Their chunks take turns being converted; none may end up in another call's list."""
+
+        async def read() -> list:
+            query = async_client.query(NS, SET_NAME)
+            query.select("v")
+            return await query.results()
+
+        for records in await asyncio.gather(*(read() for _ in range(4))):
+            assert len(records) == seeded
+            assert {record.bins["v"] for record in records} == set(range(seeded))
+            assert all(type(record) is aerospike_py.Record for record in records[:100])
 
     async def test_foreach(self, async_client, seeded):
         seen = []

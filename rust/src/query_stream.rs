@@ -8,7 +8,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use aerospike_core::query::PartitionFilter;
@@ -177,7 +177,7 @@ impl RunningQuery {
         tokio::spawn(watch_over(handle, queue, Arc::clone(&stop)));
         Ok(Self {
             records,
-            taken: Vec::new(),
+            taken: Vec::with_capacity(room.taken_at_once),
             taken_at_once: room.taken_at_once,
             stop,
         })
@@ -248,10 +248,13 @@ type HandedOver = Either<Ready<bool>, Pin<Box<dyn Future<Output = bool> + Send>>
 /// "in the queue" and "will not be fetched again" are the same moment.
 ///
 /// This runs for every record, and aerospike-core puts what it returns in a
-/// box of its own. So the record goes into the queue right here, before any
-/// future exists: nothing is cloned and the box holds a `bool`. Only when the
-/// queue is full is a future built that waits, and that is the one case where
-/// the reader has time to spare.
+/// box of its own (`Box::pin(callback(record))`). So the record goes into the
+/// queue right here, before any future exists: nothing is cloned, and what
+/// aerospike-core boxes is this small enum, a `bool` or a pointer, and not a
+/// future laid out for the wait with the record inside. That allocation per
+/// record is aerospike-core's and stays. Only when the queue is full is a
+/// future built that waits, and that is the one case where the reader has
+/// time to spare.
 fn hand_over(queue: &mpsc::Sender<Item>, stop: &Arc<StopSignal>, item: Item) -> HandedOver {
     if stop.is_stopped() {
         return Either::Left(ready(false));
@@ -600,27 +603,104 @@ impl Drop for StreamState {
 }
 
 /// How many records [`PyRecordStream::read_all`] converts under one hold of
-/// the GIL: some ten milliseconds' worth, so that the event loop and other
-/// threads get their turn while a large result is being built.
-const READ_ALL_CHUNK: usize = 4096;
+/// the GIL.
+///
+/// A trade between two things, both measured. The event loop cannot run while
+/// a chunk is converted, so a chunk should be short: with eight results of
+/// 20 000 records in flight the loop was 24 ms late at the 99th percentile
+/// with chunks of 4096 and 9 ms with 1024. But every chunk has to get the GIL
+/// first, and next to a thread that does not let go of it that is a wait of
+/// one switch interval (5 ms) per chunk: 100 000 records took 0.40 s with
+/// chunks of 4096 and 0.55 s with 1024, which is where 0.14.x was (0.56 to
+/// 0.62 s). Smaller than this would be slower than 0.14.x there.
+const READ_ALL_CHUNK: usize = 1024;
 
-/// One chunk of records being converted on a thread of its own.
+/// A result of at most this many records is converted when it is delivered,
+/// like a batch of a stream: there is nothing to pipeline, and it need not
+/// wait for its turn behind the chunks of a large result.
+const SMALL_RESULT: usize = 256;
+
+/// One chunk of records being converted.
 type Converting = tokio::task::JoinHandle<PyResult<Vec<Py<PyAny>>>>;
 
-/// Convert a chunk of records, and pass each through `wrap` when there is
-/// one (the Python side's `Record` constructor). One hold of the GIL.
-fn convert_chunk(chunk: Vec<Record>, wrap: Option<&Py<PyAny>>) -> PyResult<Vec<Py<PyAny>>> {
-    Python::attach(|py| {
-        let mut converted = Vec::with_capacity(chunk.len());
-        for record in &chunk {
-            let raw = record_to_py(py, record, None)?;
-            converted.push(match wrap {
-                Some(wrap) => wrap.call1(py, (raw,))?,
-                None => raw,
-            });
+/// The turns chunk conversions take, for the whole process.
+///
+/// Every conversion needs the GIL, so two of them cannot overlap anyway. What
+/// they can do is queue up for it: with eight large `results()` in flight,
+/// eight threads asked for the GIL over and over and the event loop's thread
+/// had to get past all of them, which made it 59 ms late at the 99th
+/// percentile where reading batch by batch made it 4 ms late. One conversion
+/// at a time leaves the loop a single thread to compete with. A free-threaded
+/// build has no GIL to queue for, so there the conversions run side by side.
+fn conversion_turns(py: Python<'_>) -> Arc<Semaphore> {
+    static TURNS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    Arc::clone(TURNS.get_or_init(|| {
+        let side_by_side = if gil_is_enabled(py) {
+            1
+        } else {
+            std::thread::available_parallelism().map_or(1, usize::from)
+        };
+        Arc::new(Semaphore::new(side_by_side))
+    }))
+}
+
+/// Whether this interpreter runs with the GIL. Interpreters that cannot tell
+/// (before 3.13) all do.
+fn gil_is_enabled(py: Python<'_>) -> bool {
+    py.import("sys")
+        .and_then(|sys| sys.call_method0("_is_gil_enabled"))
+        .and_then(|enabled| enabled.extract::<bool>())
+        .unwrap_or(true)
+}
+
+/// Convert records, and pass each through `wrap` when there is one (the
+/// Python side's `Record` constructor).
+fn convert_records(
+    py: Python<'_>,
+    records: &[Record],
+    wrap: Option<&Py<PyAny>>,
+) -> PyResult<Vec<Py<PyAny>>> {
+    let mut converted = Vec::with_capacity(records.len());
+    for record in records {
+        let raw = record_to_py(py, record, None)?;
+        converted.push(match wrap {
+            Some(wrap) => wrap.call1(py, (raw,))?,
+            None => raw,
+        });
+    }
+    Ok(converted)
+}
+
+/// Convert a chunk on a thread of its own, when it is this chunk's turn.
+/// Must be called inside the runtime.
+fn convert_in_turn(
+    chunk: Vec<Record>,
+    wrap: Option<Arc<Py<PyAny>>>,
+    turns: Arc<Semaphore>,
+) -> Converting {
+    tokio::spawn(async move {
+        // Never closed, so this is always a permit; it is held until the
+        // conversion is through.
+        let _turn = turns.acquire_owned().await;
+        let converting = tokio::task::spawn_blocking(move || {
+            Python::attach(|py| convert_records(py, &chunk, wrap.as_deref()))
+        });
+        match converting.await {
+            Ok(converted) => converted,
+            Err(lost) => Err(conversion_lost(lost)),
         }
-        Ok(converted)
     })
+}
+
+/// A conversion that did not come back. A panic is passed on as the panic it
+/// is, so that it reaches the caller as `RustPanicError` like any other.
+fn conversion_lost(lost: tokio::task::JoinError) -> PyErr {
+    match lost.try_into_panic() {
+        Ok(panic) => std::panic::resume_unwind(panic),
+        Err(lost) => pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "converting query records was interrupted: {lost}"
+        )),
+    }
 }
 
 /// Wait for a chunk that is being converted and append it to `converted`.
@@ -631,9 +711,7 @@ async fn collect_converted(
     let Some(converting) = converting else {
         return Ok(());
     };
-    let chunk = converting.await.map_err(|e| {
-        pyo3::exceptions::PyRuntimeError::new_err(format!("converting query records failed: {e}"))
-    })??;
+    let chunk = converting.await.map_err(conversion_lost)??;
     if converted.is_empty() {
         *converted = chunk;
     } else {
@@ -642,9 +720,15 @@ async fn collect_converted(
     Ok(())
 }
 
-/// Every record of a query, already converted: what
-/// [`PyRecordStream::read_all`] resolves to.
-pub(crate) struct ConvertedRecords(Vec<Py<PyAny>>);
+/// Every record of a query: what [`PyRecordStream::read_all`] resolves to.
+///
+/// Either `converted` holds them, or - for a small result - `unconverted`
+/// does and they are converted here, when the list is built.
+pub(crate) struct ConvertedRecords {
+    converted: Vec<Py<PyAny>>,
+    unconverted: Vec<Record>,
+    wrap: Option<Arc<Py<PyAny>>>,
+}
 
 impl<'py> IntoPyObject<'py> for ConvertedRecords {
     type Target = PyAny;
@@ -652,7 +736,12 @@ impl<'py> IntoPyObject<'py> for ConvertedRecords {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        Ok(PyList::new(py, &self.0)?.into_any())
+        let records = if self.unconverted.is_empty() {
+            self.converted
+        } else {
+            convert_records(py, &self.unconverted, self.wrap.as_deref())?
+        };
+        Ok(PyList::new(py, records)?.into_any())
     }
 }
 
@@ -734,12 +823,20 @@ impl PyRecordStream {
     /// times: 100 000 records took 5.6 s that way where 0.14.x took 0.6 s.
     ///
     /// Here the records are gathered on the runtime, without the GIL, and
-    /// converted [`READ_ALL_CHUNK`] at a time on a thread of their own while
-    /// the next ones are being fetched. The event loop is involved once, at
-    /// the end, and has nothing left to do then: wrapping every record in the
-    /// loop's own thread would stall it for as long as the whole result takes.
-    /// The GIL is never held for longer than one chunk takes, and no more
-    /// than three chunks of unconverted records are in memory.
+    /// converted a chunk at a time on a thread of their own while the next
+    /// ones are being fetched. The event loop is involved once, at the end,
+    /// and has nothing left to do then: wrapping every record in the loop's
+    /// own thread would stall it for as long as the whole result takes.
+    ///
+    /// The GIL is never held for longer than one chunk takes, and only one
+    /// chunk is converted at a time in the whole process (see
+    /// [`conversion_turns`]). Unconverted records are in memory as the queue,
+    /// the chunk being gathered and the chunk being converted. A chunk is cut
+    /// when [`READ_ALL_CHUNK`] records are gathered and a read brings at most
+    /// as many, so it stays below twice that.
+    ///
+    /// A result of at most [`SMALL_RESULT`] records skips all of this and is
+    /// converted on delivery.
     ///
     /// An error ends it without a result, as it always did for `results()`.
     /// Cancelling the awaiting task drops what was gathered; the caller
@@ -752,13 +849,13 @@ impl PyRecordStream {
     ) -> PyResult<Bound<'py, PyAny>> {
         let state = Arc::clone(&self.state);
         let wrap = wrap.map(Arc::new);
+        let turns = conversion_turns(py);
         future_into_py_panic_safe(py, "RecordStream.read_all", async move {
             let mut gathered: Vec<Record> = Vec::new();
             let mut converting: Option<Converting> = None;
             let mut converted: Vec<Py<PyAny>> = Vec::new();
             let convert = |chunk: Vec<Record>| -> Converting {
-                let wrap = wrap.clone();
-                tokio::task::spawn_blocking(move || convert_chunk(chunk, wrap.as_deref()))
+                convert_in_turn(chunk, wrap.clone(), Arc::clone(&turns))
             };
             while let Some(batch) = state
                 .next_batch(READ_ALL_CHUNK)
@@ -780,10 +877,21 @@ impl PyRecordStream {
                 }
             }
             collect_converted(converting.take(), &mut converted).await?;
+            if converted.is_empty() && gathered.len() <= SMALL_RESULT {
+                return Ok(ConvertedRecords {
+                    converted,
+                    unconverted: gathered,
+                    wrap,
+                });
+            }
             if !gathered.is_empty() {
                 collect_converted(Some(convert(gathered)), &mut converted).await?;
             }
-            Ok(ConvertedRecords(converted))
+            Ok(ConvertedRecords {
+                converted,
+                unconverted: Vec::new(),
+                wrap: None,
+            })
         })
     }
 
@@ -1084,6 +1192,143 @@ mod tests {
             matches!(running.next_if_ready(), Some(None)),
             "the end is known without waiting"
         );
+    }
+
+    // --- read_all's conversions ----------------------------------------------
+
+    fn ensure_python() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(Python::initialize);
+    }
+
+    fn plain(n: u32) -> Record {
+        Record::new(None, Default::default(), None, n, 0)
+    }
+
+    /// The generations of converted `(key, meta, bins)` tuples, in order.
+    fn generations(py: Python<'_>, converted: &Bound<'_, PyAny>) -> Vec<u32> {
+        converted
+            .try_iter()
+            .expect("a list")
+            .map(|record| {
+                let meta = record.expect("an item").get_item(1).expect("meta");
+                meta.get_item("gen").expect("gen").extract().expect("int")
+            })
+            .inspect(|_| {
+                let _ = py;
+            })
+            .collect()
+    }
+
+    #[test]
+    fn under_the_gil_one_conversion_runs_at_a_time() {
+        ensure_python();
+        Python::attach(|py| {
+            let turns = conversion_turns(py);
+            if gil_is_enabled(py) {
+                assert_eq!(turns.available_permits(), 1);
+            } else {
+                assert!(turns.available_permits() >= 1);
+            }
+            assert!(
+                Arc::ptr_eq(&turns, &conversion_turns(py)),
+                "one set of turns for the whole process"
+            );
+        });
+    }
+
+    #[test]
+    fn a_small_result_is_converted_when_it_is_delivered() {
+        ensure_python();
+        Python::attach(|py| {
+            let small = ConvertedRecords {
+                converted: Vec::new(),
+                unconverted: vec![plain(3), plain(1), plain(2)],
+                wrap: None,
+            };
+            let list = small.into_pyobject(py).expect("converts");
+            assert_eq!(generations(py, &list), vec![3, 1, 2]);
+
+            let none = ConvertedRecords {
+                converted: Vec::new(),
+                unconverted: Vec::new(),
+                wrap: None,
+            };
+            assert_eq!(none.into_pyobject(py).expect("converts").len().unwrap(), 0);
+        });
+    }
+
+    #[test]
+    fn records_are_passed_through_the_wrapper_they_are_given() {
+        ensure_python();
+        Python::attach(|py| {
+            // Stands in for the Python side's `Record` constructor.
+            let wrap = py
+                .eval(c"lambda raw: ('wrapped', raw[1]['gen'])", None, None)
+                .expect("a function")
+                .unbind();
+            let converted =
+                convert_records(py, &[plain(7), plain(8)], Some(&wrap)).expect("converts");
+            let seen: Vec<(String, u32)> = converted
+                .iter()
+                .map(|item| item.extract(py).expect("a pair"))
+                .collect();
+            assert_eq!(
+                seen,
+                vec![("wrapped".to_string(), 7), ("wrapped".to_string(), 8)]
+            );
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_chunk_waits_for_its_turn_and_comes_back_whole() {
+        ensure_python();
+        let turns = Arc::new(Semaphore::new(1));
+        let held = Arc::clone(&turns)
+            .acquire_owned()
+            .await
+            .expect("never closed");
+
+        let waiting = convert_in_turn((0..300).map(plain).collect(), None, Arc::clone(&turns));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !waiting.is_finished(),
+            "another conversion has the turn, so this one has not started"
+        );
+
+        drop(held);
+        let converted = waiting.await.expect("not lost").expect("converts");
+        assert_eq!(converted.len(), 300);
+        Python::attach(|py| {
+            let list = PyList::new(py, converted).expect("a list").into_any();
+            assert_eq!(generations(py, &list), (0..300).collect::<Vec<_>>());
+        });
+        assert_eq!(
+            turns.available_permits(),
+            1,
+            "the turn is given back when the conversion is through"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_conversion_that_fails_gives_its_turn_back() {
+        ensure_python();
+        let turns = Arc::new(Semaphore::new(1));
+        let failing = Python::attach(|py| {
+            py.eval(c"lambda raw: 1 / 0", None, None)
+                .expect("a function")
+                .unbind()
+        });
+
+        let outcome = convert_in_turn(vec![plain(1)], Some(Arc::new(failing)), Arc::clone(&turns))
+            .await
+            .expect("not lost");
+
+        Python::attach(|py| {
+            let error = outcome.expect_err("the wrapper raised");
+            assert!(error.is_instance_of::<pyo3::exceptions::PyZeroDivisionError>(py));
+        });
+        assert_eq!(turns.available_permits(), 1);
     }
 
     #[tokio::test]
