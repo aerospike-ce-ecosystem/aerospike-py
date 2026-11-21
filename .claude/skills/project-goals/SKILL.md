@@ -7,13 +7,13 @@ model: opus
 
 # Project Goals
 
-A high-performance client library that wraps aerospike-client-rust v2 as Python bindings via PyO3.
+A high-performance client library that wraps aerospike-client-rust v3 as Python bindings via PyO3.
 
 ## 5 Core Goals
 
 | # | Goal | Key Metric |
 |---|------|----------|
-| 1 | **Rust v2 Bindings** | Expose aerospike crate 2.x API via both sync/async paths |
+| 1 | **Rust v3 Bindings** | Expose aerospike crate 3.x API via both sync/async paths |
 | 2 | **Performance** | GIL-free I/O, outperform C client (aerospike-client-python) on async paths |
 | 3 | **Observability** | logging · OTel tracing · Prometheus metrics |
 | 4 | **NumPy v2 Integration** | Direct structured array I/O for batch read/write |
