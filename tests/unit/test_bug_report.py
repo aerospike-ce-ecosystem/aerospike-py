@@ -24,7 +24,7 @@ class TestLogUnexpectedError:
             log_unexpected_error("Client.get", exc)
 
         msg = caplog.records[0].message
-        assert "gh issue create --repo KimSoungRyoul/aerospike-py" in msg
+        assert "gh issue create --repo aerospike-ce-ecosystem/aerospike-py" in msg
 
     def test_log_contains_context(self, caplog):
         exc = RuntimeError("internal failure")

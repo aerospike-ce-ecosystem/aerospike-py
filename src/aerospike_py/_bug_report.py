@@ -13,7 +13,7 @@ __all__ = ["log_unexpected_error", "catch_unexpected"]
 
 logger = logging.getLogger("aerospike_py")
 
-_REPO = "KimSoungRyoul/aerospike-py"
+_REPO = "aerospike-ce-ecosystem/aerospike-py"
 
 
 def _shell_escape(s: str) -> str:
