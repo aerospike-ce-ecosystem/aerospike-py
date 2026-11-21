@@ -592,7 +592,57 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
             &format!("Unmapped aerospike_core::Error kind: {err}"),
         );
     }
-    build_pyerr(class, &describe(&err), err.node(), err.in_doubt())
+    build_pyerr(
+        class,
+        &describe(&err),
+        err.node(),
+        may_have_been_applied(&err),
+    )
+}
+
+/// Whether a write that failed with `err` may have been applied all the same:
+/// the `in_doubt` of the Python exception, of a batch row and of the span.
+///
+/// aerospike-core decides this for every error, by one rule for a server's
+/// answer (in doubt only when an earlier attempt of the same command was sent
+/// and may have gone through) and another for everything else (in doubt as
+/// soon as the command was sent). It files a UDF failure under "everything
+/// else", so every failed `apply()` came out in doubt.
+///
+/// A UDF failure is a server's answer: the server could not find the
+/// function, or ran it, rolled the record back and said so. That is as
+/// definite as KEY_EXISTS, and the Java client treats it that way, so the rule
+/// for a server's answer is applied to it here.
+pub(crate) fn may_have_been_applied(err: &AsError) -> bool {
+    if !err.in_doubt() {
+        return false;
+    }
+    match udf_answer(err) {
+        // The retry loop files the error of every earlier attempt under the
+        // final one, so "no earlier attempt" reads as "no sub-errors". An
+        // earlier attempt that failed before it was sent is filed too, which
+        // errs on the side of saying "in doubt".
+        Some(answer) => !answer.sub_errors().is_empty(),
+        None => true,
+    }
+}
+
+/// The server's "the UDF failed" answer that `err` reports, if it reports one.
+///
+/// A single-record command reports it as its own error. aerospike-core runs a
+/// one-key batch as a single-record command and wraps that command's error in
+/// the row's, so there it is the direct cause. (A row of a larger batch is a
+/// plain server error and already follows the rule for a server's answer.)
+fn udf_answer(err: &AsError) -> Option<&AsError> {
+    let is_udf_answer = |e: &&AsError| matches!(e.kind(), ErrorKind::UdfBadResponse);
+    match err.kind() {
+        ErrorKind::UdfBadResponse => Some(err),
+        ErrorKind::Server {
+            rc: ResultCode::UdfBadResponse,
+            ..
+        } => err.cause().filter(is_udf_answer),
+        _ => None,
+    }
 }
 
 /// Build the `RecordNotFound` error raised when a delete targeted a record

@@ -278,7 +278,7 @@ pub(crate) mod otel_impl {
         if let crate::errors::ErrorClass::Server(rc) = class {
             span.set_attribute(KeyValue::new("db.response.status_code", format!("{rc:?}")));
         }
-        if err.in_doubt() {
+        if crate::errors::may_have_been_applied(err) {
             span.set_attribute(KeyValue::new("aerospike.in_doubt", true));
         }
     }

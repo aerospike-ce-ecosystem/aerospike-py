@@ -96,8 +96,15 @@ impl RowOutcome {
 /// gone, after the master had already taken the write. A single-record write
 /// that ends this way is reported in doubt; a batch row has to be as well, or
 /// "failed, certainly not applied" would be said of a record that was written.
+///
+/// In the other direction it marks every failed UDF row of a one-key batch in
+/// doubt, although the server answered with a definite failure; see
+/// [`may_have_been_applied`](crate::errors::may_have_been_applied).
 pub(crate) fn row_in_doubt(br: &BatchRecord, outcome: RowOutcome) -> bool {
-    br.in_doubt() || (br.has_write() && server_gave_up_waiting(outcome))
+    if !br.has_write() {
+        return false;
+    }
+    br.error().is_some_and(crate::errors::may_have_been_applied) || server_gave_up_waiting(outcome)
 }
 
 /// The row was answered with the server's own `TIMEOUT` result code.

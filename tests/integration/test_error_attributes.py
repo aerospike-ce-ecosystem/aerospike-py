@@ -16,6 +16,7 @@ must not be logged as a possible bug in the client (issue #445).
 """
 
 import logging
+import time
 
 import pytest
 
@@ -27,6 +28,26 @@ NS = "test"
 SET_NAME = "error_attrs"
 
 BUG_REPORT_MARKER = "may be a bug in aerospike-py"
+
+
+@pytest.fixture(scope="module")
+def failing_udf(client):
+    """Register the UDF once; wait until the node serves it."""
+    client.udf_put("tests/failing_udf.lua")
+    probe = (NS, SET_NAME, "udf_probe")
+    client.put(probe, {"v": 1})
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            client.apply(probe, "failing_udf", "update_then_fail", [])
+        except aerospike_py.AerospikeError as exc:
+            if "failing on purpose" in str(exc):
+                break
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.1)
+    yield
+    client.remove(probe)
 
 
 def _error_count(operation: str, set_name: str, error_type: str) -> int:
@@ -114,6 +135,43 @@ class TestServerAnsweredWithAFailure:
         exc = excinfo.value
         assert (exc.result_code, exc.error_type) == (aerospike_py.AEROSPIKE_ERR_UDF, "UdfBadResponse")
         assert isinstance(exc, aerospike_py.ServerError)
+        assert exc.in_doubt is False, "the server said it could not run the function: nothing is in doubt"
+
+    async def test_a_udf_that_fails_after_updating_changed_nothing_and_is_not_in_doubt(
+        self, any_client, any_cleanup, failing_udf
+    ):
+        """The server rolls a failed UDF back, so its failure is as definite as KEY_EXISTS.
+
+        Rust client 3.0 marks every failed UDF call in doubt. Reported that way,
+        a caller could not tell "the function raised" from "the answer was lost".
+        """
+        key = (NS, SET_NAME, "udf_rollback")
+        any_cleanup.append(key)
+        await invoke(any_client, "put", key, {"v": 1})
+
+        with pytest.raises(aerospike_py.UDFError) as excinfo:
+            await invoke(any_client, "apply", key, "failing_udf", "update_then_fail", [])
+
+        exc = excinfo.value
+        assert (exc.result_code, exc.in_doubt) == (aerospike_py.AEROSPIKE_ERR_UDF, False)
+        assert "failing on purpose" in str(exc)
+        assert (await invoke(any_client, "get", key)).bins == {"v": 1}, "the failed UDF's update was kept"
+
+    @pytest.mark.parametrize("count", [1, 3], ids=["one_key", "several_keys"])
+    async def test_a_failed_batch_apply_row_is_not_in_doubt_either(self, any_client, any_cleanup, failing_udf, count):
+        """Rust client 3.0 runs a one-key batch as a single-record command, so both shapes are checked."""
+        keys = [(NS, SET_NAME, f"udf_rollback_batch_{count}_{i}") for i in range(count)]
+        any_cleanup.extend(keys)
+        for key in keys:
+            await invoke(any_client, "put", key, {"v": 1})
+
+        result = await invoke(any_client, "batch_apply", keys, "failing_udf", "update_then_fail", [])
+
+        assert [(row.result, row.in_doubt) for row in result.batch_records] == [
+            (aerospike_py.AEROSPIKE_ERR_UDF, False)
+        ] * count
+        for key in keys:
+            assert (await invoke(any_client, "get", key)).bins == {"v": 1}
 
 
 class TestNoServerAnswered:
