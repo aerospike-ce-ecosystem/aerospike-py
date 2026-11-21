@@ -22,6 +22,7 @@ number of keys.
 """
 
 import asyncio
+from typing import ClassVar
 
 import pytest
 
@@ -314,6 +315,73 @@ class TestAnAnswerWorthARetryIsStillAnAnswer:
         assert {hot_row(outcome) for outcome in outcomes} == {(0, None, False), self.REFUSED}
         for outcome in outcomes:
             assert [(row.result, row.in_doubt) for row in outcome.batch_records[1:]] == [(0, False)] * (keys - 1)
+
+
+class TestARecordThatCouldNotBeSentAgain:
+    """With ``max_retries > 0`` a node's share of a write batch is sent again when its answer is late.
+
+    When no node can be found for a record at that moment, Rust client 3.0
+    gives its row ``PARTITION_UNAVAILABLE`` and calls that certain, "since
+    nothing was sent". That is true of the second send. The first one may have
+    been applied, so the row has to say that it is in doubt.
+
+    The node is lost here by closing the client between the two sends, which
+    asks nothing of the server. A node that is dropped from the cluster while
+    a batch waits for it takes the same path.
+    """
+
+    COUNT = 20_000
+    SET = "batch_resend_unrouted"
+    # The answer for 20 000 records does not come within 5 ms, so the first
+    # send is given up on. The second is due 400 ms later.
+    IMPATIENT: ClassVar = {
+        "total_timeout": 30_000,
+        "socket_timeout": 5,
+        "max_retries": 20,
+        "sleep_between_retries": 400,
+    }
+    PATIENT: ClassVar = {"total_timeout": 30_000, "socket_timeout": 30_000}
+
+    async def test_no_row_calls_a_written_record_certainly_not_written(self, async_client):
+        keys = [(NS, self.SET, i) for i in range(self.COUNT)]
+        records = [(key, {"v": 7, "pad": "x" * 200}) for key in keys]
+        seen_a_failed_row_that_was_written = False
+
+        for _ in range(3):
+            sender = await aerospike_py.AsyncClient(AEROSPIKE_CONFIG).connect()
+            call = asyncio.ensure_future(sender.batch_write(records, policy=self.IMPATIENT))
+            await asyncio.sleep(0.1)
+            await sender.close()
+            raised = None
+            try:
+                rows = (await call).batch_records
+            except aerospike_py.AerospikeError as exc:
+                raised = exc
+                rows = exc.partial_result.batch_records if exc.partial_result is not None else []
+            await asyncio.sleep(1.5)  # the server finishes what it had received
+
+            stored = (await async_client.batch_read(keys, bins=["v"], policy=self.PATIENT)).batch_records
+            written = [now.result == aerospike_py.AEROSPIKE_OK for now in stored]
+            await async_client.batch_remove(keys, policy=self.PATIENT)
+
+            wrong = [
+                row.key[2]
+                for row, was_written in zip(rows, written)
+                if row.result != 0 and not row.in_doubt and was_written
+            ]
+            assert wrong == [], f"{len(wrong)} rows say 'failed, not in doubt' of a record that was written"
+            assert all(was_written for row, was_written in zip(rows, written) if row.result == 0)
+            if raised is not None and any(row.in_doubt for row in rows):
+                assert raised.in_doubt, "a call with a row in doubt is in doubt"
+
+            seen_a_failed_row_that_was_written = any(
+                row.result != 0 and was_written for row, was_written in zip(rows, written)
+            )
+            if seen_a_failed_row_that_was_written:
+                break
+
+        if not seen_a_failed_row_that_was_written:
+            pytest.skip("no send was given up on after the server had written its records: nothing was tested")
 
 
 class TestRetryCountersOnAFailedCall:

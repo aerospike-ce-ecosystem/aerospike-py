@@ -112,6 +112,24 @@ pub(crate) fn server_gave_up_waiting(outcome: RowOutcome) -> bool {
     outcome == RowOutcome::Failed(ErrorClass::Server(ResultCode::Timeout))
 }
 
+/// Whether aerospike-core gave this row `PARTITION_UNAVAILABLE` itself,
+/// because it found no node to send the record to.
+///
+/// It reports that with the server's result code, so the row looks like one a
+/// server refused. What tells them apart is the node: a server's answer names
+/// the node that gave it, and a code the client made up names none.
+pub(crate) fn could_not_be_routed(br: &BatchRecord) -> bool {
+    br.error().is_some_and(|err| {
+        matches!(
+            err.kind(),
+            aerospike_core::ErrorKind::Server {
+                rc: ResultCode::PartitionUnavailable,
+                ..
+            }
+        ) && err.node().is_none()
+    })
+}
+
 /// Whether the server answered this row with success.
 ///
 /// The same judgement as `RowOutcome::of(br) == RowOutcome::Ok`, without
@@ -272,6 +290,16 @@ impl PendingBatchRecords {
     pub fn into_batch_records(self, py: Python<'_>) -> PyResult<PyBatchRecords> {
         build_batch_records(py, self.results, self.retry_stats, &self.in_doubt_rows)
     }
+
+    /// Whether any row will be reported in doubt: by the call that made the
+    /// rows, or by its own error.
+    fn any_row_in_doubt(&self) -> bool {
+        !self.in_doubt_rows.is_empty()
+            || self
+                .results
+                .iter()
+                .any(|row| row_in_doubt(row, RowOutcome::of(row)))
+    }
 }
 
 /// Attach the rows of a batch call that failed as a whole to its exception,
@@ -296,11 +324,19 @@ impl PendingBatchRecords {
 /// sent (a node's task could not be joined). The error of such a call is a
 /// plain client error that knows nothing of a send, so the exception is
 /// marked here, like the rows.
+///
+/// The exception is also in doubt when any of its rows is. A call that failed
+/// on several nodes comes back with the error of one of them, the first whose
+/// share failed, and that one may be a refusal (`KEY_BUSY`, not in doubt)
+/// while another node's share was sent and never answered. Which error it is
+/// depends on the order of the records; whether a write of the call may have
+/// been applied must not.
 pub(crate) fn attach_partial_result(
     err: PyErr,
     rows: PendingBatchRecords,
     call_in_doubt: bool,
 ) -> PyErr {
+    let call_in_doubt = call_in_doubt || rows.any_row_in_doubt();
     off_the_runtime(|| {
         Python::attach(|py| {
             let attached = rows

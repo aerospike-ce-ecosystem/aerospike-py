@@ -112,7 +112,7 @@ pub async fn do_remove(client: &AsClient, args: RemoveArgs) -> PyResult<()> {
         // the real wire code attached (ADR-0027), not the -1 sentinel.
         // With `max_retries > 0` this may be the answer to a second send
         // whose first one deleted the record; see
-        // `rows_a_resend_may_have_answered`.
+        // `rows_a_resend_leaves_in_doubt`.
         let may_be_a_resend = args.write_policy.base_policy.max_retries > 0;
         return Err(crate::errors::record_not_found_for_delete(may_be_a_resend));
     }
@@ -333,7 +333,7 @@ fn finish_batch<'k>(
         failure,
         stand_ins,
     } = settle_batch(ops, outcome, keys);
-    let mut in_doubt_rows = rows_a_resend_may_have_answered(&rows, sent.policy);
+    let mut in_doubt_rows = rows_a_resend_leaves_in_doubt(&rows, sent.policy);
     // The call gave up on rows it may already have sent: see
     // `unanswered_rows_may_have_been_sent`. Without a class to go by, assume
     // that it did.
@@ -417,22 +417,36 @@ fn settle_batch<'k>(
     }
 }
 
-/// The failed rows of a write batch that may be the answer to a *second* send
-/// of their record, in ascending order.
+/// The failed rows of a write batch that say nothing certain about a *first*
+/// send of their record, although they look as if they did, in ascending
+/// order.
 ///
 /// With `max_retries > 0` aerospike-core sends a node's share of a batch again
-/// when its answer did not arrive. If the first send had been applied, the
+/// when its answer did not arrive. Two kinds of row then mislead.
+///
+/// **The answer to the second send.** If the first send had been applied, the
 /// second one meets its own work: a delete finds no record, a write whose
 /// filter the first send made false is filtered out, a UDF fails on the state
 /// it left behind. Such a row says "failed" about a record that was changed.
-///
 /// For most answers aerospike-core marks a row that was sent before as in
 /// doubt. These three it reads on the path of an ordinary record, which has
-/// no such mark, and the binding cannot see whether a row was sent twice. So
-/// when re-sending is switched on (it is off by default for a batch that
-/// writes), every row of a write that ends in one of them is reported in
-/// doubt: the call does not know, and says so.
-fn rows_a_resend_may_have_answered(rows: &[BatchRecord], batch_policy: &BatchPolicy) -> Vec<usize> {
+/// no such mark.
+///
+/// **No second send at all.** When no node can be found for a record at the
+/// time of the re-send (its node was dropped from the cluster meanwhile, or
+/// the client was closed), aerospike-core gives the row
+/// `PARTITION_UNAVAILABLE` and calls it certain, "since nothing was sent".
+/// That is true of the send that did not happen and says nothing of the one
+/// before it. With 20 000 records and a client closed between the two sends,
+/// some hundreds of rows per call said "refused, not in doubt" of records
+/// that had been written.
+///
+/// The binding cannot see whether a row was sent before. So when re-sending
+/// is switched on (it is off by default for a batch that writes), every row
+/// of a write that ends in one of these ways is reported in doubt: the call
+/// does not know, and says so. That includes a record that could not be
+/// routed at the first send either, which was certainly not written.
+fn rows_a_resend_leaves_in_doubt(rows: &[BatchRecord], batch_policy: &BatchPolicy) -> Vec<usize> {
     if batch_policy.base_policy.max_retries == 0 {
         return Vec::new();
     }
@@ -440,14 +454,15 @@ fn rows_a_resend_may_have_answered(rows: &[BatchRecord], batch_policy: &BatchPol
         .enumerate()
         .filter(|(_, row)| {
             row.has_write()
-                && matches!(
-                    RowOutcome::of(row),
-                    RowOutcome::Failed(ErrorClass::Server(
-                        ResultCode::KeyNotFoundError
-                            | ResultCode::FilteredOut
-                            | ResultCode::UdfBadResponse
+                && (crate::batch_types::could_not_be_routed(row)
+                    || matches!(
+                        RowOutcome::of(row),
+                        RowOutcome::Failed(ErrorClass::Server(
+                            ResultCode::KeyNotFoundError
+                                | ResultCode::FilteredOut
+                                | ResultCode::UdfBadResponse
+                        ))
                     ))
-                )
         })
         .map(|(index, _)| index)
         .collect()
@@ -1950,6 +1965,55 @@ mod tests {
             let in_doubt = exception.getattr("in_doubt").unwrap().extract().unwrap();
             (rows, in_doubt)
         })
+    }
+
+    /// The `in_doubt` of the exception a failed call raises with these rows
+    /// attached, when the call's own error says "not in doubt".
+    fn call_in_doubt_with_rows(in_doubt_rows: Vec<usize>) -> (Vec<bool>, bool) {
+        pyo3::Python::initialize();
+        let rows = PendingBatchRecords {
+            in_doubt_rows,
+            results: vec![
+                BatchRecord::new(test_key("a"), true),
+                BatchRecord::new(test_key("b"), true),
+            ],
+            retry_stats: None,
+        };
+        // An error that is certain by itself: nothing was sent for it.
+        let refused = as_to_pyerr(AsError::invalid_argument("refused"));
+        let raised = crate::batch_types::attach_partial_result(refused, rows, false);
+
+        pyo3::Python::attach(|py| {
+            use pyo3::types::PyAnyMethods;
+            let exception = raised.value(py);
+            let rows = exception
+                .getattr("partial_result")
+                .unwrap()
+                .getattr("batch_records")
+                .unwrap()
+                .try_iter()
+                .unwrap()
+                .map(|row| row.unwrap().getattr("in_doubt").unwrap().extract().unwrap())
+                .collect();
+            (
+                rows,
+                exception.getattr("in_doubt").unwrap().extract().unwrap(),
+            )
+        })
+    }
+
+    #[test]
+    fn test_a_failed_call_is_in_doubt_when_one_of_its_rows_is() {
+        // A call that failed on two nodes raises the error of one of them. A
+        // refusal from the first must not hide that the second node's share
+        // was sent and never answered.
+        let (rows, call_in_doubt) = call_in_doubt_with_rows(vec![1]);
+        assert_eq!(rows, vec![false, true]);
+        assert!(call_in_doubt, "a write of this call may have been applied");
+
+        let (rows, call_in_doubt) = call_in_doubt_with_rows(Vec::new());
+        assert_eq!(rows, vec![false, false]);
+        assert!(!call_in_doubt);
     }
 
     #[test]

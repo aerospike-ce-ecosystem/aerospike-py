@@ -522,6 +522,13 @@ fn result_code_exception(rc: &ResultCode, msg: String) -> PyErr {
         | ResultCode::InvalidQuota
         | ResultCode::NotAllowlisted
         | ResultCode::QuotaExceeded => AdminError::new_err(msg),
+        // What a server under load refuses a write with. A plain ServerError,
+        // and nothing this library needs updating for: a batch that returns
+        // such a row builds this exception only to drop it, and a warning per
+        // refused call said otherwise.
+        ResultCode::KeyBusy | ResultCode::DeviceOverload | ResultCode::PartitionUnavailable => {
+            ServerError::new_err(msg)
+        }
         // Default server error
         _ => {
             log::warn!(
