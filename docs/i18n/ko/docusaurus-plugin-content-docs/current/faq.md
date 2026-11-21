@@ -131,13 +131,31 @@ aerospike_py.stop_metrics_server()
 
 Prometheus에서 `http://localhost:9464/metrics`를 scrape하세요. Operation type별 latency histogram이 기록됩니다. 자세한 내용은 [Metrics guide](/docs/integrations/observability/metrics)를 참고하세요.
 
-## 어떤 Aerospike server 버전을 지원하나요?
+## 어떤 Aerospike server 버전을 지원하나요? {#what-aerospike-server-versions-are-supported}
 
-CI는 현재 `aerospike/aerospike-server:latest` image를 대상으로 integration
-suite를 실행하고, 로컬 Compose 예제는 Aerospike CE 8.1.0.3을 고정해서
-사용합니다. Package는 Aerospike Rust Client 2.0.0을 사용합니다. 더 오래된
-server release를 지원해야 한다면 배포 전에 해당 version으로 integration suite를
-실행하세요.
+aerospike-py 0.15는 Aerospike Rust Client 3.0을 기반으로 합니다(0.14.x는 2.2).
+지원하는 최소 server 버전은 **6.4**입니다.
+
+| Server 버전 | 상태 |
+|---|---|
+| 8.2 | 테스트함: CI integration suite가 이 버전으로 실행됩니다 |
+| 8.1 | 테스트함: CI integration suite가 이 버전으로 실행됩니다 |
+| 7.2 | 테스트함: CI integration suite가 이 버전으로 실행됩니다 |
+| 그 밖의 6.4 이상 release | 동작할 것으로 예상하지만 테스트하지 않음 |
+| 6.4 미만 | 지원하지 않음 |
+
+CI integration matrix는 정확히 이 세 버전으로 고정되어 있습니다. 로컬 Compose
+예제는 Aerospike CE 8.1.0.3을 고정해서 사용합니다. CI가 테스트하지 않는 버전을
+사용한다면 배포 전에 그 버전으로 integration suite를 실행하세요.
+
+## 0.15로 업그레이드할 때 무엇을 바꿔야 하나요?
+
+0.15는 Aerospike Rust Client 3.0으로 옮기면서 몇 가지 결과와 오류를 바꿉니다.
+`operate_ordered()`는 연산마다 항목 하나를 반환하고, `BatchRecord`에 다섯 번째
+field가 생겼고, write batch는 더 이상 스스로 retry하지 않고, 실패한 UDF는
+`UDFError`를 발생시키며, shape이 `(1,)`인 NumPy field는 blob으로 저장되는 등의
+변경이 있습니다. [0.15로 업그레이드](/docs/guides/migration-0.15) 가이드는
+체크리스트로 시작하고, 변경마다 변경 전후 예제를 보여 줍니다.
 
 ## bug 신고 또는 기능 요청은 어떻게 하나요?
 

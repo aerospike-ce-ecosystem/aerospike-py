@@ -132,11 +132,29 @@ Scrape `http://localhost:9464/metrics` from Prometheus. Operation latency histog
 
 ## What Aerospike server versions are supported?
 
-CI runs the integration suite against the current
-`aerospike/aerospike-server:latest` image, while the local Compose examples pin
-Aerospike CE 8.1.0.3. The package uses Aerospike Rust Client 2.0.0. If you need
-to support an older server release, run the integration suite against that
-version before deploying.
+aerospike-py 0.15 is built on Aerospike Rust Client 3.0 (0.14.x used 2.2). Its
+minimum supported server is **6.4**.
+
+| Server version | Status |
+|---|---|
+| 8.2 | Tested: the CI integration suite runs against it |
+| 8.1 | Tested: the CI integration suite runs against it |
+| 7.2 | Tested: the CI integration suite runs against it |
+| Other releases from 6.4 on | Expected to work, not tested |
+| Older than 6.4 | Not supported |
+
+The CI integration matrix is pinned to exactly these three versions. The local
+Compose examples pin Aerospike CE 8.1.0.3. If you run a version CI does not
+test, run the integration suite against it before deploying.
+
+## What do I need to change when upgrading to 0.15?
+
+0.15 moves to Aerospike Rust Client 3.0 and changes a few results and errors:
+`operate_ordered()` returns one entry per operation, `BatchRecord` has a fifth
+field, write batches no longer retry on their own, a failing UDF raises
+`UDFError`, NumPy fields of shape `(1,)` are stored as a blob, and more. The
+[Upgrading to 0.15](/docs/guides/migration-0.15) guide starts with a checklist
+and shows a before/after example for every change.
 
 ## How do I report a bug or request a feature?
 
