@@ -340,19 +340,36 @@ fn execute_query_collect(
     debug!("Executing {}", op_name);
 
     let telemetry = QueryTelemetry::start(op_name, namespace, set_name, conn_info);
+    let gather = {
+        let client = Arc::clone(client);
+        async move {
+            // Dropped on the way out, which stops the query when an error
+            // ends the loop before the stream does.
+            let mut running =
+                RunningQuery::start(&client, &query_policy, partition_filter, statement).await?;
+            let mut records = Vec::new();
+            while let Some(record) = running.next().await {
+                records.push(record?);
+            }
+            Ok::<_, AsError>(records)
+        }
+    };
     let outcome: PyResult<Result<Vec<_>, AsError>> = catch_panic_sync(panic_op(op_name), || {
         Ok(py.detach(|| {
-            RUNTIME.block_on(async {
-                // Dropped on the way out, which stops the query when an error
-                // ends the loop before the stream does.
-                let mut running =
-                    RunningQuery::start(client, &query_policy, partition_filter, statement).await?;
-                let mut records = Vec::new();
-                while let Some(record) = running.next().await {
-                    records.push(record?);
-                }
-                Ok(records)
-            })
+            // Gathered by a task of the runtime, and this thread waits for
+            // that task once. Gathering on this thread means that every time
+            // the queue runs empty the thread goes to sleep and a node reader
+            // has to wake it, a system call each time; a task is woken on the
+            // worker that brought the record.
+            match RUNTIME.block_on(RUNTIME.spawn(gather)) {
+                Ok(gathered) => gathered,
+                Err(lost) => match lost.try_into_panic() {
+                    Ok(panic) => std::panic::resume_unwind(panic),
+                    Err(lost) => Err(AsError::client_error(format!(
+                        "the query was interrupted: {lost}"
+                    ))),
+                },
+            }
         }))
     });
 
