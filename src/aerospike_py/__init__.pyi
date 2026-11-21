@@ -2687,12 +2687,80 @@ class Query:
         """
         ...
 
+class AsyncRecordStream:
+    """The records of a running query, one at a time, as they arrive.
+
+    Returned by ``AsyncQuery.stream()``; ``async for record in query`` uses
+    one. Nothing is sent to the cluster until the first record is asked for.
+
+    The query stops — on the client and on the server — when the stream ends,
+    when ``close()`` is called, when the ``async with`` block is left, or when
+    the stream is garbage collected. In CPython that last case is the moment
+    an ``async for`` loop is left with ``break`` or by an exception while
+    nothing else refers to the stream; use ``async with`` where that must not
+    depend on the interpreter.
+
+    Stopping takes effect when a node next hands records to the client. A scan
+    whose records are flowing stops within milliseconds; a rate-limited one
+    (``records_per_second``) keeps its connection until the server sends its
+    next block, at most the query's ``socket_timeout``.
+
+    Memory stays bounded whatever the pace of the consumer: at most
+    ``record_queue_size`` records (default 1024) wait in the client, plus the
+    batch being handed out, and the server is not read from while they wait. A
+    consumer that stops reading for longer than the query's ``socket_timeout``
+    (30 seconds by default) loses the query: the server gives up on a client
+    that does not read.
+
+    Cancelling a task that is waiting for the next record closes the stream.
+
+    Example:
+        ```python
+        async with client.query("test", "demo").stream() as records:
+            async for record in records:
+                if record.bins["status"] == "wanted":
+                    break
+        ```
+    """
+
+    def __aiter__(self) -> AsyncRecordStream: ...
+    async def __anext__(self) -> Record: ...
+    def close(self) -> None:
+        """Stop the query and drop the records not yet handed out. Idempotent."""
+        ...
+
+    async def aclose(self) -> None:
+        """Same as ``close()``; for ``contextlib.aclosing`` and similar helpers."""
+        ...
+
+    @property
+    def closed(self) -> bool:
+        """Whether ``close()`` has been called."""
+        ...
+
+    async def __aenter__(self) -> AsyncRecordStream: ...
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Any,
+    ) -> bool: ...
+
 class AsyncQuery:
     """Async secondary index query object.
 
     Created via ``AsyncClient.query(namespace, set_name)``. Use ``where()``
-    to set a predicate filter, ``select()`` to choose bins, then
-    ``await results()`` or ``await foreach()`` to execute.
+    to set a predicate filter, ``select()`` to choose bins, then read the
+    records with ``await results()``, ``await foreach()`` or
+    ``async for record in query``.
+
+    All three read the query's record stream by awaiting it, so cancelling the
+    task that runs them stops the query, on the client and on the server.
+
+    A running query does not take one of the ``max_concurrent_operations``
+    slots: it stays open for as long as its consumer reads, and a consumer
+    that looks something up for each record would otherwise wait for itself.
+    Bound the number of scans an application runs at once in the application.
 
     Example:
         ```python
@@ -2702,6 +2770,9 @@ class AsyncQuery:
         query.select("name", "age")
         query.where(predicates.between("age", 20, 30))
         records = await query.results()
+
+        async for record in query:      # the same query, streamed
+            await handle(record)
         ```
     """
 
@@ -2722,8 +2793,38 @@ class AsyncQuery:
         """
         ...
 
+    def stream(self, policy: Optional[dict[str, Any]] = None) -> AsyncRecordStream:
+        """Open the query as an async iterator of records.
+
+        The policy is checked here; nothing is sent until the first record is
+        asked for. See :class:`AsyncRecordStream` for when the query stops and
+        how much memory it uses.
+
+        Args:
+            policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
+
+        Returns:
+            An ``AsyncRecordStream``, usable with ``async for`` and
+            ``async with``.
+
+        Example:
+            ```python
+            async with query.stream({"max_records": 1000}) as records:
+                async for record in records:
+                    await handle(record)
+            ```
+        """
+        ...
+
+    def __aiter__(self) -> AsyncRecordStream:
+        """``async for record in query`` — the same as ``query.stream()``."""
+        ...
+
     async def results(self, policy: Optional[dict[str, Any]] = None) -> list[Record]:
         """Execute the query and return all matching records.
+
+        All or nothing: a query that fails raises and returns no records.
+        Cancelling the awaiting task stops the query.
 
         Args:
             policy: Optional [`QueryPolicy`](types.md#querypolicy) dict.
@@ -2758,30 +2859,30 @@ class AsyncQuery:
         scan. Returning ``False`` stops fetching from the server, so it bounds
         both time and memory — use it for "scan until I find the first match".
 
-        The callback runs on the calling thread, outside the client's async
-        runtime, so it may call back into the client (for example to look
-        something up per record).
+        The callback is a plain function and runs in a worker thread, off the
+        event loop, so it may block — write to a file, call a sync client —
+        without stalling other tasks. It cannot be awaited: a coroutine function
+        is refused with ``TypeError``. To await something for each record, use
+        ``async for record in query``.
 
-        **Behaviour change — a failing query may now raise after processing
-        part of the result set.** This method previously fetched everything
-        before invoking the callback, so a query error — a `total_timeout`
-        expiring, a node going away, any transport fault — was decided *before
-        the first callback ran*: you got either zero callbacks and an exception,
-        or a complete iteration. Now the scan stays open for as long as the
-        callback takes, so such an error raises **after** an arbitrary prefix of
-        records has already been handed to the callback.
+        **Cancellation.** Cancelling the awaiting task stops the query. A
+        callback that is running when the cancellation arrives cannot be
+        interrupted; it runs to its end, no further callback starts, and only
+        then is ``CancelledError`` raised. When the caller sees the
+        cancellation, nothing of this call is running any more.
 
-        Concretely: a callback that writes each record into another system, and
-        an outer ``except`` that treats the exception as "nothing was written",
-        is now wrong — some rows were written. The exception type and message are
-        unchanged, so nothing at the call site reveals this.
+        **A failing query may raise after processing part of the result set.**
+        The scan stays open for as long as the callbacks take, so a query error
+        — a ``total_timeout`` expiring, a node going away, any transport fault —
+        raises **after** an arbitrary prefix of records has already been handed
+        to the callback. A callback that writes each record into another
+        system, with an outer ``except`` that treats the exception as "nothing
+        was written", is wrong: some rows were written.
 
         Bounded memory and all-or-nothing delivery cannot both hold. If your
         callback has side effects that must not be applied to a partial result
-        set, use :meth:`results` instead — it is unchanged, still materialises
-        everything before returning, and still fails without delivering anything.
-        Note this is separate from a callback raising on its own, which has
-        always left preceding records processed.
+        set, use :meth:`results` instead — it materialises everything before
+        returning, and fails without delivering anything.
 
         Args:
             callback: Function called with each record. Return ``False`` to stop.
@@ -2789,6 +2890,9 @@ class AsyncQuery:
             policy: Optional [`QueryPolicy`](types.md#querypolicy) dict. Set
                 ``record_queue_size`` to trade buffered memory against how far
                 the client reads ahead of a slow callback.
+
+        Raises:
+            TypeError: ``callback`` is a coroutine function.
 
         Example:
             ```python

@@ -162,7 +162,7 @@ class TestCallbackEnvironment:
 
 class TestAsyncQueryForeach:
     async def test_async_foreach_streams_too(self, async_client, client, seeded):
-        """``AsyncQuery.foreach`` runs the same native path via ``to_thread``."""
+        """``AsyncQuery.foreach`` streams too: the first callback runs long before the scan ends."""
         query = async_client.query(NS, SET_NAME)
         started = time.perf_counter()
         first_callback_at = None

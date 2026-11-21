@@ -26,6 +26,7 @@ mod operations;
 pub mod panic_safety;
 mod policy;
 pub mod query;
+mod query_stream;
 mod record_helpers;
 mod runtime;
 pub mod tracing;
@@ -95,6 +96,7 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<client::PyClient>()?;
     m.add_class::<async_client::PyAsyncClient>()?;
     m.add_class::<query::PyQuery>()?;
+    m.add_class::<query_stream::PyRecordStream>()?;
     m.add_class::<types::partition_filter::PyPartitionFilter>()?;
     m.add_class::<batch_types::PyBatchRecord>()?;
     m.add_class::<batch_types::PyBatchRecords>()?;

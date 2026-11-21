@@ -161,6 +161,22 @@ impl<'a> OperationTimer<'a> {
         }
     }
 
+    /// A timer for an operation that began at `start`, for callers that
+    /// cannot keep a borrowing timer alive while the operation runs.
+    pub fn started_at(
+        start: Instant,
+        op_name: &'a str,
+        namespace: &'a str,
+        set_name: &'a str,
+    ) -> Self {
+        Self {
+            start,
+            op_name,
+            namespace,
+            set_name,
+        }
+    }
+
     pub fn finish(self, error_type: &str) {
         let duration = self.start.elapsed().as_secs_f64();
         let labels = OperationLabels {

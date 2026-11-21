@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from aerospike_py._aerospike import AerospikeError
 from aerospike_py._aerospike import Client as _NativeClient
 from aerospike_py._aerospike import Query as _NativeQuery
-from aerospike_py._bug_report import catch_unexpected
+from aerospike_py._bug_report import _maybe_log, catch_unexpected
 
 if TYPE_CHECKING:
     from aerospike_py._aerospike import LazyBatchRecords
@@ -130,12 +130,25 @@ class Query:
     def results(self, policy=None) -> list[Record]:
         return [_wrap_record(r) for r in self._inner.results(policy)]
 
-    @catch_unexpected("Query.foreach")
     def foreach(self, callback, policy=None) -> None:
-        def _cb(raw):
-            return callback(_wrap_record(raw))
+        raised_by_callback: list[BaseException] = []
 
-        self._inner.foreach(_cb, policy)
+        def _cb(raw):
+            record = _wrap_record(raw)
+            try:
+                return callback(record)
+            except BaseException as exc:
+                raised_by_callback.append(exc)
+                raise
+
+        try:
+            self._inner.foreach(_cb, policy)
+        except Exception as exc:
+            # What the caller's own callback raised is the caller's to handle,
+            # not a sign of a bug in this library.
+            if not any(exc is raised for raised in raised_by_callback):
+                _maybe_log("Query.foreach", exc)
+            raise
 
 
 # ---------------------------------------------------------------------------

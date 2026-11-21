@@ -64,9 +64,9 @@ if STUB_PATH.exists():
 def test_docstring_example_syntax(location: str, code: str) -> None:
     """Each docstring code example must be valid Python syntax."""
     source = code
-    # If the code contains await expressions, wrap it in an async function
-    # so that compile() accepts the syntax.
-    if "await " in code:
+    # If the code awaits — an await expression, ``async for``, ``async with`` —
+    # wrap it in an async function so that compile() accepts the syntax.
+    if any(marker in code for marker in ("await ", "async for ", "async with ")):
         indented = textwrap.indent(code, "    ")
         source = f"async def _test_wrapper():\n{indented}"
     try:

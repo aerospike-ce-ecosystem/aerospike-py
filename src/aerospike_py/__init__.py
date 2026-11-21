@@ -300,7 +300,7 @@ from aerospike_py._types import HLLPolicy, ListPolicy, MapPolicy, Operation  # n
 
 # Client and query classes (re-exported from internal modules)
 from aerospike_py._client import Client, Query  # noqa: F401
-from aerospike_py._async_client import AsyncClient, AsyncQuery  # noqa: F401
+from aerospike_py._async_client import AsyncClient, AsyncQuery, AsyncRecordStream  # noqa: F401
 
 # Observability utilities (re-exported from internal module)
 from aerospike_py._observability import (  # noqa: F401
@@ -381,6 +381,7 @@ __all__ = [
     "AsyncClient",
     "Query",
     "AsyncQuery",
+    "AsyncRecordStream",
     "BatchRecord",
     "BatchRecords",
     "BatchRetryInfo",

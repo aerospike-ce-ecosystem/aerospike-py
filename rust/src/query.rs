@@ -10,7 +10,6 @@ use aerospike_core::query::Filter;
 use aerospike_core::{
     Bins, Client as AsClient, CollectionIndexType, Error as AsError, Statement, Value,
 };
-use futures::StreamExt;
 use log::{debug, trace};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
@@ -18,6 +17,7 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::catch_panic_sync;
 use crate::policy::query_policy::parse_query_policy;
+use crate::query_stream::{PyRecordStream, QueryRequest, QueryTelemetry, RunningQuery};
 use crate::runtime::RUNTIME;
 use crate::types::record::record_to_py;
 use crate::types::value::py_to_value;
@@ -315,99 +315,63 @@ pub(crate) fn validate_bin_name(name: &str) -> PyResult<()> {
     }
 }
 
-/// Execute a query/scan, collect all records, with metrics and OTel span.
-#[allow(unused, clippy::too_many_arguments)]
+/// The name a panic inside a query is reported under.
+fn panic_op(op_name: &str) -> &'static str {
+    match op_name {
+        "scan" => "Query.scan",
+        "query" => "Query.query",
+        _ => "Query.execute",
+    }
+}
+
+/// Execute a query/scan and collect every record.
+#[allow(clippy::too_many_arguments)]
 fn execute_query_collect(
     py: Python<'_>,
     client: &Arc<AsClient>,
     statement: Statement,
     policy: Option<&Bound<'_, PyDict>>,
-    op_name: &str,
+    op_name: &'static str,
     namespace: &str,
     set_name: &str,
     conn_info: &crate::tracing::ConnectionInfo,
 ) -> PyResult<Vec<aerospike_core::Record>> {
-    let client = client.clone();
     let (query_policy, partition_filter) = parse_query_policy(policy)?;
     debug!("Executing {}", op_name);
 
-    let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
-
-    // Start the OTel span *before* the operation runs so the recorded span
-    // duration reflects actual query latency. Previously the span was created
-    // after `block_on` returned, yielding a near-zero, meaningless duration.
-    #[cfg(feature = "otel")]
-    let otel_span = {
-        use opentelemetry::trace::{SpanKind, Tracer};
-        use opentelemetry::KeyValue;
-        let tracer = crate::tracing::otel_impl::get_tracer();
-        let span_name = format!("{} {}.{}", op_name.to_uppercase(), namespace, set_name);
-        tracer
-            .span_builder(span_name)
-            .with_kind(SpanKind::Client)
-            .with_attributes(vec![
-                KeyValue::new("db.system.name", "aerospike"),
-                KeyValue::new("db.namespace", namespace.to_string()),
-                KeyValue::new("db.collection.name", set_name.to_string()),
-                KeyValue::new("db.operation.name", op_name.to_uppercase()),
-                KeyValue::new("server.address", conn_info.server_address.clone()),
-                KeyValue::new("server.port", conn_info.server_port),
-                KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
-            ])
-            .start(&tracer)
-    };
-
-    let panic_op: &'static str = match op_name {
-        "scan" => "Query.scan",
-        "query" => "Query.query",
-        _ => "Query.execute",
-    };
-    let panic_result: PyResult<Result<Vec<_>, AsError>> = catch_panic_sync(panic_op, || {
+    let telemetry = QueryTelemetry::start(op_name, namespace, set_name, conn_info);
+    let outcome: PyResult<Result<Vec<_>, AsError>> = catch_panic_sync(panic_op(op_name), || {
         Ok(py.detach(|| {
             RUNTIME.block_on(async {
-                let rs = client
-                    .query(&query_policy, partition_filter, statement)
-                    .await?;
-                let mut stream = rs.into_stream();
-                let mut results = Vec::new();
-                while let Some(result) = stream.next().await {
-                    results.push(result?);
+                // Dropped on the way out, which stops the query when an error
+                // ends the loop before the stream does.
+                let mut running =
+                    RunningQuery::start(client, &query_policy, partition_filter, statement).await?;
+                let mut records = Vec::new();
+                while let Some(record) = running.next().await {
+                    records.push(record?);
                 }
-                Ok(results)
+                Ok(records)
             })
         }))
     });
 
-    // Finish metrics and end the OTel span on every path — including a
-    // caught panic — before propagating any error.
-    match &panic_result {
-        Ok(Ok(_)) => timer.finish(""),
-        Ok(Err(e)) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
-        Err(_) => {} // panic caught: timer left unrecorded (no Drop impl)
+    match &outcome {
+        Ok(Ok(_)) => telemetry.finish(None),
+        Ok(Err(e)) => telemetry.finish(Some(e)),
+        Err(_) => telemetry.abandon(),
     }
-
-    #[cfg(feature = "otel")]
-    {
-        use opentelemetry::trace::TraceContextExt;
-        let cx = opentelemetry::Context::current().with_span(otel_span);
-        let span_ref = TraceContextExt::span(&cx);
-        if let Ok(Err(e)) = &panic_result {
-            crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
-        }
-        span_ref.end();
-    }
-
-    panic_result?.map_err(as_to_pyerr)
+    outcome?.map_err(as_to_pyerr)
 }
 
 /// Execute a query/scan and collect all results as a Python list.
-#[allow(unused, clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn execute_query(
     py: Python<'_>,
     client: &Arc<AsClient>,
     statement: Statement,
     policy: Option<&Bound<'_, PyDict>>,
-    op_name: &str,
+    op_name: &'static str,
     namespace: &str,
     set_name: &str,
     conn_info: &crate::tracing::ConnectionInfo,
@@ -441,77 +405,51 @@ fn execute_query(
 /// when invoked from a thread already inside the runtime. Polling one record per
 /// `block_on` keeps every callback outside that context.
 ///
-/// This costs nothing in fetch throughput: `Recordset` is an `async_channel`
-/// bounded by `record_queue_size` that the per-node reader tasks keep filling on
-/// the runtime's worker threads while the callback runs here. Dropping the
-/// stream on early exit runs `Recordset::drop`, which closes the recordset and
-/// stops those commands.
-#[allow(clippy::too_many_arguments, unused)]
+/// This costs nothing in fetch throughput: the recordset is a channel bounded
+/// by `record_queue_size` that the per-node reader tasks keep filling on the
+/// runtime's worker threads while the callback runs here.
+///
+/// **Leaving early stops the query.** Every way out of the loop — the end of
+/// the stream, a callback that returned `False` or raised, a stream error, a
+/// panic — drops the [`RunningQuery`], and that closes the recordset. Dropping
+/// the stream alone does not: see [`RunningQuery`].
+#[allow(clippy::too_many_arguments)]
 fn execute_foreach(
     py: Python<'_>,
     client: &Arc<AsClient>,
     statement: Statement,
     callback: &Bound<'_, PyAny>,
     policy: Option<&Bound<'_, PyDict>>,
-    op_name: &str,
+    op_name: &'static str,
     namespace: &str,
     set_name: &str,
     conn_info: &crate::tracing::ConnectionInfo,
 ) -> PyResult<()> {
-    let client = client.clone();
     let (query_policy, partition_filter) = parse_query_policy(policy)?;
     debug!("Executing {} (streaming)", op_name);
 
-    let timer = crate::metrics::OperationTimer::start(op_name, namespace, set_name);
-
-    // Span opened before the operation runs so its duration reflects real query
-    // latency, matching `execute_query_collect`.
-    #[cfg(feature = "otel")]
-    let otel_span = {
-        use opentelemetry::trace::{SpanKind, Tracer};
-        use opentelemetry::KeyValue;
-        let tracer = crate::tracing::otel_impl::get_tracer();
-        let span_name = format!("{} {}.{}", op_name.to_uppercase(), namespace, set_name);
-        tracer
-            .span_builder(span_name)
-            .with_kind(SpanKind::Client)
-            .with_attributes(vec![
-                KeyValue::new("db.system.name", "aerospike"),
-                KeyValue::new("db.namespace", namespace.to_string()),
-                KeyValue::new("db.collection.name", set_name.to_string()),
-                KeyValue::new("db.operation.name", op_name.to_uppercase()),
-                KeyValue::new("server.address", conn_info.server_address.clone()),
-                KeyValue::new("server.port", conn_info.server_port),
-                KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
-            ])
-            .start(&tracer)
-    };
-
-    let panic_op: &'static str = match op_name {
-        "scan" => "Query.scan",
-        "query" => "Query.query",
-        _ => "Query.execute",
-    };
+    let telemetry = QueryTelemetry::start(op_name, namespace, set_name, conn_info);
 
     // `catch_panic_sync` covers the whole drive loop, including the Rust side of
     // each callback invocation, so a panic still surfaces as `RustPanicError`.
-    let outcome: PyResult<Result<(), AsError>> = catch_panic_sync(panic_op, || {
+    let outcome: PyResult<Result<(), AsError>> = catch_panic_sync(panic_op(op_name), || {
         let started = py.detach(|| {
-            RUNTIME.block_on(async {
-                client
-                    .query(&query_policy, partition_filter, statement)
-                    .await
-            })
+            RUNTIME.block_on(RunningQuery::start(
+                client,
+                &query_policy,
+                partition_filter,
+                statement,
+            ))
         });
-        let mut stream = match started {
-            Ok(rs) => rs.into_stream(),
+        let mut running = match started {
+            Ok(running) => running,
             Err(e) => return Ok(Err(e)),
         };
 
         loop {
             // GIL released while waiting for the next record; re-taken only to
             // build the Python record and run the callback.
-            let next = py.detach(|| RUNTIME.block_on(stream.next()));
+            let next = py.detach(|| RUNTIME.block_on(running.next()));
             let Some(item) = next else { break };
             let record = match item {
                 Ok(record) => record,
@@ -528,25 +466,14 @@ fn execute_foreach(
         Ok(Ok(()))
     });
 
-    // Finish metrics and end the OTel span on every path — including a caught
-    // panic and a callback that raised — before propagating any error.
+    // Report the outcome on every path. A caught panic or a callback that
+    // raised is not an outcome of the query: the span is closed, nothing is
+    // recorded.
     match &outcome {
-        Ok(Ok(())) => timer.finish(""),
-        Ok(Err(e)) => timer.finish(&crate::metrics::error_type_from_aerospike_error(e)),
-        Err(_) => {} // panic or Python error: timer left unrecorded (no Drop impl)
+        Ok(Ok(())) => telemetry.finish(None),
+        Ok(Err(e)) => telemetry.finish(Some(e)),
+        Err(_) => telemetry.abandon(),
     }
-
-    #[cfg(feature = "otel")]
-    {
-        use opentelemetry::trace::TraceContextExt;
-        let cx = opentelemetry::Context::current().with_span(otel_span);
-        let span_ref = TraceContextExt::span(&cx);
-        if let Ok(Err(e)) = &outcome {
-            crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
-        }
-        span_ref.end();
-    }
-
     outcome?.map_err(as_to_pyerr)
 }
 
@@ -966,5 +893,31 @@ impl PyQuery {
             &self.set_name,
             &self.connection_info,
         )
+    }
+
+    /// Open the query as a stream that is read by awaiting.
+    ///
+    /// The predicates, the selected bins and the policy are checked here;
+    /// nothing is sent until the first read. `AsyncQuery` builds `results()`,
+    /// `foreach()` and `async for` on this.
+    #[pyo3(signature = (policy=None))]
+    fn stream(&self, policy: Option<&Bound<'_, PyDict>>) -> PyResult<PyRecordStream> {
+        let statement = build_statement(
+            &self.namespace,
+            &self.set_name,
+            &self.bins,
+            &self.predicates,
+        )?;
+        let (query_policy, partition_filter) = parse_query_policy(policy)?;
+        Ok(PyRecordStream::new(QueryRequest {
+            client: Arc::clone(&self.client),
+            policy: query_policy,
+            partition_filter,
+            statement,
+            op_name: "query",
+            namespace: self.namespace.clone(),
+            set_name: self.set_name.clone(),
+            connection_info: Arc::clone(&self.connection_info),
+        }))
     }
 }
