@@ -587,6 +587,11 @@ class TestTheKeyFieldIsOneValue:
         ids=["one_int", "two_ints", "two_bytes", "nested_structure"],
     )
     async def test_anything_else_is_refused_and_nothing_is_written(self, any_client, any_cleanup, key_type):
+        # Where the rows went before this was refused: the bytes of the key's
+        # elements with the trailing zeros cut off, and the all-zero key.
+        strays = [(NS, SET, stray) for stray in (b"", b"\x05", 0)]
+        any_cleanup.extend(strays)
+        await invoke(any_client, "batch_remove", strays)
         await _put(any_client, any_cleanup, (NS, SET, 5), {"v": -1})
         data = np.zeros(2, np.dtype([("_key", *key_type), ("v", "i4")]))
         data["v"] = [10, 20]
@@ -595,8 +600,7 @@ class TestTheKeyFieldIsOneValue:
             await invoke(any_client, "batch_write_numpy", data, NS, SET)
 
         assert (await invoke(any_client, "get", (NS, SET, 5))).bins == {"v": -1}
-        for stray in (b"", b"\x05", 0):
-            assert await _result_codes(any_client, [(NS, SET, stray)]) == [2]
+        assert await _result_codes(any_client, strays) == [2, 2, 2]
 
     async def test_a_custom_key_field_is_held_to_the_same_rule(self, any_client, any_cleanup):
         data = np.zeros(1, np.dtype([("id", "i8", (1,)), ("v", "i4")]))

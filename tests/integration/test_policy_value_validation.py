@@ -578,3 +578,54 @@ class TestIntegersThatDoNotFit:
             await invoke(any_client, method, *arguments, **keywords)
 
         assert [r.getMessage()[:100] for r in caplog.records if "may be a bug in aerospike-py" in r.getMessage()] == []
+
+
+class TestARecordWithoutBins:
+    """``batch_write`` cannot write an empty record, and says so before it sends anything.
+
+    The Rust client refuses to build the request for a node whose share of the
+    batch contains such a record, so the valid records that happened to live on
+    the same node failed with it while those on other nodes were written: which
+    records an argument error took down depended on the partition map.
+    """
+
+    @pytest.mark.parametrize("position", [0, 1, 2])
+    async def test_it_is_refused_and_no_record_is_written(self, any_client, any_cleanup, position):
+        keys = [(NS, SET, f"no_bins_{position}_{i}") for i in range(3)]
+        any_cleanup.extend(keys)
+        records = [(key, {"v": i}) for i, key in enumerate(keys)]
+        records[position] = (keys[position], {})
+
+        with pytest.raises(aerospike_py.InvalidArgError, match=f"record {position} has no bins"):
+            await invoke(any_client, "batch_write", records)
+
+        found = await invoke(any_client, "batch_read", keys)
+        assert [row.result for row in found.batch_records] == [aerospike_py.AEROSPIKE_ERR_RECORD_NOT_FOUND] * 3
+
+    async def test_a_single_empty_record_is_refused_the_same_way(self, any_client, any_cleanup):
+        key = (NS, SET, "no_bins_alone")
+        any_cleanup.append(key)
+
+        with pytest.raises(aerospike_py.InvalidArgError, match="record 0 has no bins"):
+            await invoke(any_client, "batch_write", [(key, {})])
+
+    async def test_a_bin_set_to_none_is_a_write(self, any_client, any_cleanup):
+        """Removing a bin is something to send; only no bins at all is nothing."""
+        key = (NS, SET, "no_bins_but_a_removal")
+        any_cleanup.append(key)
+        await invoke(any_client, "put", key, {"keep": 1, "drop": 2})
+
+        result = await invoke(any_client, "batch_write", [(key, {"drop": None})])
+
+        assert [row.result for row in result.batch_records] == [0]
+        assert (await invoke(any_client, "get", key)).bins == {"keep": 1}
+
+    async def test_an_array_without_bin_fields_is_refused(self, any_client, any_cleanup):
+        data = np.zeros(3, np.dtype([("_key", "i8"), ("_note", "S4")]))
+        data["_key"] = [9601, 9602, 9603]
+
+        with pytest.raises(ValueError, match="dtype has no bin fields"):
+            await invoke(any_client, "batch_write_numpy", data, NS, SET)
+
+        found = await invoke(any_client, "batch_read", [(NS, SET, int(k)) for k in data["_key"]])
+        assert [row.result for row in found.batch_records] == [aerospike_py.AEROSPIKE_ERR_RECORD_NOT_FOUND] * 3

@@ -886,7 +886,7 @@ pub fn prepare_batch_write_args(
     let base_write_policy = Arc::new(parse_batch_write_policy(policy)?);
     let mut rust_records = Vec::with_capacity(records.len());
 
-    for item in records.iter() {
+    for (position, item) in records.iter().enumerate() {
         let tuple = item.cast::<PyTuple>().map_err(|_| {
             pyo3::exceptions::PyTypeError::new_err("Each record must be a tuple of (key, bins)")
         })?;
@@ -901,6 +901,18 @@ pub fn prepare_batch_write_args(
             .cast::<PyDict>()
             .map_err(|_| pyo3::exceptions::PyTypeError::new_err("bins element must be a dict"))?;
         let bins = py_dict_to_bins(bins_dict)?;
+        // A write of no bins is refused by the server (parameter error), and
+        // aerospike-core refuses to build a request for a node whose share of
+        // the batch contains one: every record that happens to live on that
+        // node then fails with it, and the records on other nodes are written.
+        // Which records an argument error took down would depend on the
+        // partition map, so it is refused here, before anything is sent.
+        if bins.is_empty() {
+            return Err(crate::errors::InvalidArgError::new_err(format!(
+                "record {position} has no bins: batch_write cannot write an empty record \
+                 (to delete records use batch_remove)"
+            )));
+        }
 
         // Per-record meta (3rd tuple element) overrides batch-level TTL.
         // When present we allocate a fresh Arc; without meta all records

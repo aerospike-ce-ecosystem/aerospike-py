@@ -1333,6 +1333,13 @@ fn records_of_array(
             key_field
         ))
     })?;
+    // Rows without bins cannot be written: see `prepare_batch_write_args`.
+    if bin_fields.is_empty() {
+        return Err(PyValueError::new_err(format!(
+            "dtype has no bin fields: every field is the key field '{key_field}' or starts with \
+             '_', so there is nothing to write"
+        )));
+    }
     // A key is one value. A sub-array field is read as the bytes of all its
     // elements, so a `(1,)` integer key would be written under a bytes key —
     // another record than the integer key it was up to 0.14.x — and trimming
