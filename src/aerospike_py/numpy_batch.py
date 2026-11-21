@@ -101,6 +101,43 @@ def _check_float_range(base: Any, val: Any, field: str) -> None:
         raise OverflowError(f"float overflow: value {val!r} does not fit in f{base.itemsize * 8} for field '{field}'")
 
 
+def _check_float_range_of_array(base: Any, arr: Any, field: str) -> None:
+    """Apply :func:`_check_float_range` to every element of a numeric array.
+
+    Assigning the array would let NumPy turn an out-of-range element into
+    ±inf with nothing but a ``RuntimeWarning``.
+    """
+    import numpy as np
+
+    limit = _FLOAT_MAX.get(base.itemsize) if base.kind == "f" else None
+    if limit is None or arr.dtype.kind not in "iuf":
+        return
+    wide = arr.astype(np.float64, copy=False)
+    too_big = np.isfinite(wide) & (np.abs(wide) > limit)
+    if too_big.any():
+        first = wide[too_big].flat[0]
+        raise OverflowError(
+            f"float overflow: value {float(first)!r} does not fit in f{base.itemsize * 8} for field '{field}'"
+        )
+
+
+def _with_row_context(exc: Exception, message: str) -> Exception:
+    """Return an exception of ``exc``'s kind that carries ``message``.
+
+    The exact type is kept when it can be built from one message. A type whose
+    constructor needs more (``UnicodeEncodeError`` takes five arguments) falls
+    back to the built-in it derives from, so the row context is added instead
+    of the conversion failing with an unrelated ``TypeError``.
+    """
+    try:
+        return type(exc)(message)
+    except TypeError:
+        for kind in (OverflowError, TypeError, ValueError):
+            if isinstance(exc, kind):
+                return kind(message)
+        raise
+
+
 def _assign_value(data: Any, i: int, field: str, field_dtype: Any, val: Any) -> None:
     """Store one bin value, following the rules of the native conversion.
 
@@ -142,10 +179,15 @@ def _assign_value(data: Any, i: int, field: str, field_dtype: Any, val: Any) -> 
                     f"vector length mismatch for field '{field}': the value has shape {arr.shape}, "
                     f"the dtype expects {field_dtype.shape}"
                 )
+            _check_float_range_of_array(base, arr, field)
             data[field][i] = arr
             return
         raise TypeError(f"unsupported value type {type(val).__name__} for numpy vector field '{field}'")
 
+    if base.kind == "S" and isinstance(val, str):
+        # The native conversion stores the UTF-8 bytes of a string; NumPy
+        # alone would only accept ASCII here.
+        val = val.encode("utf-8")
     _check_float_range(base, val, field)
     data[field][i] = val
 
@@ -220,9 +262,10 @@ def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
                         try:
                             _assign_value(data, i, field, dtype[field], val)
                         except (ValueError, TypeError, OverflowError) as exc:
-                            raise type(exc)(
+                            raise _with_row_context(
+                                exc,
                                 f"Failed to assign value {val!r} to field '{field}' "
-                                f"(dtype={dtype[field]}) for record at index {i} (key={pk!r}): {exc}"
+                                f"(dtype={dtype[field]}) for record at index {i} (key={pk!r}): {exc}",
                             ) from exc
 
     return NumpyBatchRecords(data, meta, result_codes, key_map)
