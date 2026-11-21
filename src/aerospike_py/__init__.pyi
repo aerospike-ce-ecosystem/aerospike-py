@@ -126,8 +126,10 @@ class LazyBatchRecords:
     def to_numpy(self, dtype: "np.dtype") -> NumpyBatchRecords:
         """Materialise as a NumPy structured array.
 
-        ``dtype`` must be a real ``numpy.dtype`` object — list-of-tuples
-        and dtype strings are not auto-promoted. The per-record buffer
+        ``dtype`` is a structured ``numpy.dtype`` or anything
+        ``numpy.dtype(...)`` makes one of (a list of tuples, a dict spec,
+        a comma-separated string); the rows are laid out by the dtype
+        NumPy makes of it. It must have named fields. The per-record buffer
         fill runs with the GIL released (``py.detach``), so sibling work
         (other asyncio tasks, torch inference) can hold the GIL during
         the fill — ideal for FastAPI/PyTorch CPU-inference workers.

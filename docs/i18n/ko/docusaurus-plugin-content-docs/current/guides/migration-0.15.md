@@ -810,13 +810,14 @@ Node가 **같은 주소에서 새 node id로** 재시작하면(예: container �
 
 | Workload | 0.14.4 | 0.15 |
 |---|---|---|
-| 존재하는 record 720개 × bin 8개 `batch_read`, 동시 호출 8개, CPU를 쓰는 경쟁 thread 포함 | peak 67–68 MiB | peak 78–84 MiB |
-| 같은 batch, 동시 호출 32개, batch 192,000개(약 3분) | 134–190 MiB 사이를 오르내림(peak 192 MiB) | 243–246 MiB에 자리 잡고 마지막 96,000개 동안 평평하게 유지(peak 253 MiB) |
-| key 50,000개짜리 `batch_read` 한 번 | key당 peak memory 2.2 KiB | key당 2.7 KiB (약 +20%) |
+| 존재하는 record 720개 × bin 8개 `batch_read`, 동시 호출 8개, CPU를 쓰는 경쟁 thread 포함 | peak 66–70 MiB | peak 75–77 MiB |
+| 같은 batch, 동시 호출 32개, batch 192,000개(약 3분) | 138 MiB에서 184 MiB까지 오른 뒤 마지막 53,000개 동안 평평함 | 201 MiB에서 257 MiB까지 오른 뒤 마지막 35,000개 동안 평평함 |
+| 존재하는 key 50,000개짜리 `batch_read` 한 번 | key당 peak memory 2.2 KiB | key당 2.7 KiB (약 +20%) |
+| 존재하지 않는 key 50,000개짜리 `batch_read` 한 번 | key당 2.0 KiB | key당 2.4 KiB (약 +20%) |
 
-어느 버전도 계속 늘지 않습니다. 누수가 아니라 client가 보관하는 buffer memory입니다. 동시 호출 32개에서 차이는 약 55–60 MiB이며, 0.15는 부하가 이어지는 동안 이 memory를 돌려주지 않습니다. 원인은 Rust client 3.0에 있습니다. Batch row 하나가 memory를 약 20% 더 차지하고, connection마다 64 KiB read buffer를 유지하며(이전 4 KiB), client가 큰 buffer를 명령마다 해제하지 않고 재사용하려고 크기가 제한된 pool에 보관합니다(크기 class마다 최대 4 MiB, 쓰지 않게 된 buffer는 약 1분 뒤에 해제).
+두 버전 모두 memory가 계단식으로 오르다가 오르는 간격이 길어지고 멈춥니다. 누수가 아니라 client가 보관하는 buffer memory입니다. 동시 호출 32개에서 차이는 73 MiB였고(같은 test의 이전 실행에서는 55–60 MiB), 0.15는 부하가 이어지는 동안 이 memory를 돌려주지 않습니다. 원인은 Rust client 3.0에 있습니다. Batch row 하나가 memory를 약 20% 더 차지하고, connection마다 64 KiB read buffer를 유지하며(이전 4 KiB), client가 큰 buffer를 명령마다 해제하지 않고 재사용하려고 크기가 제한된 pool에 보관합니다(크기 class마다 최대 4 MiB, 쓰지 않게 된 buffer는 약 1분 뒤에 해제).
 
-**대응:** memory 한도를 0.14.x에 맞춰 빠듯하게 잡았다면 여유를 두세요. 추가 memory는 동시에 진행 중인 batch 호출 수에 따라 늘어납니다. 이 측정에서는 8개일 때 약 10–15 MiB, 32개일 때 약 55–60 MiB였습니다. 0.15에서는 이 buffer 설정을 Python에서 바꿀 수 없습니다.
+**대응:** memory 한도를 0.14.x에 맞춰 빠듯하게 잡았다면 여유를 두세요. 추가 memory는 동시에 진행 중인 batch 호출 수에 따라 늘어납니다. 두 번의 측정에서 8개일 때 약 5–15 MiB, 32개일 때 약 55–75 MiB였습니다. 0.15에서는 이 buffer 설정을 Python에서 바꿀 수 없습니다.
 
 참고로, 이번 release에서 측정한 모든 시나리오에서 throughput과 latency는 같거나 더 좋았습니다(시나리오 6개의 HTTP 부하 테스트: 초당 요청 수 +0.1%~+12%, p50 latency −0.7%~−11%; NumPy microbenchmark: `to_numpy` −10%, 읽기 −0.3%, 쓰기 −2.7% 시간). 직접 workload로 측정하세요. 이 수치는 보장이 아닙니다.
 

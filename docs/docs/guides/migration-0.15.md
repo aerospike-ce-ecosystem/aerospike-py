@@ -810,13 +810,14 @@ A client process uses more memory under concurrent batch load with 0.15. Process
 
 | Workload | 0.14.4 | 0.15 |
 |---|---|---|
-| `batch_read` of 720 existing records × 8 bins, 8 calls in flight, with a CPU-bound competitor thread | peak 67–68 MiB | peak 78–84 MiB |
-| The same batch, 32 calls in flight, 192,000 batches (about three minutes) | moves between 134 and 190 MiB (peak 192 MiB) | settles at 243–246 MiB and stays flat for the last 96,000 batches (peak 253 MiB) |
-| One `batch_read` of 50,000 keys | 2.2 KiB peak memory per key | 2.7 KiB per key (about +20%) |
+| `batch_read` of 720 existing records × 8 bins, 8 calls in flight, with a CPU-bound competitor thread | peak 66–70 MiB | peak 75–77 MiB |
+| The same batch, 32 calls in flight, 192,000 batches (about three minutes) | climbs from 138 to 184 MiB and is flat for the last 53,000 batches | climbs from 201 to 257 MiB and is flat for the last 35,000 batches |
+| One `batch_read` of 50,000 keys that exist | 2.2 KiB peak memory per key | 2.7 KiB per key (about +20%) |
+| One `batch_read` of 50,000 keys that do not exist | 2.0 KiB per key | 2.4 KiB per key (about +20%) |
 
-Neither version keeps growing: this is buffer memory the client keeps, not a leak. At 32 calls in flight the difference is about 55–60 MiB, and 0.15 does not hand that memory back while the load continues. It comes from Rust client 3.0: a batch row takes about 20% more memory, every connection keeps a 64 KiB read buffer (4 KiB before), and the client keeps a bounded pool of large buffers for reuse instead of freeing them after each command (up to 4 MiB per size class; unused buffers are released about a minute after they stop being used).
+In both versions the memory climbs in steps that become rarer and then levels off: this is buffer memory the client keeps, not a leak. At 32 calls in flight the difference was 73 MiB (55–60 MiB in an earlier run of the same test), and 0.15 does not hand that memory back while the load continues. It comes from Rust client 3.0: a batch row takes about 20% more memory, every connection keeps a 64 KiB read buffer (4 KiB before), and the client keeps a bounded pool of large buffers for reuse instead of freeing them after each command (up to 4 MiB per size class; unused buffers are released about a minute after they stop being used).
 
-**What to do:** if a memory limit was sized closely for 0.14.x, leave headroom. The extra memory grows with the number of batch calls in flight: about 10–15 MiB at 8, about 55–60 MiB at 32 in this measurement. These buffer settings cannot be configured from Python in 0.15.
+**What to do:** if a memory limit was sized closely for 0.14.x, leave headroom. The extra memory grows with the number of batch calls in flight: about 5–15 MiB at 8, about 55–75 MiB at 32 in these measurements. These buffer settings cannot be configured from Python in 0.15.
 
 For context: throughput and latency were equal or better in every scenario measured for this release (an HTTP load test of six scenarios: requests per second +0.1% to +12%, p50 latency −0.7% to −11%; a NumPy microbenchmark: `to_numpy` −10%, read −0.3%, write −2.7% time). Measure your own workload; these numbers are not a guarantee.
 
