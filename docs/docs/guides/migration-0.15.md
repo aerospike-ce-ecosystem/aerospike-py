@@ -803,4 +803,5 @@ raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Ke
 ## Other changes
 
 - The client `timeout` and `idle_timeout` keep their 30-second defaults. Rust client 3.0 lowered its own defaults; aerospike-py sets the old values explicitly.
+- A map bin is read back with its keys in the order the server returns them, the same on every read (on server 8.2: sorted by key, integers before strings). 0.14.x returned the keys of the same map in a different order on each read. Code that compares dicts is not affected; code that relied on iteration order was already unreliable.
 - `meta.ttl` is computed in whole seconds, as the official Python client does. A record read right after it was written with `ttl=1000` reports `1000`; 0.14.x reported `999` nearly every time (398 of 400 reads in a measurement, and 0.15 reported `1000` in 398 of 400). When the client's clock is behind the server's, even by milliseconds, the value can be one second more than was set. Do not assert `meta.ttl <= ttl` exactly; allow a second.
