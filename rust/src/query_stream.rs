@@ -1,74 +1,226 @@
 //! A running query: its records, what stops it, and what is reported about it.
 //!
-//! Three things use a query's record stream — `Query.results()`,
-//! `Query.foreach()` and the awaitable [`PyRecordStream`] behind
-//! `AsyncQuery` — and all three must stop it the same way. They share
+//! Three things read a query's records — `Query.results()`, `Query.foreach()`
+//! and the awaitable [`PyRecordStream`] behind `AsyncQuery` — and all three
+//! must get every record once and stop the query the same way. They share
 //! [`RunningQuery`] for that and [`QueryTelemetry`] for the metric and the span.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
-use aerospike_core::query::{PartitionFilter, RecordStream};
+use aerospike_core::query::PartitionFilter;
 use aerospike_core::{
-    Client as AsClient, Error as AsError, QueryPolicy, Record, Recordset, Statement,
+    Client as AsClient, Error as AsError, QueryHandle, QueryPolicy, Record, Statement,
 };
-use futures::{FutureExt, StreamExt};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
+use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
+use tokio::sync::{mpsc, Semaphore};
 
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::future_into_py_panic_safe;
 use crate::types::record::record_to_py;
 
-/// The record stream of a query that has been sent, and the handle that stops it.
+/// What a query hands over: a record, or the error that ended it.
+type Item = Result<Record, AsError>;
+
+/// Tells a running query to stop: from any thread, any number of times, and
+/// whether or not anything is waiting for the signal yet.
+pub(crate) struct StopSignal {
+    stopped: AtomicBool,
+    /// Never holds a permit, so waiting for one can only end by the semaphore
+    /// being closed. Closing it is the signal: it wakes everything that waits
+    /// in [`stopped`](Self::stopped) and makes every later wait return at once.
+    gate: Semaphore,
+}
+
+impl StopSignal {
+    fn new() -> Self {
+        Self {
+            stopped: AtomicBool::new(false),
+            gate: Semaphore::new(0),
+        }
+    }
+
+    pub(crate) fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+        self.gate.close();
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+
+    /// Resolves once [`stop`](Self::stop) has been called.
+    async fn stopped(&self) {
+        // `Err` is the only possible outcome: see `gate`.
+        let _closed = self.gate.acquire().await;
+    }
+}
+
+/// A query that has been sent: its records, each exactly once, and the means
+/// to stop it.
 ///
-/// **Dropping it stops the query.** The stream alone does not: aerospike-core's
-/// per-node readers hold the `Recordset` too, so dropping the stream leaves them
-/// blocked on a full record queue, and the server keeps the scan and its
-/// connection until its socket timeout (30 seconds by default) runs out. Closing
-/// the recordset fails the readers' next hand-over, which ends the commands at
-/// once.
+/// # Every record once
+///
+/// aerospike-core offers two ways to read a query. Its record stream
+/// (`Client::query`) is *at least once*: the cursor a retried round resumes
+/// from moves when the consumer takes a record out, so the records that were
+/// already buffered when a node's connection failed are fetched a second time
+/// and handed out twice. Its callback API (`Client::query_foreach`) moves the
+/// cursor the moment the callback has taken a record, which makes it exactly
+/// once. A socket timeout, a lost connection or a consumer that pauses long
+/// enough for the server to give up are all it takes to retry a round, so
+/// this type uses the callback API and keeps the queue between the node
+/// readers and the consumer itself: a record is committed when it is in that
+/// queue, and nothing in the queue is ever fetched again.
+///
+/// The queue holds at most `record_queue_size` records. A node reader whose
+/// record does not fit waits, and does not read from its connection while it
+/// waits, which is the backpressure towards the server.
+///
+/// # Stopping
+///
+/// **Dropping it stops the query**, and so does the [`StopSignal`] handed out
+/// by [`stopper`](Self::stopper). Without that the node readers would go on
+/// until the scan was through, or stay blocked on the full queue while the
+/// server kept the scan and its connections.
 pub(crate) struct RunningQuery {
-    recordset: Arc<Recordset>,
-    stream: RecordStream,
+    records: mpsc::Receiver<Item>,
+    stop: Arc<StopSignal>,
 }
 
 impl RunningQuery {
-    /// Send the query. Must run inside the Tokio runtime: the per-node readers
-    /// are spawned from here.
+    /// Send the query. Must run inside the Tokio runtime: the node readers and
+    /// the task that watches over them are spawned from here.
     pub(crate) async fn start(
         client: &AsClient,
         policy: &QueryPolicy,
         partition_filter: PartitionFilter,
         statement: Statement,
     ) -> Result<Self, AsError> {
-        let recordset = client.query(policy, partition_filter, statement).await?;
-        let stream = Arc::clone(&recordset).into_stream();
-        Ok(Self { recordset, stream })
+        let (queue, records) = mpsc::channel(queue_capacity(policy));
+        let stop = Arc::new(StopSignal::new());
+        let handle = {
+            let queue = queue.clone();
+            let stop = Arc::clone(&stop);
+            client
+                .query_foreach(policy, partition_filter, statement, move |item| {
+                    hand_over(queue.clone(), Arc::clone(&stop), item)
+                })
+                .await?
+        };
+        tokio::spawn(watch_over(handle, queue, Arc::clone(&stop)));
+        Ok(Self { records, stop })
     }
 
-    /// The next record, an error that ended the stream, or `None` at its end.
-    pub(crate) async fn next(&mut self) -> Option<Result<Record, AsError>> {
-        self.stream.next().await
+    /// The next record, an error that ended the query, or `None` at its end
+    /// or once it has been told to stop.
+    ///
+    /// Dropping this future while it waits loses nothing: a record leaves the
+    /// queue only in the poll that returns it.
+    pub(crate) async fn next(&mut self) -> Option<Item> {
+        match self.records.try_recv() {
+            Ok(item) => return Some(item),
+            Err(TryRecvError::Disconnected) => return None,
+            Err(TryRecvError::Empty) => {}
+        }
+        tokio::select! {
+            biased;
+            item = self.records.recv() => item,
+            () = self.stop.stopped() => None,
+        }
     }
 
     /// The next record if it has already arrived; `None` when taking one would
     /// mean waiting.
-    fn next_if_ready(&mut self) -> Option<Option<Result<Record, AsError>>> {
-        self.stream.next().now_or_never()
+    fn next_if_ready(&mut self) -> Option<Option<Item>> {
+        match self.records.try_recv() {
+            Ok(item) => Some(Some(item)),
+            Err(TryRecvError::Disconnected) => Some(None),
+            Err(TryRecvError::Empty) => None,
+        }
     }
 
     /// A handle that stops the query from outside, while a read is waiting.
-    fn stopper(&self) -> Arc<Recordset> {
-        Arc::clone(&self.recordset)
+    fn stopper(&self) -> Arc<StopSignal> {
+        Arc::clone(&self.stop)
     }
 }
 
 impl Drop for RunningQuery {
     fn drop(&mut self) {
-        self.recordset.close();
+        self.stop.stop();
+    }
+}
+
+/// How many records may wait between the node readers and the consumer.
+fn queue_capacity(policy: &QueryPolicy) -> usize {
+    let wanted = policy.record_queue_size.max(1);
+    // A query that returns at most ten records has no use for a deeper queue.
+    match usize::try_from(policy.max_records) {
+        Ok(limit) if limit > 0 => wanted.min(limit),
+        _ => wanted,
+    }
+}
+
+/// The query's callback: put one record, or the error that ends the query,
+/// into the queue. Runs on a node's reader task, for one item at a time per
+/// node. Returns whether the query goes on.
+///
+/// aerospike-core commits a record to the resume cursor when this returns, so
+/// "in the queue" and "will not be fetched again" are the same moment.
+async fn hand_over(queue: mpsc::Sender<Item>, stop: Arc<StopSignal>, item: Item) -> bool {
+    if stop.is_stopped() {
+        return false;
+    }
+    // The reader of this query stops at the first error it is given, so there
+    // is nothing left to fetch once one is on its way.
+    let goes_on = item.is_ok();
+    match queue.try_send(item) {
+        Ok(()) => goes_on,
+        Err(TrySendError::Closed(_)) => false,
+        // The consumer is slower than the server. Wait for room, and do not
+        // read from the connection meanwhile.
+        Err(TrySendError::Full(item)) => tokio::select! {
+            biased;
+            () = stop.stopped() => false,
+            sent = queue.send(item) => sent.is_ok() && goes_on,
+        },
+    }
+}
+
+/// Hold the engine's handle for as long as the query runs: to cancel the
+/// query when it is told to stop, and to let go of the handle at the end.
+///
+/// The handle owns the callback, and the callback owns the sending half of
+/// the queue. The consumer sees the end of the query when the last sender is
+/// gone, so the handle must not outlive the query.
+async fn watch_over(mut handle: QueryHandle, queue: mpsc::Sender<Item>, stop: Arc<StopSignal>) {
+    let ended = tokio::select! {
+        biased;
+        () = stop.stopped() => None,
+        ended = handle.wait() => Some(ended),
+    };
+    match ended {
+        // Told to stop. The callback already refuses every further record;
+        // this also keeps the engine from starting another round.
+        None => handle.cancel(),
+        Some(Ok(())) => {}
+        // Every failure of the query itself has been through the callback
+        // already, and the consumer stops at the first one. What can arrive
+        // only here is the engine's task dying. Without this the consumer
+        // would take the closing queue for a normal end and return a
+        // truncated result as if it were complete.
+        Some(Err(e)) => {
+            tokio::select! {
+                biased;
+                () = stop.stopped() => {}
+                _sent = queue.send(Err(e)) => {}
+            }
+        }
     }
 }
 
@@ -192,7 +344,7 @@ struct StreamState {
     phase: tokio::sync::Mutex<Phase>,
     /// Outside `phase`, so that `close()` reaches the query while a read holds
     /// the phase and waits for records.
-    stopper: Mutex<Option<Arc<Recordset>>>,
+    stopper: Mutex<Option<Arc<StopSignal>>>,
     closed: AtomicBool,
     telemetry: Mutex<Option<QueryTelemetry>>,
 }
@@ -219,10 +371,24 @@ impl StreamState {
     /// any thread, any number of times.
     fn close(&self) {
         self.closed.store(true, Ordering::Release);
-        if let Some(recordset) = lock(&self.stopper).take() {
-            recordset.close();
+        if let Some(stop) = lock(&self.stopper).take() {
+            stop.stop();
         }
         self.finish(None);
+    }
+
+    /// Stop the query without reporting an outcome. For a query that
+    /// something other than the query ended: an exception from the caller's
+    /// callback is not a result of the query, as it is not for the sync
+    /// `foreach`. The span is closed; no duration is recorded.
+    fn abandon(&self) {
+        self.closed.store(true, Ordering::Release);
+        if let Some(stop) = lock(&self.stopper).take() {
+            stop.stop();
+        }
+        if let Some(telemetry) = lock(&self.telemetry).take() {
+            telemetry.abandon();
+        }
     }
 
     /// Wait for at least one record and return it together with the records
@@ -361,8 +527,8 @@ impl<'py> IntoPyObject<'py> for PendingRecords {
 /// Created by `Query.stream()` and wrapped by `AsyncRecordStream` in Python.
 /// Nothing is sent until the first `next_batch()`.
 ///
-/// Memory is bounded whatever the pace of the reader: records wait in
-/// aerospike-core's record queue (`record_queue_size` records), and when that is
+/// Memory is bounded whatever the pace of the reader: records wait in the
+/// queue of [`RunningQuery`] (`record_queue_size` records), and when that is
 /// full the per-node readers stop reading from the server.
 #[pyclass(name = "RecordStream", module = "aerospike_py")]
 pub struct PyRecordStream {
@@ -410,6 +576,12 @@ impl PyRecordStream {
     /// later one. Idempotent, and does not wait for anything.
     fn close(&self) {
         self.state.close();
+    }
+
+    /// Stop the query as `close()` does, without recording a duration for
+    /// it. Used when the caller's own code failed, not the query.
+    fn abandon(&self) {
+        self.state.abandon();
     }
 
     /// Whether `close()` has been called.

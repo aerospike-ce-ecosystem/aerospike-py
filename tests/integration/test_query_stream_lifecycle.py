@@ -8,7 +8,8 @@ callbacks to the end of the scan.
 
 What these tests pin:
 
-- every way of reading delivers every record once;
+- every way of reading delivers every record once, also when the client has
+  to fetch part of the set again because a node's connection failed;
 - every way of leaving early — ``break``, ``close()``, ``async with``, a
   callback returning ``False`` or raising, cancelling the task — stops the query
   **on the server**, within a moment and not when the server's socket timeout
@@ -28,10 +29,12 @@ import logging
 import os
 import threading
 import time
+from typing import ClassVar
 
 import pytest
 
 import aerospike_py
+from tests.helpers import invoke
 
 NS = "test"
 SET_NAME = "query_stream_lifecycle"
@@ -144,6 +147,73 @@ class TestEveryRecordOnce:
             return total
 
         assert await asyncio.gather(count(), count()) == [seeded, seeded]
+
+
+class TestARoundTheClientHasToFetchAgain:
+    """A node's connection failing in the middle of a scan must not repeat a record.
+
+    The client then asks for the rest again. The record stream of Rust client
+    3.0 resumes from the last record its consumer took, so everything that was
+    buffered at that moment is fetched and handed out a second time: about a
+    thousand records too many in 40,000 when this was measured. 0.14.x did not
+    do that, and neither may this.
+
+    The connection is made to fail by a consumer that pauses for longer than
+    the query's socket timeout, which makes the server give up on it, or by a
+    socket timeout too short for the scan.
+    """
+
+    IMPATIENT_SERVER: ClassVar[dict] = {"socket_timeout": 1000}
+    PAUSE_AT = 2000
+    PAUSE = 2.5
+
+    def _assert_every_record_once(self, seen: list[int], expected: int) -> None:
+        assert len(seen) - len(set(seen)) == 0, f"{len(seen) - len(set(seen))} records were delivered twice"
+        assert set(seen) == set(range(expected))
+
+    def test_sync_foreach_with_a_callback_that_pauses(self, client, seeded):
+        seen: list[int] = []
+
+        def callback(record):
+            seen.append(record.bins["v"])
+            if len(seen) == self.PAUSE_AT:
+                time.sleep(self.PAUSE)
+
+        client.query(NS, SET_NAME).foreach(callback, self.IMPATIENT_SERVER)
+
+        self._assert_every_record_once(seen, seeded)
+
+    async def test_async_foreach_with_a_callback_that_pauses(self, async_client, seeded):
+        seen: list[int] = []
+
+        def callback(record):
+            seen.append(record.bins["v"])
+            if len(seen) == self.PAUSE_AT:
+                time.sleep(self.PAUSE)
+
+        await async_client.query(NS, SET_NAME).foreach(callback, self.IMPATIENT_SERVER)
+
+        self._assert_every_record_once(seen, seeded)
+
+    async def test_async_for_with_a_consumer_that_pauses(self, async_client, seeded):
+        seen: list[int] = []
+
+        async for record in async_client.query(NS, SET_NAME).stream(self.IMPATIENT_SERVER):
+            seen.append(record.bins["v"])
+            if len(seen) == self.PAUSE_AT:
+                await asyncio.sleep(self.PAUSE)
+
+        self._assert_every_record_once(seen, seeded)
+
+    @pytest.mark.parametrize("socket_timeout", [2, 4, 6])
+    async def test_results_under_a_socket_timeout_too_short_for_the_scan(self, any_client, seeded, socket_timeout):
+        """``results()`` is all or nothing: the whole set once, or an error."""
+        try:
+            records = await invoke(any_client.query(NS, SET_NAME), "results", {"socket_timeout": socket_timeout})
+        except aerospike_py.AerospikeError:
+            return  # the scan could not be completed under this timeout, and said so
+
+        self._assert_every_record_once([record.bins["v"] for record in records], seeded)
 
 
 class TestNothingIsSentBeforeTheFirstRead:

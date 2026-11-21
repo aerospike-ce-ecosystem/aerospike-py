@@ -392,8 +392,8 @@ fn execute_query(
 ///
 /// The callback runs as records arrive rather than after the whole result set
 /// has been materialised. That is the property `foreach` exists for: peak memory
-/// is bounded by `aerospike-core`'s internal record queue (`record_queue_size`,
-/// default 1024) instead of the full result set, and time-to-first-callback is
+/// is bounded by the stream's record queue (`record_queue_size`, default 1024)
+/// instead of the full result set, and time-to-first-callback is
 /// the first record's latency instead of the whole scan's duration. Returning
 /// `False` stops the scan rather than breaking out of an already-filled `Vec`.
 ///
@@ -405,14 +405,17 @@ fn execute_query(
 /// when invoked from a thread already inside the runtime. Polling one record per
 /// `block_on` keeps every callback outside that context.
 ///
-/// This costs nothing in fetch throughput: the recordset is a channel bounded
-/// by `record_queue_size` that the per-node reader tasks keep filling on the
-/// runtime's worker threads while the callback runs here.
+/// This costs nothing in fetch throughput: the [`RunningQuery`] keeps a queue
+/// bounded by `record_queue_size` that the per-node reader tasks keep filling
+/// on the runtime's worker threads while the callback runs here.
+///
+/// **Every record reaches the callback once**, also when a node's connection
+/// fails and the client fetches part of the set again: see [`RunningQuery`].
 ///
 /// **Leaving early stops the query.** Every way out of the loop — the end of
 /// the stream, a callback that returned `False` or raised, a stream error, a
-/// panic — drops the [`RunningQuery`], and that closes the recordset. Dropping
-/// the stream alone does not: see [`RunningQuery`].
+/// panic — drops the [`RunningQuery`], and dropping it tells the node readers
+/// to stop.
 #[allow(clippy::too_many_arguments)]
 fn execute_foreach(
     py: Python<'_>,
