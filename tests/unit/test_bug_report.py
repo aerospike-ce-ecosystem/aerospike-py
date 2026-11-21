@@ -112,14 +112,27 @@ class TestCatchUnexpectedSync:
 
     def test_unexpected_error_logged_and_reraised(self, caplog):
         @catch_unexpected("test.method")
-        def raises_type_error():
-            raise TypeError("unexpected bug")
+        def raises_unexpectedly():
+            raise RuntimeError("unexpected bug")
 
-        with caplog.at_level(logging.ERROR, logger="aerospike_py"), pytest.raises(TypeError, match="unexpected bug"):
-            raises_type_error()
+        with caplog.at_level(logging.ERROR, logger="aerospike_py"), pytest.raises(RuntimeError, match="unexpected bug"):
+            raises_unexpectedly()
 
         assert len(caplog.records) == 1
         assert "gh issue create" in caplog.records[0].message
+
+    @pytest.mark.parametrize("refusal", [TypeError, ValueError])
+    def test_a_refused_argument_is_reraised_and_not_logged(self, caplog, refusal):
+        """``TypeError`` / ``ValueError`` are how an argument is refused, not a bug."""
+
+        @catch_unexpected("test.method")
+        def refuses():
+            raise refusal("Invalid key: data type is not supported as key value")
+
+        with caplog.at_level(logging.ERROR, logger="aerospike_py"), pytest.raises(refusal, match="Invalid key"):
+            refuses()
+
+        assert len(caplog.records) == 0
 
     def test_normal_return_value_preserved(self):
         @catch_unexpected("test.method")
@@ -159,14 +172,26 @@ class TestCatchUnexpectedAsync:
     @pytest.mark.asyncio
     async def test_async_unexpected_error_logged_and_reraised(self, caplog):
         @catch_unexpected("test.async_method")
-        async def raises_type_error():
-            raise TypeError("async bug")
+        async def raises_unexpectedly():
+            raise RuntimeError("async bug")
 
-        with caplog.at_level(logging.ERROR, logger="aerospike_py"), pytest.raises(TypeError, match="async bug"):
-            await raises_type_error()
+        with caplog.at_level(logging.ERROR, logger="aerospike_py"), pytest.raises(RuntimeError, match="async bug"):
+            await raises_unexpectedly()
 
         assert len(caplog.records) == 1
         assert "gh issue create" in caplog.records[0].message
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("refusal", [TypeError, ValueError])
+    async def test_async_refused_argument_is_reraised_and_not_logged(self, caplog, refusal):
+        @catch_unexpected("test.async_method")
+        async def refuses():
+            raise refusal("policy must be a dict")
+
+        with caplog.at_level(logging.ERROR, logger="aerospike_py"), pytest.raises(refusal, match="policy must be"):
+            await refuses()
+
+        assert len(caplog.records) == 0
 
     @pytest.mark.asyncio
     async def test_async_normal_return_value_preserved(self):

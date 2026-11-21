@@ -66,20 +66,33 @@ def log_unexpected_error(context: str, exc: BaseException) -> None:
     )
 
 
+#: How an argument is refused. The native layer raises these on purpose — a
+#: key of a type the server cannot store, a policy value of the wrong type —
+#: and so does the argument parsing in front of it. They are the caller's to
+#: fix: logging them as a possible bug in this library sent callers to the
+#: issue tracker for their own typos.
+_ARGUMENT_ERRORS = (TypeError, ValueError)
+
+
 def _maybe_log(method_name: str, exc: Exception) -> None:
-    """Log if exc is NOT an expected AerospikeError."""
+    """Log ``exc`` as a possible bug unless it is a failure a correct library produces.
+
+    Those are ``AerospikeError`` (the cluster or the client said no) and the
+    builtin ``TypeError`` / ``ValueError`` (an argument was refused).
+    """
     from aerospike_py._aerospike import AerospikeError
 
-    if not isinstance(exc, AerospikeError):
+    if not isinstance(exc, (AerospikeError, *_ARGUMENT_ERRORS)):
         log_unexpected_error(method_name, exc)
 
 
 def catch_unexpected(method_name: str):
     """Decorator that catches unexpected errors and logs a bug report.
 
-    Expected AerospikeError subclasses pass through unmodified.
-    All other exceptions are logged with the bug report message,
-    then re-raised as-is (so the caller still sees the original error).
+    ``AerospikeError`` subclasses and refused arguments (``TypeError``,
+    ``ValueError``) pass through unmodified and unlogged. All other
+    exceptions are logged with the bug report message, then re-raised as-is
+    (so the caller still sees the original error).
     """
 
     def decorator(func):

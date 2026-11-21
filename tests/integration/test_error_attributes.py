@@ -204,3 +204,18 @@ class TestExpectedFailuresAreNotBugReports:
 
         offending = [record.getMessage()[:160] for record in caplog.records if BUG_REPORT_MARKER in record.getMessage()]
         assert offending == [], "a failure a correct client runs into was logged as a possible bug"
+
+    async def test_a_refused_argument_does_not_either(self, any_client, caplog):
+        """A key the server cannot store and a policy of the wrong type are the caller's to fix."""
+        refused = [
+            (ValueError, "get", ((NS, SET_NAME, None),), {}),
+            (ValueError, "put", ((NS, SET_NAME, 1.5), {"v": 1}), {}),
+            (TypeError, "get", ((NS, SET_NAME, "k"),), {"policy": "not a dict"}),
+        ]
+        with caplog.at_level(logging.DEBUG):
+            for kind, method, args, kwargs in refused:
+                with pytest.raises(kind):
+                    await invoke(any_client, method, *args, **kwargs)
+
+        offending = [record.getMessage()[:160] for record in caplog.records if BUG_REPORT_MARKER in record.getMessage()]
+        assert offending == [], "a refused argument was logged as a possible bug"
