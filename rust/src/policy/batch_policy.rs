@@ -37,10 +37,10 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
     });
 
     if let Some(val) = dict.get_item("replica")? {
-        policy.replica = parse_replica(val.extract::<i32>()?);
+        policy.replica = parse_replica(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_mode_ap")? {
-        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?);
+        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
         policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
@@ -98,17 +98,17 @@ pub fn parse_batch_write_policy(
 
     // Exists (record_exists_action) — POLICY_EXISTS_*
     if let Some(val) = dict.get_item("exists")? {
-        policy.record_exists_action = parse_record_exists_action(val.extract::<i32>()?);
+        policy.record_exists_action = parse_record_exists_action(val.extract::<i32>()?)?;
     }
 
     // Generation policy — POLICY_GEN_*
     if let Some(val) = dict.get_item("gen")? {
-        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?);
+        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?)?;
     }
 
     // Commit level — POLICY_COMMIT_LEVEL_*
     if let Some(val) = dict.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?)?;
     }
 
     // TTL / expiration
@@ -172,10 +172,10 @@ pub fn parse_batch_delete_policy(
         policy.send_key = val.extract::<i32>()? == 1;
     }
     if let Some(val) = dict.get_item("gen")? {
-        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?);
+        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?)?;
     }
 
     policy.filter_expression = extract_filter_expression(dict)?;
@@ -204,7 +204,7 @@ pub fn apply_record_meta_for_delete(
         policy.send_key = key.extract::<i32>()? == 1;
     }
     if let Some(commit_level) = meta.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?)?;
     }
     if let Some(durable_delete) = meta.get_item("durable_delete")? {
         policy.durable_delete = durable_delete.extract::<bool>()?;
@@ -237,7 +237,7 @@ pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResu
         policy.send_key = val.extract::<i32>()? == 1;
     }
     if let Some(val) = dict.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("ttl")? {
         policy.expiration = parse_ttl(val.extract::<i64>()?)?;
@@ -269,7 +269,7 @@ pub fn apply_record_meta_for_apply(
         policy.send_key = key.extract::<i32>()? == 1;
     }
     if let Some(commit_level) = meta.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?)?;
     }
     if let Some(durable_delete) = meta.get_item("durable_delete")? {
         policy.durable_delete = durable_delete.extract::<bool>()?;
@@ -302,10 +302,10 @@ pub fn apply_record_meta(
         policy.send_key = key.extract::<i32>()? == 1;
     }
     if let Some(exists) = meta.get_item("exists")? {
-        policy.record_exists_action = parse_record_exists_action(exists.extract::<i32>()?);
+        policy.record_exists_action = parse_record_exists_action(exists.extract::<i32>()?)?;
     }
     if let Some(commit_level) = meta.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?)?;
     }
     if let Some(durable_delete) = meta.get_item("durable_delete")? {
         policy.durable_delete = durable_delete.extract::<bool>()?;

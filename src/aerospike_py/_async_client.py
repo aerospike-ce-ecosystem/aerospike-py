@@ -203,7 +203,7 @@ class AsyncClient:
 
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
-        self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None, retry: int = 0
+        self, data, namespace: str, set_name: str, _dtype=None, key_field: str = "_key", policy=None, retry: int = 0
     ) -> BatchWriteResult:
         """Write multiple records from a numpy structured array (async).
 
@@ -211,11 +211,17 @@ class AsyncClient:
         The dtype must contain a key field (default ``_key``) for the record key.
         Remaining non-underscore-prefixed fields become bins.
 
+        Every row is copied out of the array before this coroutine first
+        yields, so mutating ``data`` afterwards does not affect the write.
+
         Args:
-            data: numpy structured array with record data.
+            data: numpy structured array with record data. Its own
+                ``data.dtype`` defines the layout.
             namespace: Target namespace.
             set_name: Target set.
-            _dtype: numpy dtype describing the array layout.
+            _dtype: Optional dtype the array is expected to have. When given
+                and different from ``data.dtype``, ``ValueError`` is raised
+                before anything is sent.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional batch policy dict.
             retry: Maximum number of retries for failed records (default ``0``).
@@ -231,7 +237,7 @@ class AsyncClient:
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+            results = await client.batch_write_numpy(data, "test", "demo", retry=10)
             for br in results.batch_records:
                 if br.result != 0:
                     print(f"Failed: {br.key}, code={br.result}")

@@ -44,77 +44,109 @@ pub fn extract_filter_expression(dict: &Bound<'_, PyDict>) -> PyResult<Option<Ex
     Ok(None)
 }
 
+/// Build the `InvalidArgError` raised for a policy constant no enum variant matches.
+///
+/// An unknown value used to fall back to the enum's default, so a typo such as
+/// `exists=9` silently turned a create-only write into a plain update. The
+/// request is now rejected before anything is sent.
+fn unknown_policy_value(name: &str, val: i32, valid: &str) -> PyErr {
+    crate::errors::InvalidArgError::new_err(format!("invalid {name} value: {val} (valid: {valid})"))
+}
+
 /// Map a `POLICY_EXISTS_*` integer constant to a [`RecordExistsAction`].
 ///
-/// Unknown values fall back to [`RecordExistsAction::Update`] to mirror
-/// pre-existing behavior in `parse_write_policy`.
-pub(crate) fn parse_record_exists_action(val: i32) -> RecordExistsAction {
+/// Unknown values are rejected with `InvalidArgError`.
+pub(crate) fn parse_record_exists_action(val: i32) -> PyResult<RecordExistsAction> {
     match val {
-        0 => RecordExistsAction::Update,
-        1 => RecordExistsAction::UpdateOnly,
-        2 => RecordExistsAction::Replace,
-        3 => RecordExistsAction::ReplaceOnly,
-        4 => RecordExistsAction::CreateOnly,
-        _ => RecordExistsAction::Update,
+        0 => Ok(RecordExistsAction::Update),
+        1 => Ok(RecordExistsAction::UpdateOnly),
+        2 => Ok(RecordExistsAction::Replace),
+        3 => Ok(RecordExistsAction::ReplaceOnly),
+        4 => Ok(RecordExistsAction::CreateOnly),
+        _ => Err(unknown_policy_value(
+            "exists",
+            val,
+            "POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONLY=1, POLICY_EXISTS_REPLACE=2, \
+             POLICY_EXISTS_REPLACE_ONLY=3, POLICY_EXISTS_CREATE_ONLY=4",
+        )),
     }
 }
 
 /// Map a `POLICY_GEN_*` integer constant to a [`GenerationPolicy`].
 ///
-/// Unknown values fall back to [`GenerationPolicy::None`].
-pub(crate) fn parse_generation_policy(val: i32) -> GenerationPolicy {
+/// Unknown values are rejected with `InvalidArgError`.
+pub(crate) fn parse_generation_policy(val: i32) -> PyResult<GenerationPolicy> {
     match val {
-        0 => GenerationPolicy::None,
-        1 => GenerationPolicy::ExpectGenEqual,
-        2 => GenerationPolicy::ExpectGenGreater,
-        _ => GenerationPolicy::None,
+        0 => Ok(GenerationPolicy::None),
+        1 => Ok(GenerationPolicy::ExpectGenEqual),
+        2 => Ok(GenerationPolicy::ExpectGenGreater),
+        _ => Err(unknown_policy_value(
+            "gen",
+            val,
+            "POLICY_GEN_IGNORE=0, POLICY_GEN_EQ=1, POLICY_GEN_GT=2",
+        )),
     }
 }
 
 /// Map a `POLICY_COMMIT_LEVEL_*` integer constant to a [`CommitLevel`].
 ///
-/// Unknown values fall back to [`CommitLevel::CommitAll`].
-pub(crate) fn parse_commit_level(val: i32) -> CommitLevel {
+/// Unknown values are rejected with `InvalidArgError`.
+pub(crate) fn parse_commit_level(val: i32) -> PyResult<CommitLevel> {
     match val {
-        0 => CommitLevel::CommitAll,
-        1 => CommitLevel::CommitMaster,
-        _ => CommitLevel::CommitAll,
+        0 => Ok(CommitLevel::CommitAll),
+        1 => Ok(CommitLevel::CommitMaster),
+        _ => Err(unknown_policy_value(
+            "commit_level",
+            val,
+            "POLICY_COMMIT_LEVEL_ALL=0, POLICY_COMMIT_LEVEL_MASTER=1",
+        )),
     }
 }
 
 /// Map a `POLICY_REPLICA_*` integer constant to a [`Replica`].
 ///
-/// Unknown values fall back to [`Replica::Sequence`] (the aerospike-core default),
-/// mirroring the lenient behavior of `parse_record_exists_action`.
-pub(crate) fn parse_replica(val: i32) -> Replica {
+/// Unknown values are rejected with `InvalidArgError`.
+pub(crate) fn parse_replica(val: i32) -> PyResult<Replica> {
     match val {
-        0 => Replica::Master,
-        1 => Replica::Sequence,
-        2 => Replica::PreferRack,
-        _ => Replica::Sequence,
+        0 => Ok(Replica::Master),
+        1 => Ok(Replica::Sequence),
+        2 => Ok(Replica::PreferRack),
+        _ => Err(unknown_policy_value(
+            "replica",
+            val,
+            "POLICY_REPLICA_MASTER=0, POLICY_REPLICA_SEQUENCE=1, POLICY_REPLICA_PREFER_RACK=2",
+        )),
     }
 }
 
 /// Map a `POLICY_READ_MODE_AP_*` integer constant to a [`ConsistencyLevel`].
 ///
-/// Unknown values fall back to [`ConsistencyLevel::ConsistencyOne`].
-pub(crate) fn parse_consistency_level(val: i32) -> ConsistencyLevel {
+/// Unknown values are rejected with `InvalidArgError`.
+pub(crate) fn parse_consistency_level(val: i32) -> PyResult<ConsistencyLevel> {
     match val {
-        0 => ConsistencyLevel::ConsistencyOne,
-        1 => ConsistencyLevel::ConsistencyAll,
-        _ => ConsistencyLevel::ConsistencyOne,
+        0 => Ok(ConsistencyLevel::ConsistencyOne),
+        1 => Ok(ConsistencyLevel::ConsistencyAll),
+        _ => Err(unknown_policy_value(
+            "read_mode_ap",
+            val,
+            "POLICY_READ_MODE_AP_ONE=0, POLICY_READ_MODE_AP_ALL=1",
+        )),
     }
 }
 
 /// Map a `QUERY_DURATION_*` integer constant to a [`QueryDuration`].
 ///
-/// Unknown values fall back to [`QueryDuration::Long`].
-pub(crate) fn parse_query_duration(val: i32) -> QueryDuration {
+/// Unknown values are rejected with `InvalidArgError`.
+pub(crate) fn parse_query_duration(val: i32) -> PyResult<QueryDuration> {
     match val {
-        0 => QueryDuration::Long,
-        1 => QueryDuration::Short,
-        2 => QueryDuration::LongRelaxAP,
-        _ => QueryDuration::Long,
+        0 => Ok(QueryDuration::Long),
+        1 => Ok(QueryDuration::Short),
+        2 => Ok(QueryDuration::LongRelaxAP),
+        _ => Err(unknown_policy_value(
+            "expected_duration",
+            val,
+            "QUERY_DURATION_LONG=0, QUERY_DURATION_SHORT=1, QUERY_DURATION_LONG_RELAX_AP=2",
+        )),
     }
 }
 
@@ -156,26 +188,88 @@ pub(crate) fn parse_read_touch_ttl(val: i64) -> PyResult<ReadTouchTTL> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parse_replica_known_values() {
-        assert_eq!(parse_replica(0), Replica::Master);
-        assert_eq!(parse_replica(1), Replica::Sequence);
-        assert_eq!(parse_replica(2), Replica::PreferRack);
+    fn assert_invalid_arg<T: std::fmt::Debug>(result: PyResult<T>, needle: &str) {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = result.expect_err("an unknown policy value must be rejected");
+            assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
+            let msg = err.value(py).to_string();
+            assert!(msg.contains(needle), "message {msg:?} lacks {needle:?}");
+        });
     }
 
     #[test]
-    fn parse_replica_unknown_falls_back_to_sequence() {
-        assert_eq!(parse_replica(99), Replica::Sequence);
-        assert_eq!(parse_replica(-1), Replica::Sequence);
+    fn parse_replica_known_values() {
+        assert_eq!(parse_replica(0).unwrap(), Replica::Master);
+        assert_eq!(parse_replica(1).unwrap(), Replica::Sequence);
+        assert_eq!(parse_replica(2).unwrap(), Replica::PreferRack);
+    }
+
+    #[test]
+    fn parse_replica_rejects_unknown_values() {
+        assert_invalid_arg(parse_replica(99), "invalid replica value: 99");
+        assert_invalid_arg(parse_replica(-1), "invalid replica value: -1");
     }
 
     #[test]
     fn parse_consistency_level_known_and_unknown() {
-        assert_eq!(parse_consistency_level(0), ConsistencyLevel::ConsistencyOne);
-        assert_eq!(parse_consistency_level(1), ConsistencyLevel::ConsistencyAll);
         assert_eq!(
-            parse_consistency_level(99),
+            parse_consistency_level(0).unwrap(),
             ConsistencyLevel::ConsistencyOne
+        );
+        assert_eq!(
+            parse_consistency_level(1).unwrap(),
+            ConsistencyLevel::ConsistencyAll
+        );
+        assert_invalid_arg(
+            parse_consistency_level(99),
+            "invalid read_mode_ap value: 99",
+        );
+    }
+
+    #[test]
+    fn parse_record_exists_action_known_and_unknown() {
+        assert!(matches!(
+            parse_record_exists_action(0).unwrap(),
+            RecordExistsAction::Update
+        ));
+        assert!(matches!(
+            parse_record_exists_action(4).unwrap(),
+            RecordExistsAction::CreateOnly
+        ));
+        // A typo must not degrade to a plain update.
+        assert_invalid_arg(parse_record_exists_action(5), "invalid exists value: 5");
+        assert_invalid_arg(parse_record_exists_action(-1), "invalid exists value: -1");
+    }
+
+    #[test]
+    fn parse_generation_policy_known_and_unknown() {
+        assert!(matches!(
+            parse_generation_policy(1).unwrap(),
+            GenerationPolicy::ExpectGenEqual
+        ));
+        assert!(matches!(
+            parse_generation_policy(2).unwrap(),
+            GenerationPolicy::ExpectGenGreater
+        ));
+        // A typo must not silently disable the generation check.
+        assert_invalid_arg(parse_generation_policy(3), "invalid gen value: 3");
+    }
+
+    #[test]
+    fn parse_commit_level_and_query_duration_reject_unknown_values() {
+        assert!(matches!(
+            parse_commit_level(1).unwrap(),
+            CommitLevel::CommitMaster
+        ));
+        assert_invalid_arg(parse_commit_level(2), "invalid commit_level value: 2");
+        assert!(matches!(
+            parse_query_duration(1).unwrap(),
+            QueryDuration::Short
+        ));
+        assert_invalid_arg(
+            parse_query_duration(3),
+            "invalid expected_duration value: 3",
         );
     }
 

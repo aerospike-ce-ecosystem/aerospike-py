@@ -233,9 +233,10 @@ impl<'py> IntoPyObject<'py> for PendingBatchRead {
 /// `values()`, `get()`) and `__len__`-less iteration are all backed by
 /// a single cached `to_dict()`. The first such call pays the full
 /// Rust→Python dict materialisation; subsequent calls hit the cache.
-/// `__len__` itself is a pure-Rust filter+count and does not trigger
-/// the dict build. If you only need cardinality, prefer `len(handle)`
-/// or `found_count()` over `len(handle.to_dict())`.
+/// `__len__` itself is a pure-Rust pass that counts distinct Mapping keys
+/// and does not trigger the dict build. If you only need cardinality,
+/// prefer `len(handle)` over `len(handle.to_dict())`; use `found_count()`
+/// for the number of successful rows.
 #[pyclass(name = "LazyBatchRecords", mapping)]
 pub struct PyLazyBatchRecords {
     inner: Arc<Vec<BatchRecord>>,
@@ -246,8 +247,8 @@ pub struct PyLazyBatchRecords {
     /// dict-like dunder methods (`__contains__`, `__getitem__`, `__iter__`,
     /// `__len__`, `items`, `values`, `keys`). The first call that needs a
     /// dict pays the conversion cost; subsequent calls reuse the same
-    /// `PyDict`. `to_dict()` always returns a *new* dict so that callers can
-    /// mutate freely without poisoning the cache.
+    /// `PyDict`. `to_dict()` returns a shallow copy: the outer dict is new,
+    /// the bins dicts inside it are shared with this cache.
     ///
     /// `Mutex` is required because `#[pyclass]` types must be `Send + Sync`.
     /// Under the GIL it's effectively uncontended; under free-threaded
@@ -301,25 +302,31 @@ impl PyLazyBatchRecords {
 
 #[pymethods]
 impl PyLazyBatchRecords {
-    /// Dict-view cardinality: number of records that ``to_dict()`` would
-    /// include — i.e. successful reads (`result_code == Ok`) that carry
-    /// both a `user_key` and a `record` body.
+    /// Dict-view cardinality: the number of **distinct** user keys that
+    /// ``to_dict()`` would include — successful reads (`result_code == Ok`)
+    /// that carry both a `user_key` and a `record` body.
     ///
-    /// Matches ``len(lazy_records.to_dict())`` and is the size users
-    /// expect from a Mapping-protocol ``__len__``. For the raw record
+    /// Always equals ``len(lazy_records.to_dict())``, including when the
+    /// same user key was requested more than once (or in several sets):
+    /// those rows share one Mapping entry and are counted once. For the
+    /// number of successful rows use ``found_count()``; for the raw row
     /// count (including missing reads and per-record failures) use
-    /// ``len(lazy_records.batch_records)``.
+    /// ``len(lazy_records.batch_records)`` or ``len(lazy_records.to_list())``.
     ///
-    /// Fast path: pure Rust filter+count, no `PyDict` allocation.
-    fn __len__(&self) -> usize {
-        self.inner
-            .iter()
-            .filter(|br| {
-                br.key.user_key.is_some()
-                    && matches!(&br.result_code, None | Some(ResultCode::Ok))
-                    && br.record.is_some()
-            })
-            .count()
+    /// Fast path: a pure Rust pass over the keys, no `PyDict` allocation.
+    fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
+        // An already-built dict view knows its own size.
+        if let Ok(guard) = self.cached_dict.lock() {
+            if let Some(dict) = guard.as_ref() {
+                return Ok(dict.bind(py).len());
+            }
+        }
+        match distinct_dict_keys(&self.inner) {
+            Some(count) => Ok(count),
+            // A user key of a type the Rust pass does not model: let the
+            // Python dict decide what counts as the same key.
+            None => Ok(self.cached_dict(py)?.len()),
+        }
     }
 
     /// Dict-style item access: `lazy_records[user_key]` returns the bins dict.
@@ -413,13 +420,16 @@ impl PyLazyBatchRecords {
     /// `keys`, `values`, `get`, `__iter__`) share the same cached
     /// materialisation behind the scenes.
     ///
-    /// **Returned dict is a fresh shallow copy of the cached materialisation.**
-    /// Mutating it will not affect future `to_dict()` calls nor the dict
-    /// view used by `__getitem__`/`__contains__`/`__iter__`/`items`/`keys`/
-    /// `values`. This preserves the original "callers can mutate freely"
-    /// guarantee while sharing the underlying record→Python conversion
-    /// cost between `to_dict()` and the Mapping-protocol dunders (was
-    /// double-materialised before).
+    /// **Returned dict is a shallow copy of the cached materialisation.**
+    /// The outer dict is new on every call, so adding or removing keys on
+    /// it affects neither future `to_dict()` calls nor the dict view used
+    /// by `__getitem__`/`__contains__`/`__iter__`/`items`/`keys`/`values`.
+    /// The bins dicts it holds are **shared** with that view: mutating one
+    /// in place is visible through the handle and through later
+    /// `to_dict()` calls. Copy a bins dict before editing it, or use
+    /// `to_list()`, which materialises fresh dicts every time. Sharing is
+    /// what lets `to_dict()` and the Mapping-protocol dunders pay the
+    /// record→Python conversion once.
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         // ── (D) event loop resume delay: into_pyobject → to_dict call ──
         if let Some(t) = self.into_pyobject_at {
@@ -697,6 +707,46 @@ fn single_batch_record_to_py(py: Python<'_>, br: &BatchRecord) -> PyResult<Py<Py
             in_doubt: br.in_doubt,
         },
     )
+}
+
+/// Whether a batch row appears in the dict views: a successful read that
+/// carries both a user key and a record body.
+///
+/// Shared by [`batch_to_dict_py`] and [`distinct_dict_keys`] so the Mapping
+/// length can never disagree with the Mapping contents.
+fn row_in_dict_view(br: &BatchRecord) -> bool {
+    br.key.user_key.is_some()
+        && matches!(&br.result_code, None | Some(ResultCode::Ok))
+        && br.record.is_some()
+}
+
+/// Count the distinct user keys among the rows the dict views include.
+///
+/// Returns `None` when a row carries a user key that is not an integer, a
+/// string or a blob; the caller then falls back to the Python dict, which is
+/// the authority on key equality.
+fn distinct_dict_keys(results: &[BatchRecord]) -> Option<usize> {
+    #[derive(Hash, PartialEq, Eq)]
+    enum DictKey<'a> {
+        Int(i64),
+        Str(&'a str),
+        Bytes(&'a [u8]),
+    }
+
+    let mut seen = std::collections::HashSet::with_capacity(results.len());
+    for br in results {
+        if !row_in_dict_view(br) {
+            continue;
+        }
+        let key = match br.key.user_key.as_ref()? {
+            aerospike_core::Value::Int(i) => DictKey::Int(*i),
+            aerospike_core::Value::String(s) => DictKey::Str(s.as_str()),
+            aerospike_core::Value::Blob(b) => DictKey::Bytes(b.as_slice()),
+            _ => return None,
+        };
+        seen.insert(key);
+    }
+    Some(seen.len())
 }
 
 /// Convert batch results directly to `dict[key_str, bins_dict]`.

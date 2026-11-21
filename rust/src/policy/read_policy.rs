@@ -34,10 +34,10 @@ pub fn parse_read_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<Re
     });
 
     if let Some(val) = dict.get_item("replica")? {
-        policy.replica = parse_replica(val.extract::<i32>()?);
+        policy.replica = parse_replica(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_mode_ap")? {
-        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?);
+        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
         policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;

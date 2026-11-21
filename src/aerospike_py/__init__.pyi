@@ -80,15 +80,25 @@ class LazyBatchRecords:
     (``__getitem__``, ``__contains__``, ``items``, ``keys``, ``values``,
     ``get``, ``__iter__``) materialises a single cached ``PyDict`` for
     the full batch; subsequent accesses hit the cache. ``__len__`` is a
-    pure-Rust filter+count and does *not* trigger the dict build —
-    prefer ``len(handle)`` or ``found_count()`` over
-    ``len(handle.to_dict())`` when you only need cardinality. After a
+    pure-Rust pass that counts distinct Mapping keys and does *not*
+    trigger the dict build — prefer ``len(handle)`` over
+    ``len(handle.to_dict())`` when you only need cardinality, and
+    ``found_count()`` when you need the number of successful rows. After a
     Mapping access, the handle retains both the raw Rust records and
     the cached ``PyDict`` until it is dropped.
     """
 
     def to_dict(self) -> dict[Any, dict[str, Any]]:
-        """Materialise as ``dict[user_key, bins_dict]`` (cached)."""
+        """Materialise as ``dict[user_key, bins_dict]`` (cached).
+
+        The returned dict is a **shallow copy** of the cached view: adding
+        or removing keys on it affects nothing else, but the ``bins_dict``
+        values are the same objects the Mapping protocol and later
+        ``to_dict()`` calls return. Mutating a bins dict in place is
+        therefore visible through the handle. Copy the bins dict first
+        (or use ``to_list()``, which is never cached) if you need to edit
+        it.
+        """
         ...
 
     def to_list(self) -> list[dict[str, Any] | None]:
@@ -168,7 +178,12 @@ class LazyBatchRecords:
         ...
 
     def found_count(self) -> int:
-        """Count of successful records (no conversion needed)."""
+        """Count of successful rows (no conversion needed).
+
+        Counts rows, not keys: a user key requested twice and found twice
+        counts twice, and a successful digest-only row counts too. Compare
+        with ``len(handle)``, which counts distinct Mapping keys.
+        """
         ...
 
     def release_cache(self) -> None:
@@ -208,12 +223,13 @@ class LazyBatchRecords:
         ...
 
     # Dict-like Mapping backward-compat — backed by cached `to_dict()`.
-    # `__len__` is the *dict-view cardinality* (matches
-    # ``len(lazy_records.to_dict())``: successful reads with a `user_key`
-    # and a `record` body). Computed via a pure-Rust filter+count, so it
-    # does NOT trigger PyDict materialisation. For the raw record count
-    # (including missing reads / failures) use
-    # ``len(lazy_records.batch_records)``.
+    # `__len__` is the *dict-view cardinality*: the number of distinct user
+    # keys among successful reads with a `user_key` and a `record` body. It
+    # always equals ``len(lazy_records.to_dict())``, also when the same user
+    # key was requested more than once. Computed by a pure-Rust pass, so it
+    # does NOT trigger PyDict materialisation. For the number of successful
+    # rows use ``found_count()``; for the raw row count (including missing
+    # reads / failures) use ``len(lazy_records.batch_records)``.
     def items(self) -> Any: ...
     def keys(self) -> Any:  # Dict-view; never None. See `all_user_keys` for positional view.
         ...
@@ -783,7 +799,7 @@ class Client:
         data: np.ndarray,
         namespace: str,
         set_name: str,
-        _dtype: np.dtype,
+        _dtype: Optional[np.dtype] = None,
         key_field: str = "_key",
         policy: Optional[dict[str, Any]] = None,
         retry: int = 0,
@@ -795,10 +811,13 @@ class Client:
         Remaining non-underscore-prefixed fields become bins.
 
         Args:
-            data: numpy structured array with record data.
+            data: numpy structured array with record data. Its own
+                ``data.dtype`` defines the layout.
             namespace: Target namespace.
             set_name: Target set.
-            _dtype: numpy dtype describing the array layout.
+            _dtype: Optional dtype the array is expected to have. When given
+                and different from ``data.dtype``, ``ValueError`` is raised
+                before anything is sent.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             retry: Maximum number of *retries* for failed records (default
@@ -843,7 +862,7 @@ class Client:
 
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+            results = client.batch_write_numpy(data, "test", "demo", retry=10)
             for br in results.batch_records:
                 if br.result != 0:
                     print(f"Failed: {br.key}, code={br.result}")
@@ -1935,7 +1954,7 @@ class AsyncClient:
         data: np.ndarray,
         namespace: str,
         set_name: str,
-        _dtype: np.dtype,
+        _dtype: Optional[np.dtype] = None,
         key_field: str = "_key",
         policy: Optional[dict[str, Any]] = None,
         retry: int = 0,
@@ -1947,10 +1966,13 @@ class AsyncClient:
         Remaining non-underscore-prefixed fields become bins.
 
         Args:
-            data: numpy structured array with record data.
+            data: numpy structured array with record data. Its own
+                ``data.dtype`` defines the layout.
             namespace: Target namespace.
             set_name: Target set.
-            _dtype: numpy dtype describing the array layout.
+            _dtype: Optional dtype the array is expected to have. When given
+                and different from ``data.dtype``, ``ValueError`` is raised
+                before anything is sent.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             retry: Maximum number of *retries* for failed records (default
@@ -1995,7 +2017,7 @@ class AsyncClient:
 
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+            results = await client.batch_write_numpy(data, "test", "demo", retry=10)
             for br in results.batch_records:
                 if br.result != 0:
                     print(f"Failed: {br.key}, code={br.result}")

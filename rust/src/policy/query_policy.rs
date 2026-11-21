@@ -42,16 +42,16 @@ pub fn parse_query_policy(
     });
 
     if let Some(val) = dict.get_item("replica")? {
-        policy.replica = parse_replica(val.extract::<i32>()?);
+        policy.replica = parse_replica(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_mode_ap")? {
-        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?);
+        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
         policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
     }
     if let Some(val) = dict.get_item("expected_duration")? {
-        policy.expected_duration = parse_query_duration(val.extract::<i32>()?);
+        policy.expected_duration = parse_query_duration(val.extract::<i32>()?)?;
     }
 
     policy.base_policy.filter_expression = extract_filter_expression(dict)?;
@@ -154,14 +154,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_query_policy_expected_duration_unknown_falls_back() {
+    fn parse_query_policy_rejects_unknown_expected_duration() {
         Python::initialize();
         Python::attach(|py| {
             let d = build_dict(py, |d| {
                 d.set_item("expected_duration", 99i32).unwrap();
             });
-            let (p, _) = parse_query_policy(Some(&d)).unwrap();
-            assert_eq!(p.expected_duration, QueryDuration::Long);
+            let err = match parse_query_policy(Some(&d)) {
+                Ok(_) => panic!("an unknown expected_duration must be rejected"),
+                Err(err) => err,
+            };
+            assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
         });
     }
 

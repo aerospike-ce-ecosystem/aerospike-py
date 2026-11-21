@@ -211,7 +211,7 @@ class Client(_NativeClient):
         return super().batch_read(keys, bins, policy)
 
     @catch_unexpected("Client.batch_write_numpy")
-    def batch_write_numpy(self, data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0):
+    def batch_write_numpy(self, data, namespace, set_name, _dtype=None, key_field="_key", policy=None, retry=0):
         """Write multiple records from a numpy structured array.
 
         Each row of the structured array becomes a separate write operation.
@@ -219,10 +219,13 @@ class Client(_NativeClient):
         Remaining non-underscore-prefixed fields become bins.
 
         Args:
-            data: numpy structured array with record data.
+            data: numpy structured array with record data. Its own
+                ``data.dtype`` defines the layout.
             namespace: Target namespace.
             set_name: Target set.
-            _dtype: numpy dtype describing the array layout.
+            _dtype: Optional dtype the array is expected to have. When given
+                and different from ``data.dtype``, ``ValueError`` is raised
+                before anything is sent.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional batch policy dict.
             retry: Maximum number of retries for failed records (default ``0``).
@@ -238,7 +241,7 @@ class Client(_NativeClient):
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+            results = client.batch_write_numpy(data, "test", "demo", retry=10)
             for br in results.batch_records:
                 if br.result != 0:
                     print(f"Failed: {br.key}, code={br.result}")

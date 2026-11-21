@@ -899,14 +899,14 @@ impl PyAsyncClient {
 
     /// Write multiple records from a numpy structured array (async).
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0))]
+    #[pyo3(signature = (data, namespace, set_name, _dtype=None, key_field="_key", policy=None, retry=0))]
     fn batch_write_numpy<'py>(
         &self,
         py: Python<'py>,
         data: &Bound<'_, PyAny>,
         namespace: &str,
         set_name: &str,
-        _dtype: &Bound<'_, PyAny>,
+        _dtype: Option<&Bound<'_, PyAny>>,
         key_field: &str,
         policy: Option<&Bound<'_, PyDict>>,
         retry: u32,

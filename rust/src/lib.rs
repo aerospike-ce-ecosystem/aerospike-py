@@ -106,6 +106,7 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_internal_stage_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(is_internal_stage_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(dropped_log_count, m)?)?;
+    m.add_function(wrap_pyfunction!(numpy_support::validate_numpy_dtype, m)?)?;
     m.add_function(wrap_pyfunction!(
         types::partition_filter::partition_filter_all,
         m
