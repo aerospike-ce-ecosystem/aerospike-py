@@ -272,6 +272,18 @@ pub enum ErrorClass {
     Unknown,
 }
 
+/// What one link of an error's cause chain contributes to its class: see
+/// [`ErrorClass::weigh_cause`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CauseWeight {
+    /// The cause is the real failure.
+    Decides,
+    /// The cause is of the wrapper's own kind: the wrapper stands.
+    ConfirmsTheWrapper,
+    /// A context message, or nothing recognisable. Look at its cause.
+    SaysNothing,
+}
+
 impl ErrorClass {
     /// Classify one error by its own kind, ignoring what caused it.
     fn of_kind(err: &AsError) -> Self {
@@ -330,28 +342,51 @@ impl ErrorClass {
     /// the class: `err` itself, or the cause that was looked through to.
     fn decided_by(err: &AsError) -> (Self, &AsError) {
         let own = Self::of_kind(err);
-        let own_is_timeout = matches!(own, Self::ClientTimeout | Self::RetriesExhausted);
-        if !own_is_timeout && own != Self::Client {
+        if !own.is_a_wrapper() {
             return (own, err);
         }
         let mut cause = err.cause();
         while let Some(c) = cause {
             let class = Self::of_kind(c);
-            let more_specific = if own_is_timeout {
-                // A timeout on top of timeouts is still that timeout.
-                !matches!(
-                    class,
-                    Self::ClientTimeout | Self::RetriesExhausted | Self::Client | Self::Unknown
-                )
-            } else {
-                !matches!(class, Self::Client | Self::Unknown)
-            };
-            if more_specific {
-                return (class, c);
+            match own.weigh_cause(class) {
+                CauseWeight::Decides => return (class, c),
+                CauseWeight::ConfirmsTheWrapper => return (own, err),
+                CauseWeight::SaysNothing => cause = c.cause(),
             }
-            cause = c.cause();
         }
         (own, err)
+    }
+
+    /// Whether an error of this class may be a wrapper around the real
+    /// failure: a timeout (the retry budget or the deadline ran out) or a
+    /// bare client error (a context message).
+    fn is_a_wrapper(self) -> bool {
+        matches!(
+            self,
+            Self::ClientTimeout | Self::RetriesExhausted | Self::Client
+        )
+    }
+
+    /// What a cause of class `cause` means for a wrapper of class `self`.
+    ///
+    /// The first cause that is neither a context message nor unknown is the
+    /// failure of the last attempt, and it settles the matter either way.
+    /// When that attempt timed out under a timeout, the wrapper already says
+    /// so. Looking further down from there would find the attempts *before*
+    /// the last: the multi-key batch loop chains every attempt it made, newest
+    /// first, and a call whose attempts were "connection refused, timeout,
+    /// timeout" was reported as a connection failure, while a single-record
+    /// command with the same history - which keeps earlier attempts out of the
+    /// chain - was reported as the timeout it ended in.
+    fn weigh_cause(self, cause: Self) -> CauseWeight {
+        let self_is_timeout = matches!(self, Self::ClientTimeout | Self::RetriesExhausted);
+        match cause {
+            Self::Client | Self::Unknown => CauseWeight::SaysNothing,
+            Self::ClientTimeout | Self::RetriesExhausted if self_is_timeout => {
+                CauseWeight::ConfirmsTheWrapper
+            }
+            _ => CauseWeight::Decides,
+        }
     }
 
     /// Short stable name of the class: the Prometheus `error_type` label, the
@@ -857,6 +892,47 @@ mod tests {
     }
 
     // ── labels ──────────────────────────────────────────────────
+
+    /// The chain of a retried multi-key batch holds every attempt, newest
+    /// first. Only the newest is the reason the call failed. (A timeout with
+    /// causes cannot be built outside aerospike-core, hence the classes.)
+    #[test]
+    fn the_last_attempt_decides_under_a_timeout() {
+        use CauseWeight::{ConfirmsTheWrapper, Decides, SaysNothing};
+        for wrapper in [ErrorClass::RetriesExhausted, ErrorClass::ClientTimeout] {
+            assert_eq!(wrapper.weigh_cause(ErrorClass::Connection), Decides);
+            assert_eq!(
+                wrapper.weigh_cause(ErrorClass::Server(ResultCode::KeyBusy)),
+                Decides
+            );
+            // The last attempt timed out: stop here, whatever came before it.
+            assert_eq!(
+                wrapper.weigh_cause(ErrorClass::ClientTimeout),
+                ConfirmsTheWrapper
+            );
+            assert_eq!(
+                wrapper.weigh_cause(ErrorClass::RetriesExhausted),
+                ConfirmsTheWrapper
+            );
+            assert_eq!(wrapper.weigh_cause(ErrorClass::Client), SaysNothing);
+            assert_eq!(wrapper.weigh_cause(ErrorClass::Unknown), SaysNothing);
+        }
+        // A context message takes the class of whatever it is put in front of.
+        assert_eq!(
+            ErrorClass::Client.weigh_cause(ErrorClass::ClientTimeout),
+            Decides
+        );
+        assert_eq!(
+            ErrorClass::Client.weigh_cause(ErrorClass::Connection),
+            Decides
+        );
+        assert_eq!(
+            ErrorClass::Client.weigh_cause(ErrorClass::Client),
+            SaysNothing
+        );
+        assert!(!ErrorClass::Connection.is_a_wrapper());
+        assert!(!ErrorClass::Server(ResultCode::KeyBusy).is_a_wrapper());
+    }
 
     #[test]
     fn labels_tell_the_timeout_flavours_apart() {
