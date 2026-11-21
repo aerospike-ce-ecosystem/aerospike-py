@@ -241,7 +241,12 @@ class AsyncQuery:
         # not held up for the length of the result. See ``RecordStream.read_all``.
         stream = self.stream(policy)
         try:
-            return await stream._inner.read_all(_wrap_record)
+            gathered = await stream._inner.read_all(_wrap_record)
+            # Taken out of what the awaited call resolved to. asyncio keeps a
+            # future's result alive until the awaiting task next goes through
+            # the event loop, and that must not be a whole query's records
+            # once the caller has dropped the list.
+            return gathered.take()
         finally:
             stream.close()
 

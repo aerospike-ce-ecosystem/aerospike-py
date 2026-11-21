@@ -26,6 +26,7 @@ about 14 MB before the client's bounded queue and the socket buffers are full.
 """
 
 import asyncio
+import gc
 import logging
 import os
 import threading
@@ -135,7 +136,7 @@ class TestEveryRecordOnce:
 
     @pytest.mark.parametrize("wanted", [0, 1, 256, 257, 1023, 1024, 1025, 3000])
     async def test_results_of_every_size(self, async_client, seeded, wanted):
-        """A small result is converted when it is delivered, a larger one in chunks on the way."""
+        """A small result is converted when it is taken, a larger one in chunks on the way."""
         query = async_client.query(NS, SET_NAME)
         query.select("v")
 
@@ -156,6 +157,23 @@ class TestEveryRecordOnce:
             assert len(records) == seeded
             assert {record.bins["v"] for record in records} == set(range(seeded))
             assert all(type(record) is aerospike_py.Record for record in records[:100])
+
+    @pytest.mark.parametrize("wanted", [5, 3000])
+    async def test_the_result_is_the_callers_alone(self, async_client, seeded, wanted):
+        """Dropping the list frees the records: nothing else refers to it.
+
+        asyncio keeps the result of an awaited future alive until the task that
+        awaited it next goes through the event loop. When the list itself was
+        that result, a whole query's records outlived the caller's ``del``.
+        """
+        query = async_client.query(NS, SET_NAME)
+        query.select("v")
+
+        records = await query.results({"filter_expression": exp.lt(exp.int_bin("v"), exp.int_val(wanted))})
+
+        assert len(records) == wanted
+        keepers = [type(holder).__name__ for holder in gc.get_referrers(records) if isinstance(holder, asyncio.Future)]
+        assert keepers == []
 
     async def test_foreach(self, async_client, seeded):
         seen = []

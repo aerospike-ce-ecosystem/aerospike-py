@@ -616,7 +616,7 @@ impl Drop for StreamState {
 /// 0.62 s). Smaller than this would be slower than 0.14.x there.
 const READ_ALL_CHUNK: usize = 1024;
 
-/// A result of at most this many records is converted when it is delivered,
+/// A result of at most this many records is converted when it is taken,
 /// without a turn: the size of a stream's batch, which is what reading batch
 /// by batch converted at a time.
 ///
@@ -771,28 +771,60 @@ async fn collect_converted(
     Ok(())
 }
 
-/// Every record of a query: what [`PyRecordStream::read_all`] resolves to.
+/// Every record of a query, as [`PyRecordStream::read_all`] gathered them.
 ///
 /// Either `converted` holds them, or - for a small result - `unconverted`
-/// does and they are converted here, when the list is built.
-pub(crate) struct ConvertedRecords {
+/// does and they are converted when the list is built.
+struct ConvertedRecords {
     converted: Vec<Py<PyAny>>,
     unconverted: Vec<Record>,
     wrap: Option<Arc<Py<PyAny>>>,
 }
 
-impl<'py> IntoPyObject<'py> for ConvertedRecords {
-    type Target = PyAny;
-    type Output = Bound<'py, PyAny>;
-    type Error = PyErr;
+/// What [`PyRecordStream::read_all`] resolves to: the records of a query, to
+/// be taken once.
+///
+/// A holder and not the list itself, because asyncio keeps the result of an
+/// awaited future alive until the task that awaited it next goes through the
+/// event loop: the wake-up of the task holds the future, and the future holds
+/// its result. That is so for every future. With the list as the result,
+/// `del` freed nothing where it stood: 200 000 records that the caller had
+/// dropped stayed in memory (226 MiB of process RSS, 60 MiB before the call)
+/// until its next `await`.
+///
+/// [`take`](Self::take) hands the records over, so the future keeps an empty
+/// holder and the list is the caller's alone.
+#[pyclass(name = "GatheredRecords", module = "aerospike_py", frozen)]
+pub(crate) struct GatheredRecords {
+    records: Mutex<Option<ConvertedRecords>>,
+}
 
-    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let records = if self.unconverted.is_empty() {
-            self.converted
-        } else {
-            convert_records(py, &self.unconverted, self.wrap.as_deref())?
+impl From<ConvertedRecords> for GatheredRecords {
+    fn from(records: ConvertedRecords) -> Self {
+        Self {
+            records: Mutex::new(Some(records)),
+        }
+    }
+}
+
+#[pymethods]
+impl GatheredRecords {
+    /// The records, as a list. They are handed over: a second call gets an
+    /// empty list.
+    ///
+    /// A small result is converted here, in the caller's thread.
+    fn take<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        // Taken out before anything is converted: no Python code runs while
+        // the lock is held.
+        let Some(gathered) = lock(&self.records).take() else {
+            return Ok(PyList::empty(py));
         };
-        Ok(PyList::new(py, records)?.into_any())
+        let records = if gathered.unconverted.is_empty() {
+            gathered.converted
+        } else {
+            convert_records(py, &gathered.unconverted, gathered.wrap.as_deref())?
+        };
+        PyList::new(py, records)
     }
 }
 
@@ -865,8 +897,9 @@ impl PyRecordStream {
         })
     }
 
-    /// Await the whole query: one list of every record, each passed through
-    /// `wrap` when one is given, otherwise a `(key, meta, bins)` tuple.
+    /// Await the whole query: every record, each passed through `wrap` when
+    /// one is given, otherwise a `(key, meta, bins)` tuple. Resolves to a
+    /// [`GatheredRecords`]; its `take()` is the list.
     ///
     /// For `results()`, which keeps every record anyway. Reading through
     /// `next_batch` is a trip through the event loop for every batch, and
@@ -887,7 +920,7 @@ impl PyRecordStream {
     /// as many, so it stays below twice that.
     ///
     /// A result of at most [`SMALL_RESULT`] records skips all of this and is
-    /// converted when it is delivered.
+    /// converted when it is taken.
     ///
     /// An error ends it without a result, as it always did for `results()`.
     /// Cancelling the awaiting task drops what was gathered; the caller
@@ -928,21 +961,21 @@ impl PyRecordStream {
                 }
             }
             if converting.is_none() && converted.is_empty() && gathered.len() <= SMALL_RESULT {
-                return Ok(ConvertedRecords {
+                return Ok(GatheredRecords::from(ConvertedRecords {
                     converted,
                     unconverted: gathered,
                     wrap,
-                });
+                }));
             }
             collect_converted(converting.take(), &mut converted).await?;
             if !gathered.is_empty() {
                 collect_converted(Some(convert(gathered)), &mut converted).await?;
             }
-            Ok(ConvertedRecords {
+            Ok(GatheredRecords::from(ConvertedRecords {
                 converted,
                 unconverted: Vec::new(),
                 wrap: None,
-            })
+            }))
         })
     }
 
@@ -1291,23 +1324,55 @@ mod tests {
     }
 
     #[test]
-    fn a_small_result_is_converted_when_it_is_delivered() {
+    fn a_small_result_is_converted_when_it_is_taken() {
         ensure_python();
         Python::attach(|py| {
-            let small = ConvertedRecords {
+            let small = GatheredRecords::from(ConvertedRecords {
                 converted: Vec::new(),
                 unconverted: vec![plain(3), plain(1), plain(2)],
                 wrap: None,
-            };
-            let list = small.into_pyobject(py).expect("converts");
-            assert_eq!(generations(py, &list), vec![3, 1, 2]);
+            });
+            let list = small.take(py).expect("converts");
+            assert_eq!(generations(py, list.as_any()), vec![3, 1, 2]);
 
-            let none = ConvertedRecords {
+            let none = GatheredRecords::from(ConvertedRecords {
                 converted: Vec::new(),
                 unconverted: Vec::new(),
                 wrap: None,
-            };
-            assert_eq!(none.into_pyobject(py).expect("converts").len().unwrap(), 0);
+            });
+            assert_eq!(none.take(py).expect("converts").len(), 0);
+        });
+    }
+
+    #[test]
+    fn the_records_are_handed_over_and_the_holder_keeps_none() {
+        ensure_python();
+        Python::attach(|py| {
+            // Stands in for a record: an object that can be watched dying.
+            let record = py
+                .eval(c"type('Probe', (), {})()", None, None)
+                .expect("an object");
+            let alive = py
+                .import("weakref")
+                .and_then(|weakref| weakref.getattr("ref"))
+                .and_then(|make| make.call1((&record,)))
+                .expect("a weak reference");
+
+            let gathered = GatheredRecords::from(ConvertedRecords {
+                converted: vec![record.unbind()],
+                unconverted: Vec::new(),
+                wrap: None,
+            });
+            let list = gathered.take(py).expect("a list");
+            assert_eq!(list.len(), 1);
+            assert_eq!(gathered.take(py).expect("a list").len(), 0, "taken once");
+            assert!(!alive.call0().expect("the referent").is_none());
+
+            // What the holder had is the list's now: dropping the list frees
+            // the record, although the holder is still there.
+            drop(list);
+            assert!(alive.call0().expect("the referent").is_none());
+            drop(gathered);
         });
     }
 
