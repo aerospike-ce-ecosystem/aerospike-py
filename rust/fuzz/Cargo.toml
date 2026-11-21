@@ -24,8 +24,11 @@ doc = false
 
 [dependencies]
 libfuzzer-sys = "0.4"
-# We only need the FieldInfo struct and DtypeKind enum.
-# The actual write functions are unsafe and we test them via a safe shim module.
+# The targets call the production buffer writer and reader through the safe
+# shims in `_aerospike::fuzzing` (the library's name is `_aerospike`). The
+# crate links libpython, as `cargo test` does: PyO3 finds the interpreter from
+# PYO3_PYTHON or the `python3` on PATH.
+aerospike-py-native = { path = "..", features = ["fuzzing"] }
 
 [workspace]
 members = ["."]

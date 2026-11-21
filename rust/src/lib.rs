@@ -21,6 +21,8 @@ mod logging;
 pub mod metrics;
 #[deny(unsafe_op_in_unsafe_fn)]
 mod numpy_support;
+#[cfg(feature = "fuzzing")]
+pub use numpy_support::fuzzing;
 mod operate_result;
 mod operations;
 pub mod panic_safety;

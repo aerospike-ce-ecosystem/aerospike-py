@@ -12,6 +12,11 @@ wheels/
 # Rust build artifacts
 target/
 rust/target/
+# cargo-fuzz: its own lockfile, build output, corpus and crash inputs
+rust/fuzz/Cargo.lock
+rust/fuzz/target/
+rust/fuzz/corpus/
+rust/fuzz/artifacts/
 
 # Compiled extensions
 *.so

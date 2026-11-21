@@ -1374,6 +1374,126 @@ pub fn numpy_to_records(
     Ok(result)
 }
 
+// ── entry points for the fuzz targets ───────────────────────────
+
+/// Safe entry points for the fuzz targets in `rust/fuzz`.
+///
+/// The targets used to carry their own copy of the buffer arithmetic, so they
+/// fuzzed that copy and could not notice a bug in the functions above. These
+/// shims describe a field the way dtype parsing does and call the production
+/// writer and reader on it.
+#[cfg(feature = "fuzzing")]
+pub mod fuzzing {
+    use aerospike_core::{FloatValue, Value};
+
+    use super::{read_value_from_buffer, write_value_to_buffer, FieldInfo};
+
+    pub use super::DtypeKind;
+
+    /// The largest field offset and field size a target may ask for. Large
+    /// enough for every code path, small enough to keep an iteration cheap.
+    pub const MAX_OFFSET: usize = 4096;
+    pub const MAX_ITEMSIZE: usize = 4096;
+
+    /// What a fuzz input asks to be written into the field.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Input {
+        Nil,
+        Int(i64),
+        Float(f64),
+        Bool(bool),
+        Bytes(Vec<u8>),
+        Text(String),
+    }
+
+    /// What the production reader found in the field.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Output {
+        Int(i64),
+        Float(f64),
+        Bytes(Vec<u8>),
+    }
+
+    /// One write and one read of a field.
+    #[derive(Debug)]
+    pub struct Outcome {
+        /// Whether the writer accepted the input.
+        pub written: bool,
+        /// The row afterwards: exactly `offset + itemsize` bytes.
+        pub row: Vec<u8>,
+        /// What the reader returned, or `None` when it refused the field's
+        /// content (an unsigned 64-bit value beyond the signed range).
+        pub read: Option<Output>,
+    }
+
+    /// A field as dtype parsing hands it to the buffer functions, or `None`
+    /// for a shape dtype parsing refuses: an element width with no scalar, an
+    /// empty field, a field that is not a whole number of elements.
+    ///
+    /// `elements` is the sub-array length; a field that is not a sub-array has
+    /// one element. Bytes fields have one element of `base_itemsize` bytes.
+    pub fn field(
+        kind: DtypeKind,
+        base_itemsize: usize,
+        elements: usize,
+        offset: usize,
+        is_subarray: bool,
+    ) -> Option<FieldInfo> {
+        let width_ok = match kind {
+            DtypeKind::Int | DtypeKind::Uint => matches!(base_itemsize, 1 | 2 | 4 | 8),
+            DtypeKind::Float => matches!(base_itemsize, 2 | 4 | 8),
+            DtypeKind::FixedBytes | DtypeKind::VoidBytes => base_itemsize >= 1,
+        };
+        let elements = if is_subarray { elements } else { 1 };
+        let itemsize = base_itemsize.checked_mul(elements)?;
+        if !width_ok || elements == 0 || itemsize > MAX_ITEMSIZE || offset > MAX_OFFSET {
+            return None;
+        }
+        Some(FieldInfo {
+            name: "fuzzed".to_string(),
+            offset,
+            itemsize,
+            base_itemsize,
+            kind,
+            is_subarray,
+        })
+    }
+
+    /// Write `input` into a zeroed row with the production writer, then read
+    /// the field back with the production reader.
+    ///
+    /// The row is allocated with exactly `offset + itemsize` bytes: what the
+    /// functions' safety contract promises them, and not one byte more. An
+    /// access past the field is then an access past the allocation, which the
+    /// address sanitizer the fuzzer runs under reports.
+    pub fn write_then_read(field: &FieldInfo, input: &Input) -> Outcome {
+        let value = match input {
+            Input::Nil => Value::Nil,
+            Input::Int(v) => Value::Int(*v),
+            Input::Float(v) => Value::Float(FloatValue::F64(v.to_bits())),
+            Input::Bool(v) => Value::Bool(*v),
+            Input::Bytes(v) => Value::Blob(v.clone()),
+            Input::Text(v) => Value::String(v.clone()),
+        };
+        let mut row = vec![0u8; field.offset + field.itemsize];
+
+        // SAFETY: `row` is `offset + itemsize` bytes, writable, and not shared.
+        let written = unsafe { write_value_to_buffer(row.as_mut_ptr(), field, &value) }.is_ok();
+        // SAFETY: `row` is `offset + itemsize` bytes and readable.
+        let read = match unsafe { read_value_from_buffer(row.as_ptr(), field) } {
+            Ok(Value::Int(v)) => Some(Output::Int(v)),
+            Ok(Value::Float(FloatValue::F64(bits))) => Some(Output::Float(f64::from_bits(bits))),
+            Ok(Value::Float(FloatValue::F32(bits))) => {
+                Some(Output::Float(f64::from(f32::from_bits(bits))))
+            }
+            Ok(Value::Blob(bytes)) => Some(Output::Bytes(bytes)),
+            Ok(other) => unreachable!("the reader returned {other:?}, which it never builds"),
+            Err(_) => None,
+        };
+        Outcome { written, row, read }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
