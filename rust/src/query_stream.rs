@@ -5,6 +5,8 @@
 //! must get every record once and stop the query the same way. They share
 //! [`RunningQuery`] for that and [`QueryTelemetry`] for the metric and the span.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
@@ -13,10 +15,12 @@ use aerospike_core::query::PartitionFilter;
 use aerospike_core::{
     Client as AsClient, Error as AsError, QueryHandle, QueryPolicy, Record, Statement,
 };
+use futures::future::{ready, Either, Ready};
+use futures::FutureExt;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
-use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, Semaphore};
 
 use crate::errors::as_to_pyerr;
@@ -77,9 +81,19 @@ impl StopSignal {
 /// readers and the consumer itself: a record is committed when it is in that
 /// queue, and nothing in the queue is ever fetched again.
 ///
-/// The queue holds at most `record_queue_size` records. A node reader whose
-/// record does not fit waits, and does not read from its connection while it
-/// waits, which is the backpressure towards the server.
+/// At most `record_queue_size` records wait here, see [`Room`]. A node reader
+/// whose record does not fit waits, and does not read from its connection
+/// while it waits, which is the backpressure towards the server.
+///
+/// # What a record costs
+///
+/// Every record of every query and scan passes through here, one queue
+/// message each, so the two ends are kept short. A node reader puts its
+/// record in without waiting, cloning or allocating as long as there is room
+/// (see [`hand_over`]). The consumer takes the records out several at a time:
+/// the queue's permits then go back to the readers in one piece, and a reader
+/// that was waiting for room is woken once for all of them and not once per
+/// record.
 ///
 /// # Stopping
 ///
@@ -89,7 +103,54 @@ impl StopSignal {
 /// server kept the scan and its connections.
 pub(crate) struct RunningQuery {
     records: mpsc::Receiver<Item>,
+    /// Records taken out of the queue and not handed out yet, **last one
+    /// first** (they are popped off the end). They are committed like the
+    /// ones still in the queue and count against `record_queue_size` with
+    /// them.
+    taken: Vec<Item>,
+    /// See [`Room::taken_at_once`].
+    taken_at_once: usize,
     stop: Arc<StopSignal>,
+}
+
+/// How the records that may wait in the client are divided between the queue
+/// and what the consumer has taken out of it.
+///
+/// `queue + taken_at_once - 1` is what the policy allows: of the records the
+/// consumer takes out in one go, one is handed out at once and the others
+/// wait in [`RunningQuery::taken`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Room {
+    /// Slots of the queue the node readers fill.
+    queue: usize,
+    /// How many records the consumer takes out of the queue in one go.
+    taken_at_once: usize,
+}
+
+impl Room {
+    /// The most the consumer takes out in one go. More than this gains
+    /// nothing: a reader is woken once per so many records already.
+    const MOST_TAKEN_AT_ONCE: usize = 64;
+
+    fn of(policy: &QueryPolicy) -> Self {
+        let wanted = policy.record_queue_size.max(1);
+        // A query that returns at most ten records has no use for more room.
+        match usize::try_from(policy.max_records) {
+            Ok(limit) if limit > 0 => Self::for_records(wanted.min(limit)),
+            _ => Self::for_records(wanted),
+        }
+    }
+
+    /// Room for `allowed` waiting records (at least one). A quarter of it, at
+    /// most, is taken out at a time: a small queue stays a queue, and is not
+    /// emptied into the consumer's hands in one go.
+    fn for_records(allowed: usize) -> Self {
+        let taken_at_once = (allowed / 4).clamp(1, Self::MOST_TAKEN_AT_ONCE);
+        Self {
+            queue: allowed - (taken_at_once - 1),
+            taken_at_once,
+        }
+    }
 }
 
 impl RunningQuery {
@@ -101,47 +162,66 @@ impl RunningQuery {
         partition_filter: PartitionFilter,
         statement: Statement,
     ) -> Result<Self, AsError> {
-        let (queue, records) = mpsc::channel(queue_capacity(policy));
+        let room = Room::of(policy);
+        let (queue, records) = mpsc::channel(room.queue);
         let stop = Arc::new(StopSignal::new());
         let handle = {
             let queue = queue.clone();
             let stop = Arc::clone(&stop);
             client
                 .query_foreach(policy, partition_filter, statement, move |item| {
-                    hand_over(queue.clone(), Arc::clone(&stop), item)
+                    hand_over(&queue, &stop, item)
                 })
                 .await?
         };
         tokio::spawn(watch_over(handle, queue, Arc::clone(&stop)));
-        Ok(Self { records, stop })
+        Ok(Self {
+            records,
+            taken: Vec::new(),
+            taken_at_once: room.taken_at_once,
+            stop,
+        })
     }
 
     /// The next record, an error that ended the query, or `None` at its end
     /// or once it has been told to stop.
     ///
-    /// Dropping this future while it waits loses nothing: a record leaves the
-    /// queue only in the poll that returns it.
+    /// Dropping this future while it waits loses nothing: what has left the
+    /// queue is kept in `self`, not in the future.
     pub(crate) async fn next(&mut self) -> Option<Item> {
-        match self.records.try_recv() {
-            Ok(item) => return Some(item),
-            Err(TryRecvError::Disconnected) => return None,
-            Err(TryRecvError::Empty) => {}
+        if let Some(item) = self.taken.pop() {
+            return Some(item);
         }
-        tokio::select! {
+        let closed = tokio::select! {
             biased;
-            item = self.records.recv() => item,
-            () = self.stop.stopped() => None,
+            taken = self.records.recv_many(&mut self.taken, self.taken_at_once) => taken == 0,
+            () = self.stop.stopped() => true,
+        };
+        if closed {
+            return None;
         }
+        self.taken.reverse();
+        self.taken.pop()
     }
 
     /// The next record if it has already arrived; `None` when taking one would
     /// mean waiting.
     fn next_if_ready(&mut self) -> Option<Option<Item>> {
-        match self.records.try_recv() {
-            Ok(item) => Some(Some(item)),
-            Err(TryRecvError::Disconnected) => Some(None),
-            Err(TryRecvError::Empty) => None,
+        if let Some(item) = self.taken.pop() {
+            return Some(Some(item));
         }
+        // One poll, and not `try_recv`: that one parks the calling thread -
+        // a runtime worker here - while a sender is in the middle of putting
+        // a record in.
+        let taken = self
+            .records
+            .recv_many(&mut self.taken, self.taken_at_once)
+            .now_or_never()?;
+        if taken == 0 {
+            return Some(None);
+        }
+        self.taken.reverse();
+        Some(self.taken.pop())
     }
 
     /// A handle that stops the query from outside, while a read is waiting.
@@ -156,39 +236,55 @@ impl Drop for RunningQuery {
     }
 }
 
-/// How many records may wait between the node readers and the consumer.
-fn queue_capacity(policy: &QueryPolicy) -> usize {
-    let wanted = policy.record_queue_size.max(1);
-    // A query that returns at most ten records has no use for a deeper queue.
-    match usize::try_from(policy.max_records) {
-        Ok(limit) if limit > 0 => wanted.min(limit),
-        _ => wanted,
-    }
-}
+/// What the query's callback returns: whether the query goes on, known at
+/// once or after a wait for room in the queue.
+type HandedOver = Either<Ready<bool>, Pin<Box<dyn Future<Output = bool> + Send>>>;
 
 /// The query's callback: put one record, or the error that ends the query,
 /// into the queue. Runs on a node's reader task, for one item at a time per
-/// node. Returns whether the query goes on.
+/// node. Resolves to whether the query goes on.
 ///
-/// aerospike-core commits a record to the resume cursor when this returns, so
+/// aerospike-core commits a record to the resume cursor when this resolves, so
 /// "in the queue" and "will not be fetched again" are the same moment.
-async fn hand_over(queue: mpsc::Sender<Item>, stop: Arc<StopSignal>, item: Item) -> bool {
+///
+/// This runs for every record, and aerospike-core puts what it returns in a
+/// box of its own. So the record goes into the queue right here, before any
+/// future exists: nothing is cloned and the box holds a `bool`. Only when the
+/// queue is full is a future built that waits, and that is the one case where
+/// the reader has time to spare.
+fn hand_over(queue: &mpsc::Sender<Item>, stop: &Arc<StopSignal>, item: Item) -> HandedOver {
     if stop.is_stopped() {
-        return false;
+        return Either::Left(ready(false));
     }
     // The reader of this query stops at the first error it is given, so there
     // is nothing left to fetch once one is on its way.
     let goes_on = item.is_ok();
     match queue.try_send(item) {
-        Ok(()) => goes_on,
-        Err(TrySendError::Closed(_)) => false,
+        Ok(()) => Either::Left(ready(goes_on)),
+        Err(TrySendError::Closed(_)) => Either::Left(ready(false)),
         // The consumer is slower than the server. Wait for room, and do not
         // read from the connection meanwhile.
-        Err(TrySendError::Full(item)) => tokio::select! {
-            biased;
-            () = stop.stopped() => false,
-            sent = queue.send(item) => sent.is_ok() && goes_on,
-        },
+        Err(TrySendError::Full(item)) => Either::Right(Box::pin(wait_for_room(
+            queue.clone(),
+            Arc::clone(stop),
+            item,
+            goes_on,
+        ))),
+    }
+}
+
+/// [`hand_over`] for a queue that was full: put the item in when there is
+/// room, unless the query is told to stop first.
+async fn wait_for_room(
+    queue: mpsc::Sender<Item>,
+    stop: Arc<StopSignal>,
+    item: Item,
+    goes_on: bool,
+) -> bool {
+    tokio::select! {
+        biased;
+        () = stop.stopped() => false,
+        sent = queue.send(item) => sent.is_ok() && goes_on,
     }
 }
 
@@ -787,5 +883,217 @@ mod tests {
         assert!(lock(&state.telemetry).is_none());
         state.close();
         assert!(state.is_closed());
+    }
+
+    // --- the queue between the node readers and the consumer ---------------
+
+    /// A record that can be told from the others: its generation is `n`.
+    fn record(n: u32) -> Item {
+        Ok(Record::new(None, Default::default(), None, n, 0))
+    }
+
+    fn number(item: Option<Item>) -> u32 {
+        item.expect("a record, not the end")
+            .expect("a record, not an error")
+            .generation
+    }
+
+    /// A query with room for `allowed` waiting records and no server behind
+    /// it: the test plays the node readers through the sender.
+    fn running(allowed: usize) -> (mpsc::Sender<Item>, Arc<StopSignal>, RunningQuery) {
+        let room = Room::for_records(allowed);
+        let (queue, records) = mpsc::channel(room.queue);
+        let stop = Arc::new(StopSignal::new());
+        let running = RunningQuery {
+            records,
+            taken: Vec::new(),
+            taken_at_once: room.taken_at_once,
+            stop: Arc::clone(&stop),
+        };
+        (queue, stop, running)
+    }
+
+    /// Hand records over for as long as they are taken at once; how many were.
+    fn fill(queue: &mpsc::Sender<Item>, stop: &Arc<StopSignal>, from: u32) -> u32 {
+        let mut accepted = 0;
+        while matches!(
+            hand_over(queue, stop, record(from + accepted)),
+            Either::Left(_)
+        ) {
+            accepted += 1;
+        }
+        // The record that did not fit is dropped with its future: the reader
+        // of a real query would wait with it instead.
+        accepted
+    }
+
+    #[test]
+    fn no_more_records_wait_than_the_policy_allows() {
+        for allowed in [1, 2, 3, 4, 5, 8, 16, 63, 64, 100, 256, 1024, 1_000_000] {
+            let room = Room::for_records(allowed);
+            assert!(room.queue >= 1, "{allowed}: {room:?}");
+            assert!(
+                (1..=Room::MOST_TAKEN_AT_ONCE).contains(&room.taken_at_once),
+                "{allowed}: {room:?}"
+            );
+            assert_eq!(
+                room.queue + room.taken_at_once - 1,
+                allowed,
+                "{allowed}: {room:?}"
+            );
+        }
+        assert_eq!(
+            Room::for_records(1024),
+            Room {
+                queue: 961,
+                taken_at_once: 64
+            }
+        );
+
+        let limited = QueryPolicy {
+            record_queue_size: 1024,
+            max_records: 10,
+            ..QueryPolicy::default()
+        };
+        assert_eq!(Room::of(&limited), Room::for_records(10));
+        let unset = QueryPolicy {
+            record_queue_size: 0,
+            ..QueryPolicy::default()
+        };
+        assert_eq!(Room::of(&unset), Room::for_records(1));
+    }
+
+    #[tokio::test]
+    async fn records_come_out_once_and_in_the_order_they_went_in() {
+        let (queue, stop, mut running) = running(1024);
+        for n in 0..500 {
+            let handed = hand_over(&queue, &stop, record(n));
+            assert!(
+                matches!(handed, Either::Left(_)),
+                "there is room, so nothing waits"
+            );
+            assert!(handed.await, "the query goes on after a record");
+        }
+        drop(queue);
+
+        // Some through `next`, some through `next_if_ready`, as a batch read does.
+        let mut seen = Vec::new();
+        while let Some(item) = running.next().await {
+            seen.push(number(Some(item)));
+            for _ in 0..3 {
+                match running.next_if_ready() {
+                    Some(Some(item)) => seen.push(number(Some(item))),
+                    Some(None) | None => break,
+                }
+            }
+        }
+        assert_eq!(seen, (0..500).collect::<Vec<_>>());
+        assert!(running.next().await.is_none(), "the end stays the end");
+    }
+
+    #[tokio::test]
+    async fn what_waits_in_the_client_stays_within_the_room() {
+        for allowed in [1_u32, 4, 16, 100, 1024] {
+            let (queue, stop, mut running) = running(allowed as usize);
+            let mut handed_over = fill(&queue, &stop, 0);
+            let mut handed_out = 0;
+            // Take one, let the readers fill up again, and so on: at no point
+            // may more be waiting than the policy allows.
+            for _ in 0..(3 * allowed) {
+                assert_eq!(number(running.next().await), handed_out);
+                handed_out += 1;
+                handed_over += fill(&queue, &stop, handed_over);
+                let waiting = handed_over - handed_out;
+                assert!(waiting <= allowed, "{waiting} wait, {allowed} allowed");
+            }
+            assert!(
+                handed_over - handed_out >= allowed / 2,
+                "{allowed}: the room is used, not just respected"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reader_without_room_waits_and_its_record_is_not_lost() {
+        let (queue, stop, mut running) = running(4);
+        assert_eq!(fill(&queue, &stop, 0), 4);
+
+        let waiting = hand_over(&queue, &stop, record(4));
+        assert!(matches!(waiting, Either::Right(_)), "the queue is full");
+        tokio::pin!(waiting);
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "the reader waits for room"
+        );
+
+        assert_eq!(number(running.next().await), 0);
+        assert!(waiting.await, "there is room now, and the query goes on");
+        drop(queue);
+        for n in 1..=4 {
+            assert_eq!(number(running.next().await), n);
+        }
+        assert!(running.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stopping_releases_a_reader_that_waits_for_room() {
+        let (queue, stop, running) = running(4);
+        assert_eq!(fill(&queue, &stop, 0), 4);
+        let waiting = hand_over(&queue, &stop, record(4));
+        tokio::pin!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+
+        drop(running);
+
+        assert!(!waiting.await, "a stopped query does not go on");
+        let after = hand_over(&queue, &stop, record(5));
+        assert!(
+            matches!(after, Either::Left(_)),
+            "nothing waits after a stop"
+        );
+        assert!(!after.await);
+    }
+
+    #[tokio::test]
+    async fn the_error_that_ends_a_query_is_handed_over_and_ends_it() {
+        let (queue, stop, mut running) = running(16);
+        assert!(hand_over(&queue, &stop, record(0)).await);
+        let goes_on = hand_over(&queue, &stop, Err(AsError::client_error("node gone"))).await;
+        assert!(!goes_on, "the readers stop at the error");
+        drop(queue);
+
+        assert_eq!(number(running.next().await), 0);
+        assert!(matches!(running.next().await, Some(Err(_))));
+        assert!(running.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn taking_what_is_ready_never_waits() {
+        let (queue, stop, mut running) = running(16);
+        assert!(
+            running.next_if_ready().is_none(),
+            "nothing has arrived: taking one would mean waiting"
+        );
+
+        assert!(hand_over(&queue, &stop, record(7)).await);
+        assert_eq!(number(running.next_if_ready().expect("it has arrived")), 7);
+        assert!(running.next_if_ready().is_none());
+
+        drop(queue);
+        assert!(
+            matches!(running.next_if_ready(), Some(None)),
+            "the end is known without waiting"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_consumer_told_to_stop_while_it_waits_gets_the_end() {
+        let (_queue, stop, mut running) = running(16);
+        let stopper = running.stopper();
+        let reading = tokio::spawn(async move { running.next().await.is_none() });
+        tokio::task::yield_now().await;
+        stopper.stop();
+        assert!(reading.await.expect("the read does not panic"));
+        assert!(stop.is_stopped());
     }
 }
