@@ -56,7 +56,7 @@ Returned by: batch operations (inside `BatchWriteResult.batch_records`)
 | `key` | `AerospikeKey \| None` | Record key |
 | `result` | `int` | `0` when the server reported success, the server's result code when it reported a failure (`2` not found, `27` filtered out, ...), `-1` when no server answered for this record |
 | `record` | `Record \| None` | Record data (`None` if operation failed) |
-| `in_doubt` | `bool` | The record failed, but the write may have been applied: the request was sent and the answer never came back (default `False`) |
+| `in_doubt` | `bool` | The record failed, but the write may have been applied: the request was sent and the answer never came back (default `False`). With `max_retries > 0` on a write batch, a row that ends in `KEY_NOT_FOUND`, `FILTERED_OUT` or `UDF_BAD_RESPONSE` is in doubt too (see [Re-sent writes and `in_doubt`](../guides/admin/error-handling.md#re-sent-writes-and-in_doubt)) |
 | `error_type` | `str \| None` | `None` on success. Otherwise the kind of failure, by the same name an exception carries in `error_type`: a server code (`"KeyNotFoundError"`, `"FilteredOut"`, ...), a client-side failure (`"Timeout"`, `"Connection"`, ...), or `"NoResponse"` when no node answered for the record. Tells the `-1` results apart. Added in 0.15: code that unpacks a `BatchRecord` into four names must take five. |
 
 ```python
@@ -84,7 +84,7 @@ What the client-side retry loop of `batch_write` / `batch_write_numpy` (`retry=N
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `attempts` | `int` | `1` | Attempts actually issued, including the first. Always `>= 1`. |
-| `max_attempts` | `int` | `1` | Attempts the caller asked for: `1 + retry`. |
+| `max_attempts` | `int` | `1` | Attempts the caller asked for: `1 + retry`, at most `2**32 - 1`. |
 | `truncated_by_timeout` | `bool` | `False` | `total_timeout` stopped the retries before `max_attempts`. |
 | `unresolved` | `int` | `0` | Records still carrying a retryable failure code when the loop ended. |
 
@@ -213,7 +213,7 @@ Used by: `get()`, `select()`, `exists()`
 | `max_retries` | `int` | `2` | Max retries |
 | `sleep_between_retries` | `int` | `0` | Sleep between retries (ms) |
 | `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. Drains the socket so reused connections do not see stale responses. |
-| `filter_expression` | `Any` | | Expression filter built via `aerospike_py.exp`. |
+| `filter_expression` | `Any` | | Expression filter built via `aerospike_py.exp`. In every policy, any other value except `None` (a string, a number, a list, a dict) raises `InvalidArgError` before anything is sent. |
 | `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | Replica selection algorithm. |
 | `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP namespace read consistency. Maps to `aerospike-core` `ConsistencyLevel`. |
 | `read_touch_ttl_percent` | `int` | `0` | Reset TTL on read when within N% of original write TTL (server v8+). `0` = server default, `-1` = never reset, `1..=100` = percent. |
@@ -384,7 +384,7 @@ Per-record meta for `batch_apply()`. Pass as the second element of a `(key, meta
 | `durable_delete` | `bool` | Override durable_delete. |
 
 :::note
-`filter_expression` is **not** accepted in `BatchUDFMeta` — set it on the batch-level [`BatchUDFPolicy`](#batchudfpolicy) instead. (Per-record `filter_expression` is unwired in aerospike-core 2.0; matches the [`BatchDeleteMeta`](#batchdeletemeta) shape.)
+`filter_expression` is **not** accepted in `BatchUDFMeta` — set it on the batch-level [`BatchUDFPolicy`](#batchudfpolicy) instead, as with [`BatchDeleteMeta`](#batchdeletemeta).
 :::
 
 ```python

@@ -91,7 +91,7 @@ except AerospikeError as e:
 |-----------|------|
 | `result_code` | Server가 응답했으면 server의 result code(예: `2` record 없음, `5` record 이미 존재, `100` UDF 실패). 어떤 server도 응답하지 않았으면 `-1`: client timeout, connection 실패, 잘못된 인자. |
 | `error_type` | 실패의 종류를 나타내는 이름. Server code는 code 이름을 따릅니다(`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, ...; server가 알린 timeout은 `"ServerTimeout"`). Client 쪽 실패는 `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"`, `"Client"` 중 하나입니다. `-1`인 경우들은 이 값으로 구분합니다. |
-| `in_doubt` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. |
+| `in_doubt` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. `max_retries > 0`으로 보낸 write는 예외입니다. [다시 보낸 write와 `in_doubt`](#re-sent-writes-and-in_doubt)를 참고하세요. |
 | `partial_result` | 전체가 실패한 batch 호출이면 요청한 record마다 row 하나를 요청 순서대로 담은 `BatchWriteResult`. 그 밖의 실패에서는 `None`. |
 
 ```python
@@ -163,9 +163,11 @@ for br in results.batch_records:
 | Server가 timeout을 알림 | `9` | `"ServerTimeout"` | write면 `True` |
 | 요청을 보냈지만 client가 기다리기를 멈춤 | `-1` | `"Timeout"` | write면 `True` |
 | 전송 실패 | `-1` | `"Connection"`, `"InvalidNode"`, ... | 이미 보낸 write면 `True` |
-| 그 record에 대해 어떤 node도 응답하지 않음 | `-1` | `"NoResponse"` | `False` |
+| 그 record에 대해 어떤 node도 응답하지 않음 | `-1` | `"NoResponse"` | 아무것도 보내지 않았으면(key를 route하지 못함) `False`. 호출이 row를 돌려받지 못한 채 끝났고 이미 보냈을 수 있으면 write에 대해 `True` |
 
 `result`는 server가 그 record의 성공을 알린 경우에만 `0`입니다. 아무 응답이 없었다는 이유로 row가 쓰인 것으로 취급되는 일은 없습니다.
+
+Server가 retry할 만한 code인 `KEY_BUSY`(14), `DEVICE_OVERLOAD`(18), `PARTITION_UNAVAILABLE`(11)로 거절한 write는 응답입니다. 그 row는 해당 code와 `in_doubt == False`를 갖고, key가 하나뿐인 batch에서도 호출은 정상적으로 반환됩니다. 이렇게 거절된 단일 record write(예: hot key에 대한 `put()`)는 해당 `result_code`, `"KeyBusy"`·`"DeviceOverload"`·`"PartitionUnavailable"` 중 하나인 `error_type`, `in_doubt == False`를 가진 `ServerError`를 발생시킵니다.
 
 ### Batch 전체가 실패할 때
 
@@ -182,8 +184,8 @@ except AerospikeError as exc:
     rows = exc.partial_result.batch_records
     written = [br.key for br in rows if br.result == 0]
     unsure = [br.key for br in rows if br.in_doubt]           # 다시 보내기 전에 읽어서 확인
-    not_sent = [br.key for br in rows if br.error_type == "NoResponse"]
-    logger.warning("batch failed: %d written, %d in doubt, %d unanswered",
+    not_sent = [br.key for br in rows if br.error_type == "NoResponse" and not br.in_doubt]
+    logger.warning("batch failed: %d written, %d in doubt, %d never sent",
                    len(written), len(unsure), len(not_sent))
 ```
 
@@ -230,6 +232,24 @@ if retry_records:
 :::tip
 Exponential backoff로 transient failure를 자동으로 retry하려면 내장 `retry` 파라미터를 사용하세요: `client.batch_write(records, retry=3)`. 실패한 record만 다시 보내며, 이미 성공한 record나 `in_doubt`인 `CREATE_ONLY`·generation 검사 record는 다시 보내지 않습니다. `total_timeout`(기본값 1000 ms)이 상한이고, 0이 아닌 `policy["max_retries"]`와 함께 쓰면 `InvalidArgError`가 발생합니다. Write batch(`batch_write`, `batch_write_numpy`, `batch_remove`, `batch_apply`, write가 있는 `batch_operate`)는 스스로 아무것도 다시 보내지 않습니다. 이들의 `max_retries` 기본값은 `0`입니다.
 :::
+
+### 다시 보낸 write와 `in_doubt` {#re-sent-writes-and-in_doubt}
+
+기본적으로 write는 다시 보내지 않습니다. 모든 write의 `max_retries`는 `0`입니다. Write에 `max_retries > 0`을 주면, 응답이 유실되었을 때 Rust client가 write를 다시 보냅니다. 첫 전송이 이미 적용되었다면 두 번째 전송은 자기가 한 일을 만납니다. 다시 보낸 delete는 record를 찾지 못하고, 다시 보낸 filter 있는 write는 더 이상 조건에 맞지 않으며, 다시 보낸 UDF는 첫 실행이 남긴 상태 때문에 실패합니다. Rust client는 row가 두 번 전송되었는지 알려 주지 않으므로, 이런 policy에서는 다음과 같습니다.
+
+- `batch_write`, write가 있는 `batch_operate`, `batch_remove`, `batch_apply`의 row가 `KEY_NOT_FOUND`(2), `FILTERED_OUT`(27), `UDF_BAD_RESPONSE`(100)로 끝나면 `in_doubt == True`입니다.
+- `RecordNotFound`를 발생시킨 `remove()`는 `in_doubt == True`를 갖습니다.
+
+호출이 record를 바꿨는지 알 수 없고, 그렇다고 알려 주는 것입니다. 기본 policy에서는 아무것도 바뀌지 않고, 읽기(`batch_read`)는 결코 in doubt가 아닙니다.
+
+```python
+import aerospike_py
+
+result = client.batch_remove(keys, policy={"max_retries": 2})
+for br in result.batch_records:
+    if br.result == aerospike_py.AEROSPIKE_ERR_RECORD_NOT_FOUND and br.in_doubt:
+        ...  # 이 호출의 앞선 전송이 지웠거나, 원래 없었음: 읽어서 확인
+```
 
 ### Async Batch Read
 
@@ -444,6 +464,8 @@ client.put(key, bins, policy=write_policy)
 client.remove(key, policy={"max_retries": 2})
 client.put(key, bins, policy={"max_retries": 2})  # 전체 bin 덮어쓰기는 idempotent
 ```
+
+`max_retries > 0`일 때 `RecordNotFound`를 발생시킨 `remove()`는 `in_doubt == True`를 갖습니다. 앞선 전송이 record를 지웠을 수 있기 때문입니다. [다시 보낸 write와 `in_doubt`](#re-sent-writes-and-in_doubt)를 참고하세요.
 :::
 
 :::warning[기본 timeout 상호작용]

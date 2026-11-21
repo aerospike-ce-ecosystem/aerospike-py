@@ -24,10 +24,12 @@ One line per breaking change. Follow the link for the details.
 | passes `retry=N` to `batch_write` together with `policy["max_retries"]` | [The `retry` argument](#the-retry-argument-of-batch_write) |
 | catches `ClientError` for a failing UDF, or `ClusterError` / `AerospikeTimeoutError` for an unknown namespace | [Exceptions](#exceptions) |
 | passes policy values that are not one of the `POLICY_*` constants | [Policy values are checked](#policy-values-are-checked) |
+| passes a `filter_expression` that is not built with `aerospike_py.exp` (a string, a dict, ...) | [A filter that is not an expression](#a-filter_expression-that-is-not-an-expression-is-refused) |
 | reads records that old clients wrote with a language-specific blob (`PYTHON_BLOB`, `JAVA_BLOB`, ...), or catches `RustPanicError` to skip them | [Language-specific blobs](#records-with-a-language-specific-blob-are-readable) |
 | uses `batch_write_numpy()` or `to_numpy()` | [NumPy batch reads and writes](#numpy-batch-reads-and-writes) |
+| declares the `batch_write_numpy()` key field as a sub-array, such as `("_key", "i8", (1,))` | [The key field is one value](#the-key-field-is-one-value) |
 | writes NumPy fields of shape `(1,)` | [One-element vectors](#one-element-vectors-are-stored-as-a-blob) (deployment order matters) |
-| passes an `async def` callback to `AsyncQuery.foreach()`, or cancels it | [Async queries](#async-queries) |
+| passes an `async def` callback to `AsyncQuery.foreach()`, keeps thread-local state in its callback, or cancels it | [Async queries](#async-queries) |
 | sets `max_concurrent_operations` and calls `apply()` | [`apply()` and backpressure](#apply-counts-against-max_concurrent_operations) |
 | restarts Aerospike containers under a long-lived client | [Node restarts](#node-restarts-with-a-new-node-id) |
 | runs with a memory limit sized closely for 0.14.x | [Memory](#memory-under-concurrent-batch-load) |
@@ -93,12 +95,19 @@ print(ordered({"x": 2, "m": {"k": 1}},
 | `increment(x, 1)`, `read(x)` (`x=2`) | `[("x", 3)]` |
 | `write(x, 7)` | `[]` |
 | `read(missing)`, `read(b)` (`b=2`) | `[("b", 2)]` |
+| `list_get(l, 0)`, `list_get(l, 1)` (`l=[None, 5]`) | `[("l", 5)]` |
 | `write(x, 7)`, `map_size(m)` (`m` has one entry) | `[("x", None), ("m", 1)]` |
 | `read(missing)`, `map_size(m)` | `[("missing", None), ("m", 1)]` |
 | `touch()`, `map_size(m)` | `[("m", 1)]` |
 | `write(x, 7)`, `bit_count(b, 0, 8)` (`b=0x0f`) | `[("x", None), ("b", 4)]` |
 
 The binding's results are compared with the official client's for these and more cases in `tests/compatibility/test_operate_ordered_contract.py`.
+
+**Known differences from the official client.** These remain in 0.15:
+
+- An operation that names no bin (`touch`, `delete`) never appears in the result. The official client emits `("", None)` for `delete` when the request also contains a map, bit or HLL operation.
+- In a request that writes but contains no map, bit or HLL operation, a list read that finds a nil element is left out. The official client reports `("l", None)` for it.
+- `MAP_RETURN_KEY_VALUE` results are a list of `(key, value)` tuples (`[("j", 2), ("k", 1)]`); the official client returns a flat list (`["j", 2, "k", 1]`). This applies to `operate()` as well.
 
 **`operate()` is unchanged.** It still returns a dict with one key per bin, a list when several operations answered the same bin, and no `None` for a write:
 
@@ -188,9 +197,11 @@ How to tell the outcomes of a row apart:
 | Server reported a timeout | `9` | `"ServerTimeout"` | `True` for a write: the master may have applied it |
 | Request sent, the client stopped waiting | `-1` | `"Timeout"` | `True` for a write |
 | Transport failure | `-1` | `"Connection"`, `"InvalidNode"`, ... | `True` for a write that had been sent |
-| No node answered for the record | `-1` | `"NoResponse"` | `False` |
+| No node answered for the record | `-1` | `"NoResponse"` | `False` when nothing was sent for it (the key could not be routed). `True` for a write when the call gave up without its rows after it may have sent them |
 
 `in_doubt` means the record failed but the write may have been applied: the request was sent and the answer never came back. Read the record before you write it again.
+
+A write the server refused with a code worth a retry, `KEY_BUSY` (14), `DEVICE_OVERLOAD` (18) or `PARTITION_UNAVAILABLE` (11), is an answer: the row carries that code with `in_doubt == False`, and the call returns normally, also for a batch of one key. This is the same as in 0.14.x. When a write batch is sent with `max_retries > 0`, three more outcomes are reported in doubt; see [Rows a second send may have answered](#rows-a-second-send-may-have-answered).
 
 ### A fifth field: `error_type`
 
@@ -306,7 +317,13 @@ AerospikeTimeoutError
 runs: 1
 ```
 
-**What to do:** if a write batch must be re-sent by the client, ask for it: `policy={"max_retries": 2}`. With that policy the same example prints `runs: 3` on 0.15. Do this only when applying the batch twice gives the same result as applying it once: full-record `batch_write` without `CREATE_ONLY` or a generation check, `batch_remove`, reads. Do not do it for increments, appends, list or map changes that add elements, most UDFs, `CREATE_ONLY` writes (the second copy fails with "record exists" for a write that went through) or generation-checked writes. For `batch_write` and `batch_write_numpy`, prefer `retry=N`, described next.
+**What to do:** if a write batch must be re-sent by the client, ask for it: `policy={"max_retries": 2}`. With that policy the same example prints `runs: 3` on 0.15. Do this only when applying the batch twice gives the same result as applying it once: full-record `batch_write` without `CREATE_ONLY` or a generation check, `batch_remove`, reads. Do not do it for increments, appends, list or map changes that add elements, most UDFs, `CREATE_ONLY` writes (the second copy fails with "record exists" for a write that went through) or generation-checked writes. For `batch_write` and `batch_write_numpy`, prefer `retry=N`, described below.
+
+### Rows a second send may have answered
+
+With `max_retries > 0` on a write, the Rust client sends a node's share of a batch again when its answer is lost. If the first send was applied, the second one meets its own work: a re-sent delete finds no record, a re-sent filtered write no longer matches, a re-sent UDF fails on what the first run left behind. The Rust client does not say whether a row was sent twice, so a row of `batch_write`, `batch_operate` (with a write), `batch_remove` or `batch_apply` that ends in `KEY_NOT_FOUND` (2), `FILTERED_OUT` (27) or `UDF_BAD_RESPONSE` (100) is reported with `in_doubt == True`: the call does not know whether it changed the record. `remove()` that raises `RecordNotFound` under such a policy carries `in_doubt == True` too.
+
+With the default policy (`max_retries` is `0` for every write) nothing changes, and reads (`batch_read`) are never in doubt. See [Error Handling](/docs/guides/error-handling#re-sent-writes-and-in_doubt) for an example.
 
 ### The `retry` argument of `batch_write`
 
@@ -352,7 +369,7 @@ Every `AerospikeError` carries four attributes. 0.14.x had only `result_code`.
 |---|---|
 | `result_code` | The server's result code when a server answered; `-1` when no server answered. |
 | `error_type` | The kind of failure, by name. A server code is named after the code (`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, `"DeviceOverload"`, ...; `"ServerTimeout"` for a timeout the server reported). A failure on the client side is `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"` or `"Client"`. |
-| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. |
+| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. A write sent with `max_retries > 0` is the exception, see [Rows a second send may have answered](#rows-a-second-send-may-have-answered). |
 | `partial_result` | The rows of a batch call that failed as a whole, `None` otherwise. See [above](#a-batch-call-that-fails-as-a-whole-keeps-its-rows). |
 
 `result_code == -1` covers several failures; `error_type` tells them apart. The exception class and `error_type` changed for two failures:
@@ -386,7 +403,7 @@ InvalidArgError -1 InvalidArgument
 
 A UDF the server could not run raised a plain `ClientError` with `result_code == -1` in 0.14.x, and was logged as a possible bug in aerospike-py. In 0.15 it raises `UDFError` (a `ServerError`) with `result_code == 100` (`AEROSPIKE_ERR_UDF`), the code a failed `batch_apply` row has always reported.
 
-A UDF failure is an answer from the server, not a lost answer: the server could not find the function, or ran it, rolled the record back and said so. `exc.in_doubt` is therefore `False`, for `apply()` and for a `batch_apply` row alike. A UDF call the client stopped waiting for is a timeout, and that one is in doubt.
+A UDF failure is an answer from the server, not a lost answer: the server could not find the function, or ran it, rolled the record back and said so. `exc.in_doubt` is therefore `False`, for `apply()` and for a `batch_apply` row alike (unless the batch was sent with `max_retries > 0`, see [Rows a second send may have answered](#rows-a-second-send-may-have-answered)). A UDF call the client stopped waiting for is a timeout, and that one is in doubt.
 
 **What to do:** catch `aerospike_py.UDFError` (or `ServerError`) around `apply()`. An `except ClientError` no longer catches a UDF failure.
 
@@ -429,6 +446,20 @@ invalid exists value: 9 (valid: POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONL
 ```
 
 **What to do:** use the constants, for example `aerospike_py.POLICY_EXISTS_CREATE_ONLY`.
+
+### A `filter_expression` that is not an expression is refused
+
+A `filter_expression` that is not an expression built with `aerospike_py.exp` (a string, a number, a list, a dict) now raises `InvalidArgError` before anything is sent: `filter_expression must be an expression built with aerospike_py.exp, got str`. Up to 0.14.x such a value was dropped without a word and the call ran **unfiltered**: `client.put(key, bins, policy={"filter_expression": "v == 1"})` wrote the record unconditionally. `None` still means "no filter".
+
+**What to do:** build the filter with `aerospike_py.exp`, for example `exp.eq(exp.int_bin("v"), exp.int_val(1))`. A call that raises here ran without its filter on 0.14.x; check what it wrote or returned.
+
+### Other values refused before anything is sent
+
+- `max_retries = 2**64 - 1` raises `InvalidArgError` (`max_retries is too large: ...`). Rust client 3.0 would make no attempt at all with that value, so the call would fail with "Timeout after 0 tries" without being sent.
+- An integer that does not fit its field (`retry=-1`, `total_timeout=-1`, `ttl=2**70`) raises `OverflowError`. It is not logged as a possible bug in aerospike-py.
+- A `batch_write()` record without bins, `(key, {})`, raises `InvalidArgError` (`record 1 has no bins: ...`) and nothing is written. On 0.14.x the call raised `ClientError` ("Batch write operations do not contain a write") and logged it as a possible bug in aerospike-py. A bin set to `None` is still a write, it removes the bin. `batch_write_numpy()` refuses a dtype without bin fields with `ValueError` for the same reason.
+
+`batch_write(retry=2**32 - 1)` reports `retry.max_attempts == 2**32 - 1`: the count saturates instead of wrapping to `0`.
 
 ## Records with a language-specific blob are readable
 
@@ -491,11 +522,13 @@ except ValueError as exc:
 _dtype does not match the array: data.dtype is [('_key', '<i8'), ('score', '<f8'), ('count', '<i4')], _dtype is [('_key', '<i8'), ('score', '<f4'), ('count', '<i4')]. Omit _dtype to use data.dtype, or convert the array first with data.astype(_dtype).
 ```
 
+The rows are read from `numpy.asarray(data)`: an array subclass such as `numpy.recarray` is written as the plain array it is, and the mask of a masked array is ignored.
+
 **What to do:** nothing, if the dtype you pass is `data.dtype`. Otherwise drop the argument, or convert the array with `data.astype(...)` first.
 
 ### dtypes are checked in both directions
 
-`batch_write_numpy()` and `to_numpy()` check the dtype with the same rules before anything is written or filled. They reject:
+`batch_write_numpy()` and `to_numpy()` check the dtype with the same rules before anything is written or filled. `to_numpy(dtype)` accepts whatever `numpy.dtype(...)` accepts and lays the rows out by the dtype NumPy makes of it. They reject:
 
 - an array or dtype without named fields (`TypeError`);
 - NumPy's variable-length `StringDType` (`TypeError`);
@@ -511,6 +544,12 @@ In 0.14.x an object member nested in a structured field was written to the serve
 # 0.15
 TypeError: dtype field 's' holds Python objects ([('x', '<i4'), ('o', 'O')]): an object member nested inside a structured ...
 ```
+
+### The key field is one value
+
+The key field of `batch_write_numpy()` (`_key`, or the field named by `key_field`) must be one value: a scalar integer or a fixed-width bytes field. A sub-array, including a one-element `("_key", "i8", (1,))`, or a nested structured field raises `TypeError` before anything is written: `the key field '_key' must be a scalar integer or bytes field, not a sub-array or a nested structure; ...`. 0.14.x accepted `("_key", "i8", (1,))` and wrote the integer key.
+
+**What to do:** declare the key as `("_key", "i8")`. Sub-array **bin** fields are not affected: they are vectors, stored as blobs (see [One-element vectors](#one-element-vectors-are-stored-as-a-blob)).
 
 ### Vector length and float range
 
@@ -633,7 +672,7 @@ print(len(handle), len(handle.to_dict()), handle.found_count(), len(handle.to_li
 
 `AsyncQuery.results()` and `AsyncQuery.foreach()` used to run the query in a worker thread. Cancelling the task raised `CancelledError` at once while the thread went on reading records and calling the callback to the end of the scan. In 0.15 both read the query's record stream by awaiting it, so cancelling the task stops the query on the client and on the server.
 
-`foreach()` still calls its callback from a worker thread, so the callback may block. When the task is cancelled, a callback that is running finishes, no new one starts, and only then is `CancelledError` raised.
+`foreach()` still calls its callback from a worker thread, so the callback may block. Callbacks never overlap, but they do not all run on the same thread: the event loop's default executor picks one for each batch of records, so do not keep state in thread-locals. An exception the callback raises stops the query and is raised from `foreach()` unchanged, `StopIteration` included. When the task is cancelled, a callback that is running finishes, no new one starts, and only then is `CancelledError` raised. That holds when every task is cancelled at once too, as `asyncio.run` does on Ctrl-C.
 
 ```python
 async def cancel_after_100(client):
@@ -668,7 +707,12 @@ callbacks when CancelledError was raised: 100, half a second later: 100
 
 ### `async for` and `query.stream()`
 
-An `AsyncQuery` can now be iterated: `async for record in query`. `query.stream(policy)` returns the same thing, an `AsyncRecordStream`, which is also an async context manager and has `close()`. Nothing is sent before the first record is asked for. At most `record_queue_size` records (default 1024) wait in the client, whatever the pace of the consumer. See the [Query guide](/docs/guides/query-scan#async-streaming).
+An `AsyncQuery` can now be iterated: `async for record in query`. `query.stream(policy)` returns the same thing, an `AsyncRecordStream`, which is also an async context manager and has `close()`. Nothing is sent before the first record is asked for. At most `record_queue_size` records (default 1024) wait in the client, whatever the pace of the consumer, and a consumer may pause for longer than `socket_timeout`: the client fetches the rest again when reading resumes, without repeating a record. Several tasks may iterate the same stream; each record goes to one of them. See the [Query guide](/docs/guides/query-scan#async-streaming).
+
+Two points to know when you move code to streams:
+
+- Cancelling a task that waits for the next record closes the stream, and a later read on it raises `RuntimeError` instead of ending the iteration, because the cancelled read may already have taken records. `asyncio.wait_for(anext(stream), t)` cancels the read when it times out; to bound a wait, put the timeout around the whole loop.
+- Closing the client does not stop a stream that is already running: it reads on to its end with the connections it holds, and a stream that has not been read from yet fails on its first read. Close streams before the client.
 
 ```python
 async for record in client.query("test", "demo"):
@@ -713,7 +757,7 @@ Measured on the server's own job list (`query-show`), 100,000 records:
 | sync `foreach()` callback returns `False` | 30.3 s | gone at once |
 | `break` out of `async for` | (not available) | 0.1 s |
 
-One case is not changed: a rate-limited scan (`records_per_second`) stops only when the server sends its next block of records, so its connection is held until then, at most `socket_timeout`.
+One case is different: a rate-limited scan (`records_per_second`) is sent in blocks that are far apart, and it stays listed on the server until its next block is due. Measured at 50 records per second: 45 seconds, the same with a `socket_timeout` of 2000, 30000 (the default) or 0. `socket_timeout` does not bound it.
 
 ## `apply()` counts against `max_concurrent_operations`
 

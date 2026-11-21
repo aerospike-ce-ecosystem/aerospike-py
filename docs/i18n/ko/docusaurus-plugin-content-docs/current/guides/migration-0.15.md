@@ -24,10 +24,12 @@ aerospike-py 0.15는 native core를 Aerospike Rust client 2.2에서 3.0으로 �
 | `batch_write`에 `retry=N`과 `policy["max_retries"]`를 함께 전달 | [`retry` 인자](#the-retry-argument-of-batch_write) |
 | 실패한 UDF를 `ClientError`로, 없는 namespace를 `ClusterError` / `AerospikeTimeoutError`로 catch | [Exception](#exceptions) |
 | `POLICY_*` 상수가 아닌 policy 값을 전달 | [Policy 값 검사](#policy-values-are-checked) |
+| `aerospike_py.exp`로 만들지 않은 `filter_expression`(문자열, dict 등)을 전달 | [Expression이 아닌 filter](#a-filter_expression-that-is-not-an-expression-is-refused) |
 | 예전 client가 언어별 blob(`PYTHON_BLOB`, `JAVA_BLOB`, ...)으로 쓴 record를 읽거나, 그런 record를 건너뛰려고 `RustPanicError`를 catch | [언어별 blob](#records-with-a-language-specific-blob-are-readable) |
 | `batch_write_numpy()`나 `to_numpy()`를 사용 | [NumPy batch 읽기와 쓰기](#numpy-batch-reads-and-writes) |
+| `batch_write_numpy()`의 key field를 `("_key", "i8", (1,))` 같은 sub-array로 선언 | [Key field는 값 하나입니다](#the-key-field-is-one-value) |
 | shape이 `(1,)`인 NumPy field를 씀 | [원소가 하나인 vector](#one-element-vectors-are-stored-as-a-blob) (배포 순서가 중요합니다) |
-| `AsyncQuery.foreach()`에 `async def` callback을 넘기거나 취소 | [Async query](#async-queries) |
+| `AsyncQuery.foreach()`에 `async def` callback을 넘기거나, callback에서 thread-local 상태를 쓰거나, 취소 | [Async query](#async-queries) |
 | `max_concurrent_operations`를 설정하고 `apply()`를 호출 | [`apply()`와 backpressure](#apply-counts-against-max_concurrent_operations) |
 | 오래 실행되는 client 아래에서 Aerospike container를 재시작 | [Node 재시작](#node-restarts-with-a-new-node-id) |
 | 0.14.x에 맞춰 memory 한도를 빠듯하게 잡음 | [Memory](#memory-under-concurrent-batch-load) |
@@ -93,12 +95,19 @@ print(ordered({"x": 2, "m": {"k": 1}},
 | `increment(x, 1)`, `read(x)` (`x=2`) | `[("x", 3)]` |
 | `write(x, 7)` | `[]` |
 | `read(missing)`, `read(b)` (`b=2`) | `[("b", 2)]` |
+| `list_get(l, 0)`, `list_get(l, 1)` (`l=[None, 5]`) | `[("l", 5)]` |
 | `write(x, 7)`, `map_size(m)` (`m`의 원소 1개) | `[("x", None), ("m", 1)]` |
 | `read(missing)`, `map_size(m)` | `[("missing", None), ("m", 1)]` |
 | `touch()`, `map_size(m)` | `[("m", 1)]` |
 | `write(x, 7)`, `bit_count(b, 0, 8)` (`b=0x0f`) | `[("x", None), ("b", 4)]` |
 
 `tests/compatibility/test_operate_ordered_contract.py`가 이 경우들을 포함한 여러 요청에서 binding의 결과를 공식 client의 결과와 비교합니다.
+
+**공식 client와 알려진 차이.** 0.15에도 다음 차이가 남아 있습니다.
+
+- `touch`, `delete`처럼 bin을 지정하지 않은 연산은 결과에 나타나지 않습니다. 공식 client는 요청에 map, bit, HLL 연산도 있으면 `delete`에 대해 `("", None)`을 내놓습니다.
+- 쓰기가 있지만 map, bit, HLL 연산은 없는 요청에서, nil 원소를 찾은 list 읽기는 빠집니다. 공식 client는 이를 `("l", None)`으로 알려 줍니다.
+- `MAP_RETURN_KEY_VALUE` 결과는 `(key, value)` tuple의 list입니다(`[("j", 2), ("k", 1)]`). 공식 client는 평평한 list를 반환합니다(`["j", 2, "k", 1]`). `operate()`도 마찬가지입니다.
 
 **`operate()`는 바뀌지 않았습니다.** 여전히 bin마다 key 하나인 dict를 반환하고, 여러 연산이 같은 bin에 응답하면 list를, write에는 `None`을 넣지 않습니다.
 
@@ -188,9 +197,11 @@ Row의 결과를 구분하는 방법:
 | Server가 timeout을 알림 | `9` | `"ServerTimeout"` | write면 `True`: master가 이미 적용했을 수 있음 |
 | 요청을 보냈지만 client가 기다리기를 멈춤 | `-1` | `"Timeout"` | write면 `True` |
 | 전송 실패 | `-1` | `"Connection"`, `"InvalidNode"`, ... | 이미 보낸 write면 `True` |
-| 그 record에 대해 어떤 node도 응답하지 않음 | `-1` | `"NoResponse"` | `False` |
+| 그 record에 대해 어떤 node도 응답하지 않음 | `-1` | `"NoResponse"` | 아무것도 보내지 않았으면(key를 route하지 못함) `False`. 호출이 row를 돌려받지 못한 채 끝났고 이미 보냈을 수 있으면 write에 대해 `True` |
 
 `in_doubt`는 record가 실패했지만 write가 적용되었을 수도 있다는 뜻입니다. 요청은 보냈는데 응답이 돌아오지 않은 경우입니다. 다시 쓰기 전에 record를 읽어 확인하세요.
+
+Server가 retry할 만한 code인 `KEY_BUSY`(14), `DEVICE_OVERLOAD`(18), `PARTITION_UNAVAILABLE`(11)로 거절한 write는 응답입니다. 그 row는 해당 code와 `in_doubt == False`를 갖고, key가 하나뿐인 batch에서도 호출은 정상적으로 반환됩니다. 0.14.x와 같습니다. Write batch를 `max_retries > 0`으로 보내면 결과 세 가지가 더 in doubt로 보고됩니다. [두 번째 전송이 응답했을 수 있는 row](#rows-a-second-send-may-have-answered)를 참고하세요.
 
 ### 다섯 번째 field: `error_type`
 
@@ -306,7 +317,13 @@ AerospikeTimeoutError
 runs: 1
 ```
 
-**대응:** write batch를 client가 다시 보내야 한다면 직접 요청하세요: `policy={"max_retries": 2}`. 0.15에서 이 policy로 같은 예제를 실행하면 `runs: 3`이 출력됩니다. Batch를 두 번 적용해도 한 번 적용한 것과 결과가 같을 때만 이렇게 하세요. `CREATE_ONLY`나 generation 검사가 없는 전체 record `batch_write`, `batch_remove`, 읽기가 이에 해당합니다. Increment, append, 원소를 추가하는 list·map 변경, 대부분의 UDF, `CREATE_ONLY` write(이미 적용된 write인데 두 번째 사본이 "record exists"로 실패), generation 검사가 있는 write에는 쓰지 마세요. `batch_write`와 `batch_write_numpy`에는 다음에 설명하는 `retry=N`을 권장합니다.
+**대응:** write batch를 client가 다시 보내야 한다면 직접 요청하세요: `policy={"max_retries": 2}`. 0.15에서 이 policy로 같은 예제를 실행하면 `runs: 3`이 출력됩니다. Batch를 두 번 적용해도 한 번 적용한 것과 결과가 같을 때만 이렇게 하세요. `CREATE_ONLY`나 generation 검사가 없는 전체 record `batch_write`, `batch_remove`, 읽기가 이에 해당합니다. Increment, append, 원소를 추가하는 list·map 변경, 대부분의 UDF, `CREATE_ONLY` write(이미 적용된 write인데 두 번째 사본이 "record exists"로 실패), generation 검사가 있는 write에는 쓰지 마세요. `batch_write`와 `batch_write_numpy`에는 아래에서 설명하는 `retry=N`을 권장합니다.
+
+### 두 번째 전송이 응답했을 수 있는 row {#rows-a-second-send-may-have-answered}
+
+Write에 `max_retries > 0`을 주면, 응답이 유실되었을 때 Rust client가 batch 중 한 node 몫을 다시 보냅니다. 첫 전송이 이미 적용되었다면 두 번째 전송은 자기가 한 일을 만납니다. 다시 보낸 delete는 record를 찾지 못하고, 다시 보낸 filter 있는 write는 더 이상 조건에 맞지 않으며, 다시 보낸 UDF는 첫 실행이 남긴 상태 때문에 실패합니다. Rust client는 row가 두 번 전송되었는지 알려 주지 않으므로, `batch_write`, write가 있는 `batch_operate`, `batch_remove`, `batch_apply`의 row가 `KEY_NOT_FOUND`(2), `FILTERED_OUT`(27), `UDF_BAD_RESPONSE`(100)로 끝나면 `in_doubt == True`로 보고됩니다. 호출이 record를 바꿨는지 알 수 없다는 뜻입니다. 이런 policy에서 `RecordNotFound`를 발생시킨 `remove()`도 `in_doubt == True`를 갖습니다.
+
+기본 policy(모든 write에서 `max_retries`는 `0`)에서는 아무것도 바뀌지 않고, 읽기(`batch_read`)는 결코 in doubt가 아닙니다. 예제는 [Error Handling](/docs/guides/error-handling#re-sent-writes-and-in_doubt)에 있습니다.
 
 ### `batch_write`의 `retry` 인자 {#the-retry-argument-of-batch_write}
 
@@ -352,7 +369,7 @@ retry=2 and policy['max_retries']=1 were both given; they would multiply into up
 |---|---|
 | `result_code` | Server가 응답했으면 server의 result code, 어떤 server도 응답하지 않았으면 `-1`. |
 | `error_type` | 실패의 종류를 나타내는 이름. Server code는 code 이름을 따릅니다(`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, `"DeviceOverload"`, ...; server가 알린 timeout은 `"ServerTimeout"`). Client 쪽 실패는 `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"`, `"Client"` 중 하나입니다. |
-| `in_doubt` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. |
+| `in_doubt` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. `max_retries > 0`으로 보낸 write는 예외입니다. [두 번째 전송이 응답했을 수 있는 row](#rows-a-second-send-may-have-answered)를 참고하세요. |
 | `partial_result` | 전체가 실패한 batch 호출의 row. 그 밖에는 `None`. [위](#a-batch-call-that-fails-as-a-whole-keeps-its-rows)를 참고하세요. |
 
 `result_code == -1`은 여러 실패를 포함하며, `error_type`으로 구분합니다. 두 가지 실패에서는 exception class와 `error_type`이 바뀌었습니다.
@@ -386,7 +403,7 @@ InvalidArgError -1 InvalidArgument
 
 0.14.x에서 server가 실행하지 못한 UDF는 `result_code == -1`인 일반 `ClientError`를 발생시켰고, aerospike-py의 bug일 수 있다는 log도 남겼습니다. 0.15에서는 `result_code == 100`(`AEROSPIKE_ERR_UDF`)인 `UDFError`(`ServerError`의 하위 class)를 발생시킵니다. 실패한 `batch_apply` row가 원래부터 알리던 code와 같습니다.
 
-UDF 실패는 응답을 잃은 것이 아니라 server가 보낸 응답입니다. server가 함수를 찾지 못했거나, 실행한 뒤 record를 되돌리고 실패했다고 알린 것입니다. 그래서 `apply()`에서도 `batch_apply` row에서도 `exc.in_doubt`는 `False`입니다. client가 기다리다 포기한 UDF 호출은 timeout이며, 이 경우는 in doubt입니다.
+UDF 실패는 응답을 잃은 것이 아니라 server가 보낸 응답입니다. server가 함수를 찾지 못했거나, 실행한 뒤 record를 되돌리고 실패했다고 알린 것입니다. 그래서 `apply()`에서도 `batch_apply` row에서도 `exc.in_doubt`는 `False`입니다(batch를 `max_retries > 0`으로 보낸 경우는 예외입니다. [두 번째 전송이 응답했을 수 있는 row](#rows-a-second-send-may-have-answered)를 참고하세요). client가 기다리다 포기한 UDF 호출은 timeout이며, 이 경우는 in doubt입니다.
 
 **대응:** `apply()` 주변에서는 `aerospike_py.UDFError`(또는 `ServerError`)를 catch하세요. `except ClientError`는 더 이상 UDF 실패를 잡지 않습니다.
 
@@ -429,6 +446,20 @@ invalid exists value: 9 (valid: POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONL
 ```
 
 **대응:** `aerospike_py.POLICY_EXISTS_CREATE_ONLY`처럼 상수를 사용하세요.
+
+### Expression이 아닌 `filter_expression`은 거부됩니다 {#a-filter_expression-that-is-not-an-expression-is-refused}
+
+`aerospike_py.exp`로 만든 expression이 아닌 `filter_expression`(문자열, 숫자, list, dict)은 이제 아무것도 보내기 전에 `InvalidArgError`를 발생시킵니다: `filter_expression must be an expression built with aerospike_py.exp, got str`. 0.14.x까지는 이런 값을 아무 말 없이 버리고 **filter 없이** 호출을 실행했습니다. `client.put(key, bins, policy={"filter_expression": "v == 1"})`은 record를 조건 없이 썼습니다. `None`은 여전히 "filter 없음"을 뜻합니다.
+
+**대응:** `exp.eq(exp.int_bin("v"), exp.int_val(1))`처럼 `aerospike_py.exp`로 filter를 만드세요. 여기서 exception이 발생하는 호출은 0.14.x에서 filter 없이 실행되었으니, 그 호출이 쓰거나 반환한 것을 확인하세요.
+
+### 아무것도 보내기 전에 거부되는 그 밖의 값
+
+- `max_retries = 2**64 - 1`은 `InvalidArgError`(`max_retries is too large: ...`)를 발생시킵니다. Rust client 3.0은 이 값으로는 한 번도 시도하지 않으므로, 그대로 두면 호출이 보내지지도 않은 채 "Timeout after 0 tries"로 실패합니다.
+- Field에 맞지 않는 정수(`retry=-1`, `total_timeout=-1`, `ttl=2**70`)는 `OverflowError`를 발생시킵니다. aerospike-py의 bug일 수 있다는 log는 남기지 않습니다.
+- Bin이 없는 `batch_write()` record `(key, {})`는 `InvalidArgError`(`record 1 has no bins: ...`)를 발생시키고 아무것도 쓰지 않습니다. 0.14.x에서는 호출이 `ClientError`("Batch write operations do not contain a write")를 발생시키고 aerospike-py의 bug일 수 있다는 log를 남겼습니다. Bin을 `None`으로 지정하는 것은 여전히 write이며, 그 bin을 제거합니다. `batch_write_numpy()`도 같은 이유로 bin field가 없는 dtype을 `ValueError`로 거부합니다.
+
+`batch_write(retry=2**32 - 1)`은 `retry.max_attempts == 2**32 - 1`을 알려 줍니다. 횟수가 `0`으로 넘어가지 않고 최댓값에서 멈춥니다.
 
 ## 언어별 blob이 담긴 record를 읽을 수 있습니다 {#records-with-a-language-specific-blob-are-readable}
 
@@ -491,11 +522,13 @@ except ValueError as exc:
 _dtype does not match the array: data.dtype is [('_key', '<i8'), ('score', '<f8'), ('count', '<i4')], _dtype is [('_key', '<i8'), ('score', '<f4'), ('count', '<i4')]. Omit _dtype to use data.dtype, or convert the array first with data.astype(_dtype).
 ```
 
+Row는 `numpy.asarray(data)`에서 읽습니다. `numpy.recarray` 같은 array subclass는 그 바탕의 일반 array로 쓰이고, masked array의 mask는 무시됩니다.
+
 **대응:** 넘기는 dtype이 `data.dtype`이라면 고칠 것이 없습니다. 그렇지 않다면 인자를 빼거나, 먼저 `data.astype(...)`으로 array를 변환하세요.
 
 ### dtype을 양방향에서 검사합니다
 
-`batch_write_numpy()`와 `to_numpy()`는 같은 규칙으로 dtype을 검사하며, 무엇이든 쓰거나 채우기 전에 다음을 거부합니다.
+`batch_write_numpy()`와 `to_numpy()`는 같은 규칙으로 dtype을 검사합니다. `to_numpy(dtype)`은 `numpy.dtype(...)`이 받는 것은 무엇이든 받으며, NumPy가 그로부터 만든 dtype대로 row를 배치합니다. 두 method는 무엇이든 쓰거나 채우기 전에 다음을 거부합니다.
 
 - Named field가 없는 array나 dtype (`TypeError`)
 - NumPy의 가변 길이 `StringDType` (`TypeError`)
@@ -511,6 +544,12 @@ _dtype does not match the array: data.dtype is [('_key', '<i8'), ('score', '<f8'
 # 0.15
 TypeError: dtype field 's' holds Python objects ([('x', '<i4'), ('o', 'O')]): an object member nested inside a structured ...
 ```
+
+### Key field는 값 하나입니다 {#the-key-field-is-one-value}
+
+`batch_write_numpy()`의 key field(`_key`, 또는 `key_field`로 지정한 field)는 값 하나, 즉 scalar 정수이거나 고정 폭 bytes field여야 합니다. 원소가 하나인 `("_key", "i8", (1,))`를 포함한 sub-array나 중첩된 structured field는 무엇이든 쓰기 전에 `TypeError`를 발생시킵니다: `the key field '_key' must be a scalar integer or bytes field, not a sub-array or a nested structure; ...`. 0.14.x는 `("_key", "i8", (1,))`를 받아들여 정수 key로 썼습니다.
+
+**대응:** key를 `("_key", "i8")`로 선언하세요. Sub-array **bin** field는 영향을 받지 않습니다. 이들은 vector이며 blob으로 저장됩니다([원소가 하나인 vector](#one-element-vectors-are-stored-as-a-blob) 참고).
 
 ### Vector 길이와 float 범위
 
@@ -633,7 +672,7 @@ print(len(handle), len(handle.to_dict()), handle.found_count(), len(handle.to_li
 
 `AsyncQuery.results()`와 `AsyncQuery.foreach()`는 이전에 worker thread에서 query를 실행했습니다. Task를 취소하면 `CancelledError`는 바로 발생했지만, thread는 scan이 끝날 때까지 record를 읽고 callback을 계속 호출했습니다. 0.15에서는 둘 다 query의 record stream을 await하며 읽으므로, task를 취소하면 client와 server 양쪽에서 query가 멈춥니다.
 
-`foreach()`는 여전히 worker thread에서 callback을 호출하므로 callback이 block되어도 됩니다. Task가 취소되면 실행 중인 callback은 끝까지 실행되고, 새 callback은 시작되지 않으며, 그다음에야 `CancelledError`가 발생합니다.
+`foreach()`는 여전히 worker thread에서 callback을 호출하므로 callback이 block되어도 됩니다. Callback은 서로 겹쳐 실행되지 않지만 모두 같은 thread에서 실행되지는 않습니다. Event loop의 기본 executor가 record 묶음마다 thread를 고르므로, thread-local에 상태를 두지 마세요. Callback이 발생시킨 exception은 query를 멈추고 `foreach()`에서 그대로 다시 발생합니다. `StopIteration`도 마찬가지입니다. Task가 취소되면 실행 중인 callback은 끝까지 실행되고, 새 callback은 시작되지 않으며, 그다음에야 `CancelledError`가 발생합니다. `asyncio.run`이 Ctrl-C에서 하듯 모든 task를 한꺼번에 취소할 때도 같습니다.
 
 ```python
 async def cancel_after_100(client):
@@ -668,7 +707,12 @@ callbacks when CancelledError was raised: 100, half a second later: 100
 
 ### `async for`와 `query.stream()`
 
-이제 `AsyncQuery`를 순회할 수 있습니다: `async for record in query`. `query.stream(policy)`도 같은 `AsyncRecordStream`을 반환하며, 이 객체는 async context manager이기도 하고 `close()`를 갖습니다. 첫 record를 요청하기 전에는 아무것도 보내지 않습니다. Consumer의 속도와 관계없이 client에서 대기하는 record는 최대 `record_queue_size`개(기본값 1024)입니다. [Query 가이드](/docs/guides/query-scan#async-streaming)를 참고하세요.
+이제 `AsyncQuery`를 순회할 수 있습니다: `async for record in query`. `query.stream(policy)`도 같은 `AsyncRecordStream`을 반환하며, 이 객체는 async context manager이기도 하고 `close()`를 갖습니다. 첫 record를 요청하기 전에는 아무것도 보내지 않습니다. Consumer의 속도와 관계없이 client에서 대기하는 record는 최대 `record_queue_size`개(기본값 1024)이며, consumer가 `socket_timeout`보다 오래 멈춰도 됩니다. 읽기를 다시 시작하면 client가 나머지를 다시 가져오며 record를 중복해서 넘기지 않습니다. 여러 task가 같은 stream을 순회해도 되고, 각 record는 그중 한 task에만 전달됩니다. [Query 가이드](/docs/guides/query-scan#async-streaming)를 참고하세요.
+
+Stream으로 코드를 옮길 때 알아 둘 점이 두 가지 있습니다.
+
+- 다음 record를 기다리는 task를 취소하면 stream이 닫힙니다. 취소된 읽기가 이미 record를 가져갔을 수 있으므로, 그 뒤 같은 stream을 읽으면 순회가 끝나는 대신 `RuntimeError`가 발생합니다. `asyncio.wait_for(anext(stream), t)`는 시간이 다 되면 읽기를 취소합니다. 기다리는 시간을 제한하려면 loop 전체에 timeout을 거세요.
+- Client를 닫아도 이미 실행 중인 stream은 멈추지 않습니다. Stream은 갖고 있는 connection으로 끝까지 읽고, 아직 한 번도 읽지 않은 stream은 첫 읽기에서 실패합니다. Stream을 client보다 먼저 닫으세요.
 
 ```python
 async for record in client.query("test", "demo"):
@@ -713,7 +757,7 @@ Server의 job 목록(`query-show`)으로 측정했습니다. Record는 100,000�
 | sync `foreach()` callback이 `False` 반환 | 30.3초 | 즉시 사라짐 |
 | `async for`에서 `break` | (지원 안 함) | 0.1초 |
 
-바뀌지 않은 경우가 하나 있습니다. 속도가 제한된 scan(`records_per_second`)은 server가 다음 record 묶음을 보낼 때 비로소 멈추므로, 그때까지(최대 `socket_timeout`) connection이 유지됩니다.
+다른 경우가 하나 있습니다. 속도가 제한된 scan(`records_per_second`)은 server가 묶음을 멀리 떨어진 간격으로 보내며, 다음 묶음을 보낼 때가 될 때까지 server의 목록에 남아 있습니다. 초당 50 record에서 측정한 결과 45초였고, `socket_timeout`이 2000, 30000(기본값), 0일 때 모두 같았습니다. `socket_timeout`은 이 시간의 상한이 되지 않습니다.
 
 ## `apply()`도 `max_concurrent_operations`에 포함됩니다 {#apply-counts-against-max_concurrent_operations}
 

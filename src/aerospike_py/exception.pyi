@@ -89,8 +89,15 @@ class AerospikeError(Exception):
             ``"RustPanic"`` and ``"Client"``.
         in_doubt: ``True`` when a write was sent and no definite answer came
             back, so the server may have applied it. ``False`` when the
-            server answered with a failure (record exists, a failed UDF,
-            ...), and always for reads.
+            server answered with a failure (record exists, a failed UDF, a
+            busy key, ...), and always for reads.
+
+            One answer is not definite when the caller has switched
+            re-sending on for a write (``max_retries > 0``; it is off by
+            default): "record not found" for a delete, "filtered out" and a
+            failed UDF can be the answer to a second send whose first one
+            was applied. The client cannot tell whether it sent twice, so
+            these are reported in doubt under such a policy.
         partial_result: The per-record rows of a batch call that failed as a
             whole (a ``BatchWriteResult``), ``None`` for every other failure.
             One entry per requested record, in request order: the records

@@ -28,6 +28,8 @@ expr = exp.ge(exp.int_bin("age"), exp.int_val(21))
 record = client.get(key, policy={"filter_expression": expr})
 ```
 
+`filter_expression` takes only an expression built with `aerospike_py.exp`. Anything else (a string such as `"age >= 21"`, a number, a list, a dict) raises `InvalidArgError` before anything is sent: `filter_expression must be an expression built with aerospike_py.exp, got str`. Up to 0.14.x such a value was ignored and the call ran unfiltered. `None` means "no filter".
+
 ## Value Constructors
 
 | Function | Description |

@@ -46,7 +46,7 @@ Exception
 |-----------|------|------|
 | `result_code` | `int` | Server가 응답했으면 server의 result code(예: `2` record 없음, `5` record 이미 존재, `100` UDF 실패)이며 `AEROSPIKE_ERR_*` 상수와 일치합니다. 어떤 server도 응답하지 않았으면 `-1`: client timeout, connection 실패, 잘못된 인자. |
 | `error_type` | `str` | 실패의 종류. Prometheus `error_type` label, OpenTelemetry `error.type` attribute와 같은 이름입니다. Server code는 code 이름을 따르고(`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, `"DeviceOverload"`, ...), server가 알린 timeout은 `"ServerTimeout"`입니다. Client 쪽 실패는 `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"`, `"Client"`입니다. `-1`인 경우들은 이 값으로 구분합니다. |
-| `in_doubt` | `bool` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패 등)와 읽기에서는 항상 `False`. |
+| `in_doubt` | `bool` | Write를 보냈지만 확정된 응답을 받지 못해 server가 적용했을 수 있으면 `True`. server가 실패라고 응답한 경우(record 존재, UDF 실패, `KEY_BUSY` 같은 거절 등)와 읽기에서는 항상 `False`. Write에 `max_retries > 0`을 주었다면 `RecordNotFound`를 발생시킨 `remove()`도 in doubt입니다. 앞선 전송이 record를 지웠을 수 있기 때문입니다([다시 보낸 write와 `in_doubt`](../guides/admin/error-handling.md#re-sent-writes-and-in_doubt) 참고). |
 | `partial_result` | `BatchWriteResult \| None` | 전체가 실패한 batch 호출의 record별 row: 요청한 record마다 `BatchRecord` 하나를 요청 순서대로 담습니다. 그 밖의 실패에서는 `None`. |
 
 ```python

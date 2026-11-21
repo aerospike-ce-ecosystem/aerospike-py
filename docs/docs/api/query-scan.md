@@ -41,7 +41,7 @@ def process(record: Record) -> None:
 query.foreach(process)
 ```
 
-On `AsyncQuery`, the callback runs in a worker thread and must be a plain function (an `async def` function raises `TypeError`). Cancelling the awaiting task stops the query; a running callback finishes first.
+On `AsyncQuery`, the callback runs in a worker thread and must be a plain function (an `async def` function raises `TypeError`). Callbacks never overlap, but they do not all run on the same thread, so do not keep state in thread-locals. An exception the callback raises stops the query and is raised from `foreach()` unchanged, `StopIteration` included. Cancelling the awaiting task stops the query; a running callback finishes first, also when `asyncio.run` cancels every task on Ctrl-C.
 
 ### `stream(policy=None) -> AsyncRecordStream` (async only)
 
@@ -67,11 +67,15 @@ Returned by `AsyncQuery.stream()`; `async for record in query` uses one.
 | `await aclose()` | Same as `close()`; for `contextlib.aclosing` and similar helpers. |
 | `closed` | Whether `close()` has been called. |
 
-The query stops, on the client and on the server, when the stream ends, when `close()` is called, when the `async with` block is left, or when the stream is garbage collected. Cancelling a task that waits for the next record closes the stream. At most `record_queue_size` records (default 1024) wait in the client.
+The query stops, on the client and on the server, when the stream ends, when `close()` is called, when the `async with` block is left, or when the stream is garbage collected. At most `record_queue_size` records (default 1024) wait in the client. Every record is handed out once, and several tasks may iterate the same stream: each record goes to one of them.
+
+Cancelling a task that waits for the next record closes the stream. A later read on that stream raises `RuntimeError` instead of ending the iteration, because the cancelled read may already have taken records. A stream closed with `close()` simply ends. To bound a wait, put the timeout around the whole loop, not around one `anext()`.
+
+Closing the client does not stop a stream that is already running; close streams before the client.
 
 ### Leaving a query early
 
-Every way of leaving a query before its end stops the scan on the server at once, on the sync and the async client: a `foreach()` callback returning `False` or raising, `break` out of `async for`, `close()`, cancellation, an error in the stream. Up to 0.14.x the server went on scanning until its socket timeout (30 seconds by default). A rate-limited scan (`records_per_second`) stops when the server sends its next block, at most `socket_timeout` later.
+Every way of leaving a query before its end stops the scan on the server at once, on the sync and the async client: a `foreach()` callback returning `False` or raising, `break` out of `async for`, `close()`, cancellation, an error in the stream. Up to 0.14.x the server went on scanning until its socket timeout (30 seconds by default). A rate-limited scan (`records_per_second`) is sent in blocks that are far apart and stays listed on the server until its next block is due (45 seconds at 50 records per second in one measurement); `socket_timeout` does not shorten that.
 
 ---
 

@@ -153,7 +153,9 @@ CI integration matrix는 정확히 이 세 버전으로 고정되어 있습니�
 0.15는 Aerospike Rust Client 3.0으로 옮기면서 몇 가지 결과와 오류를 바꿉니다.
 `operate_ordered()`는 연산마다 항목 하나를 반환하고, `BatchRecord`에 다섯 번째
 field가 생겼고, write batch는 더 이상 스스로 retry하지 않고, 실패한 UDF는
-`UDFError`를 발생시키며, shape이 `(1,)`인 NumPy field는 blob으로 저장되는 등의
+`UDFError`를 발생시키며, `aerospike_py.exp`로 만들지 않은 `filter_expression`은
+무시되는 대신 `InvalidArgError`를 발생시키고, shape이 `(1,)`인 NumPy field는
+blob으로 저장되는 등의
 변경이 있습니다. [0.15로 업그레이드](/docs/guides/migration-0.15) 가이드는
 체크리스트로 시작하고, 변경마다 변경 전후 예제를 보여 줍니다.
 

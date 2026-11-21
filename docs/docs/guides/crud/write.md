@@ -248,7 +248,7 @@ results = await client.batch_write(records, retry=5)
 </Tabs>
 
 :::tip[in_doubt flag]
-When `br.in_doubt` is `True`, the server may have completed the write before the error occurred. A timeout after sending the write is one example. Check `in_doubt` before retrying a non-idempotent operation so you do not apply it twice.
+When `br.in_doubt` is `True`, the server may have completed the write before the error occurred. A timeout after sending the write is one example. Check `in_doubt` before retrying a non-idempotent operation so you do not apply it twice. With `max_retries > 0` on a write batch, a row that ends in `KEY_NOT_FOUND`, `FILTERED_OUT` or `UDF_BAD_RESPONSE` is in doubt too; see [Re-sent writes and `in_doubt`](../admin/error-handling.md#re-sent-writes-and-in_doubt).
 :::
 
 ## Batch Operate / Remove

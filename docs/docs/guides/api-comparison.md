@@ -35,7 +35,7 @@ This page compares the **official C-based client** (`aerospike` on PyPI) with th
 | Increment | `client.increment(key, bin, offset)` | `client.increment(key, bin, offset)` | Same |
 | Remove bin | `client.remove_bin(key, bin_names)` | `client.remove_bin(key, bin_names)` | Same |
 | Operate | `client.operate(key, ops)` | `client.operate(key, ops)` | Same; returns `Record` |
-| Operate ordered | `client.operate_ordered(key, ops)` | `client.operate_ordered(key, ops)` | Same; returns `OperateOrderedResult` |
+| Operate ordered | `client.operate_ordered(key, ops)` | `client.operate_ordered(key, ops)` | Same; returns `OperateOrderedResult`. A few results differ, see [known differences](/docs/guides/migration-0.15#operate_ordered-returns-one-entry-per-operation) |
 
 ## Batch Operations
 
@@ -117,7 +117,7 @@ This page compares the **official C-based client** (`aerospike` on PyPI) with th
 | Module | Official C Client | aerospike-py | Notes |
 |--------|------------------|--------------|-------|
 | List operations | `aerospike_helpers.operations.list_operations` | `aerospike_py.list_operations` | 37 operations; same semantics |
-| Map operations | `aerospike_helpers.operations.map_operations` | `aerospike_py.map_operations` | 33 operations; same semantics |
+| Map operations | `aerospike_helpers.operations.map_operations` | `aerospike_py.map_operations` | 33 operations; same semantics, except that `MAP_RETURN_KEY_VALUE` returns a list of `(key, value)` tuples where the official client returns a flat list |
 
 ## Expression Filters
 

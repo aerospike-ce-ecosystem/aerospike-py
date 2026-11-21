@@ -890,7 +890,7 @@ Remaining non-underscore-prefixed fields become bins.
 | `namespace` | Target namespace. |
 | `set_name` | Target set. |
 | `_dtype` | Optional dtype the array is expected to have. When given and different from ``data.dtype``, ``ValueError`` is raised before anything is sent. |
-| `key_field` | Name of the dtype field to use as the user key (default ``"_key"``). |
+| `key_field` | Name of the dtype field to use as the user key (default ``"_key"``). The field must be one value, a scalar integer or a fixed-width bytes field: a sub-array or a nested structured field raises ``TypeError`` before anything is written. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 | `retry` | Maximum number of *retries* for failed records (default ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When > 0, the records that failed with a transient error (timeout, device overload, key busy, a lost connection, a node that is down) are sent again with exponential backoff (Full Jitter, max 500 ms). Only the records that failed are re-sent; a record that already succeeded never is. A ``CREATE_ONLY`` or generation-checked record whose first send may have been applied (``in_doubt``) is not re-sent either: the second send would fail for a write that went through. **`retry` is bounded by `total_timeout`, which defaults to 1000 ms.** Retries stop once ``elapsed + backoff`` would reach that budget, so with the default policy ``retry=10`` yields far fewer than 11 attempts — the backoff ladder alone can consume half of it, before counting each attempt's own network time. To actually get ``N + 1`` attempts, raise it yourself with ``policy={"total_timeout": 30000}`` — the client never lengthens the budget on your behalf. ``retry`` cannot be combined with ``policy["max_retries"]``. The two would multiply — each of the ``retry + 1`` attempts re-sent ``max_retries`` times underneath — so giving both raises ``InvalidArgError``. A batch write starts from ``max_retries = 0``. Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo)) to see what happened: ``attempts`` versus ``max_attempts``, ``truncated_by_timeout``, and how many records are still ``unresolved``. If a record still has no answer from a server when the attempts run out, the call raises (``ClusterError``, ``AerospikeTimeoutError``, ...) and ``exc.partial_result`` holds every row together with the same ``retry`` counters. Total wall-clock time may still exceed ``total_timeout`` by up to one additional timeout window, because the guard does not account for the in-flight attempt. Always check each ``BatchRecord.result`` code regardless of whether the call returned successfully. |
 
@@ -1532,6 +1532,10 @@ by the client's internal record queue (``record_queue_size``, default
 callback runs at the first record's latency rather than after the whole
 scan. Returning ``False`` stops fetching from the server, so it bounds
 both time and memory — use it for "scan until I find the first match".
+
+Every record reaches the callback once, also when a node's connection
+fails in the middle of the scan and the client fetches part of the set
+again.
 
 The callback runs on the calling thread, outside the client's async
 runtime, so it may call back into the client (for example to look

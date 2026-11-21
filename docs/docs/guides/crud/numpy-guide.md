@@ -102,6 +102,7 @@ results = client.batch_write_numpy(data, "test", "demo", dtype)
 ### Key field conventions
 
 - Default key field: `"_key"` (configurable via `key_field` parameter)
+- The key field must be one value, a scalar integer or a fixed-width bytes field: a sub-array such as `("_key", "i4", (1,))` raises `TypeError`
 - Fields prefixed with `_` are excluded from bins (only `_key` is used as the record key)
 - All other fields become Aerospike bins
 

@@ -819,6 +819,9 @@ class Client:
                 and different from ``data.dtype``, ``ValueError`` is raised
                 before anything is sent.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
+                The field must be one value, a scalar integer or a fixed-width
+                bytes field: a sub-array or a nested structured field raises
+                ``TypeError`` before anything is written.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             retry: Maximum number of *retries* for failed records (default
                 ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
@@ -1994,6 +1997,9 @@ class AsyncClient:
                 and different from ``data.dtype``, ``ValueError`` is raised
                 before anything is sent.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
+                The field must be one value, a scalar integer or a fixed-width
+                bytes field: a sub-array or a nested structured field raises
+                ``TypeError`` before anything is written.
             policy: Optional [`BatchPolicy`](types.md#batchpolicy) dict.
             retry: Maximum number of *retries* for failed records (default
                 ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When
@@ -2644,6 +2650,10 @@ class Query:
         callback runs at the first record's latency rather than after the whole
         scan. Returning ``False`` stops fetching from the server, so it bounds
         both time and memory — use it for "scan until I find the first match".
+
+        Every record reaches the callback once, also when a node's connection
+        fails in the middle of the scan and the client fetches part of the set
+        again.
 
         The callback runs on the calling thread, outside the client's async
         runtime, so it may call back into the client (for example to look

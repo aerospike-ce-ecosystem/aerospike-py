@@ -696,7 +696,7 @@ NumPy 구조화 배열의 각 행을 별도 Record로 씁니다. `key_field`로 
 | `namespace` | 대상 namespace |
 | `set_name` | 대상 set |
 | `_dtype` | 배열이 가져야 할 NumPy dtype(선택). 주어졌는데 `data.dtype`과 다르면 아무것도 보내기 전에 `ValueError`가 발생합니다. |
-| `key_field` | user key로 사용할 dtype field 이름. 기본값은 `"_key"` |
+| `key_field` | user key로 사용할 dtype field 이름. 기본값은 `"_key"`. 이 field는 값 하나, 즉 scalar 정수이거나 고정 폭 bytes field여야 합니다. Sub-array나 중첩 structured field는 아무것도 쓰기 전에 `TypeError`를 발생시킵니다. |
 | `policy` | 선택적 [`BatchPolicy`](types.md#batchpolicy) dict |
 | `retry` | 일시적 오류가 발생한 Record의 최대 재시도 횟수. 기본값은 `0`. `batch_write`의 `retry`와 같은 규칙을 따릅니다. |
 
@@ -1325,7 +1325,7 @@ for record in records:
 
 ### `foreach(callback, policy=None)`
 
-Query를 실행해 각 Record마다 callback을 호출합니다. callback이 `False`를 반환하면 순회를 일찍 종료합니다.
+Query를 실행해 각 Record마다 callback을 호출합니다. callback이 `False`를 반환하면 순회를 일찍 종료합니다. Scan 도중 node 연결이 끊겨 client가 일부를 다시 가져오더라도 모든 Record는 callback에 한 번씩만 전달됩니다.
 
 | 파라미터 | 설명 |
 |-----------|------|
@@ -1355,7 +1355,7 @@ await query.foreach(process)
   </TabItem>
 </Tabs>
 
-`AsyncQuery.foreach()`의 callback은 event loop 밖의 worker thread에서 실행되는 일반 함수여야 하며, `async def` 함수를 넘기면 `TypeError`가 발생합니다. Await하는 task를 취소하면 query가 멈추고, 실행 중인 callback이 끝난 뒤에 `CancelledError`가 발생합니다.
+`AsyncQuery.foreach()`의 callback은 event loop 밖의 worker thread에서 실행되는 일반 함수여야 하며, `async def` 함수를 넘기면 `TypeError`가 발생합니다. Callback은 서로 겹쳐 실행되지 않지만 모두 같은 thread에서 실행되지는 않으므로 thread-local에 상태를 두지 마세요. Callback이 발생시킨 exception은 query를 멈추고 `foreach()`에서 그대로 다시 발생합니다(`StopIteration` 포함). Await하는 task를 취소하면 query가 멈추고, 실행 중인 callback이 끝난 뒤에 `CancelledError`가 발생합니다.
 
 ### `stream(policy=None)` (AsyncQuery)
 

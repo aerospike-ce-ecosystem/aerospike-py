@@ -148,6 +148,8 @@ asyncio.run(main())
 | Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` — truncate/zero-pad |
 | Sub-array | — | `("f4", (128,))` | field 크기와 정확히 같은 `Blob(bytes)` (예: vector embedding). 다른 길이는 `ValueError`. Scalar는 원소가 하나인 `(1,)` field만 채울 수 있음 |
 
+HLL bin, GeoJSON bin, 그리고 client가 해석하지 않는 particle type의 bin(`get()`이 `bytes`나 `str`로 반환하는 값)은 다른 bytes와 똑같이 복사됩니다. `S<N>`, `V<N>` field에는 field 폭에 맞춰 잘리거나 0으로 채워져 들어가고, 숫자 vector field에는 길이가 정확히 맞을 때 들어갑니다. Byte가 없는 field(`S0`, `V0`, `(0,)` sub-array)도 받아들이며 아무것도 담지 않습니다. `to_numpy(dtype)`은 `numpy.dtype(...)`이 받는 것은 무엇이든 받으며, NumPy가 그로부터 만든 dtype대로 row를 배치합니다.
+
 :::tip[지원 안 되는 dtype]
 
 Unicode string (`U`), Python object (`O`, structured field 안에 중첩된 것 포함), 가변 길이 `StringDType`, named field가 없는 dtype은 `TypeError`로, native가 아닌 byte order는 `ValueError`로 reject. string 데이터에는 `S` (fixed bytes) 사용.

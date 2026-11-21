@@ -91,7 +91,7 @@ Every `AerospikeError` carries four attributes. Use them instead of the message 
 |-----------|---------|
 | `result_code` | The server's result code when a server answered (for example `2` record not found, `5` record exists, `100` UDF failed). `-1` when no server answered: a client timeout, a connection failure, an invalid argument. |
 | `error_type` | The kind of failure, by name. A server code is named after the code (`"KeyNotFoundError"`, `"KeyExistsError"`, `"GenerationError"`, `"FilteredOut"`, ...; `"ServerTimeout"` for a timeout the server reported). Client-side failures are `"Timeout"`, `"MaxRetriesExceeded"`, `"Connection"`, `"NoMoreConnections"`, `"MaxErrorRate"`, `"InvalidNode"`, `"InvalidArgument"`, `"UdfBadResponse"`, `"StreamTerminated"`, `"BadResponse"`, `"Backpressure"`, `"RustPanic"` or `"Client"`. This is what tells the `-1` cases apart. |
-| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. |
+| `in_doubt` | `True` when a write was sent and no definite answer came back, so the server may have applied it. `False` when the server answered with a failure (record exists, a failed UDF, ...), and always for reads. A write sent with `max_retries > 0` is the exception, see [Re-sent writes and `in_doubt`](#re-sent-writes-and-in_doubt). |
 | `partial_result` | For a batch call that failed as a whole: a `BatchWriteResult` with one row per requested record, in request order. `None` for every other failure. |
 
 ```python
@@ -164,9 +164,11 @@ Every `BatchRecord` has `result`, `error_type` and `in_doubt`:
 | Server reported a timeout | `9` | `"ServerTimeout"` | `True` for a write |
 | Request sent, the client stopped waiting | `-1` | `"Timeout"` | `True` for a write |
 | Transport failure | `-1` | `"Connection"`, `"InvalidNode"`, ... | `True` for a write that had been sent |
-| No node answered for the record | `-1` | `"NoResponse"` | `False` |
+| No node answered for the record | `-1` | `"NoResponse"` | `False` when nothing was sent for it (the key could not be routed). `True` for a write when the call gave up without its rows after it may have sent them |
 
 `result` is `0` only when a server reported success for that record. A row is never counted as written because nothing came back.
+
+A write the server refused with a code worth a retry, `KEY_BUSY` (14), `DEVICE_OVERLOAD` (18) or `PARTITION_UNAVAILABLE` (11), is an answer: the row carries that code with `in_doubt == False`, and the call returns normally, also for a batch of one key. A single-record write refused this way (`put()` on a hot key, for example) raises `ServerError` with that `result_code`, an `error_type` of `"KeyBusy"`, `"DeviceOverload"` or `"PartitionUnavailable"`, and `in_doubt == False`.
 
 ### When the Whole Batch Fails
 
@@ -183,8 +185,8 @@ except AerospikeError as exc:
     rows = exc.partial_result.batch_records
     written = [br.key for br in rows if br.result == 0]
     unsure = [br.key for br in rows if br.in_doubt]           # read before re-sending
-    not_sent = [br.key for br in rows if br.error_type == "NoResponse"]
-    logger.warning("batch failed: %d written, %d in doubt, %d unanswered",
+    not_sent = [br.key for br in rows if br.error_type == "NoResponse" and not br.in_doubt]
+    logger.warning("batch failed: %d written, %d in doubt, %d never sent",
                    len(written), len(unsure), len(not_sent))
 ```
 
@@ -231,6 +233,24 @@ if retry_records:
 :::tip
 Use the built-in `retry` parameter for automatic transient-failure retries with exponential backoff: `client.batch_write(records, retry=3)`. It re-sends only the records that failed, never one that succeeded, and never a `CREATE_ONLY` or generation-checked record that is in doubt. It is bounded by `total_timeout` (default 1000 ms), and it cannot be combined with a non-zero `policy["max_retries"]` (that raises `InvalidArgError`). Write batches (`batch_write`, `batch_write_numpy`, `batch_remove`, `batch_apply`, a writing `batch_operate`) do not re-send anything by themselves: their `max_retries` defaults to `0`.
 :::
+
+### Re-sent Writes and `in_doubt`
+
+Writes are not re-sent by default: `max_retries` is `0` for every write. When you set `max_retries > 0` on a write, the Rust client sends it again when its answer is lost. If the first send was applied, the second one meets its own work: a re-sent delete finds no record, a re-sent filtered write no longer matches, a re-sent UDF fails on what the first run left behind. The Rust client does not say whether a row was sent twice, so under such a policy:
+
+- a row of `batch_write`, `batch_operate` (with a write), `batch_remove` or `batch_apply` that ends in `KEY_NOT_FOUND` (2), `FILTERED_OUT` (27) or `UDF_BAD_RESPONSE` (100) has `in_doubt == True`;
+- `remove()` that raises `RecordNotFound` carries `in_doubt == True`.
+
+The call does not know whether it changed the record, and says so. With the default policy nothing changes, and reads (`batch_read`) are never in doubt.
+
+```python
+import aerospike_py
+
+result = client.batch_remove(keys, policy={"max_retries": 2})
+for br in result.batch_records:
+    if br.result == aerospike_py.AEROSPIKE_ERR_RECORD_NOT_FOUND and br.in_doubt:
+        ...  # deleted by an earlier send of this call, or missing before it: read to find out
+```
 
 ### Async Batch Read
 
@@ -445,6 +465,8 @@ The `0` default applies to *every* operation that takes a `WritePolicy`, includi
 client.remove(key, policy={"max_retries": 2})
 client.put(key, bins, policy={"max_retries": 2})  # full-bin overwrite is idempotent
 ```
+
+With `max_retries > 0`, a `remove()` that raises `RecordNotFound` has `in_doubt == True`: an earlier send may have deleted the record. See [Re-sent writes and `in_doubt`](#re-sent-writes-and-in_doubt).
 :::
 
 :::warning[Default timeout interaction]

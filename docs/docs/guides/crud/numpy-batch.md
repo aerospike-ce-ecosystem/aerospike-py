@@ -148,6 +148,8 @@ Rows with `result_codes[i] != 0`, including `RecordNotFound`, keep the dtype's z
 | Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` — truncated/zero-padded |
 | Sub-array | — | `("f4", (128,))` | `Blob(bytes)` of exactly the field's size (e.g., vector embeddings); any other length raises `ValueError`. A scalar fills only a one-element `(1,)` field. |
 
+An HLL bin, a GeoJSON bin and a bin of a particle type the client does not interpret (what `get()` returns as `bytes` or `str`) are copied like any other bytes: into `S<N>` and `V<N>` fields, truncated or zero-padded to the field width, and into a numeric vector field of exactly their length. Fields of no bytes (`S0`, `V0`, a `(0,)` sub-array) are accepted and carry nothing. `to_numpy(dtype)` accepts whatever `numpy.dtype(...)` accepts and lays the rows out by the dtype NumPy makes of it.
+
 :::tip[Unsupported dtypes]
 
 Unicode strings (`U`), Python objects (`O`, also nested inside a structured field), variable-length `StringDType` and dtypes without named fields are rejected with `TypeError`; non-native byte order with `ValueError`. Use `S` (fixed bytes) for string data.

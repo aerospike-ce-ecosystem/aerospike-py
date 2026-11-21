@@ -56,7 +56,7 @@ _, meta, bins = record     # tuple unpacking
 | `key` | `AerospikeKey \| None` | record key |
 | `result` | `int` | server가 성공을 알렸으면 `0`, 실패를 알렸으면 server의 result code(`2` not found, `27` filtered out, ...), 이 record에 대해 어떤 server도 응답하지 않았으면 `-1` |
 | `record` | `Record \| None` | record 데이터 (operation 실패 시 `None`) |
-| `in_doubt` | `bool` | record는 실패했지만 write가 적용되었을 수 있음: 요청은 보냈고 응답이 돌아오지 않음 (default `False`) |
+| `in_doubt` | `bool` | record는 실패했지만 write가 적용되었을 수 있음: 요청은 보냈고 응답이 돌아오지 않음 (default `False`). Write batch에 `max_retries > 0`을 주었다면 `KEY_NOT_FOUND`, `FILTERED_OUT`, `UDF_BAD_RESPONSE`로 끝난 row도 in doubt ([다시 보낸 write와 `in_doubt`](../guides/admin/error-handling.md#re-sent-writes-and-in_doubt) 참고) |
 | `error_type` | `str \| None` | 성공이면 `None`. 아니면 exception의 `error_type`과 같은 이름으로 나타낸 실패 종류: server code(`"KeyNotFoundError"`, `"FilteredOut"`, ...), client 쪽 실패(`"Timeout"`, `"Connection"`, ...), 어떤 node도 응답하지 않았으면 `"NoResponse"`. `-1`인 결과들을 구분해 줍니다. 0.15에서 추가되었으므로 `BatchRecord`를 이름 네 개로 unpack하던 코드는 다섯 개로 바꿔야 합니다. |
 
 ```python
@@ -84,7 +84,7 @@ Batch 호출(`batch_read` 포함)이 전체적으로 실패했을 때 `exc.parti
 | Field | Type | Default | 설명 |
 |-------|------|---------|------|
 | `attempts` | `int` | `1` | 첫 시도를 포함해 실제로 보낸 시도 횟수. 항상 `>= 1`. |
-| `max_attempts` | `int` | `1` | 호출자가 요청한 시도 횟수: `1 + retry`. |
+| `max_attempts` | `int` | `1` | 호출자가 요청한 시도 횟수: `1 + retry`, 최대 `2**32 - 1`. |
 | `truncated_by_timeout` | `bool` | `False` | `max_attempts`에 이르기 전에 `total_timeout` 때문에 retry가 멈춤. |
 | `unresolved` | `int` | `0` | loop가 끝났을 때 아직 retry 가능한 실패 code를 가진 record 수. |
 
@@ -205,7 +205,7 @@ if result.meta is not None:
 | `max_retries` | `int` | `2` | 최대 retry |
 | `sleep_between_retries` | `int` | `0` | retry 간 sleep (ms) |
 | `timeout_delay` | `int` | `0` | deadline 이후 request timeout 까지의 delay (ms). 재사용 connection 이 stale response 를 보지 않도록 socket drain. |
-| `filter_expression` | `Any` | | `aerospike_py.exp` 로 빌드된 expression filter. |
+| `filter_expression` | `Any` | | `aerospike_py.exp` 로 빌드된 expression filter. 모든 policy에서 `None`이 아닌 그 밖의 값(문자열, 숫자, list, dict)은 아무것도 보내기 전에 `InvalidArgError`를 발생시킵니다. |
 | `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | replica 선택 알고리즘. |
 | `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP namespace read consistency. `aerospike-core` `ConsistencyLevel` 로 매핑. |
 | `read_touch_ttl_percent` | `int` | `0` | original write TTL 의 N% 이내일 때 read 시 TTL reset (server v8+). `0` = server default, `-1` = reset 안 함, `1..=100` = percent. |
@@ -376,7 +376,7 @@ client.batch_remove([
 | `durable_delete` | `bool` | durable_delete override. |
 
 :::note
-`filter_expression` 은 `BatchUDFMeta` 에 **허용되지 않음** — batch-level [`BatchUDFPolicy`](#batchudfpolicy) 에 설정. (Per-record `filter_expression` 은 aerospike-core 2.0 에서 unwired; [`BatchDeleteMeta`](#batchdeletemeta) shape 와 매칭.)
+`filter_expression` 은 `BatchUDFMeta` 에 **허용되지 않음** — batch-level [`BatchUDFPolicy`](#batchudfpolicy) 에 설정합니다. [`BatchDeleteMeta`](#batchdeletemeta)도 같습니다.
 :::
 
 ```python

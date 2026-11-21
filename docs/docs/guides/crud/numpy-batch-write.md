@@ -136,7 +136,7 @@ numpy structured array             Aerospike
 
 ## Key Field
 
-By default, the dtype field named `"_key"` is used as the record key. You can specify a different field with `key_field`:
+By default, the dtype field named `"_key"` is used as the record key. The key field must be one value: a scalar integer or a fixed-width bytes field. A sub-array, even a one-element `("_key", "i8", (1,))`, or a nested structured field raises `TypeError` before anything is written; declare it as `("_key", "i8")`. You can specify a different field with `key_field`:
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -498,11 +498,11 @@ results: BatchWriteResult = await client.batch_write_numpy(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `data` | `np.ndarray` | required | Structured numpy array with record data. Its own `data.dtype` defines the layout. |
+| `data` | `np.ndarray` | required | Structured numpy array with record data. Its own `data.dtype` defines the layout. The rows are read from `numpy.asarray(data)`: an array subclass such as `numpy.recarray` is written as the plain array it is, and the mask of a masked array is ignored. |
 | `namespace` | `str` | required | Target Aerospike namespace |
 | `set_name` | `str` | required | Target set name |
 | `_dtype` | `np.dtype \| None` | `None` | Optional dtype the array is expected to have. When given and different from `data.dtype`, `ValueError` is raised before anything is sent. |
-| `key_field` | `str` | `"_key"` | Name of the dtype field to use as the record user key |
+| `key_field` | `str` | `"_key"` | Name of the dtype field to use as the record user key. The field must be a scalar integer or fixed-width bytes field; a sub-array or nested structured field raises `TypeError`. |
 | `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides. `max_retries` defaults to `0` and cannot be combined with `retry`. |
 | `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). `0` = no retry. Only records that failed are re-sent; a `CREATE_ONLY` or generation-checked record that is `in_doubt` is not. Giving a non-zero `policy["max_retries"]` as well raises `InvalidArgError`. |
 

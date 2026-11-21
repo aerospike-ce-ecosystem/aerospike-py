@@ -152,7 +152,9 @@ test, run the integration suite against it before deploying.
 0.15 moves to Aerospike Rust Client 3.0 and changes a few results and errors:
 `operate_ordered()` returns one entry per operation, `BatchRecord` has a fifth
 field, write batches no longer retry on their own, a failing UDF raises
-`UDFError`, NumPy fields of shape `(1,)` are stored as a blob, and more. The
+`UDFError`, a `filter_expression` that is not built with `aerospike_py.exp`
+raises `InvalidArgError` instead of being ignored, NumPy fields of shape `(1,)`
+are stored as a blob, and more. The
 [Upgrading to 0.15](/docs/guides/migration-0.15) guide starts with a checklist
 and shows a before/after example for every change.
 
