@@ -234,14 +234,16 @@ class AsyncQuery:
 
     @catch_unexpected("AsyncQuery.results")
     async def results(self, policy=None) -> list[Record]:
+        # Not a loop over the stream's batches: every batch would be a trip
+        # through the event loop, and a result that is kept whole anyway gains
+        # nothing from arriving in pieces. The records are wrapped where they
+        # are converted, a chunk at a time and off this thread, so the loop is
+        # not held up for the length of the result. See ``RecordStream.read_all``.
         stream = self.stream(policy)
-        records: list[Record] = []
         try:
-            while (batch := await stream._next_batch()) is not None:
-                records.extend(map(_wrap_record, batch))
+            return await stream._inner.read_all(_wrap_record)
         finally:
             stream.close()
-        return records
 
     async def foreach(self, callback, policy=None) -> None:
         if inspect.iscoroutinefunction(callback):

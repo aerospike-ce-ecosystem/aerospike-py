@@ -503,6 +503,63 @@ impl Drop for StreamState {
     }
 }
 
+/// How many records [`PyRecordStream::read_all`] converts under one hold of
+/// the GIL: some ten milliseconds' worth, so that the event loop and other
+/// threads get their turn while a large result is being built.
+const READ_ALL_CHUNK: usize = 4096;
+
+/// One chunk of records being converted on a thread of its own.
+type Converting = tokio::task::JoinHandle<PyResult<Vec<Py<PyAny>>>>;
+
+/// Convert a chunk of records, and pass each through `wrap` when there is
+/// one (the Python side's `Record` constructor). One hold of the GIL.
+fn convert_chunk(chunk: Vec<Record>, wrap: Option<&Py<PyAny>>) -> PyResult<Vec<Py<PyAny>>> {
+    Python::attach(|py| {
+        let mut converted = Vec::with_capacity(chunk.len());
+        for record in &chunk {
+            let raw = record_to_py(py, record, None)?;
+            converted.push(match wrap {
+                Some(wrap) => wrap.call1(py, (raw,))?,
+                None => raw,
+            });
+        }
+        Ok(converted)
+    })
+}
+
+/// Wait for a chunk that is being converted and append it to `converted`.
+async fn collect_converted(
+    converting: Option<Converting>,
+    converted: &mut Vec<Py<PyAny>>,
+) -> PyResult<()> {
+    let Some(converting) = converting else {
+        return Ok(());
+    };
+    let chunk = converting.await.map_err(|e| {
+        pyo3::exceptions::PyRuntimeError::new_err(format!("converting query records failed: {e}"))
+    })??;
+    if converted.is_empty() {
+        *converted = chunk;
+    } else {
+        converted.extend(chunk);
+    }
+    Ok(())
+}
+
+/// Every record of a query, already converted: what
+/// [`PyRecordStream::read_all`] resolves to.
+pub(crate) struct ConvertedRecords(Vec<Py<PyAny>>);
+
+impl<'py> IntoPyObject<'py> for ConvertedRecords {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(PyList::new(py, &self.0)?.into_any())
+    }
+}
+
 /// Records on their way to Python: converted once the GIL is held, when the
 /// awaited read completes.
 pub(crate) struct PendingRecords(Vec<Record>);
@@ -569,6 +626,68 @@ impl PyRecordStream {
                 .await
                 .map(|batch| batch.map(PendingRecords))
                 .map_err(as_to_pyerr)
+        })
+    }
+
+    /// Await the whole query: one list of every record, each passed through
+    /// `wrap` when one is given, otherwise a `(key, meta, bins)` tuple.
+    ///
+    /// For `results()`, which keeps every record anyway. Reading through
+    /// `next_batch` is a trip through the event loop for every batch, and
+    /// with another thread holding the GIL each trip waits for it several
+    /// times: 100 000 records took 5.6 s that way where 0.14.x took 0.6 s.
+    ///
+    /// Here the records are gathered on the runtime, without the GIL, and
+    /// converted [`READ_ALL_CHUNK`] at a time on a thread of their own while
+    /// the next ones are being fetched. The event loop is involved once, at
+    /// the end, and has nothing left to do then: wrapping every record in the
+    /// loop's own thread would stall it for as long as the whole result takes.
+    /// The GIL is never held for longer than one chunk takes, and no more
+    /// than three chunks of unconverted records are in memory.
+    ///
+    /// An error ends it without a result, as it always did for `results()`.
+    /// Cancelling the awaiting task drops what was gathered; the caller
+    /// closes the stream.
+    #[pyo3(signature = (wrap=None))]
+    fn read_all<'py>(
+        &self,
+        py: Python<'py>,
+        wrap: Option<Py<PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let state = Arc::clone(&self.state);
+        let wrap = wrap.map(Arc::new);
+        future_into_py_panic_safe(py, "RecordStream.read_all", async move {
+            let mut gathered: Vec<Record> = Vec::new();
+            let mut converting: Option<Converting> = None;
+            let mut converted: Vec<Py<PyAny>> = Vec::new();
+            let convert = |chunk: Vec<Record>| -> Converting {
+                let wrap = wrap.clone();
+                tokio::task::spawn_blocking(move || convert_chunk(chunk, wrap.as_deref()))
+            };
+            while let Some(batch) = state
+                .next_batch(READ_ALL_CHUNK)
+                .await
+                .map_err(as_to_pyerr)?
+            {
+                if gathered.is_empty() {
+                    gathered = batch;
+                } else {
+                    gathered.extend(batch);
+                }
+                if gathered.len() >= READ_ALL_CHUNK {
+                    // One chunk at a time, so that they come out in order. If
+                    // the one before is still being converted, fetching waits
+                    // for it here: the conversion is the slower of the two
+                    // then, and nothing is gained by reading further ahead.
+                    collect_converted(converting.take(), &mut converted).await?;
+                    converting = Some(convert(std::mem::take(&mut gathered)));
+                }
+            }
+            collect_converted(converting.take(), &mut converted).await?;
+            if !gathered.is_empty() {
+                collect_converted(Some(convert(gathered)), &mut converted).await?;
+            }
+            Ok(ConvertedRecords(converted))
         })
     }
 
