@@ -32,6 +32,7 @@ pub fn parse_read_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<Re
         "sleep_between_retries" => policy.base_policy.sleep_between_retries;
         "timeout_delay" => policy.base_policy.timeout_delay
     });
+    super::check_max_retries(policy.base_policy.max_retries)?;
 
     if let Some(val) = dict.get_item("replica")? {
         policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;

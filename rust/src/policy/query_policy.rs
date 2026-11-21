@@ -40,6 +40,7 @@ pub fn parse_query_policy(
         "record_queue_size" => policy.record_queue_size;
         "include_bin_data" => policy.include_bin_data
     });
+    super::check_max_retries(policy.base_policy.max_retries)?;
 
     if let Some(val) = dict.get_item("replica")? {
         policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;

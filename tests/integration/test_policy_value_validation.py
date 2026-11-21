@@ -500,3 +500,81 @@ class TestReadsAcceptValidValues:
             assert "invalid replica value" not in str(exc)
         else:
             assert record.bins == SEED_BINS
+
+
+class TestAFilterThatIsNotAnExpression:
+    """A filter that is ignored lets through exactly what it was there to stop."""
+
+    @pytest.mark.parametrize("bogus", ["v == 1", 1, ["eq"], {"op": "eq"}], ids=["str", "int", "list", "dict"])
+    async def test_a_write_is_refused_and_the_record_stays_as_it_was(self, any_client, any_cleanup, bogus):
+        key = (NS, SET, f"filter_not_expression_{type(bogus).__name__}")
+        any_cleanup.append(key)
+        await invoke(any_client, "put", key, {"v": 1})
+
+        with pytest.raises(aerospike_py.InvalidArgError, match="filter_expression must be an expression"):
+            await invoke(any_client, "put", key, {"v": 99}, policy={"filter_expression": bogus})
+
+        record = await invoke(any_client, "get", key)
+        assert (record.bins, record.meta.gen) == ({"v": 1}, 1)
+
+    @pytest.mark.parametrize("method", ["get", "batch_read", "batch_remove"])
+    async def test_reads_and_batches_refuse_it_too(self, any_client, any_cleanup, method):
+        key = (NS, SET, f"filter_not_expression_{method}")
+        any_cleanup.append(key)
+        await invoke(any_client, "put", key, {"v": 1})
+        argument = key if method == "get" else [key]
+
+        with pytest.raises(aerospike_py.InvalidArgError, match="filter_expression must be an expression"):
+            await invoke(any_client, method, argument, policy={"filter_expression": "v == 1"})
+
+        assert (await invoke(any_client, "get", key)).bins == {"v": 1}
+
+    async def test_none_means_no_filter(self, any_client, any_cleanup):
+        key = (NS, SET, "filter_none")
+        any_cleanup.append(key)
+
+        await invoke(any_client, "put", key, {"v": 1}, policy={"filter_expression": None})
+
+        assert (await invoke(any_client, "get", key)).bins == {"v": 1}
+
+
+class TestIntegersThatDoNotFit:
+    async def test_the_largest_max_retries_is_refused_instead_of_failing_unsent(self, any_client, any_cleanup):
+        """The Rust client counts ``max_retries + 1`` attempts; for the largest value that is zero."""
+        key = (NS, SET, "max_retries_wraps")
+        any_cleanup.append(key)
+        await invoke(any_client, "put", key, {"v": 1})
+
+        for method, arguments in (("get", (key,)), ("put", (key, {"v": 2})), ("batch_read", ([key],))):
+            with pytest.raises(aerospike_py.InvalidArgError, match="max_retries is too large"):
+                await invoke(any_client, method, *arguments, policy={"max_retries": 2**64 - 1})
+
+        assert (await invoke(any_client, "get", key)).bins == {"v": 1}
+
+    async def test_the_largest_retry_reports_its_attempts(self, any_client, any_cleanup):
+        key = (NS, SET, "retry_wraps")
+        any_cleanup.append(key)
+
+        result = await invoke(any_client, "batch_write", [(key, {"v": 1})], retry=2**32 - 1)
+
+        assert (result.retry.attempts, result.retry.max_attempts) == (1, 2**32 - 1)
+
+    @pytest.mark.parametrize(
+        ("method", "arguments", "keywords"),
+        [
+            ("batch_write", ([((NS, SET, "does_not_fit"), {"v": 1})],), {"retry": -1}),
+            ("put", ((NS, SET, "does_not_fit"), {"v": 1}), {"policy": {"total_timeout": -1}}),
+            ("put", ((NS, SET, "does_not_fit"), {"v": 1}), {"policy": {"max_retries": -1}}),
+            ("put", ((NS, SET, "does_not_fit"), {"v": 1}), {"meta": {"ttl": 2**70}}),
+        ],
+        ids=["retry", "total_timeout", "max_retries", "ttl"],
+    )
+    async def test_an_integer_out_of_range_is_the_callers_error_not_a_bug_report(
+        self, any_client, any_cleanup, caplog, method, arguments, keywords
+    ):
+        any_cleanup.append((NS, SET, "does_not_fit"))
+
+        with caplog.at_level("DEBUG"), pytest.raises((OverflowError, ValueError, aerospike_py.AerospikeError)):
+            await invoke(any_client, method, *arguments, **keywords)
+
+        assert [r.getMessage()[:100] for r in caplog.records if "may be a bug in aerospike-py" in r.getMessage()] == []

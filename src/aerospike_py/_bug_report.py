@@ -71,14 +71,15 @@ def log_unexpected_error(context: str, exc: BaseException) -> None:
 #: and so does the argument parsing in front of it. They are the caller's to
 #: fix: logging them as a possible bug in this library sent callers to the
 #: issue tracker for their own typos.
-_ARGUMENT_ERRORS = (TypeError, ValueError)
+_ARGUMENT_ERRORS = (TypeError, ValueError, OverflowError)
 
 
 def _maybe_log(method_name: str, exc: Exception) -> None:
     """Log ``exc`` as a possible bug unless it is a failure a correct library produces.
 
     Those are ``AerospikeError`` (the cluster or the client said no) and the
-    builtin ``TypeError`` / ``ValueError`` (an argument was refused).
+    builtin ``TypeError`` / ``ValueError`` / ``OverflowError`` (an argument was
+    refused; the last one for an integer that does not fit, ``retry=-1`` say).
     """
     from aerospike_py._aerospike import AerospikeError
 

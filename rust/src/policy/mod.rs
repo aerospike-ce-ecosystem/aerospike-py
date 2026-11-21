@@ -31,15 +31,44 @@ macro_rules! extract_policy_fields {
 
 pub(crate) use extract_policy_fields;
 
-/// Extract `filter_expression` from a policy dict, returning `Some(Expression)`
-/// if the key is present and is a valid expression, `None` otherwise.
+/// Extract `filter_expression` from a policy dict: `Some(Expression)` when one
+/// is given, `None` when the key is absent or `None`.
+///
+/// Anything else is refused. It used to be ignored, and a filter that is
+/// ignored lets through exactly the writes and reads it was there to stop:
+/// `put(key, bins, policy={"filter_expression": "v == 1"})` wrote the record
+/// unconditionally.
 pub fn extract_filter_expression(dict: &Bound<'_, PyDict>) -> PyResult<Option<Expression>> {
-    if let Some(val) = dict.get_item("filter_expression")? {
-        if is_expression(&val) {
-            return Ok(Some(py_to_expression(&val)?));
-        }
+    let Some(val) = dict.get_item("filter_expression")? else {
+        return Ok(None);
+    };
+    if val.is_none() {
+        return Ok(None);
     }
-    Ok(None)
+    if !is_expression(&val) {
+        let given = val
+            .get_type()
+            .name()
+            .map_or_else(|_| "?".to_string(), |name| name.to_string());
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "filter_expression must be an expression built with aerospike_py.exp, got {given}"
+        )));
+    }
+    Ok(Some(py_to_expression(&val)?))
+}
+
+/// Refuse the one `max_retries` aerospike-core cannot count with.
+///
+/// It makes `max_retries + 1` attempts. For the largest value that sum wraps
+/// to zero, and the command fails with "Timeout after 0 tries" without ever
+/// being sent.
+pub(crate) fn check_max_retries(max_retries: usize) -> PyResult<()> {
+    if max_retries == usize::MAX {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "max_retries is too large: {max_retries}"
+        )));
+    }
+    Ok(())
 }
 
 /// Build the `InvalidArgError` raised for a policy constant no enum variant matches.

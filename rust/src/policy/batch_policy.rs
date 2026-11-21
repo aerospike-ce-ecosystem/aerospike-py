@@ -60,6 +60,7 @@ pub fn parse_batch_policy(
         "allow_inline_ssd" => policy.allow_inline_ssd;
         "respond_all_keys" => policy.respond_all_keys
     });
+    super::check_max_retries(policy.base_policy.max_retries)?;
 
     if let Some(val) = dict.get_item("replica")? {
         policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;

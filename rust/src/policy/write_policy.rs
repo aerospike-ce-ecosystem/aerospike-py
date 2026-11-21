@@ -143,6 +143,7 @@ pub fn parse_write_policy(
         "timeout_delay" => policy.base_policy.timeout_delay;
         "durable_delete" => policy.durable_delete
     });
+    super::check_max_retries(policy.base_policy.max_retries)?;
 
     // Key (send_key)
     if let Some(val) = dict.get_item("key")? {

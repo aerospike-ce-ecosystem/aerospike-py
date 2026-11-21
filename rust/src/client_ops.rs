@@ -933,7 +933,7 @@ async fn drive_batch_write_retries<E: BatchWriteAttempts + Sync>(
                     backoff_ms,
                     timeout_ms,
                     attempts_made,
-                    max_retries + 1
+                    max_retries.saturating_add(1)
                 );
                 truncated_by_timeout = true;
                 break;
@@ -1034,7 +1034,7 @@ async fn drive_batch_write_retries<E: BatchWriteAttempts + Sync>(
     // failure, so reporting it costs nothing extra.
     let stats = BatchWriteRetryStats {
         attempts: attempts_made,
-        max_attempts: max_retries + 1,
+        max_attempts: max_retries.saturating_add(1),
         truncated_by_timeout,
         unresolved: retry_indices.len() as u32,
     };
