@@ -249,13 +249,26 @@ pub async fn do_operate_ordered(client: &AsClient, args: &OperateArgs) -> PyResu
 /// returns only whether the call as a whole failed, so the rows exist either
 /// way: one per operation, in request order.
 ///
-/// Deliberately not `into_iter().map(..).collect()`: the standard library
-/// would collect in place, into the allocation of `ops`. A `BatchOperation`
-/// is 672 bytes and a `BatchRecord` 408, so every result would carry 264
-/// bytes of unused capacity per row for as long as Python holds it.
+/// Reuse the operations' allocation while moving the smaller result rows out.
+/// Shrink it before returning, so the result does not retain the unused
+/// per-operation storage while Python holds the rows.
 fn collect_rows(ops: Vec<BatchOperation>) -> Vec<BatchRecord> {
-    let mut rows = Vec::with_capacity(ops.len());
-    rows.extend(ops.into_iter().map(BatchOperation::into_batch_record));
+    let mut rows: Vec<_> = ops
+        .into_iter()
+        .map(|op| {
+            let mut row = op.into_batch_record();
+            if let Some(record) = &mut row.record {
+                // Python's batch views read the bin map. The core also
+                // decodes an ordered values vector, which can own copies
+                // of every string or blob. Release it before handing the
+                // rows over to Python. Single-record operate_ordered uses
+                // the separate, unmodified operate path.
+                record.results = None;
+            }
+            row
+        })
+        .collect();
+    rows.shrink_to_fit();
     rows
 }
 
