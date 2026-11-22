@@ -68,7 +68,7 @@ NumPy 2.5.5는 Python 3.12 이상이 필요하다. 패키지의 Python 3.10·3.1
 
 ### 테스트
 
-아래는 모두 리뷰와 재검증의 수정까지 끝난 최종 커밋(`b74f993`)에서 다시 돌린 결과다. 그 뒤의 커밋은 이 문서뿐이다.
+아래는 모두 리뷰와 재검증의 수정까지 끝난 커밋(`b74f993`)에서 다시 돌린 결과다. 그 뒤의 커밋은 이 문서와, PR의 CI가 찾은 테스트 환경 수정 둘(`61b94c8`, `7ff1fc3`)뿐이다.
 
 | 대상 | 결과 |
 |---|---|
@@ -86,6 +86,13 @@ NumPy 2.5.5는 Python 3.12 이상이 필요하다. 패키지의 Python 3.10·3.1
 | 문서 빌드 (`make docs-build`) | 영어·한국어 모두 성공, 깨진 링크·앵커 없음 |
 
 skip 사유는 보안 기능 미활성(CE) 9개, truncate 직후 읽기가 비결정적인 테스트 3개, GIL이 켜진 빌드 1개이고, 7.2에서는 서버 8 이상이 필요한 `read_touch_ttl_percent` 1개가 더해진다.
+
+**PR의 CI가 찾은 것.** draft PR(#500)의 첫 CI에서 26개 가운데 2개가 실패했다. 둘 다 라이브러리 코드가 아니라 테스트 쪽이다.
+
+- **Compatibility Tests.** `89ae582`가 넣은 NumPy 호환성 테스트 때문에 `tests/compatibility/test_data_types.py`가 NumPy를 import하는데, CI의 `tox -e compat`은 `test-compat` 의존성 그룹(pytest, pytest-asyncio, 공식 클라이언트)만 설치한다. 수집 단계에서 `No module named 'numpy'`로 끝났다. 로컬 검증은 NumPy가 있는 개발 환경으로 직접 돌려서 놓쳤고, 그 커밋 뒤로 `tox -e compat`을 돌린 적이 없었다. 그룹에 NumPy를 넣었다(`61b94c8`). CI와 같은 명령(`uvx --with tox-uv tox -e compat`)으로 289개 통과, 3개 skip이다.
+- **CodeQL.** 이 브랜치가 추가한 fixture 세 곳에서 `py/uninitialized-local-variable` 오류가 났다. `try` 안에서 연결하고 `except`에서 `skip_or_raise(e)`를 부르는 기존 fixture와 같은 모양이다. `skip_or_raise()`는 반환하지 않지만(`NoReturn`) CodeQL은 그것을 모듈 너머로 따라가지 않는다. `main`에도 같은 이유의 알림이 5건 열려 있다. 새 fixture 세 곳에는 호출 뒤에 도달하지 않는 `raise`를 넣었다(`7ff1fc3`). 기존 fixture는 그대로 뒀다.
+
+나머지 24개 job은 첫 실행에서 통과했다. Linux에서의 빌드와 단위 테스트(Python 3.10~3.15, free-threaded 3.14t·3.15t), 서버 7.2·8.1·8.2 통합 테스트, 동시성 테스트(3.14t·3.15t 포함), feasibility, lint, MSRV, 문서, 보안 감사다. 로컬에서 확인하지 못한 Python 버전과 Linux가 여기서 처음 돌았다.
 
 **`make build` 뒤에는 테스트 의존성을 다시 설치해야 한다.** `make build`는 `uv sync --group dev`를 거치고, 이 sync는 dev 그룹 밖의 패키지(공식 클라이언트 `aerospike`, FastAPI, gunicorn 등)를 지운다. 그 상태로 전체 스위트를 돌리면 `tests/compatibility`의 수집 단계에서 `could not import 'aerospike'`로 몇 초 만에 끝난다. 최종 검증에서 한 번 겪었다. `uv sync --inexact --no-install-project --group dev --group test-all --group test-compat`로 되돌린다.
 
@@ -324,8 +331,8 @@ sync `results()`의 비자발적 문맥 전환은 22,015회 → 1,860회 → 448
 
 ### 로컬에서 확인하지 못한 것
 
-- Linux(x86_64·aarch64), Windows, macOS x86_64의 wheel 설치는 CI에서만 확인할 수 있다.
-- `tox -e py314t`는 이 기계에서 wheel을 GIL 빌드 3.14로 만들어 실패한다([테스트](#테스트) 참고). CI의 free-threaded job이 같은 문제를 겪는지는 CI에서 확인한다.
+- Linux aarch64, Windows, macOS x86_64의 wheel은 릴리스 빌드에서만 확인할 수 있다. PR의 CI는 Linux x86_64에서 빌드하고 테스트한다.
+- `tox -e py314t`는 이 기계에서 wheel을 GIL 빌드 3.14로 만들어 실패한다([테스트](#테스트) 참고). CI의 free-threaded job(3.14t, 3.15t)은 PR에서 통과했으므로 이 기계의 tox 환경 문제다.
 - 재전송 시점에 노드를 찾지 못한 쓰기 행의 `in_doubt`(`08ea4ed`)는 두 전송 사이에 클라이언트를 닫는 방법으로만 재현했다. 노드가 클러스터에서 빠지는 경우는 코드로는 같은 경로이지만 돌려 보지 못했다.
 - 노드별 작업이 패닉하는 경로(`195ff82`)와 timeout 아래 여러 시도가 이어진 오류(`2cd260e`)는 건강한 클러스터로 만들 수 없어 단위 테스트로만 고정했다.
 - **넓은 레코드의 동시 `results()`는 재지 못했다.** 세 번째 성능 검토가 요청한 측정이다(레코드당 2~4 KB, bin 20개 이상, 8개 동시). 이 부하를 걸면 podman VM의 가상 네트워크가 멈춘다. 게스트 커널이 `virtio_net eth0: NETDEV WATCHDOG: transmit queue 0 timed out`을 반복하고, 포워딩된 포트와 ssh가 모두 `connection reset`이 된다. 두 번 시도해 두 번 다 그랬고(한 번은 0.14.4 빌드로 읽는 중이었다), 그때마다 VM을 재시작해야 했다. 클라이언트가 아니라 VM 스택(krunkit 1.1.1, gvproxy)의 문제다. 덩어리 크기는 레코드 수로 정하므로 레코드가 아주 넓으면 한 덩어리의 변환이 길어진다. 레코드 사이에서는 `Record`를 만드는 Python 코드가 실행되므로 기다리는 스레드가 switch interval(5 ms)마다 GIL을 가져갈 수 있다는 것이 근거이고, 실측은 없다. Linux에서도 재지 않았다.
