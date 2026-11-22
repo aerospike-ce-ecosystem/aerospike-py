@@ -148,16 +148,9 @@ CI integration matrix는 정확히 이 세 버전으로 고정되어 있습니�
 예제는 Aerospike CE 8.1.0.3을 고정해서 사용합니다. CI가 테스트하지 않는 버전을
 사용한다면 배포 전에 그 버전으로 integration suite를 실행하세요.
 
-## 0.15로 업그레이드할 때 무엇을 바꿔야 하나요?
+## 업그레이드 시 호환성 변경은 어디서 확인하나요?
 
-0.15는 Aerospike Rust Client 3.0으로 옮기면서 몇 가지 결과와 오류를 바꿉니다.
-`operate_ordered()`는 연산마다 항목 하나를 반환하고, `BatchRecord`에 다섯 번째
-field가 생겼고, write batch는 더 이상 스스로 retry하지 않고, 실패한 UDF는
-`UDFError`를 발생시키며, `aerospike_py.exp`로 만들지 않은 `filter_expression`은
-무시되는 대신 `InvalidArgError`를 발생시키고, shape이 `(1,)`인 NumPy field는
-blob으로 저장되는 등의
-변경이 있습니다. [0.15로 업그레이드](/docs/guides/migration-0.15) 가이드는
-체크리스트로 시작하고, 변경마다 변경 전후 예제를 보여 줍니다.
+[버전별 호환성 변경](/docs/guides/version-compatibility)에서 기존 함수의 호출 방식, 반환값, 저장 형식에 영향을 주는 변경을 확인할 수 있습니다.
 
 ## bug 신고 또는 기능 요청은 어떻게 하나요?
 

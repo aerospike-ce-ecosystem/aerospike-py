@@ -35,7 +35,7 @@ description: 공식 C 기반 Client와 aerospike-py의 API를 나란히 비교
 | Increment | `client.increment(key, bin, offset)` | `client.increment(key, bin, offset)` | 동일 |
 | Remove bin | `client.remove_bin(key, bin_names)` | `client.remove_bin(key, bin_names)` | 동일 |
 | Operate | `client.operate(key, ops)` | `client.operate(key, ops)` | 동일; `Record` 반환 |
-| Operate ordered | `client.operate_ordered(key, ops)` | `client.operate_ordered(key, ops)` | 동일; `OperateOrderedResult` 반환. 일부 결과가 다름, [알려진 차이](/docs/guides/migration-0.15#operate_ordered-returns-one-entry-per-operation) 참고 |
+| Operate ordered | `client.operate_ordered(key, ops)` | `client.operate_ordered(key, ops)` | 동일; `OperateOrderedResult` 반환. 일부 결과가 다름, [연산별 반환값](/docs/guides/version-compatibility#operate_ordered-returns-one-entry-per-operation) 참고 |
 
 ## Batch Operations
 

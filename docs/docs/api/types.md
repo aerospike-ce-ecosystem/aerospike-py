@@ -155,7 +155,7 @@ Returned by: `operate_ordered()`
 |-------|------|-------------|
 | `key` | `AerospikeKey \| None` | Record key |
 | `meta` | `RecordMetadata \| None` | Record metadata |
-| `ordered_bins` | `list[BinTuple]` | One entry per operation that answered, in request order; a bin answered twice appears twice. See [Upgrading to 0.15](../guides/migration-0.15.md#operate_ordered-returns-one-entry-per-operation) for when a value-less operation appears as `(bin, None)`. |
+| `ordered_bins` | `list[BinTuple]` | One entry per operation that answered, in request order; a bin answered twice appears twice. See [Ordered results](../guides/version-compatibility.md#operate_ordered-returns-one-entry-per-operation) for when a value-less operation appears as `(bin, None)`. |
 
 ### `BinTuple`
 

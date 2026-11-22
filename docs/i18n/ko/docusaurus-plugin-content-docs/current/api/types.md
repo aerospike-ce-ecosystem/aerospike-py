@@ -147,7 +147,7 @@ if result.meta is not None:
 |-------|------|-------------|
 | `key` | `AerospikeKey \| None` | record key |
 | `meta` | `RecordMetadata \| None` | record metadata |
-| `ordered_bins` | `list[BinTuple]` | 응답한 operation마다 항목 하나, 요청 순서대로. 두 번 응답한 bin은 두 번 나타납니다. 값이 없는 operation이 `(bin, None)`으로 나타나는 경우는 [0.15로 업그레이드](../guides/migration-0.15.md#operate_ordered-returns-one-entry-per-operation)를 참고하세요. |
+| `ordered_bins` | `list[BinTuple]` | 응답한 operation마다 항목 하나, 요청 순서대로. 두 번 응답한 bin은 두 번 나타납니다. 값이 없는 operation이 `(bin, None)`으로 나타나는 경우는 [연산별 반환값](../guides/version-compatibility.md#operate_ordered-returns-one-entry-per-operation)를 참고하세요. |
 
 ### `BinTuple`
 

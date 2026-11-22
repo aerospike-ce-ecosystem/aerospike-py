@@ -52,7 +52,7 @@ const sidebars: SidebarsConfig = {
         },
         'guides/troubleshooting',
         'guides/admin/error-handling',
-        'guides/migration-0.15',
+        'guides/version-compatibility',
         'guides/api-comparison',
         'guides/architecture',
       ],

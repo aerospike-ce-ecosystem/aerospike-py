@@ -191,7 +191,7 @@ custom `key_field` 사용 시 그 field 가 bin 으로도 저장되길 원하면
 | Float | `f` | `"f4"`, `"f8"` | `Float(f64)` |
 | Fixed bytes | `S` | `"S8"`, `"S16"` | `Blob(bytes)` 또는 `String` |
 | Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` |
-| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` — shape `(1,)`도 마찬가지이며, 0.14.x는 이를 scalar로 저장했습니다. Writer를 바꾸기 전에 [0.15로 업그레이드](../migration-0.15.md#one-element-vectors-are-stored-as-a-blob)를 참고하세요 |
+| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` — shape `(1,)`도 마찬가지이며, 0.14.x는 이를 scalar로 저장했습니다. Writer를 바꾸기 전에 [원소가 하나인 벡터](../version-compatibility.md#one-element-vectors-are-stored-as-a-blob)를 참고하세요 |
 
 :::tip[지원 안 되는 dtype]
 

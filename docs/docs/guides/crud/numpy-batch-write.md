@@ -191,7 +191,7 @@ The same dtype kinds supported by `batch_read().to_numpy(dtype)` are supported f
 | Float | `f` | `"f4"`, `"f8"` | `Float(f64)` |
 | Fixed bytes | `S` | `"S8"`, `"S16"` | `Blob(bytes)` or `String` |
 | Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` |
-| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` — also for shape `(1,)`, which 0.14.x stored as a scalar; see [Upgrading to 0.15](../migration-0.15.md#one-element-vectors-are-stored-as-a-blob) before switching writers |
+| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` — also for shape `(1,)`, which 0.14.x stored as a scalar; see [One-element vectors](../version-compatibility.md#one-element-vectors-are-stored-as-a-blob) before switching writers |
 
 :::tip[Unsupported dtypes]
 

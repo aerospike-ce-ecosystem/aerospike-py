@@ -534,7 +534,7 @@ _, meta, bins = await client.operate(key, ops)
 
 ### `operate_ordered(key, ops, meta=None, policy=None)`
 
-`operate`와 동일하지만 결과를 [`OperateOrderedResult`](types.md#operateorderedresult) NamedTuple의 `ordered_bins` 필드에 `BinTuple(name, value)` 리스트로 반환합니다. 응답한 operation마다 항목 하나가 요청 순서대로 들어가며, 두 번 응답한 bin은 두 번 나타납니다. 값이 없는 operation이 `(bin, None)`으로 나타나는 경우는 [0.15로 업그레이드](../guides/migration-0.15.md#operate_ordered-returns-one-entry-per-operation)를 참고하세요. 빈 bin 이름으로 읽으면 레코드 전체를 반환합니다.
+`operate`와 동일하지만 결과를 [`OperateOrderedResult`](types.md#operateorderedresult) NamedTuple의 `ordered_bins` 필드에 `BinTuple(name, value)` 리스트로 반환합니다. 응답한 operation마다 항목 하나가 요청 순서대로 들어가며, 두 번 응답한 bin은 두 번 나타납니다. 값이 없는 operation이 `(bin, None)`으로 나타나는 경우는 [연산별 반환값](../guides/version-compatibility.md#operate_ordered-returns-one-entry-per-operation)를 참고하세요. 빈 bin 이름으로 읽으면 레코드 전체를 반환합니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>

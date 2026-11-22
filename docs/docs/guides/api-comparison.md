@@ -35,7 +35,7 @@ This page compares the **official C-based client** (`aerospike` on PyPI) with th
 | Increment | `client.increment(key, bin, offset)` | `client.increment(key, bin, offset)` | Same |
 | Remove bin | `client.remove_bin(key, bin_names)` | `client.remove_bin(key, bin_names)` | Same |
 | Operate | `client.operate(key, ops)` | `client.operate(key, ops)` | Same; returns `Record` |
-| Operate ordered | `client.operate_ordered(key, ops)` | `client.operate_ordered(key, ops)` | Same; returns `OperateOrderedResult`. A few results differ, see [known differences](/docs/guides/migration-0.15#operate_ordered-returns-one-entry-per-operation) |
+| Operate ordered | `client.operate_ordered(key, ops)` | `client.operate_ordered(key, ops)` | Same; returns `OperateOrderedResult`. A few results differ, see [Ordered results](/docs/guides/version-compatibility#operate_ordered-returns-one-entry-per-operation) |
 
 ## Batch Operations
 

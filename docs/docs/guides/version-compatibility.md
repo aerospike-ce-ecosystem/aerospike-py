@@ -1,18 +1,21 @@
 ---
-title: Upgrading to 0.15
-sidebar_label: Upgrading to 0.15
-sidebar_position: 4
-slug: /guides/migration-0.15
-description: What changes between aerospike-py 0.14.x and 0.15, with a before/after example for each change and what to do about it.
+title: Compatibility by version
+slug: /guides/version-compatibility
+toc_max_heading_level: 2
+description: Check how upgrading aerospike-py affects existing calls, return values and stored data.
 ---
 
-aerospike-py 0.15 moves the native core from Aerospike Rust client 2.2 to 3.0. Most code keeps working unchanged. This page lists every change that can break code written for 0.14.x, or change what it observes, with an example and what to do.
+Check how upgrading aerospike-py affects existing calls, return values and stored data.
 
-Every example on this page was run with 0.14.x and with 0.15 against a single-node Aerospike CE 8.2 server. The output shown is what each version printed; long messages are shortened with `...`. Unless an example says otherwise, `client` is a connected sync `Client` and `aerospike_py` is imported.
+[0.14.x → 0.15](#v0-15) · [0.13.0 → 0.14.0](#v0-14)
 
-## Checklist
+## 0.14.x → 0.15 {#v0-15}
 
-One line per breaking change. Follow the link for the details.
+The 0.15 release candidate uses Aerospike Rust client 3.0. Choose a feature below to compare its behavior in 0.14.x and 0.15 and see how to update your code.
+
+Examples use both versions against a single Aerospike CE 8.2 node. Unless specified, `client` is a connected synchronous client.
+
+### Checklist {#checklist}
 
 | If your code... | then read |
 |---|---|
@@ -36,13 +39,13 @@ One line per breaking change. Follow the link for the details.
 
 A query with more than one `where()` predicate raises `InvalidArgError`, as 0.14.x already did; see [Queries](#queries-take-one-where-predicate).
 
-## Minimum server version
+### Minimum server version
 
 0.15 is built on Aerospike Rust client 3.0 (0.14.x used 2.2). With Rust client 3.0 the minimum supported server is **6.4**.
 
 **What to do:** upgrade any server older than 6.4 before you upgrade the client. The [FAQ](/docs/faq#what-aerospike-server-versions-are-supported) lists the server versions the integration tests run against.
 
-## `operate_ordered()` returns one entry per operation
+### `operate_ordered()` returns one entry per operation
 
 In 0.14.x `operate_ordered()` returned one entry per **bin**. A bin that two operations answered appeared once, with a list of both values, and the entries did not follow the order of the operations (their order changed from run to run). 0.15 returns what the official Python client returns: one `(bin, value)` entry per **operation** that answered, in request order. A bin answered twice appears twice.
 
@@ -127,7 +130,7 @@ print(record.bins)
 - If you expected a list for a bin answered twice, collect the entries yourself: `[b.value for b in result.ordered_bins if b.name == "c"]`.
 - If your request contains a map, bit or HLL operation and you do not want the `(bin, None)` entries, drop them: `[b for b in result.ordered_bins if b.value is not None]`.
 
-## Queries take one `where()` predicate
+### Queries take one `where()` predicate
 
 A query runs with one secondary-index predicate. Calling `where()` a second time on the same query raises `InvalidArgError` when the query runs (`results()`, `foreach()` or iteration). 0.14.x raised `InvalidArgError` at the same point, so working code is not affected; only the message changed:
 
@@ -140,9 +143,9 @@ InvalidArgError: Invalid argument: a query takes at most one where() predicate, 
 
 Rust client 3.0 would silently keep only the last predicate, so 0.15 checks this itself. To narrow a query further, keep one predicate and put the other conditions in a filter expression (`policy={"filter_expression": ...}`).
 
-## Batch results
+### Batch results
 
-### What `BatchRecord.result` means
+#### What `BatchRecord.result` means
 
 `BatchRecord.result` is now:
 
@@ -199,7 +202,7 @@ How to tell the outcomes of a row apart:
 
 A write the server refused with a code worth a retry, `KEY_BUSY` (14), `DEVICE_OVERLOAD` (18) or `PARTITION_UNAVAILABLE` (11), is an answer: the row carries that code with `in_doubt == False`, and the call returns normally, also for a batch of one key. This is the same as in 0.14.x. When a write batch is sent with `max_retries > 0`, four more outcomes are reported in doubt; see [Rows a second send may have answered](#rows-a-second-send-may-have-answered).
 
-### A fifth field: `error_type`
+#### A fifth field: `error_type`
 
 `BatchRecord` is a named tuple with five fields now: `key`, `result`, `record`, `in_doubt`, `error_type`. Code that unpacks it into exactly four names breaks:
 
@@ -217,7 +220,7 @@ ValueError: too many values to unpack (expected 4)
 
 **What to do:** use the attributes (`br.result`, `br.in_doubt`, `br.error_type`), or unpack five names.
 
-### A batch call that fails as a whole keeps its rows
+#### A batch call that fails as a whole keeps its rows
 
 A batch call that fails as a whole still raises an exception, and the exception now carries the rows: `exc.partial_result` is a `BatchWriteResult` with one `BatchRecord` per requested record, in request order. Records that other nodes answered keep their results; the others say why they have none. This holds for every batch method: `batch_read`, `batch_write`, `batch_write_numpy`, `batch_operate`, `batch_remove` and `batch_apply`. For every other failure `partial_result` is `None`.
 
@@ -260,7 +263,7 @@ except aerospike_py.AerospikeError as exc:
     unsure = [br.key for br in exc.partial_result.batch_records if br.in_doubt]
 ```
 
-## Write batches no longer retry automatically
+### Write batches no longer retry automatically
 
 In 0.14.x every batch call started from a policy with `max_retries = 2`. When the answer to a batch was lost, the Rust client sent it again, up to twice, also for increments and UDF calls, and the server applied each copy. In 0.15 the default depends on what the batch does:
 
@@ -317,13 +320,13 @@ runs: 1
 
 **What to do:** if a write batch must be re-sent by the client, ask for it: `policy={"max_retries": 2}`. With that policy the same example prints `runs: 3` on 0.15. Do this only when applying the batch twice gives the same result as applying it once: full-record `batch_write` without `CREATE_ONLY` or a generation check, `batch_remove`, reads. Do not do it for increments, appends, list or map changes that add elements, most UDFs, `CREATE_ONLY` writes (the second copy fails with "record exists" for a write that went through) or generation-checked writes. For `batch_write` and `batch_write_numpy`, prefer `retry=N`, described below.
 
-### Rows a second send may have answered
+#### Rows a second send may have answered
 
 With `max_retries > 0` on a write, the Rust client sends a node's share of a batch again when its answer is lost. If the first send was applied, the second one meets its own work: a re-sent delete finds no record, a re-sent filtered write no longer matches, a re-sent UDF fails on what the first run left behind. The Rust client does not say whether a row was sent twice, so a row of `batch_write`, `batch_operate` (with a write), `batch_remove` or `batch_apply` that ends in `KEY_NOT_FOUND` (2), `FILTERED_OUT` (27) or `UDF_BAD_RESPONSE` (100) is reported with `in_doubt == True`: the call does not know whether it changed the record. So is a row with `PARTITION_UNAVAILABLE` (11) that the client gave the row itself, because it found no node for the record when the node's share was due to be sent again (the node was dropped from the cluster meanwhile, or the client was closed): the first send may have been applied. The call still returns normally with such rows. A row that a server refused with `PARTITION_UNAVAILABLE` at the first send is unchanged, `in_doubt == False`. `remove()` that raises `RecordNotFound` under such a policy carries `in_doubt == True` too.
 
 With the default policy (`max_retries` is `0` for every write) nothing changes, and reads (`batch_read`) are never in doubt. See [Error Handling](/docs/guides/error-handling#re-sent-writes-and-in_doubt) for an example.
 
-### The `retry` argument of `batch_write`
+#### The `retry` argument of `batch_write`
 
 `batch_write(records, retry=N)` and `batch_write_numpy(..., retry=N)` run the binding's own retry loop. In 0.15 it:
 
@@ -357,9 +360,9 @@ retry=2 and policy['max_retries']=1 were both given; they would multiply into up
 
 **What to do:** remove `max_retries` from `batch_write` and `batch_write_numpy` calls that pass `retry=N`.
 
-## Exceptions
+### Exceptions
 
-### Every exception says what happened
+#### Every exception says what happened
 
 Every `AerospikeError` carries four attributes. 0.14.x had only `result_code`.
 
@@ -397,7 +400,7 @@ UDFError 100 UdfBadResponse
 InvalidArgError -1 InvalidArgument
 ```
 
-### A failing UDF raises `UDFError`
+#### A failing UDF raises `UDFError`
 
 A UDF the server could not run raised a plain `ClientError` with `result_code == -1` in 0.14.x, and was logged as a possible bug in aerospike-py. In 0.15 it raises `UDFError` (a `ServerError`) with `result_code == 100` (`AEROSPIKE_ERR_UDF`), the code a failed `batch_apply` row has always reported.
 
@@ -405,13 +408,13 @@ A UDF failure is an answer from the server, not a lost answer: the server could 
 
 **What to do:** catch `aerospike_py.UDFError` (or `ServerError`) around `apply()`. An `except ClientError` no longer catches a UDF failure.
 
-### An unknown namespace raises `InvalidArgError`
+#### An unknown namespace raises `InvalidArgError`
 
 A key whose namespace the cluster does not have raised `AerospikeTimeoutError` for a single-record command and `ClusterError` for a batch call in 0.14.x. Both now raise `InvalidArgError` (`result_code == -1`, `error_type == "InvalidArgument"`). When the batch call does return because other keys could be sent, the row for such a key carries `result == 20` and `error_type == "InvalidNamespace"` (0.14.x: `11`).
 
 **What to do:** if you caught `ClusterError` or `AerospikeTimeoutError` to handle a mistyped or missing namespace, catch `InvalidArgError`.
 
-### Metrics use the same names
+#### Metrics use the same names
 
 The Prometheus `error_type` label of `db_client_operation_duration_seconds` and the OpenTelemetry `error.type` attribute come from the same classification as `exc.error_type`, so a dashboard and an `except` clause name a failure the same way:
 
@@ -419,11 +422,11 @@ The Prometheus `error_type` label of `db_client_operation_duration_seconds` and 
 db_client_operation_duration_seconds_count{...,db_operation_name="get",error_type="KeyNotFoundError"} 1
 ```
 
-### Messages changed
+#### Messages changed
 
 Many exception messages read differently, for example `AEROSPIKE_ERR (2): Key not found [node=...]` where 0.14.x said `AEROSPIKE_ERR (2): Server error: KeyNotFoundError, In Doubt: false, Node: ...`. Do not match on message text; use the exception class, `result_code` and `error_type`.
 
-## Policy values are checked
+### Policy values are checked
 
 An `exists`, `gen`, `commit_level`, `replica`, `read_mode_ap` or `expected_duration` value that is not one of the `POLICY_*` / `QUERY_DURATION_*` constants now raises `InvalidArgError` before anything is sent. In 0.14.x an unknown value fell back to the default: `exists=9` became a plain update and `gen=9` turned the generation check off.
 
@@ -445,13 +448,13 @@ invalid exists value: 9 (valid: POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONL
 
 **What to do:** use the constants, for example `aerospike_py.POLICY_EXISTS_CREATE_ONLY`.
 
-### A `filter_expression` that is not an expression is refused
+#### A `filter_expression` that is not an expression is refused
 
 A `filter_expression` that is not an expression built with `aerospike_py.exp` (a string, a number, a list, a dict) now raises `InvalidArgError` before anything is sent: `filter_expression must be an expression built with aerospike_py.exp, got str`. Up to 0.14.x such a value was dropped without a word and the call ran **unfiltered**: `client.put(key, bins, policy={"filter_expression": "v == 1"})` wrote the record unconditionally. `None` still means "no filter".
 
 **What to do:** build the filter with `aerospike_py.exp`, for example `exp.eq(exp.int_bin("v"), exp.int_val(1))`. A call that raises here ran without its filter on 0.14.x; check what it wrote or returned.
 
-### Other values refused before anything is sent
+#### Other values refused before anything is sent
 
 - `max_retries = 2**64 - 1` raises `InvalidArgError` (`max_retries is too large: ...`). Rust client 3.0 would make no attempt at all with that value, so the call would fail with "Timeout after 0 tries" without being sent.
 - An integer that does not fit its field (`retry=-1`, `total_timeout=-1`, `ttl=2**70`) raises `OverflowError`. It is not logged as a possible bug in aerospike-py.
@@ -460,7 +463,7 @@ A `filter_expression` that is not an expression built with `aerospike_py.exp` (a
 
 `batch_write(retry=2**32 - 1)` reports `retry.max_attempts == 2**32 - 1`: the count saturates instead of wrapping to `0`.
 
-## Records with a language-specific blob are readable
+### Records with a language-specific blob are readable
 
 Old clients stored a value that has no Aerospike type with their own language's serializer, under a particle type of its own: `JAVA_BLOB` (7), `CSHARP_BLOB` (8), `PYTHON_BLOB` (9, a pickle), `RUBY_BLOB` (10), `PHP_BLOB` (11), `ERLANG_BLOB` (12). Clusters that have been running long enough still hold such records. With 0.14.x, any read of a record with such a bin raised `RustPanicError`, so the whole record was unreadable. In 0.15 the bin is returned as `bytes` holding the raw payload, the other bins are read normally, and the first such value of each type is logged as a warning (later ones at debug level, so a scan over old data does not flood the log). `get()`, `batch_read()` and scans all behave this way (issue #280).
 
@@ -492,11 +495,11 @@ Writing the bytes back with `put()` stores an ordinary blob; reading that bin af
 
 **What to do:** code that caught `RustPanicError` to skip such records now receives them. If you need the value, decode the bytes yourself. For `PYTHON_BLOB` that is `pickle.loads(...)`, and only for data you trust: unpickling can run code.
 
-## NumPy batch reads and writes
+### NumPy batch reads and writes
 
 The rules below hold for the sync and the async client alike.
 
-### `batch_write_numpy()` reads the layout from the array
+#### `batch_write_numpy()` reads the layout from the array
 
 The signature is now `batch_write_numpy(data, namespace, set_name, _dtype=None, key_field="_key", policy=None, retry=0)`. The layout comes from `data.dtype`. In 0.14.x `_dtype` was required, and the array's bytes were read through it even when it did not match the array. In 0.15 a `_dtype` that differs from `data.dtype` raises `ValueError` before the first row is sent.
 
@@ -525,7 +528,7 @@ The rows are read from `numpy.asarray(data)`: an array subclass such as `numpy.r
 
 **What to do:** nothing, if the dtype you pass is `data.dtype`. Otherwise drop the argument, or convert the array with `data.astype(...)` first.
 
-### dtypes are checked in both directions
+#### dtypes are checked in both directions
 
 `batch_write_numpy()` and `to_numpy()` validate the dtype before any data is written or filled. `to_numpy(dtype)` accepts whatever `numpy.dtype(...)` accepts and lays the rows out by the dtype NumPy makes of it. They reject:
 
@@ -546,13 +549,13 @@ In 0.14.x an object member nested in a structured field was written to the serve
 TypeError: dtype field 's' holds Python objects ([('x', '<i4'), ('o', 'O')]): an object member nested inside a structured ...
 ```
 
-### The key field is one value
+#### The key field is one value
 
 The key field of `batch_write_numpy()` (`_key`, or the field named by `key_field`) must be one value: a scalar integer or a fixed-width bytes field. A sub-array, including a one-element `("_key", "i8", (1,))`, or a nested structured field raises `TypeError` before anything is written: `the key field '_key' must be a scalar integer or bytes field, not a sub-array or a nested structure; ...`. 0.14.x accepted `("_key", "i8", (1,))` and wrote the integer key.
 
 **What to do:** declare the key as `("_key", "i8")`. Sub-array **bin** fields are not affected: they are vectors, stored as blobs (see [One-element vectors](#one-element-vectors-are-stored-as-a-blob)).
 
-### Vector length and float range
+#### Vector length and float range
 
 A numeric sub-array field is a vector. On read it takes a blob of exactly the field's size in bytes; any other length is an error. A scalar fills only a one-element field. A finite value too large for an `f2` or `f4` field raises `OverflowError`; NaN and infinities are kept. In 0.14.x a shorter blob was padded with zeros, a longer one was cut off, a scalar filled the first element of a longer vector, and an overflowing value became `inf`, all without an error. Fixed-width bytes fields (`S<N>`) keep their padding and truncation rules.
 
@@ -580,7 +583,7 @@ OverflowError: float overflow: value 70000 does not fit in f16 for field 'big'
 
 **What to do:** make the read dtype match what is stored. If a bin really holds values of different lengths, read it without `to_numpy()`.
 
-### One-element vectors are stored as a blob
+#### One-element vectors are stored as a blob
 
 :::danger[Fields of shape `(1,)`: upgrade readers first; once writers switch, there is no way back to 0.14.x]
 
@@ -624,7 +627,7 @@ TypeError: cannot write bytes to numeric field 'score'
 [(array([1.5], dtype=float32),)]
 ```
 
-### Rows and keys of `NumpyBatchRecords`
+#### Rows and keys of `NumpyBatchRecords`
 
 Row `i` of the result is request `i`, hit or miss, as before. Only real user keys go into the key index used by `get()` and `in`. In 0.14.x a row requested by digest only was indexed under an invented key (`"__no_user_key_<i>__"` in the native conversion, the row number `i` in the pure-Python one, which could hide a real integer key equal to that number). Such a row is now reachable by position only. A user key requested twice points at its last row, as before.
 
@@ -645,7 +648,7 @@ print(result.batch_records["v"].tolist(), "__no_user_key_0__" in result, result.
 [1611, 1000] False 1000
 ```
 
-### Length of the `batch_read()` handle
+#### Length of the `batch_read()` handle
 
 `len(handle)` on the `LazyBatchRecords` that `batch_read()` returns is now the number of distinct keys in its mapping, so it always equals `len(handle.to_dict())`. In 0.14.x it counted successful rows with a user key, which was too high when a key was requested twice or from two sets. `found_count()` counts successful rows, and `to_list()` has one slot per request, as before.
 
@@ -667,9 +670,9 @@ print(len(handle), len(handle.to_dict()), handle.found_count(), len(handle.to_li
 
 **What to do:** use `found_count()` for "how many records came back" and `len(handle)` for "how many keys the mapping has".
 
-## Async queries
+### Async queries
 
-### Cancelling a query stops it
+#### Cancelling a query stops it
 
 `AsyncQuery.results()` and `AsyncQuery.foreach()` used to run the query in a worker thread. Cancelling the task raised `CancelledError` at once while the thread went on reading records and calling the callback to the end of the scan. In 0.15 both read the query's record stream by awaiting it, so cancelling the task stops the query on the client and on the server.
 
@@ -706,7 +709,7 @@ callbacks when CancelledError was raised: 100, half a second later: 100
 
 (`client` is an `AsyncClient` here; the set holds 5,000 records.)
 
-### `async for` and `query.stream()`
+#### `async for` and `query.stream()`
 
 An `AsyncQuery` can now be iterated: `async for record in query`. `query.stream(policy)` returns the same thing, an `AsyncRecordStream`, which is also an async context manager and has `close()`. Nothing is sent before the first record is asked for. At most `record_queue_size` records (default 1024) per query wait in the client, whatever the pace of the consumer (plus the batch being handed to Python and one record for each node whose reader is waiting for room), and a consumer may pause for longer than `socket_timeout`: the client fetches the rest again when reading resumes, without repeating a record. Several tasks may iterate the same stream; each record goes to one of them. See the [Query guide](/docs/guides/query-scan#async-streaming).
 
@@ -727,7 +730,7 @@ TypeError: 'async for' requires an object with __aiter__ method, got AsyncQuery
 (iterates)
 ```
 
-### `foreach()` refuses a coroutine function
+#### `foreach()` refuses a coroutine function
 
 `AsyncQuery.foreach()` calls its callback from a worker thread and cannot await it. In 0.14.x an `async def` callback created one coroutine per record that nobody awaited (and, since a coroutine is not `False`, never stopped the scan). 0.15 raises `TypeError`:
 
@@ -747,7 +750,7 @@ TypeError: foreach() calls its callback from a worker thread and cannot await it
 
 **What to do:** to await something per record, use `async for record in query`.
 
-### Leaving a scan early stops it on the server
+#### Leaving a scan early stops it on the server
 
 This applies to the sync client too. In 0.14.x, when you stopped reading a query early, the client dropped it, but the server went on with the scan and held its connection until the socket timeout (30 s by default). In 0.15 every way out closes the query on the server: a `foreach()` callback returning `False` or raising, `break` out of `async for`, `close()`, leaving `async with`, cancellation, an error in the stream, and garbage collection of the stream.
 
@@ -760,7 +763,7 @@ Measured on the server's own job list (`query-show`), 100,000 records:
 
 One case is different: a rate-limited scan (`records_per_second`) is sent in blocks that are far apart, and it stays listed on the server until its next block is due. Measured at 50 records per second: 45 seconds, the same with a `socket_timeout` of 2000, 30000 (the default) or 0. `socket_timeout` does not bound it.
 
-## `apply()` counts against `max_concurrent_operations`
+### `apply()` counts against `max_concurrent_operations`
 
 With `max_concurrent_operations` set, `batch_apply()` took one of the slots, but the single-record `apply()` did not, so UDF calls passed the limit. In 0.15 `apply()` waits for a slot like every other record command and raises `BackpressureError` when `operation_queue_timeout_ms` runs out.
 
@@ -798,13 +801,13 @@ The limit counts single-record commands (including `apply()`) and batch commands
 
 **What to do:** if you set `max_concurrent_operations`, size it with UDF calls included, and handle `BackpressureError` around `apply()`.
 
-## Node restarts with a new node id
+### Node restarts with a new node id
 
 After a node restarts **with a new node id on the same address**, for example when its container is restarted, a long-lived client needs about one cluster tend interval (about 1 second by default) before it routes to that node again. During that time a command can raise `ClusterError`. With 0.14.x this took a few milliseconds. Rust client 3.0 drops a node whose name no longer matches and learns the new one on the next tend. A node that keeps its id across the restart is served at once, as before.
 
 **What to do:** if you restart nodes in place (rolling container restarts, tests that restart the server), give fixed node ids to the nodes, or retry `ClusterError` for about a second after a restart.
 
-## Memory under concurrent batch load
+### Memory under concurrent batch load
 
 A client process uses more memory under concurrent batch load with 0.15. Process memory (RSS) for the same workload on both versions:
 
@@ -821,7 +824,7 @@ In both versions the memory climbs in steps that become rarer and then levels of
 
 Throughput, peak memory and latency can move in different directions. Measure tail latency and peak RSS under your usual record width and concurrency before sizing workers.
 
-## Logging
+### Logging
 
 aerospike-py logs an error with "This error may be a bug in aerospike-py" and a command for filing an issue when it meets an error it does not expect. 0.14.x also did this for ordinary failures: an argument the library refuses (`TypeError`, `ValueError`), an exception raised by your own `foreach` callback, a failing UDF, a node going down, a client timeout. 0.15 raises these to the caller without that log line. Anything else that is not an `AerospikeError` is still logged.
 
@@ -846,7 +849,7 @@ raised: Invalid key: Invalid argument: Data type is not supported as Key value.
 raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Key value.
 ```
 
-## Other changes
+### Other changes
 
 - NumPy routing fields `_namespace` and `_set` must be scalar fixed-width UTF-8 bytes. Invalid layouts and invalid UTF-8 are rejected before the batch is sent. Raw void (`V<N>`) keys retain trailing zero bytes; padded string (`S<N>`) keys still trim trailing zeros. For example, an older writer stored a `V2` key containing `b"K\x00"` under the digest of `b"K"`. Migrate that record before switching writers if the new and old keys should name the same record.
 - In-doubt writes conditioned on a filter, specifying a relative TTL or removing only bins are excluded from binding-level retries. Inspect the returned row and its uncertainty before deciding whether to write again.
@@ -855,3 +858,9 @@ raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Ke
 - The client `timeout` and `idle_timeout` keep their 30-second defaults. Rust client 3.0 lowered its own defaults; aerospike-py sets the old values explicitly.
 - A map bin is read back with its keys in the order the server returns them, the same on every read (on server 8.2: sorted by key, integers before strings). 0.14.x returned the keys of the same map in a different order on each read. Code that compares dicts is not affected; code that relied on iteration order was already unreliable.
 - `meta.ttl` is computed in whole seconds, as the official Python client does. A record read right after it was written with `ttl=1000` reports `1000`; 0.14.x reported `999` nearly every time (398 of 400 reads in a measurement, and 0.15 reported `1000` in 398 of 400). When the client's clock is behind the server's, even by milliseconds, the value can be one second more than was set. Do not assert `meta.ttl <= ttl` exactly; allow a second.
+
+## 0.13.0 → 0.14.0 {#v0-14}
+
+Check numeric flags passed to list sort operations. In 0.13.0 an unknown flag selected the default sort. In 0.14.0 executing the operation raises `ValueError` for that flag. Use `LIST_SORT_DEFAULT` (0) for the default sort or `LIST_SORT_DROP_DUPLICATES` (2) to remove duplicates.
+
+In 0.14.0 exceptions expose the server code through `result_code`. For example, when `remove()` targets a missing record, the `RecordNotFound` exception carries `result_code == 2`. [0.14.0 release notes](https://github.com/aerospike-ce-ecosystem/aerospike-py/releases/tag/v0.14.0)

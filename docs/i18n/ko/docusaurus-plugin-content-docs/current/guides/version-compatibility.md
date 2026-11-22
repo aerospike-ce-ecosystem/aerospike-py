@@ -1,18 +1,21 @@
 ---
-title: 0.15로 업그레이드
-sidebar_label: 0.15로 업그레이드
-sidebar_position: 4
-slug: /guides/migration-0.15
-description: aerospike-py 0.14.x와 0.15 사이에 바뀐 점을 변경 전후 예제와 함께 정리하고, 무엇을 고쳐야 하는지 설명합니다.
+title: 버전별 호환성 변경
+slug: /guides/version-compatibility
+toc_max_heading_level: 2
+description: 버전을 올릴 때 기존 호출 코드, 반환값, 저장 데이터에 영향을 주는 변경을 확인하세요.
 ---
 
-aerospike-py 0.15는 native core를 Aerospike Rust client 2.2에서 3.0으로 옮깁니다. 대부분의 코드는 그대로 동작합니다. 이 페이지는 0.14.x용으로 작성한 코드를 깨뜨리거나 코드가 관찰하는 결과를 바꾸는 변경을 모두 모아, 변경마다 예제와 대응 방법을 설명합니다.
+버전을 올릴 때 기존 호출 코드, 반환값, 저장 데이터에 영향을 주는 변경을 확인하세요.
 
-이 페이지의 예제는 모두 단일 node Aerospike CE 8.2 server에서 0.14.x와 0.15로 각각 실행했습니다. 출력은 각 버전이 실제로 출력한 내용이며, 긴 메시지는 `...`로 줄였습니다. 예제에서 따로 언급하지 않으면 `client`는 연결된 sync `Client`이고 `aerospike_py`는 import되어 있습니다.
+[0.14.x → 0.15](#v0-15) · [0.13.0 → 0.14.0](#v0-14)
 
-## 체크리스트 {#checklist}
+## 0.14.x → 0.15 {#v0-15}
 
-깨지는 변경마다 한 줄씩 적었습니다. 자세한 내용은 링크를 따라가세요.
+0.15 후보판은 Aerospike Rust 클라이언트 3.0을 사용합니다. 아래 표에서 사용하는 기능을 선택하면 0.14.x와 0.15의 동작과 필요한 코드 변경을 비교할 수 있습니다.
+
+예제는 단일 노드 Aerospike CE 8.2에서 두 버전으로 실행했습니다. `client`는 연결된 동기 클라이언트입니다.
+
+### 코드 점검표 {#checklist}
 
 | 코드가 다음에 해당하면 | 읽을 곳 |
 |---|---|
@@ -36,13 +39,13 @@ aerospike-py 0.15는 native core를 Aerospike Rust client 2.2에서 3.0으로 �
 
 `where()` predicate가 둘 이상인 query는 0.14.x와 마찬가지로 `InvalidArgError`를 발생시킵니다. [Query](#queries-take-one-where-predicate)를 참고하세요.
 
-## 최소 server 버전 {#minimum-server-version}
+### 최소 server 버전 {#minimum-server-version}
 
 0.15는 Aerospike Rust client 3.0을 기반으로 합니다(0.14.x는 2.2). Rust client 3.0에서 지원하는 최소 server 버전은 **6.4**입니다.
 
 **대응:** 6.4보다 오래된 server는 client를 업그레이드하기 전에 먼저 업그레이드하세요. Integration test가 실행되는 server 버전은 [FAQ](/docs/faq#what-aerospike-server-versions-are-supported)에 있습니다.
 
-## `operate_ordered()`: 연산마다 한 항목 {#operate_ordered-returns-one-entry-per-operation}
+### `operate_ordered()`: 연산마다 한 항목 {#operate_ordered-returns-one-entry-per-operation}
 
 0.14.x의 `operate_ordered()`는 **bin**마다 항목 하나를 반환했습니다. 두 연산이 응답한 bin은 두 값을 담은 list로 한 번만 나타났고, 항목 순서도 연산 순서를 따르지 않았습니다(실행할 때마다 순서가 달라졌습니다). 0.15는 공식 Python client와 같은 결과를 반환합니다. 응답한 **연산**마다 `(bin, value)` 항목 하나를 요청 순서대로 돌려주며, 두 번 응답한 bin은 두 번 나타납니다.
 
@@ -127,7 +130,7 @@ print(record.bins)
 - 두 번 응답한 bin을 list로 받고 싶다면 직접 모으세요: `[b.value for b in result.ordered_bins if b.name == "c"]`.
 - 요청에 map, bit, HLL 연산이 있고 `(bin, None)` 항목이 필요 없다면 걸러 내세요: `[b for b in result.ordered_bins if b.value is not None]`.
 
-## Query는 `where()` predicate를 하나만 받습니다 {#queries-take-one-where-predicate}
+### Query는 `where()` predicate를 하나만 받습니다 {#queries-take-one-where-predicate}
 
 Query는 secondary-index predicate 하나로 실행됩니다. 같은 query에서 `where()`를 두 번 호출하면 query를 실행할 때(`results()`, `foreach()`, 순회) `InvalidArgError`가 발생합니다. 0.14.x도 같은 시점에 `InvalidArgError`를 발생시켰으므로 동작하던 코드는 영향을 받지 않고, 메시지만 바뀌었습니다.
 
@@ -140,9 +143,9 @@ InvalidArgError: Invalid argument: a query takes at most one where() predicate, 
 
 Rust client 3.0은 마지막 predicate 하나만 조용히 남기기 때문에 0.15가 직접 검사합니다. Query를 더 좁히려면 predicate는 하나만 두고 나머지 조건은 filter expression(`policy={"filter_expression": ...}`)으로 표현하세요.
 
-## Batch 결과 {#batch-results}
+### Batch 결과 {#batch-results}
 
-### `BatchRecord.result`의 의미
+#### `BatchRecord.result`의 의미
 
 이제 `BatchRecord.result`는 다음과 같습니다.
 
@@ -199,7 +202,7 @@ Row의 결과를 구분하는 방법:
 
 Server가 retry할 만한 code인 `KEY_BUSY`(14), `DEVICE_OVERLOAD`(18), `PARTITION_UNAVAILABLE`(11)로 거절한 write는 응답입니다. 그 row는 해당 code와 `in_doubt == False`를 갖고, key가 하나뿐인 batch에서도 호출은 정상적으로 반환됩니다. 0.14.x와 같습니다. Write batch를 `max_retries > 0`으로 보내면 결과 네 가지가 더 in doubt로 보고됩니다. [두 번째 전송이 응답했을 수 있는 row](#rows-a-second-send-may-have-answered)를 참고하세요.
 
-### 다섯 번째 field: `error_type`
+#### 다섯 번째 field: `error_type`
 
 이제 `BatchRecord`는 field가 다섯 개인 named tuple입니다: `key`, `result`, `record`, `in_doubt`, `error_type`. 정확히 이름 네 개로 unpack하는 코드는 깨집니다.
 
@@ -217,7 +220,7 @@ ValueError: too many values to unpack (expected 4)
 
 **대응:** attribute(`br.result`, `br.in_doubt`, `br.error_type`)로 접근하거나 이름 다섯 개로 unpack하세요.
 
-### 전체가 실패한 batch 호출도 row를 남깁니다 {#a-batch-call-that-fails-as-a-whole-keeps-its-rows}
+#### 전체가 실패한 batch 호출도 row를 남깁니다 {#a-batch-call-that-fails-as-a-whole-keeps-its-rows}
 
 전체가 실패한 batch 호출은 여전히 exception을 발생시키지만, 이제 exception이 row를 담고 있습니다. `exc.partial_result`는 요청한 record마다 `BatchRecord` 하나를 요청 순서대로 담은 `BatchWriteResult`입니다. 다른 node가 응답한 record는 결과를 그대로 갖고, 나머지는 결과가 없는 이유를 알려 줍니다. 모든 batch method에 적용됩니다: `batch_read`, `batch_write`, `batch_write_numpy`, `batch_operate`, `batch_remove`, `batch_apply`. 그 밖의 실패에서는 `partial_result`가 `None`입니다.
 
@@ -260,7 +263,7 @@ except aerospike_py.AerospikeError as exc:
     unsure = [br.key for br in exc.partial_result.batch_records if br.in_doubt]
 ```
 
-## Write batch는 더 이상 자동으로 retry하지 않습니다 {#write-batches-no-longer-retry-automatically}
+### Write batch는 더 이상 자동으로 retry하지 않습니다 {#write-batches-no-longer-retry-automatically}
 
 0.14.x에서는 모든 batch 호출이 `max_retries = 2`인 policy에서 시작했습니다. Batch의 응답이 유실되면 Rust client가 최대 두 번까지 다시 보냈고, increment와 UDF 호출도 예외가 아니었으며, server는 보낸 만큼 적용했습니다. 0.15에서는 batch가 하는 일에 따라 기본값이 정해집니다.
 
@@ -317,13 +320,13 @@ runs: 1
 
 **대응:** write batch를 client가 다시 보내야 한다면 직접 요청하세요: `policy={"max_retries": 2}`. 0.15에서 이 policy로 같은 예제를 실행하면 `runs: 3`이 출력됩니다. Batch를 두 번 적용해도 한 번 적용한 것과 결과가 같을 때만 이렇게 하세요. `CREATE_ONLY`나 generation 검사가 없는 전체 record `batch_write`, `batch_remove`, 읽기가 이에 해당합니다. Increment, append, 원소를 추가하는 list·map 변경, 대부분의 UDF, `CREATE_ONLY` write(이미 적용된 write인데 두 번째 사본이 "record exists"로 실패), generation 검사가 있는 write에는 쓰지 마세요. `batch_write`와 `batch_write_numpy`에는 아래에서 설명하는 `retry=N`을 권장합니다.
 
-### 두 번째 전송이 응답했을 수 있는 row {#rows-a-second-send-may-have-answered}
+#### 두 번째 전송이 응답했을 수 있는 row {#rows-a-second-send-may-have-answered}
 
 Write에 `max_retries > 0`을 주면, 응답이 유실되었을 때 Rust client가 batch 중 한 node 몫을 다시 보냅니다. 첫 전송이 이미 적용되었다면 두 번째 전송은 자기가 한 일을 만납니다. 다시 보낸 delete는 record를 찾지 못하고, 다시 보낸 filter 있는 write는 더 이상 조건에 맞지 않으며, 다시 보낸 UDF는 첫 실행이 남긴 상태 때문에 실패합니다. Rust client는 row가 두 번 전송되었는지 알려 주지 않으므로, `batch_write`, write가 있는 `batch_operate`, `batch_remove`, `batch_apply`의 row가 `KEY_NOT_FOUND`(2), `FILTERED_OUT`(27), `UDF_BAD_RESPONSE`(100)로 끝나면 `in_doubt == True`로 보고됩니다. 호출이 record를 바꿨는지 알 수 없다는 뜻입니다. Node 몫을 다시 보낼 때가 되었는데 그 record의 node를 찾지 못해(그사이 node가 cluster에서 빠졌거나 client가 닫힘) client가 직접 `PARTITION_UNAVAILABLE`(11)을 준 row도 마찬가지입니다. 첫 전송이 적용되었을 수 있기 때문입니다. 이런 row가 있어도 호출은 정상적으로 반환됩니다. 첫 전송에서 server가 `PARTITION_UNAVAILABLE`로 거절한 row는 그대로 `in_doubt == False`입니다. 이런 policy에서 `RecordNotFound`를 발생시킨 `remove()`도 `in_doubt == True`를 갖습니다.
 
 기본 policy(모든 write에서 `max_retries`는 `0`)에서는 아무것도 바뀌지 않고, 읽기(`batch_read`)는 결코 in doubt가 아닙니다. 예제는 [Error Handling](/docs/guides/error-handling#re-sent-writes-and-in_doubt)에 있습니다.
 
-### `batch_write`의 `retry` 인자 {#the-retry-argument-of-batch_write}
+#### `batch_write`의 `retry` 인자 {#the-retry-argument-of-batch_write}
 
 `batch_write(records, retry=N)`과 `batch_write_numpy(..., retry=N)`은 binding 자체의 retry loop를 실행합니다. 0.15의 동작은 다음과 같습니다.
 
@@ -357,9 +360,9 @@ retry=2 and policy['max_retries']=1 were both given; they would multiply into up
 
 **대응:** `retry=N`을 넘기는 `batch_write`·`batch_write_numpy` 호출에서 `max_retries`를 제거하세요.
 
-## Exception {#exceptions}
+### Exception {#exceptions}
 
-### 모든 exception이 무슨 일이 있었는지 알려 줍니다
+#### 모든 exception이 무슨 일이 있었는지 알려 줍니다
 
 모든 `AerospikeError`에 attribute 네 개가 있습니다. 0.14.x에는 `result_code`만 있었습니다.
 
@@ -397,7 +400,7 @@ UDFError 100 UdfBadResponse
 InvalidArgError -1 InvalidArgument
 ```
 
-### 실패한 UDF는 `UDFError`를 발생시킵니다
+#### 실패한 UDF는 `UDFError`를 발생시킵니다
 
 0.14.x에서 server가 실행하지 못한 UDF는 `result_code == -1`인 일반 `ClientError`를 발생시켰고, aerospike-py의 bug일 수 있다는 log도 남겼습니다. 0.15에서는 `result_code == 100`(`AEROSPIKE_ERR_UDF`)인 `UDFError`(`ServerError`의 하위 class)를 발생시킵니다. 실패한 `batch_apply` row가 원래부터 알리던 code와 같습니다.
 
@@ -405,13 +408,13 @@ UDF 실패는 응답을 잃은 것이 아니라 server가 보낸 응답입니다
 
 **대응:** `apply()` 주변에서는 `aerospike_py.UDFError`(또는 `ServerError`)를 catch하세요. `except ClientError`는 더 이상 UDF 실패를 잡지 않습니다.
 
-### 없는 namespace는 `InvalidArgError`를 발생시킵니다 {#an-unknown-namespace-raises-invalidargerror}
+#### 없는 namespace는 `InvalidArgError`를 발생시킵니다 {#an-unknown-namespace-raises-invalidargerror}
 
 Cluster에 없는 namespace의 key는 0.14.x에서 단일 record 명령이면 `AerospikeTimeoutError`, batch 호출이면 `ClusterError`를 발생시켰습니다. 이제 둘 다 `InvalidArgError`(`result_code == -1`, `error_type == "InvalidArgument"`)를 발생시킵니다. 다른 key는 보낼 수 있어서 batch 호출이 반환되는 경우, 그런 key의 row는 `result == 20`, `error_type == "InvalidNamespace"`를 갖습니다(0.14.x: `11`).
 
 **대응:** 잘못 입력했거나 없는 namespace를 처리하려고 `ClusterError`나 `AerospikeTimeoutError`를 catch했다면 `InvalidArgError`를 catch하세요.
 
-### Metric도 같은 이름을 씁니다
+#### Metric도 같은 이름을 씁니다
 
 `db_client_operation_duration_seconds`의 Prometheus `error_type` label과 OpenTelemetry `error.type` attribute는 `exc.error_type`과 같은 분류에서 나옵니다. 그래서 dashboard와 `except` 절이 같은 실패를 같은 이름으로 부릅니다.
 
@@ -419,11 +422,11 @@ Cluster에 없는 namespace의 key는 0.14.x에서 단일 record 명령이면 `A
 db_client_operation_duration_seconds_count{...,db_operation_name="get",error_type="KeyNotFoundError"} 1
 ```
 
-### 메시지가 바뀌었습니다
+#### 메시지가 바뀌었습니다
 
 여러 exception 메시지의 문구가 바뀌었습니다. 예를 들어 0.14.x의 `AEROSPIKE_ERR (2): Server error: KeyNotFoundError, In Doubt: false, Node: ...`는 이제 `AEROSPIKE_ERR (2): Key not found [node=...]`입니다. 메시지 문자열로 분기하지 말고 exception class, `result_code`, `error_type`을 사용하세요.
 
-## Policy 값을 검사합니다 {#policy-values-are-checked}
+### Policy 값을 검사합니다 {#policy-values-are-checked}
 
 `exists`, `gen`, `commit_level`, `replica`, `read_mode_ap`, `expected_duration` 값이 `POLICY_*` / `QUERY_DURATION_*` 상수 중 하나가 아니면, 이제 아무것도 보내기 전에 `InvalidArgError`가 발생합니다. 0.14.x에서는 알 수 없는 값이 기본값으로 바뀌었습니다. `exists=9`는 일반 update가 되었고, `gen=9`는 generation 검사를 꺼 버렸습니다.
 
@@ -445,13 +448,13 @@ invalid exists value: 9 (valid: POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONL
 
 **대응:** `aerospike_py.POLICY_EXISTS_CREATE_ONLY`처럼 상수를 사용하세요.
 
-### Expression이 아닌 `filter_expression`은 거부됩니다 {#a-filter_expression-that-is-not-an-expression-is-refused}
+#### Expression이 아닌 `filter_expression`은 거부됩니다 {#a-filter_expression-that-is-not-an-expression-is-refused}
 
 `aerospike_py.exp`로 만든 expression이 아닌 `filter_expression`(문자열, 숫자, list, dict)은 이제 아무것도 보내기 전에 `InvalidArgError`를 발생시킵니다: `filter_expression must be an expression built with aerospike_py.exp, got str`. 0.14.x까지는 이런 값을 아무 말 없이 버리고 **filter 없이** 호출을 실행했습니다. `client.put(key, bins, policy={"filter_expression": "v == 1"})`은 record를 조건 없이 썼습니다. `None`은 여전히 "filter 없음"을 뜻합니다.
 
 **대응:** `exp.eq(exp.int_bin("v"), exp.int_val(1))`처럼 `aerospike_py.exp`로 filter를 만드세요. 여기서 exception이 발생하는 호출은 0.14.x에서 filter 없이 실행되었으니, 그 호출이 쓰거나 반환한 것을 확인하세요.
 
-### 아무것도 보내기 전에 거부되는 그 밖의 값
+#### 아무것도 보내기 전에 거부되는 그 밖의 값
 
 - `max_retries = 2**64 - 1`은 `InvalidArgError`(`max_retries is too large: ...`)를 발생시킵니다. Rust client 3.0은 이 값으로는 한 번도 시도하지 않으므로, 그대로 두면 호출이 보내지지도 않은 채 "Timeout after 0 tries"로 실패합니다.
 - Field에 맞지 않는 정수(`retry=-1`, `total_timeout=-1`, `ttl=2**70`)는 `OverflowError`를 발생시킵니다. aerospike-py의 bug일 수 있다는 log는 남기지 않습니다.
@@ -460,7 +463,7 @@ invalid exists value: 9 (valid: POLICY_EXISTS_IGNORE=0, POLICY_EXISTS_UPDATE_ONL
 
 `batch_write(retry=2**32 - 1)`은 `retry.max_attempts == 2**32 - 1`을 알려 줍니다. 횟수가 `0`으로 넘어가지 않고 최댓값에서 멈춥니다.
 
-## 언어별 blob이 담긴 record를 읽을 수 있습니다 {#records-with-a-language-specific-blob-are-readable}
+### 언어별 blob이 담긴 record를 읽을 수 있습니다 {#records-with-a-language-specific-blob-are-readable}
 
 예전 client는 Aerospike type이 없는 값을 자기 언어의 serializer로 직렬화해 고유한 particle type으로 저장했습니다: `JAVA_BLOB`(7), `CSHARP_BLOB`(8), `PYTHON_BLOB`(9, pickle), `RUBY_BLOB`(10), `PHP_BLOB`(11), `ERLANG_BLOB`(12). 오래 운영된 cluster에는 이런 record가 아직 남아 있습니다. 0.14.x에서는 이런 bin이 있는 record를 읽기만 해도 `RustPanicError`가 발생해 record 전체를 읽을 수 없었습니다. 0.15에서는 그 bin을 raw payload를 담은 `bytes`로 반환하고, 나머지 bin은 평소대로 읽으며, type마다 처음 만난 값만 warning으로 남깁니다(그 뒤로는 debug level이라, 오래된 data를 scan해도 log가 넘치지 않습니다). `get()`, `batch_read()`, scan 모두 이렇게 동작합니다(issue #280).
 
@@ -492,11 +495,11 @@ WARNING:_aerospike::types::value:bin value has particle type 9, which this clien
 
 **대응:** 이런 record를 건너뛰려고 `RustPanicError`를 catch하던 코드는 이제 record를 받습니다. 값이 필요하면 bytes를 직접 decode하세요. `PYTHON_BLOB`이라면 `pickle.loads(...)`이며, 신뢰할 수 있는 데이터에만 사용하세요. Unpickling은 코드를 실행할 수 있습니다.
 
-## NumPy batch 읽기와 쓰기 {#numpy-batch-reads-and-writes}
+### NumPy batch 읽기와 쓰기 {#numpy-batch-reads-and-writes}
 
 아래 규칙은 sync client와 async client에 똑같이 적용됩니다.
 
-### `batch_write_numpy()`는 array에서 layout을 읽습니다
+#### `batch_write_numpy()`는 array에서 layout을 읽습니다
 
 이제 signature는 `batch_write_numpy(data, namespace, set_name, _dtype=None, key_field="_key", policy=None, retry=0)`입니다. Layout은 `data.dtype`에서 가져옵니다. 0.14.x에서는 `_dtype`이 필수였고, array와 맞지 않아도 array의 byte를 그 dtype으로 읽었습니다. 0.15에서는 `data.dtype`과 다른 `_dtype`을 주면 첫 row를 보내기 전에 `ValueError`가 발생합니다.
 
@@ -525,7 +528,7 @@ Row는 `numpy.asarray(data)`에서 읽습니다. `numpy.recarray` 같은 array s
 
 **대응:** 넘기는 dtype이 `data.dtype`이라면 고칠 것이 없습니다. 그렇지 않다면 인자를 빼거나, 먼저 `data.astype(...)`으로 array를 변환하세요.
 
-### dtype을 양방향에서 검사합니다
+#### dtype을 양방향에서 검사합니다
 
 `batch_write_numpy()`와 `to_numpy()`는 데이터를 쓰거나 채우기 전에 dtype을 검사합니다. `to_numpy(dtype)`은 `numpy.dtype(...)`이 받는 것은 무엇이든 받으며, NumPy가 그로부터 만든 dtype대로 row를 배치합니다. 두 method는 무엇이든 쓰거나 채우기 전에 다음을 거부합니다.
 
@@ -546,13 +549,13 @@ Row는 `numpy.asarray(data)`에서 읽습니다. `numpy.recarray` 같은 array s
 TypeError: dtype field 's' holds Python objects ([('x', '<i4'), ('o', 'O')]): an object member nested inside a structured ...
 ```
 
-### Key field는 값 하나입니다 {#the-key-field-is-one-value}
+#### Key field는 값 하나입니다 {#the-key-field-is-one-value}
 
 `batch_write_numpy()`의 key field(`_key`, 또는 `key_field`로 지정한 field)는 값 하나, 즉 scalar 정수이거나 고정 폭 bytes field여야 합니다. 원소가 하나인 `("_key", "i8", (1,))`를 포함한 sub-array나 중첩된 structured field는 무엇이든 쓰기 전에 `TypeError`를 발생시킵니다: `the key field '_key' must be a scalar integer or bytes field, not a sub-array or a nested structure; ...`. 0.14.x는 `("_key", "i8", (1,))`를 받아들여 정수 key로 썼습니다.
 
 **대응:** key를 `("_key", "i8")`로 선언하세요. Sub-array **bin** field는 영향을 받지 않습니다. 이들은 vector이며 blob으로 저장됩니다([원소가 하나인 vector](#one-element-vectors-are-stored-as-a-blob) 참고).
 
-### Vector 길이와 float 범위
+#### Vector 길이와 float 범위
 
 숫자 sub-array field는 vector입니다. 읽을 때는 field 크기와 정확히 같은 byte 수의 blob만 받고, 다른 길이는 오류입니다. Scalar는 원소가 하나인 field만 채울 수 있습니다. `f2`나 `f4` field에 담기에 너무 큰 유한값은 `OverflowError`를 발생시키고, NaN과 무한대는 그대로 유지됩니다. 0.14.x에서는 짧은 blob은 0으로 채우고, 긴 blob은 잘라 내고, scalar는 더 긴 vector의 첫 원소만 채웠으며, 넘치는 값은 `inf`가 되었습니다. 모두 오류 없이 일어났습니다. 고정 폭 bytes field(`S<N>`)의 padding·잘라 내기 규칙은 그대로입니다.
 
@@ -580,7 +583,7 @@ OverflowError: float overflow: value 70000 does not fit in f16 for field 'big'
 
 **대응:** 읽는 dtype을 저장된 값에 맞추세요. Bin에 실제로 길이가 다른 값이 섞여 있다면 `to_numpy()` 없이 읽으세요.
 
-### 원소가 하나인 vector는 blob으로 저장됩니다 {#one-element-vectors-are-stored-as-a-blob}
+#### 원소가 하나인 vector는 blob으로 저장됩니다 {#one-element-vectors-are-stored-as-a-blob}
 
 :::danger[shape `(1,)` field: reader를 먼저 업그레이드하세요. writer를 바꾼 뒤에는 0.14.x로 되돌릴 수 없습니다]
 
@@ -624,7 +627,7 @@ TypeError: cannot write bytes to numeric field 'score'
 [(array([1.5], dtype=float32),)]
 ```
 
-### `NumpyBatchRecords`의 row와 key
+#### `NumpyBatchRecords`의 row와 key
 
 결과의 row `i`는 이전과 같이 hit이든 miss든 요청 `i`에 대응합니다. `get()`과 `in`이 쓰는 key index에는 실제 user key만 들어갑니다. 0.14.x에서는 digest만으로 요청한 row가 지어낸 key로 index되었습니다(native 변환에서는 `"__no_user_key_<i>__"`, 순수 Python 변환에서는 row 번호 `i`이며, 후자는 그 번호와 같은 실제 정수 key를 가릴 수 있었습니다). 이제 그런 row는 위치로만 접근할 수 있습니다. 두 번 요청한 user key는 이전과 같이 마지막 row를 가리킵니다.
 
@@ -645,7 +648,7 @@ print(result.batch_records["v"].tolist(), "__no_user_key_0__" in result, result.
 [1611, 1000] False 1000
 ```
 
-### `batch_read()` handle의 길이
+#### `batch_read()` handle의 길이
 
 `batch_read()`가 반환하는 `LazyBatchRecords`의 `len(handle)`은 이제 mapping에 있는 서로 다른 key의 수이므로 항상 `len(handle.to_dict())`와 같습니다. 0.14.x에서는 user key가 있는 성공 row 수를 셌기 때문에, 같은 key를 두 번 요청하거나 두 set에서 요청하면 값이 너무 컸습니다. `found_count()`는 이전과 같이 성공 row 수를 세고, `to_list()`는 요청마다 slot 하나를 갖습니다.
 
@@ -667,9 +670,9 @@ print(len(handle), len(handle.to_dict()), handle.found_count(), len(handle.to_li
 
 **대응:** "몇 개의 record가 돌아왔는가"에는 `found_count()`를, "mapping에 key가 몇 개인가"에는 `len(handle)`을 사용하세요.
 
-## Async query {#async-queries}
+### Async query {#async-queries}
 
-### Query를 취소하면 멈춥니다
+#### Query를 취소하면 멈춥니다
 
 `AsyncQuery.results()`와 `AsyncQuery.foreach()`는 이전에 worker thread에서 query를 실행했습니다. Task를 취소하면 `CancelledError`는 바로 발생했지만, thread는 scan이 끝날 때까지 record를 읽고 callback을 계속 호출했습니다. 0.15에서는 둘 다 query의 record stream을 await하며 읽으므로, task를 취소하면 client와 server 양쪽에서 query가 멈춥니다.
 
@@ -706,7 +709,7 @@ callbacks when CancelledError was raised: 100, half a second later: 100
 
 (여기서 `client`는 `AsyncClient`이고, set에는 record가 5,000개 있습니다.)
 
-### `async for`와 `query.stream()`
+#### `async for`와 `query.stream()`
 
 이제 `AsyncQuery`를 순회할 수 있습니다: `async for record in query`. `query.stream(policy)`도 같은 `AsyncRecordStream`을 반환하며, 이 객체는 async context manager이기도 하고 `close()`를 갖습니다. 첫 record를 요청하기 전에는 아무것도 보내지 않습니다. Consumer의 속도와 관계없이 client에서 대기하는 record는 query마다 최대 `record_queue_size`개(기본값 1024. 여기에 Python으로 넘겨주는 중인 묶음과, 자리가 나기를 기다리는 reader가 있는 node마다 record 하나가 더해집니다)이며, consumer가 `socket_timeout`보다 오래 멈춰도 됩니다. 읽기를 다시 시작하면 client가 나머지를 다시 가져오며 record를 중복해서 넘기지 않습니다. 여러 task가 같은 stream을 순회해도 되고, 각 record는 그중 한 task에만 전달됩니다. [Query 가이드](/docs/guides/query-scan#async-streaming)를 참고하세요.
 
@@ -727,7 +730,7 @@ TypeError: 'async for' requires an object with __aiter__ method, got AsyncQuery
 (순회합니다)
 ```
 
-### `foreach()`는 coroutine function을 거부합니다
+#### `foreach()`는 coroutine function을 거부합니다
 
 `AsyncQuery.foreach()`는 worker thread에서 callback을 호출하므로 callback을 await할 수 없습니다. 0.14.x에서 `async def` callback은 record마다 아무도 await하지 않는 coroutine을 만들었고, coroutine은 `False`가 아니므로 scan을 멈추지도 못했습니다. 0.15는 `TypeError`를 발생시킵니다.
 
@@ -747,7 +750,7 @@ TypeError: foreach() calls its callback from a worker thread and cannot await it
 
 **대응:** record마다 무언가를 await하려면 `async for record in query`를 사용하세요.
 
-### Scan을 일찍 끝내면 server에서도 멈춥니다
+#### Scan을 일찍 끝내면 server에서도 멈춥니다
 
 Sync client에도 적용됩니다. 0.14.x에서는 query를 중간에 그만 읽으면 client는 query를 버렸지만, server는 scan을 계속하면서 socket timeout(기본 30초)까지 connection을 붙잡았습니다. 0.15에서는 어떤 방법으로 빠져나와도 server의 query가 닫힙니다: `foreach()` callback이 `False`를 반환하거나 exception을 발생시킴, `async for`에서 `break`, `close()`, `async with` 블록을 벗어남, 취소, stream 오류, stream의 garbage collection.
 
@@ -760,7 +763,7 @@ Server의 job 목록(`query-show`)으로 측정했습니다. Record는 100,000�
 
 다른 경우가 하나 있습니다. 속도가 제한된 scan(`records_per_second`)은 server가 묶음을 멀리 떨어진 간격으로 보내며, 다음 묶음을 보낼 때가 될 때까지 server의 목록에 남아 있습니다. 초당 50 record에서 측정한 결과 45초였고, `socket_timeout`이 2000, 30000(기본값), 0일 때 모두 같았습니다. `socket_timeout`은 이 시간의 상한이 되지 않습니다.
 
-## `apply()`도 `max_concurrent_operations`에 포함됩니다 {#apply-counts-against-max_concurrent_operations}
+### `apply()`도 `max_concurrent_operations`에 포함됩니다 {#apply-counts-against-max_concurrent_operations}
 
 `max_concurrent_operations`를 설정하면 `batch_apply()`는 slot 하나를 차지했지만 단일 record `apply()`는 그렇지 않아서, UDF 호출은 한도를 넘어 실행되었습니다. 0.15에서는 `apply()`도 다른 record 명령처럼 slot을 기다리고, `operation_queue_timeout_ms`가 지나면 `BackpressureError`를 발생시킵니다.
 
@@ -798,13 +801,13 @@ BackpressureError
 
 **대응:** `max_concurrent_operations`를 설정했다면 UDF 호출까지 포함해 값을 정하고, `apply()` 주변에서 `BackpressureError`를 처리하세요.
 
-## 새 node id로 재시작한 node {#node-restarts-with-a-new-node-id}
+### 새 node id로 재시작한 node {#node-restarts-with-a-new-node-id}
 
 Node가 **같은 주소에서 새 node id로** 재시작하면(예: container 재시작), 오래 실행되는 client가 그 node로 다시 routing하기까지 cluster tend 주기 한 번(기본 약 1초)이 걸립니다. 그동안 명령이 `ClusterError`를 발생시킬 수 있습니다. 0.14.x에서는 몇 ms면 충분했습니다. Rust client 3.0은 이름이 더 이상 맞지 않는 node를 버리고 다음 tend에서 새 node를 알게 됩니다. 재시작 후에도 id가 같은 node는 이전처럼 바로 사용됩니다.
 
 **대응:** node를 제자리에서 재시작한다면(rolling container 재시작, server를 재시작하는 test 등) node id를 고정하거나, 재시작 후 약 1초 동안 `ClusterError`를 retry하세요.
 
-## 동시 batch 부하에서의 memory {#memory-under-concurrent-batch-load}
+### 동시 batch 부하에서의 memory {#memory-under-concurrent-batch-load}
 
 0.15에서는 동시 batch 부하가 걸린 client process가 memory를 더 사용합니다. 같은 workload를 두 버전에서 실행한 process memory(RSS)는 다음과 같습니다.
 
@@ -821,7 +824,7 @@ Node가 **같은 주소에서 새 node id로** 재시작하면(예: container �
 
 처리량, 꼬리 지연, 최대 RSS는 서로 다르게 변할 수 있습니다. 실제 레코드 너비와 동시성으로 꼬리 지연과 최대 RSS를 측정한 뒤 worker 수를 결정하세요.
 
-## Logging
+### Logging
 
 aerospike-py는 예상하지 못한 오류를 만나면 "This error may be a bug in aerospike-py"라는 문구와 issue를 등록하는 명령을 error log로 남깁니다. 0.14.x는 평범한 실패에도 이 log를 남겼습니다: library가 거부한 인자(`TypeError`, `ValueError`), 사용자 `foreach` callback이 발생시킨 exception, 실패한 UDF, node 장애, client timeout. 0.15는 이런 경우 그 log 없이 호출자에게 exception을 전달합니다. `AerospikeError`가 아닌 그 밖의 오류는 여전히 log로 남깁니다.
 
@@ -846,7 +849,7 @@ raised: Invalid key: Invalid argument: Data type is not supported as Key value.
 raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Key value.
 ```
 
-## 그 밖의 변경
+### 그 밖의 변경
 
 - NumPy의 `_namespace`·`_set`은 UTF-8 고정 너비 스칼라 바이트 필드여야 합니다. 잘못된 레이아웃이나 UTF-8은 배치 전송 전에 거부합니다. `V<N>` 키는 끝의 0바이트를 보존하며 `S<N>` 키는 패딩을 제거합니다. 예전 writer로 `V2` 키 `b"K\x00"`를 저장했다면 레코드는 `b"K"`의 digest에 있습니다. 동일 레코드로 유지하려면 새 writer가 다른 digest에 쓰기 전에 데이터를 이관하세요.
 - 필터 조건, 명시적인 상대 TTL을 사용하거나 bin 삭제만 수행하는 쓰기의 결과가 불확실하면 바인딩의 재시도 대상에서 제외합니다. 행별 결과를 확인한 뒤 재전송 여부를 결정하세요.
@@ -855,3 +858,9 @@ raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Ke
 - Client의 `timeout`과 `idle_timeout`은 30초 기본값을 유지합니다. Rust client 3.0은 자체 기본값을 낮췄지만, aerospike-py가 이전 값을 명시적으로 설정합니다.
 - Map bin을 읽으면 key가 server가 돌려준 순서로 나오고, 읽을 때마다 같습니다(server 8.2에서는 key 순 정렬이며 정수가 문자열보다 앞). 0.14.x는 같은 map의 key를 읽을 때마다 다른 순서로 돌려줬습니다. dict끼리 비교하는 코드는 영향이 없고, 순회 순서에 기대던 코드는 원래도 믿을 수 없었습니다.
 - `meta.ttl`은 공식 Python client처럼 초 단위로 계산합니다. `ttl=1000`으로 쓴 직후 읽은 record는 `1000`을 알립니다. 0.14.x는 거의 항상 `999`를 알렸습니다(측정에서 400번 중 398번, 0.15는 400번 중 398번이 `1000`). Client의 시계가 server보다 늦으면, 몇 ms 차이여도 설정한 값보다 1초 큰 값이 나올 수 있습니다. `meta.ttl <= ttl`을 그대로 단정하지 말고 1초의 여유를 두세요.
+
+## 0.13.0 → 0.14.0 {#v0-14}
+
+리스트 정렬에 숫자 플래그를 전달한다면 값을 확인하세요. 0.13.0에서는 알 수 없는 값을 기본 정렬로 처리했고, 0.14.0에서는 해당 연산을 실행할 때 `ValueError`가 발생합니다. 기본 정렬에는 `LIST_SORT_DEFAULT`(0), 중복 제거에는 `LIST_SORT_DROP_DUPLICATES`(2)를 사용하세요.
+
+0.14.0부터 예외의 `result_code`로 서버 오류를 구분할 수 있습니다. 예를 들어 `remove()`로 없는 레코드를 삭제하면 `RecordNotFound.result_code`는 2입니다. [0.14.0 릴리스 노트](https://github.com/aerospike-ce-ecosystem/aerospike-py/releases/tag/v0.14.0)
