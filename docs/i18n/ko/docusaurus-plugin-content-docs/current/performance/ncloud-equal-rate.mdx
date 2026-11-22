@@ -8,7 +8,7 @@ description: Ncloud에서 500·1,000·2,000키 배치 읽기의 처리량을 맞
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
-각 Python 빌드에서 완료 처리량을 맞췄을 때 **PR #500의 aerospike-py 0.15 후보판**은 500·1,000·2,000키 모두에서 공식 SDK보다 클라이언트 CPU 사용량, 최대 RSS, p99가 낮았습니다. Free-threaded CPython에서 2,000키를 읽을 때 0.15는 공식 SDK보다 **행당 CPU 시간이 43.8%**, **최대 RSS가 34.4%**, **p99가 51.5%** 낮았습니다. 기존 aerospike-py 0.14.4와 비교하면 여섯 조건 모두에서 최대 RSS가 **5.3–11.0% 증가**했습니다. 2,000키 p99는 일반 CPython에서 **15.8% 증가**했고 free-threaded CPython에서 **6.2% 감소**했습니다. [측정한 커밋](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c)
+각 Python 빌드에서 완료 처리량을 맞췄을 때 **PR #500의 aerospike-py 0.15 후보판**은 500·1,000·2,000키 모두에서 공식 SDK보다 CPU 시간·최대 RSS·p99에서 모두 좋은 결과를 보였습니다. Free-threaded CPython에서 2,000키를 읽을 때 0.15는 공식 SDK보다 **행당 CPU 시간이 43.8%**, **최대 RSS가 34.4%**, **p99가 51.5%** 낮았습니다. 기존 aerospike-py 0.14.4와 비교하면 여섯 조건 모두에서 최대 RSS가 **5.3–11.0% 증가**했습니다. 2,000키 p99는 일반 CPython에서 **15.8% 증가**했고 free-threaded CPython에서 **6.2% 감소**했습니다. [측정한 커밋](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c)
 
 ## 부하와 측정 지표 {#workload-and-metrics}
 
@@ -22,7 +22,7 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 모든 클라이언트와 키 개수에서 실제 처리량은 **59,978–60,000행/초**였습니다. 클라이언트와 키 개수의 조합당 세 번에 걸쳐 총 1,050건을 측정했습니다. 먼저 초당 90,000행으로 시험했을 때 공식 SDK가 각 1,200건의 예약 중 500·1,000·2,000키에서 각각 **39건·13건·2건**을 놓쳤습니다. 초당 60,000행으로 다시 측정하자 세 클라이언트가 모두 예약된 요청을 완료했습니다.
 
-각 셀에는 **행당 CPU 시간(µs) / 최대 RSS(MiB) / p99(ms)**를 표시했습니다.
+각 셀은 **행당 CPU 시간(µs) ↓ / 최대 RSS(MiB) ↓ / p99(ms) ↓** 순서입니다. **세 지표 모두 낮을수록 좋습니다.**
 
 | 호출당 키 개수 | aerospike-py 0.14.4 | aerospike-py 0.15 후보판 | 공식 SDK 1.0.0 |
 |---:|---:|---:|---:|
@@ -36,7 +36,7 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 모든 클라이언트와 키 개수에서 실제 처리량은 **89,869–89,999행/초**였습니다. CPU와 p99는 조합당 1,200건의 호출에서 구했습니다. 최대 RSS는 같은 목표 처리량으로 조합당 180건을 별도 측정한 값이며, 이때 실제 처리량은 89,019–89,993행/초였습니다. 최초 측정 도구가 해시 계산을 위해 네이티브 확장 파일 전체를 메모리에 읽어 들이면서 프로세스의 최대 RSS 기록을 높였습니다. RSS를 다시 측정할 때는 파일을 나눠 읽어 해시를 계산했습니다. 2,000키에서 0.15 후보판의 평균 CPU 사용량은 0.60 vCPU, 공식 SDK는 1.08 vCPU였습니다.
 
-각 셀에는 **행당 CPU 시간(µs) / 최대 RSS(MiB) / p99(ms)**를 표시했습니다.
+각 셀은 **행당 CPU 시간(µs) ↓ / 최대 RSS(MiB) ↓ / p99(ms) ↓** 순서입니다. **세 지표 모두 낮을수록 좋습니다.**
 
 | 호출당 키 개수 | aerospike-py 0.14.4 | aerospike-py 0.15 후보판 | 공식 SDK 1.0.0 |
 |---:|---:|---:|---:|
@@ -48,7 +48,7 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 ## aerospike-py 0.15 후보판의 변화 {#changes-in-015}
 
-각 셀은 비교 대상 대비 **행당 CPU 시간 / 최대 RSS / p99**의 변화율입니다. 반올림 전 실측값으로 계산했으며, 음수는 자원 사용량이나 지연이 줄었음을 뜻합니다. 일반 CPython과 free-threaded CPython의 목표 처리량은 서로 다르므로, 각 행은 같은 Python 빌드 안에서의 비교입니다.
+각 셀은 비교 대상 대비 **행당 CPU 시간 / 최대 RSS / p99**의 변화율입니다. 반올림 전 실측값으로 계산했으며, **음수(−)는 개선, 양수(+)는 악화**입니다. 일반 CPython과 free-threaded CPython의 목표 처리량은 서로 다르므로, 각 행은 같은 Python 빌드 안에서의 비교입니다.
 
 | CPython | 호출당 키 개수 | 0.15 vs aerospike-py 0.14.4 | 0.15 vs 공식 SDK 1.0.0 |
 |---|---:|---:|---:|
@@ -63,7 +63,7 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 동일 처리량 비교 중에는 tracing을 껐습니다. 별도 진단에서는 요청을 한 번에 하나씩 실행하고, Python 부모 span을 12.5%의 비율로 샘플링했습니다. **0.15의 Python 배치 span 206개**에 대응하는 Rust `BATCH_READ` 자식 span을 모두 부하 VM 내부의 OTLP 수신기에서 확인했습니다. Python 타이머는 세 클라이언트의 공개 API 반환 시점을 기준으로 구간을 나눴습니다. 공식 SDK는 API가 반환되기 전에 결과 객체를 만들며, 변환 구간에서는 `.bins`를 읽고 `numpy.fromiter()`로 배열을 생성합니다. 2,000키에서 공식 SDK의 별도 `collect()` 단계 p50은 **0.23 ms**였습니다. 각 열은 해당 구간에서 요청별 측정값의 중앙값입니다. [공식 SDK 배치 호출 경로](https://github.com/aerospike/aerospike-client-python-sdk/blob/v1.0.0/aerospike_sdk/sync/operations/query_dispatch.py#L584-L606) · [0.15 NumPy 버퍼 변환](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c/rust/src/numpy_support.rs#L864-L1060)
 
-| Free-threaded 동기 호출 진단, 2,000키 | 요청 시작부터 API 반환까지 p50 | NumPy 변환 p50 |
+| Free-threaded 동기 호출 진단, 2,000키 | 요청 시작부터 API 반환까지 p50 ↓ | NumPy 변환 p50 ↓ |
 |---|---:|---:|
 | 0.14.4 | 13.01 ms | 1.89 ms |
 | 0.15 후보판 | 12.52 ms | 1.89 ms |

@@ -8,7 +8,7 @@ description: CPU, peak process RSS, and p99 for 500, 1,000, and 2,000-key reads 
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
-At matched completed row rates within each Python build, the **aerospike-py 0.15 candidate from PR #500** used less client CPU and peak RSS and had lower p99 than the official SDK at 500, 1,000, and 2,000 keys. At 2,000 keys on free-threaded CPython, 0.15 used **43.8% less CPU per row** and **34.4% less peak RSS**, with **51.5% lower p99**. Compared with aerospike-py 0.14.4, peak RSS rose **5.3–11.0%** across all six cases. At 2,000 keys, p99 rose **15.8%** on standard CPython and fell **6.2%** on free-threaded CPython. [Measured revision](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c)
+At matched completed row rates within each Python build, the **aerospike-py 0.15 candidate from PR #500** was more efficient on all three metrics than the official SDK at 500, 1,000, and 2,000 keys. At 2,000 keys on free-threaded CPython, 0.15 used **43.8% less CPU per row** and **34.4% less peak RSS**, with **51.5% lower p99**. Compared with aerospike-py 0.14.4, peak RSS rose **5.3–11.0%** across all six cases. At 2,000 keys, p99 rose **15.8%** on standard CPython and fell **6.2%** on free-threaded CPython. [Measured revision](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c)
 
 ## Workload and metrics {#workload-and-metrics}
 
@@ -22,7 +22,7 @@ The driver scheduled calls at the target row rate after warmup, with up to four 
 
 Completed rates were **59,978–60,000 rows/s** across all clients and sizes. Each client and size contributed 1,050 calls across three runs. At the 90,000-row/s trial rate, the standard-build SDK missed **39, 13, and 2** arrivals at 500, 1,000, and 2,000 keys, respectively, out of 1,200 scheduled calls per size. The 60,000-row/s retest completed every arrival for all three clients.
 
-Each cell shows **CPU (µs/row) / peak RSS (MiB) / p99 (ms)**.
+Each cell shows **CPU (µs/row) ↓ / peak RSS (MiB) ↓ / p99 (ms) ↓**. **Lower is better** for all three metrics.
 
 | Keys per call | aerospike-py 0.14.4 | aerospike-py 0.15 candidate | Official SDK 1.0.0 |
 |---:|---:|---:|---:|
@@ -36,7 +36,7 @@ Each cell shows **CPU (µs/row) / peak RSS (MiB) / p99 (ms)**.
 
 Completed rates were **89,869–89,999 rows/s** across all clients and sizes. CPU and p99 use 1,200 calls per client and size. Peak RSS comes from a separate rerun at the same target rate with 180 calls per client and size, completing 89,019–89,993 rows/s. The initial driver read the entire native extension into memory to hash it, inflating the process high-water mark. The RSS rerun used a streaming hash. At 2,000 keys the 0.15 candidate used an average of 0.60 vCPUs versus 1.08 for the SDK.
 
-Each cell shows **CPU (µs/row) / peak RSS (MiB) / p99 (ms)**.
+Each cell shows **CPU (µs/row) ↓ / peak RSS (MiB) ↓ / p99 (ms) ↓**. **Lower is better** for all three metrics.
 
 | Keys per call | aerospike-py 0.14.4 | aerospike-py 0.15 candidate | Official SDK 1.0.0 |
 |---:|---:|---:|---:|
@@ -48,7 +48,7 @@ Each cell shows **CPU (µs/row) / peak RSS (MiB) / p99 (ms)**.
 
 ## Changes in the aerospike-py 0.15 candidate {#changes-in-015}
 
-Each cell gives the percentage change in **CPU per row / peak RSS / p99** relative to the named baseline, calculated from the unrounded measurements. Negative values indicate lower resource use or latency. The standard and free-threaded builds ran at different target rates, so read each row as a comparison within that build.
+Each cell gives the percentage change in **CPU per row / peak RSS / p99** relative to the named baseline, calculated from the unrounded measurements. **Negative (−) is better. Positive (+) indicates a regression.** The standard and free-threaded builds ran at different target rates, so read each row as a comparison within that build.
 
 | CPython | Keys per call | 0.15 vs aerospike-py 0.14.4 | 0.15 vs official SDK 1.0.0 |
 |---|---:|---:|---:|
@@ -63,7 +63,7 @@ Each cell gives the percentage change in **CPU per row / peak RSS / p99** relati
 
 The fixed-rate trials ran without tracing. The diagnostics used one outstanding request and sampled Python parents at a rate of 12.5%. The local OTLP receiver on the load VM collected Rust `BATCH_READ` child spans matching all **206 sampled 0.15 Python batch spans**. The three clients' Python-side timers use corresponding public API boundaries. In the official SDK, the time before API return includes construction of result envelopes. Its conversion time includes reading `.bins` and building the array with `numpy.fromiter()`. The SDK's separate `collect()` step had a p50 of **0.23 ms** at 2,000 keys. Each column is a median over requests for that phase. [Official SDK batch dispatch](https://github.com/aerospike/aerospike-client-python-sdk/blob/v1.0.0/aerospike_sdk/sync/operations/query_dispatch.py#L584-L606) · [0.15 buffer conversion](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c/rust/src/numpy_support.rs#L864-L1060)
 
-| FT sync diagnostic, 2,000 keys | Submit to API return p50 | Convert to NumPy p50 |
+| FT sync diagnostic, 2,000 keys | Submit to API return p50 ↓ | Convert to NumPy p50 ↓ |
 |---|---:|---:|
 | 0.14.4 | 13.01 ms | 1.89 ms |
 | 0.15 candidate | 12.52 ms | 1.89 ms |
