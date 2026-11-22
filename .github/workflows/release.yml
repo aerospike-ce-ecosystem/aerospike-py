@@ -1,14 +1,11 @@
-name: Daily Release
-# Runs daily at KST 07:00 (UTC 22:00 previous day). Auto-releases if there are changes since the last release.
-# Conventional Commits-based version bump: feat → minor, fix → patch, breaking → major
+name: Create GitHub Release
 
 on:
-  schedule:
-    - cron: "0 22 * * *" # UTC 22:00 = KST 07:00
-  workflow_dispatch: # manual trigger
+  workflow_dispatch:
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -60,7 +57,7 @@ jobs:
           VERSION="${LATEST_TAG#v}"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
-          # daily-release auto-bumps minor (feat) or patch only.
+          # Feature commits bump the minor version; other changes bump the patch.
           # Major bump is manual: a maintainer tags the new major version themselves.
           # `feat!:` / `BREAKING CHANGE` markers surface in release notes, not in version.
           # Only feat commits that touch release-worthy paths trigger a minor bump —
@@ -129,7 +126,7 @@ jobs:
             gh release create "${{ steps.version.outputs.next_version }}" \
               --title "release ${{ steps.version.outputs.next_version }}" \
               --notes-file /tmp/release-notes.md \
-              --target main
+              --target "${{ github.sha }}"
             ```
 
             ### Step 4: Verify
