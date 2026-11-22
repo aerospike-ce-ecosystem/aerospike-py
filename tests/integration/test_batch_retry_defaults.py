@@ -12,10 +12,13 @@ What the defaults are is unit-tested next to the parser
 an automatic re-send from Python. These tests pin what a caller can see.
 """
 
+import asyncio
+
 import numpy as np
 import pytest
 
 import aerospike_py
+from tests import AEROSPIKE_CONFIG
 from tests.helpers import invoke
 
 NS = "test"
@@ -164,3 +167,62 @@ async def test_unsupported_batch_conditions_are_refused_before_send(any_client, 
     with pytest.raises(aerospike_py.InvalidArgError, match="exists"):
         await invoke(any_client, "batch_remove", [(key, {"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})])
     assert (await invoke(any_client, "get", key)).bins["v"] == 0
+
+
+@pytest.mark.parametrize("is_async", [False, True], ids=["sync", "async"])
+async def test_last_bin_removal_with_a_lost_success_reply_is_not_replayed(client, cleanup, is_async):
+    """Forward the single-key write, then close its socket after the server confirms deletion."""
+    if len(client.get_node_names()) != 1:
+        pytest.skip("the test relays the sole storage node so it observes every command")
+    key = (NS, SET_NAME, f"drop_last_bin_{is_async}")
+    cleanup.append(key)
+    client.put(key, {"only": 1})
+    replies = []
+
+    async def frame(reader):
+        header = await reader.readexactly(8)
+        return header, await reader.readexactly(int.from_bytes(header[2:], "big"))
+
+    async def relay(reader, writer):
+        upstream, server_writer = await asyncio.open_connection(*AEROSPIKE_CONFIG["hosts"][0])
+        try:
+            while True:
+                header, body = await frame(reader)
+                server_writer.write(header + body)
+                await server_writer.drain()
+                response_header, response_body = await frame(upstream)
+                if header[1] == 3 and body[2] & 1:  # data command with the write flag
+                    replies.append(response_body[5])  # one response for a single-key write
+                    if len(replies) == 1:
+                        return
+                writer.write(response_header + response_body)
+                await writer.drain()
+        except (asyncio.IncompleteReadError, ConnectionError):
+            # Either peer may close an idle socket during client teardown.
+            return
+        finally:
+            server_writer.close()
+            writer.close()
+
+    async with await asyncio.start_server(relay, "127.0.0.1", 0) as proxy:
+        port = proxy.sockets[0].getsockname()[1]
+        config = {**AEROSPIKE_CONFIG, "hosts": [("127.0.0.1", port)]}
+        sender = aerospike_py.AsyncClient(config) if is_async else aerospike_py.client(config)
+
+        async def call(method, *args, **kwargs):
+            # Keep the loop free to relay traffic from the blocking client.
+            if is_async:
+                return await method(*args, **kwargs)
+            return await asyncio.to_thread(method, *args, **kwargs)
+
+        await call(sender.connect)
+        try:
+            with pytest.raises(aerospike_py.AerospikeError) as caught:
+                await call(sender.batch_write, [(key, {"only": None})], retry=1, policy={"ttl": -2})
+            partial = caught.value.partial_result
+            assert caught.value.in_doubt and partial.batch_records[0].in_doubt
+            assert partial.retry.attempts == 1
+        finally:
+            await call(sender.close)
+    assert replies == [0]
+    assert client.exists(key).meta is None

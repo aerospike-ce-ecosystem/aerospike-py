@@ -150,6 +150,8 @@ asyncio.run(main())
 
 HLL bin, GeoJSON bin, 그리고 client가 해석하지 않는 particle type의 bin(`get()`이 `bytes`나 `str`로 반환하는 값)은 다른 bytes와 똑같이 복사됩니다. `S<N>`, `V<N>` field에는 field 폭에 맞춰 잘리거나 0으로 채워져 들어가고, 숫자 vector field에는 길이가 정확히 맞을 때 들어갑니다. Byte가 없는 field(`S0`, `V0`, `(0,)` sub-array)도 받아들이며 아무것도 담지 않습니다. `to_numpy(dtype)`은 `numpy.dtype(...)`이 받는 것은 무엇이든 받으며, NumPy가 그로부터 만든 dtype대로 row를 배치합니다.
 
+읽기에서는 크기가 0보다 큰 출력 필드마다 독립된 바이트 구간이 필요합니다. 필드가 겹치면 서로 다른 bin 값이 같은 바이트를 덮어쓰므로 `to_numpy`는 `ValueError`를 발생시킵니다. 패딩, 뒤섞인 offset 순서, field title, 0바이트 필드를 지원합니다. 쓰기 입력에서는 `batch_write_numpy`가 겹친 필드에서 여러 bin을 읽을 수 있습니다.
+
 :::tip[지원 안 되는 dtype]
 
 Unicode string (`U`), Python object (`O`, structured field 안에 중첩된 것 포함), 가변 길이 `StringDType`, named field가 없는 dtype은 `TypeError`로, native가 아닌 byte order는 `ValueError`로 reject. string 데이터에는 `S` (fixed bytes) 사용.

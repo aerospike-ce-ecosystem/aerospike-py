@@ -36,13 +36,13 @@ logger = logging.getLogger("aerospike_py")
 def _wrap_key(raw: tuple | None) -> AerospikeKey | None:
     if raw is None:
         return None
-    return AerospikeKey(raw[0], raw[1], raw[2], raw[3])
+    return AerospikeKey(*raw)
 
 
 def _wrap_meta(raw: dict | None) -> RecordMetadata | None:
     if raw is None:
         return None
-    return RecordMetadata(gen=raw["gen"], ttl=raw["ttl"])
+    return RecordMetadata(raw["gen"], raw["ttl"])
 
 
 def _wrap_record(raw: tuple) -> Record:
@@ -62,15 +62,17 @@ def _wrap_operate_ordered(raw: tuple) -> OperateOrderedResult:
 
 
 def _wrap_batch_record(br) -> BatchRecordTuple:
-    key = _wrap_key(br.key)
-    record = _wrap_record(br.record) if br.record is not None else None
-    return BatchRecordTuple(
-        key=key,
-        result=br.result,
-        record=record,
-        in_doubt=br.in_doubt,
-        error_type=br.error_type,
-    )
+    raw_key = br.key
+    key = _wrap_key(raw_key)
+    raw_record = br.record
+    record = None
+    if raw_record is not None:
+        record_key, meta, bins = raw_record
+        # The native fallback reuses the request key. A key returned by the
+        # server (e.g. POLICY_KEY_SEND) must keep its own value and digest.
+        key_for_record = key if record_key is raw_key else _wrap_key(record_key)
+        record = Record(key_for_record, _wrap_meta(meta), bins)
+    return BatchRecordTuple(key, br.result, record, br.in_doubt, br.error_type)
 
 
 _NO_RETRIES = BatchRetryInfo()
@@ -79,10 +81,7 @@ _NO_RETRIES = BatchRetryInfo()
 def _wrap_batch_write_result(raw) -> BatchWriteResult:
     """Wrap a native ``BatchRecords``, carrying retry stats when there are any.
 
-    ``raw.retry_info`` is ``None`` on every path that issues a single batch call
-    — ``retry=0`` ``batch_write`` and all of ``batch_operate`` /
-    ``batch_remove`` / ``batch_apply`` — so the common case costs one attribute
-    read and reuses a shared default rather than building a tuple per call.
+    Operations without retry counters reuse the default single-attempt stats.
     """
     info = raw.retry_info
     return BatchWriteResult(

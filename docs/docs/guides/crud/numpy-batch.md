@@ -150,6 +150,8 @@ Rows with `result_codes[i] != 0`, including `RecordNotFound`, keep the dtype's z
 
 An HLL bin, a GeoJSON bin and a bin of a particle type the client does not interpret (what `get()` returns as `bytes` or `str`) are copied like any other bytes: into `S<N>` and `V<N>` fields, truncated or zero-padded to the field width, and into a numeric vector field of exactly their length. Fields of no bytes (`S0`, `V0`, a `(0,)` sub-array) are accepted and carry nothing. `to_numpy(dtype)` accepts whatever `numpy.dtype(...)` accepts and lays the rows out by the dtype NumPy makes of it.
 
+When reading, each non-empty output field needs its own byte range. `to_numpy` raises `ValueError` for overlapping fields because independent bin values would overwrite each other. Padding, out-of-order offsets, field titles and zero-width fields are supported. On input, `batch_write_numpy` can read multiple bins from overlapping fields.
+
 :::tip[Unsupported dtypes]
 
 Unicode strings (`U`), Python objects (`O`, also nested inside a structured field), variable-length `StringDType` and dtypes without named fields are rejected with `TypeError`; non-native byte order with `ValueError`. Use `S` (fixed bytes) for string data.

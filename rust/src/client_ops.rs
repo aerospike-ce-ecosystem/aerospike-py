@@ -595,12 +595,15 @@ fn failure_may_pass(class: ErrorClass) -> bool {
 /// has been applied, `CREATE_ONLY` finds the record it just created and a
 /// generation check finds the generation it just bumped, and the second send
 /// fails for a write that in fact went through. The first send may also
-/// invalidate a filter or start a requested relative TTL.
-fn put_is_idempotent(policy: &BatchWritePolicy) -> bool {
+/// invalidate a filter or start a requested relative TTL. A put containing
+/// only NIL bins can delete the record by removing its last bin; replaying
+/// it would then report KEY_NOT_FOUND for a successful deletion.
+fn put_is_idempotent(policy: &BatchWritePolicy, bins: &[aerospike_core::Bin]) -> bool {
     policy.generation_policy == aerospike_core::GenerationPolicy::None
         && policy.record_exists_action != aerospike_core::RecordExistsAction::CreateOnly
         && policy.filter_expression.is_none()
         && !matches!(policy.expiration, aerospike_core::Expiration::Seconds(_))
+        && bins.iter().any(|bin| bin.value != Value::Nil)
 }
 
 /// What the retry loop needs to know about one row.
@@ -619,11 +622,15 @@ struct RowJudgement {
 
 /// Judge one `batch_write` row.
 ///
-/// `idempotent` is [`put_is_idempotent`] for the row's write policy. A row is
-/// sent again only when the failure is transient **and** a second send cannot
+/// `idempotent` checks the row's bins and write policy when a transient
+/// failure is in doubt. A row is retried only when a second send cannot
 /// do harm: either the first one certainly was not applied (`!in_doubt`), or
 /// applying it twice is the same as applying it once.
-fn judge_row(outcome: RowOutcome, in_doubt: bool, idempotent: bool) -> RowJudgement {
+fn judge_row(
+    outcome: RowOutcome,
+    in_doubt: bool,
+    idempotent: impl FnOnce() -> bool,
+) -> RowJudgement {
     let (transient, unanswered) = match outcome {
         RowOutcome::Ok => return RowJudgement::default(),
         RowOutcome::NoResponse => (true, true),
@@ -634,7 +641,7 @@ fn judge_row(outcome: RowOutcome, in_doubt: bool, idempotent: bool) -> RowJudgem
     };
     RowJudgement {
         failed: true,
-        retry: transient && (idempotent || !in_doubt),
+        retry: transient && (!in_doubt || idempotent()),
         in_doubt,
         unanswered,
     }
@@ -733,8 +740,8 @@ impl BatchWriteRetryStats {
 ///   repeat (an unknown namespace, an invalid argument) is not attempted
 ///   again. A plain `put` overwrites its bins, so
 ///   another send restores its bin values. A filtered, create-only or
-///   generation-checked put, or one setting an explicit relative TTL, is
-///   left alone when the first send may already have applied.
+///   generation-checked put, an all-NIL put, or one setting an explicit
+///   relative TTL is left alone when the first send may already have applied.
 /// - If, when the loop ends, a record still has no answer from a server, the
 ///   call raises the failure of the attempt that left it that way, with every
 ///   row attached as `partial_result`. Otherwise the call returns `Ok` and
@@ -1023,7 +1030,10 @@ impl BatchWriteAttempts for ClusterAttempts<'_> {
         judge_row(
             outcome,
             crate::batch_types::row_in_doubt(row, outcome),
-            put_is_idempotent(&self.records[index].2),
+            || {
+                let (_, bins, policy) = &self.records[index];
+                put_is_idempotent(policy, bins)
+            },
         )
     }
 
@@ -1651,8 +1661,8 @@ mod tests {
 
     // ── judge_row / put_is_idempotent: which rows are sent again ───────────
 
-    const IDEMPOTENT: bool = true;
-    const CONDITIONAL: bool = false;
+    const IDEMPOTENT: fn() -> bool = || true;
+    const CONDITIONAL: fn() -> bool = || false;
 
     fn server(rc: ResultCode) -> RowOutcome {
         RowOutcome::Failed(ErrorClass::Server(rc))
@@ -1775,7 +1785,8 @@ mod tests {
     fn test_only_an_unconditional_put_is_idempotent() {
         use aerospike_core::{GenerationPolicy, RecordExistsAction};
 
-        assert!(put_is_idempotent(&BatchWritePolicy::default()));
+        let bins = [aerospike_core::Bin::new("v", Value::Int(1))];
+        assert!(put_is_idempotent(&BatchWritePolicy::default(), &bins));
 
         for action in [
             RecordExistsAction::Update,
@@ -1787,14 +1798,14 @@ mod tests {
                 record_exists_action: action,
                 ..BatchWritePolicy::default()
             };
-            assert!(put_is_idempotent(&policy), "{action:?}");
+            assert!(put_is_idempotent(&policy, &bins), "{action:?}");
         }
 
         let create_only = BatchWritePolicy {
             record_exists_action: RecordExistsAction::CreateOnly,
             ..BatchWritePolicy::default()
         };
-        assert!(!put_is_idempotent(&create_only));
+        assert!(!put_is_idempotent(&create_only, &bins));
 
         for generation_policy in [
             GenerationPolicy::ExpectGenEqual,
@@ -1804,12 +1815,24 @@ mod tests {
                 generation_policy,
                 ..BatchWritePolicy::default()
             };
-            assert!(!put_is_idempotent(&policy), "{generation_policy:?}");
+            assert!(!put_is_idempotent(&policy, &bins), "{generation_policy:?}");
         }
     }
 
     #[test]
+    fn a_put_that_may_remove_the_last_bin_retries_only_after_a_definite_refusal() {
+        let policy = BatchWritePolicy::default();
+        let mut bins = vec![aerospike_core::Bin::new("only", Value::Nil)];
+        let idempotent = || put_is_idempotent(&policy, &bins);
+        assert!(!judge_row(RowOutcome::Failed(ErrorClass::Connection), true, idempotent).retry);
+        assert!(judge_row(server(ResultCode::KeyBusy), false, idempotent).retry);
+        bins.push(aerospike_core::Bin::new("preserved", Value::Int(0)));
+        assert!(put_is_idempotent(&policy, &bins));
+    }
+
+    #[test]
     fn filtered_and_expiring_puts_are_retried_only_after_a_definite_refusal() {
+        let bins = [aerospike_core::Bin::new("v", Value::Int(1))];
         for policy in [
             BatchWritePolicy {
                 filter_expression: Some(aerospike_core::expressions::bool_val(true)),
@@ -1820,7 +1843,7 @@ mod tests {
                 ..BatchWritePolicy::default()
             },
         ] {
-            let idempotent = put_is_idempotent(&policy);
+            let idempotent = || put_is_idempotent(&policy, &bins);
             assert!(!judge_row(RowOutcome::Failed(ErrorClass::Connection), true, idempotent).retry);
             assert!(judge_row(server(ResultCode::KeyBusy), false, idempotent).retry);
         }
@@ -2193,7 +2216,7 @@ mod tests {
         }
 
         fn judge(&self, index: usize, row: &Row) -> RowJudgement {
-            judge_row(row.outcome, row.in_doubt, self.idempotent[index])
+            judge_row(row.outcome, row.in_doubt, || self.idempotent[index])
         }
 
         async fn sleep_ms(&self, ms: u64) {

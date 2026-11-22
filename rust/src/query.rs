@@ -14,6 +14,7 @@ use log::{debug, trace};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
+use crate::client_common::extract_parent_context;
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::catch_panic_sync;
 use crate::policy::query_policy::parse_query_policy;
@@ -339,7 +340,13 @@ fn execute_query_collect(
     let (query_policy, partition_filter) = parse_query_policy(policy)?;
     debug!("Executing {}", op_name);
 
-    let telemetry = QueryTelemetry::start(op_name, namespace, set_name, conn_info);
+    let telemetry = QueryTelemetry::start(
+        op_name,
+        namespace,
+        set_name,
+        conn_info,
+        &extract_parent_context(py),
+    );
     let gather = {
         let client = Arc::clone(client);
         async move {
@@ -448,7 +455,13 @@ fn execute_foreach(
     let (query_policy, partition_filter) = parse_query_policy(policy)?;
     debug!("Executing {} (streaming)", op_name);
 
-    let telemetry = QueryTelemetry::start(op_name, namespace, set_name, conn_info);
+    let telemetry = QueryTelemetry::start(
+        op_name,
+        namespace,
+        set_name,
+        conn_info,
+        &extract_parent_context(py),
+    );
 
     // `catch_panic_sync` covers the whole drive loop, including the Rust side of
     // each callback invocation, so a panic still surfaces as `RustPanicError`.

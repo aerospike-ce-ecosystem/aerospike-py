@@ -140,7 +140,7 @@ fn check_native_byteorder(base: &Bound<'_, PyAny>, name: &str) -> PyResult<()> {
 ///
 /// This is the single layout validator. The read path (`to_numpy`), the write
 /// path (`batch_write_numpy`) and the pure-Python conversion all go through it,
-/// so a dtype is accepted or rejected by the same rules in every direction:
+/// with these shared layout rules:
 ///
 /// - the dtype must be structured (named fields);
 /// - no field may hold Python objects, at any nesting depth — an object slot is
@@ -283,7 +283,32 @@ fn parse_dtype_fields_with(
     Ok((fields, row_stride))
 }
 
-/// Validate a NumPy structured dtype against the batch read/write layout rules.
+/// Independent result bins need independent bytes (including a missing bin's
+/// zero-filled field). Input arrays are read-only here and may use unions.
+fn parse_output_dtype(
+    dtype: &Bound<'_, PyAny>,
+    require_native_byteorder: bool,
+) -> PyResult<(Vec<FieldInfo>, usize)> {
+    let (mut fields, row_stride) = parse_dtype_fields_with(dtype, require_native_byteorder)?;
+    // Result fields are looked up by name. Sorting these descriptors leaves
+    // NumPy's declared field order intact and also accepts reordered layouts.
+    fields.sort_unstable_by_key(|field| field.offset);
+    let mut previous: Option<&FieldInfo> = None;
+    for field in fields.iter().filter(|field| field.itemsize != 0) {
+        if let Some(prev) = previous {
+            if field.offset < prev.offset + prev.itemsize {
+                return Err(PyValueError::new_err(format!(
+                    "output dtype fields '{}' and '{}' overlap",
+                    prev.name, field.name
+                )));
+            }
+        }
+        previous = Some(field);
+    }
+    Ok((fields, row_stride))
+}
+
+/// Validate a NumPy structured dtype for independent batch result bins.
 ///
 /// Exposed to Python so the pure-Python conversion in
 /// `aerospike_py.numpy_batch` applies the rules the native paths do. That
@@ -299,7 +324,7 @@ pub fn validate_numpy_dtype(
     if !dtype.is_instance(&np_dtype)? {
         return Err(PyTypeError::new_err("dtype must be a numpy.dtype instance"));
     }
-    parse_dtype_fields_with(dtype, require_native_byteorder).map(|_| ())
+    parse_output_dtype(dtype, require_native_byteorder).map(|_| ())
 }
 
 // ── raw pointer from numpy array ────────────────────────────────
@@ -854,7 +879,7 @@ pub fn batch_to_numpy_py(
     // agree with what NumPy allocates for it. Parsed from the real dtype the
     // two cannot differ.
     let dtype_obj = &np.call_method1("dtype", (dtype_obj,))?;
-    let (fields, row_stride) = parse_dtype_fields(dtype_obj)?;
+    let (fields, row_stride) = parse_output_dtype(dtype_obj, true)?;
 
     // Overflow check: ensure n * row_stride does not overflow usize
     if n.checked_mul(row_stride).is_none() {

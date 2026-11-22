@@ -538,6 +538,53 @@ class TestHostParsing:
 class TestBatchRecordNamedTuple:
     """Verify BatchRecord and BatchRecords expose the expected public API."""
 
+    def test_write_result_preserves_request_and_server_keys(self):
+        from types import SimpleNamespace
+
+        from aerospike_py._client import _wrap_batch_write_result, _wrap_partial_result
+        from aerospike_py.types import (
+            AerospikeKey,
+            BatchRecord,
+            BatchRetryInfo,
+            BatchWriteResult,
+            Record,
+            RecordMetadata,
+        )
+
+        digest = bytes(range(20))
+        request = ("test", "set", None, digest)
+        returned = ("test", "set", "stored_key", digest)
+        native = SimpleNamespace(
+            retry_info=(2, 3, False, 1),
+            batch_records=[
+                SimpleNamespace(
+                    key=request,
+                    result=0,
+                    record=(returned, {"gen": 3, "ttl": 17}, {"v": 4}),
+                    in_doubt=False,
+                    error_type=None,
+                ),
+                SimpleNamespace(key=request, result=-1, record=None, in_doubt=True, error_type="Connection"),
+            ],
+        )
+        expected = BatchWriteResult(
+            [
+                BatchRecord(
+                    AerospikeKey(*request), 0, Record(AerospikeKey(*returned), RecordMetadata(3, 17), {"v": 4})
+                ),
+                BatchRecord(AerospikeKey(*request), -1, None, True, "Connection"),
+            ],
+            BatchRetryInfo(2, 3, False, 1),
+        )
+        result = _wrap_batch_write_result(native)
+        assert result == expected
+        assert type(result) is BatchWriteResult and type(result.batch_records[0]) is BatchRecord
+        assert type(result.batch_records[0].record) is Record
+        error = RuntimeError()
+        error.partial_result = native
+        _wrap_partial_result(error)
+        assert type(error.partial_result) is BatchWriteResult and error.partial_result == expected
+
     def test_batch_record_has_expected_attributes(self):
         from aerospike_py import BatchRecord
 

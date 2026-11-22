@@ -8,6 +8,8 @@ Requires a running Aerospike server.
 """
 
 import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -68,6 +70,49 @@ class TestAsyncConnectRace:
         await client.close()  # should not raise
 
         assert client.is_connected() is False
+
+    @pytest.mark.parametrize("context_exit", [False, True], ids=["close", "context_exit"])
+    async def test_cancelled_close_finishes_before_reconnect(self, context_exit):
+        client = await aerospike_py.AsyncClient(AEROSPIKE_CONFIG).connect()
+        try:
+            close = client.__aexit__(None, None, None) if context_exit else client.close()
+            first = asyncio.create_task(close)
+            await asyncio.sleep(0)  # let it hand the connection to native shutdown
+            assert not client.is_connected()
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+
+            # Either closer may run while the original native shutdown is still
+            # in progress. Both must finish before connect can reopen the client.
+            await asyncio.wait_for(asyncio.gather(client.close(), client.close()), timeout=10)
+            await client.connect()
+            assert await client.ping()
+        finally:
+            await client.close()
+
+    async def test_close_from_different_event_loop_threads(self):
+        client = await aerospike_py.AsyncClient(AEROSPIKE_CONFIG).connect()
+        workers = 8
+        ready = threading.Barrier(workers, timeout=15)
+
+        async def close_together():
+            # Exercise both the live transition and overlapping idempotent closes.
+            for _ in range(3):
+                ready.wait()
+                await client.close()
+
+        def run_loop():
+            asyncio.run(close_together())
+
+        try:
+            loop = asyncio.get_running_loop()
+            with ThreadPoolExecutor(workers) as pool:
+                await asyncio.gather(*(loop.run_in_executor(pool, run_loop) for _ in range(workers)))
+            await client.connect()
+            assert await client.ping()
+        finally:
+            await client.close()
 
     async def test_connect_close_reconnect_cycle(self):
         """Multiple connect→close→reconnect cycles should work cleanly."""

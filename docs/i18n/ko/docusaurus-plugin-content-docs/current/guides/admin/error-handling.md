@@ -237,7 +237,7 @@ Exponential backoff로 transient failure를 자동으로 retry하려면 내장 `
 
 쓰기를 포함한 배치에서 `POLICY_REPLICA_MASTER`와 양의 `max_retries`를 함께 지정하면 전송 전에 예외가 발생합니다. Rust 클라이언트 3.0은 이 조합에서 배치 종료 응답이 유실되면 서버가 이미 성공을 알린 행도 재전송할 수 있습니다. 재실행 시 값이 달라지는 쓰기에는 기본 재시도 횟수 0을 사용하세요. 읽기 전용 배치는 이 replica 정책을 사용할 수 있습니다.
 
-필터 조건이나 명시적인 상대 TTL이 있는 쓰기의 성공 여부가 불확실하면 행별 재시도를 멈춥니다. 첫 쓰기로 조건이 달라지거나 만료 시각이 연장될 수 있기 때문입니다. namespace 기본 TTL을 사용하는 일반 덮어쓰기에 `retry=N`을 지정하면 재전송이 generation을 증가시키고 서버의 기본 TTL을 다시 시작할 수 있습니다. 공개 배치의 지연과 오류 라벨은 재시도까지 포함한 최종 결과를 나타내며, 추가 전송은 `_retry` 이름으로 따로 기록합니다.
+필터 조건이나 명시적인 상대 TTL을 사용하거나 bin 삭제만 하는 쓰기의 성공 여부가 불확실하면 행별 재시도를 멈춥니다. 다시 보내면 첫 쓰기로 달라진 조건을 충족하지 못하거나 만료 시각이 연장되거나 마지막 bin 삭제 후 레코드 없음으로 보고될 수 있기 때문입니다. namespace 기본 TTL을 사용하는 일반 덮어쓰기에 `retry=N`을 지정하면 재전송이 generation을 증가시키고 서버의 기본 TTL을 다시 시작할 수 있습니다. 공개 배치의 지연과 오류 라벨은 재시도까지 포함한 최종 결과를 나타내며, 추가 전송은 `_retry` 이름으로 따로 기록합니다.
 
 쓰기를 포함한 `batch_operate()`는 각 행에 `exists`, `commit_level`, `ttl`, `key`, `durable_delete`를 적용합니다. 이 메서드는 예상 generation을 받지 않으므로 세대 비교에는 `operate(..., meta={"gen": expected})`를 사용하세요. 읽기 전용 `batch_operate()`는 `exists`·`gen`·`commit_level`을 거부합니다. `batch_remove()`는 배치 정책과 개별 레코드 meta 모두에서 `exists`를 거부합니다.
 

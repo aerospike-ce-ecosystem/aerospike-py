@@ -8,7 +8,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use aerospike_core::query::PartitionFilter;
@@ -19,11 +19,12 @@ use futures::future::{ready, Either, Ready};
 use futures::FutureExt;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::sync::PyOnceLock;
+use pyo3::sync::{OnceLockExt, PyOnceLock};
 use pyo3::types::PyList;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, Semaphore};
 
+use crate::client_common::{extract_parent_context, ParentContext};
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::{catch_panic_sync, future_into_py_panic_safe};
 use crate::types::record::record_to_py;
@@ -360,6 +361,7 @@ impl QueryTelemetry {
         namespace: &str,
         set_name: &str,
         conn_info: &crate::tracing::ConnectionInfo,
+        parent_ctx: &ParentContext,
     ) -> Self {
         #[cfg(feature = "otel")]
         let span = {
@@ -379,7 +381,7 @@ impl QueryTelemetry {
                     KeyValue::new("server.port", conn_info.server_port),
                     KeyValue::new("db.aerospike.cluster_name", conn_info.cluster_name.clone()),
                 ])
-                .start(&tracer)
+                .start_with_context(&tracer, parent_ctx)
         };
         Self {
             started: Instant::now(),
@@ -464,6 +466,8 @@ struct StreamState {
     stop: Arc<StopSignal>,
     closed: AtomicBool,
     telemetry: Mutex<Option<QueryTelemetry>>,
+    /// Captured on the first consumer's Python thread, before waiting for admission.
+    parent_ctx: OnceLock<ParentContext>,
 }
 
 /// Lock a mutex that guards plain data: a panic elsewhere cannot have left it
@@ -552,6 +556,9 @@ impl StreamState {
                 &request.namespace,
                 &request.set_name,
                 &request.connection_info,
+                self.parent_ctx
+                    .get()
+                    .expect("first read captures its parent"),
             ));
             let running = RunningQuery::start_with_stop(
                 &request.client,
@@ -900,6 +907,13 @@ pub struct PyRecordStream {
 }
 
 impl PyRecordStream {
+    fn begin_read(&self, py: Python<'_>) -> Arc<StreamState> {
+        self.state
+            .parent_ctx
+            .get_or_init_py_attached(py, || extract_parent_context(py));
+        Arc::clone(&self.state)
+    }
+
     pub(crate) fn new(request: QueryRequest) -> Self {
         Self {
             state: Arc::new(StreamState {
@@ -907,6 +921,7 @@ impl PyRecordStream {
                 stop: Arc::new(StopSignal::new()),
                 closed: AtomicBool::new(false),
                 telemetry: Mutex::new(None),
+                parent_ctx: OnceLock::new(),
             }),
         }
     }
@@ -926,7 +941,7 @@ impl PyRecordStream {
         if max_records == 0 {
             return Err(PyValueError::new_err("max_records must be at least 1"));
         }
-        let state = Arc::clone(&self.state);
+        let state = self.begin_read(py);
         future_into_py_panic_safe(py, "RecordStream.next_batch", async move {
             state
                 .next_batch(max_records)
@@ -970,7 +985,7 @@ impl PyRecordStream {
         py: Python<'py>,
         wrap: Option<Py<PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let state = Arc::clone(&self.state);
+        let state = self.begin_read(py);
         let wrap = wrap.map(Arc::new);
         let turns = conversion_turns(py);
         future_into_py_panic_safe(py, "RecordStream.read_all", async move {
@@ -1056,7 +1071,27 @@ mod tests {
             server_port: 3000,
             cluster_name: "test".into(),
         };
-        QueryTelemetry::start("query", "test", "demo", &conn_info)
+        QueryTelemetry::start("query", "test", "demo", &conn_info, &Default::default())
+    }
+
+    #[cfg(feature = "otel")]
+    #[test]
+    fn query_span_uses_the_callers_trace_id() {
+        use opentelemetry::trace::{
+            Span, SpanContext, SpanId, TraceContextExt, TraceFlags, TraceState,
+        };
+        let trace_id = 7u128.into();
+        let remote = SpanContext::new(
+            trace_id,
+            SpanId::from(11u64),
+            TraceFlags::SAMPLED,
+            true,
+            TraceState::default(),
+        );
+        let parent = ParentContext::new().with_remote_span_context(remote);
+        let telemetry =
+            QueryTelemetry::start("query", "test", "demo", &Default::default(), &parent);
+        assert_eq!(telemetry.span.span_context().trace_id(), trace_id);
     }
 
     fn state(phase: Phase) -> Arc<StreamState> {
@@ -1065,6 +1100,7 @@ mod tests {
             stop: Arc::new(StopSignal::new()),
             closed: AtomicBool::new(false),
             telemetry: Mutex::new(Some(telemetry())),
+            parent_ctx: OnceLock::new(),
         })
     }
 

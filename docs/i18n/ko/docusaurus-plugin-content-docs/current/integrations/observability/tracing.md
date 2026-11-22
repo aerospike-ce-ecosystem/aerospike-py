@@ -73,6 +73,8 @@ aerospike_py.shutdown_tracing()
 | `aerospike-py[otel]` + no active span | root span 생성 |
 | `aerospike-py` (base) | root span (propagation 없음) |
 
+쿼리는 `results()` 또는 `foreach()`가 실행될 때 활성화된 span을 부모로 사용합니다. 비동기 쿼리 스트림은 처음 읽을 때 부모 span을 정합니다. 쿼리나 스트림을 다른 span에서 생성했더라도 첫 읽기의 부모가 끝까지 유지됩니다.
+
 ## Framework 통합
 
 ### FastAPI

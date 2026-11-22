@@ -133,6 +133,42 @@ BASE_KEYS = [201, 202, 203, 204, 205, 206]
 
 
 class TestLayouts:
+    async def test_overlapping_output_bins_are_rejected_even_if_one_is_missing(self, any_client, any_cleanup):
+        (key,) = _keys([215])
+        await _put(any_client, any_cleanup, key, {"a": 11, "b": 22})
+        handle = await invoke(any_client, "batch_read", [key])
+        for other in ("b", "missing"):
+            dtype = np.dtype({"names": ["a", other], "formats": ["i4", "i4"], "offsets": [2, 0], "itemsize": 8})
+            with pytest.raises(ValueError, match="overlap"):
+                handle.to_numpy(dtype)
+
+    async def test_output_preserves_titles_padding_and_zero_width_fields_at_any_offset(self, any_client, any_cleanup):
+        (key,) = _keys([216])
+        await _put(any_client, any_cleanup, key, {"a": 11, "b": 22})
+        dtype = np.dtype(
+            {
+                "names": ["b", "alias_gap", "a"],
+                "formats": ["i4", "S0", "i4"],
+                "offsets": [8, 1, 0],
+                "titles": ["b_title", None, None],
+                "itemsize": 16,
+            }
+        )
+        result = (await _read(any_client, [key], dtype)).batch_records
+        assert result.dtype == dtype
+        assert (result["a"][0], result["b_title"][0], result["alias_gap"][0]) == (11, 22, b"")
+
+    async def test_overlapping_input_fields_can_write_the_same_bytes_to_two_bins(self, any_client, any_cleanup):
+        (key,) = _keys([217])
+        any_cleanup.append(key)
+        dtype = np.dtype({"names": ["_key", "a", "b"], "formats": ["i8", "i4", "i4"], "offsets": [0, 8, 8]})
+        data = np.zeros(1, dtype=dtype)
+        data["_key"] = key[2]
+        data["a"] = 31
+        written = await invoke(any_client, "batch_write_numpy", data, NS, SET)
+        assert written.batch_records[0].result == 0
+        assert (await invoke(any_client, "get", key)).bins == {"a": 31, "b": 31}
+
     @pytest.mark.parametrize(
         ("view", "written"),
         [

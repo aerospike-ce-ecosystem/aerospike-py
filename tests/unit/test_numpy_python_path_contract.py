@@ -275,6 +275,11 @@ VALID_DTYPES = [
 
 
 class TestDtypeValidation:
+    def test_output_fields_must_have_independent_bytes_even_with_a_missing_bin(self):
+        dtype = np.dtype({"names": ["first", "missing"], "formats": ["i4", "i4"], "offsets": [0, 0]})
+        with pytest.raises(ValueError, match="overlap"):
+            _convert_one(dtype, {"first": 11})
+
     @pytest.mark.parametrize(("dtype", "message"), REJECTED_DTYPES)
     def test_rejected_dtypes(self, dtype, message):
         batch = _make_batch_records([])

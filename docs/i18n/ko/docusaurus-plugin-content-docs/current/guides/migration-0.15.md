@@ -330,7 +330,7 @@ Write에 `max_retries > 0`을 주면, 응답이 유실되었을 때 Rust client�
 - Exponential backoff(full jitter, 시도 사이 최대 500 ms)로 최대 `N + 1`번 시도합니다.
 - Transient error로 실패한 record만 다시 보냅니다: timeout, device overload, key busy, 끊어진 connection, 내려간 node.
 - 이미 성공한 record는 절대 다시 보내지 않습니다.
-- 앞선 전송이 적용되었을 수 있는(`in_doubt`) `CREATE_ONLY` 또는 generation 검사 record는 다시 보내지 않으며, 그 row는 `in_doubt = True`를 유지합니다.
+- 앞선 쓰기가 적용되었을 수 있고 필터, generation 검사, `CREATE_ONLY`, 명시적인 상대 TTL을 사용하거나 모든 bin 값이 `None`이면 해당 row는 `in_doubt = True`를 유지합니다. 마지막 bin을 지우면 레코드도 삭제되므로 다시 보내면 성공한 삭제를 레코드 없음으로 보고할 수 있습니다.
 - 다시 해도 똑같이 실패할 오류(없는 namespace, 잘못된 인자)는 다시 시도하지 않습니다.
 - `total_timeout`(기본값 1000 ms)이 다 되면 멈춥니다. 실제로 `N + 1`번 시도하려면 `policy={"total_timeout": 30000}`처럼 늘리세요.
 
@@ -527,13 +527,15 @@ Row는 `numpy.asarray(data)`에서 읽습니다. `numpy.recarray` 같은 array s
 
 ### dtype을 양방향에서 검사합니다
 
-`batch_write_numpy()`와 `to_numpy()`는 같은 규칙으로 dtype을 검사합니다. `to_numpy(dtype)`은 `numpy.dtype(...)`이 받는 것은 무엇이든 받으며, NumPy가 그로부터 만든 dtype대로 row를 배치합니다. 두 method는 무엇이든 쓰거나 채우기 전에 다음을 거부합니다.
+`batch_write_numpy()`와 `to_numpy()`는 데이터를 쓰거나 채우기 전에 dtype을 검사합니다. `to_numpy(dtype)`은 `numpy.dtype(...)`이 받는 것은 무엇이든 받으며, NumPy가 그로부터 만든 dtype대로 row를 배치합니다. 두 method는 무엇이든 쓰거나 채우기 전에 다음을 거부합니다.
 
 - Named field가 없는 array나 dtype (`TypeError`)
 - NumPy의 가변 길이 `StringDType` (`TypeError`)
 - `U`, `O` field와 structured field 안에 중첩된 object member (`TypeError`)
 - Native가 아닌 byte order의 field (`ValueError`, 0.14.x와 같음)
 - 지원하지 않는 원소 크기
+
+크기가 0보다 큰 출력 필드의 바이트 구간이 겹치면 `ValueError`가 발생합니다. 누락된 bin의 필드를 0으로 유지하려면 각 bin에 독립된 저장 공간이 필요합니다. `batch_write_numpy()`의 입력 필드는 계속 겹칠 수 있습니다.
 
 0.14.x에서는 structured field 안에 중첩된 object member가 object pointer의 raw byte 그대로 server에 쓰였습니다.
 
@@ -847,7 +849,7 @@ raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Ke
 ## 그 밖의 변경
 
 - NumPy의 `_namespace`·`_set`은 UTF-8 고정 너비 스칼라 바이트 필드여야 합니다. 잘못된 레이아웃이나 UTF-8은 배치 전송 전에 거부합니다. `V<N>` 키는 끝의 0바이트를 보존하며 `S<N>` 키는 패딩을 제거합니다. 예전 writer로 `V2` 키 `b"K\x00"`를 저장했다면 레코드는 `b"K"`의 digest에 있습니다. 동일 레코드로 유지하려면 새 writer가 다른 digest에 쓰기 전에 데이터를 이관하세요.
-- 결과가 불확실한 필터 조건부 쓰기와 상대 TTL 쓰기는 바인딩의 재시도 대상에서 제외합니다. 행별 결과를 확인한 뒤 재전송 여부를 결정하세요.
+- 필터 조건, 명시적인 상대 TTL을 사용하거나 bin 삭제만 수행하는 쓰기의 결과가 불확실하면 바인딩의 재시도 대상에서 제외합니다. 행별 결과를 확인한 뒤 재전송 여부를 결정하세요.
 - AsyncClient 한 개가 동시에 실행하는 쿼리는 기본 16개입니다. `max_concurrent_queries`로 조정할 수 있고 0이면 무제한입니다. 일반 CRUD는 별도 제한을 사용합니다.
 
 - Client의 `timeout`과 `idle_timeout`은 30초 기본값을 유지합니다. Rust client 3.0은 자체 기본값을 낮췄지만, aerospike-py가 이전 값을 명시적으로 설정합니다.

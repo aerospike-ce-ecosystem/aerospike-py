@@ -199,8 +199,8 @@ def _assign_value(data: Any, i: int, field: str, field_dtype: Any, val: Any) -> 
 def _batch_records_to_numpy(batch_records_obj, dtype, keys, *, strict=False):
     """Convert BatchRecords to NumpyBatchRecords.
 
-    The dtype is validated by the same native validator the ``to_numpy`` and
-    ``batch_write_numpy`` paths use, and rows are indexed by the same rules:
+    The native output validator used by ``to_numpy`` checks that each bin
+    has independent storage. Rows are indexed by the same rules:
     row ``i`` is request ``i``, only real user keys are indexed, and the last
     row wins when a user key repeats.
 

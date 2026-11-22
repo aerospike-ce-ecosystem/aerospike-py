@@ -330,7 +330,7 @@ With the default policy (`max_retries` is `0` for every write) nothing changes, 
 - makes up to `N + 1` attempts, with exponential backoff (full jitter, at most 500 ms between attempts);
 - re-sends only the records that failed with a transient error: a timeout, device overload, key busy, a lost connection, a node that is down;
 - never re-sends a record that already succeeded;
-- never re-sends a `CREATE_ONLY` or generation-checked record whose earlier send may have been applied (`in_doubt`); the row keeps `in_doubt = True`;
+- leaves a row in doubt when its original write may have applied and the row uses a filter, a generation check, `CREATE_ONLY`, an explicit relative TTL, or only `None` bin values. Removing the last bin deletes the record, so a second send could report a missing record for a successful deletion;
 - does not try again when the failure would repeat (an unknown namespace, an invalid argument);
 - stops when `total_timeout` (default 1000 ms) runs out. To really get `N + 1` attempts, raise it, for example `policy={"total_timeout": 30000}`.
 
@@ -527,13 +527,15 @@ The rows are read from `numpy.asarray(data)`: an array subclass such as `numpy.r
 
 ### dtypes are checked in both directions
 
-`batch_write_numpy()` and `to_numpy()` check the dtype with the same rules before anything is written or filled. `to_numpy(dtype)` accepts whatever `numpy.dtype(...)` accepts and lays the rows out by the dtype NumPy makes of it. They reject:
+`batch_write_numpy()` and `to_numpy()` validate the dtype before any data is written or filled. `to_numpy(dtype)` accepts whatever `numpy.dtype(...)` accepts and lays the rows out by the dtype NumPy makes of it. They reject:
 
 - an array or dtype without named fields (`TypeError`);
 - NumPy's variable-length `StringDType` (`TypeError`);
 - `U` and `O` fields, and an object member nested inside a structured field (`TypeError`);
 - a field in non-native byte order (`ValueError`, as in 0.14.x);
 - unsupported element widths.
+
+An output dtype with overlapping non-empty fields now raises `ValueError`. Each bin needs independent storage, including a missing bin whose field stays zero. Overlapping fields in a `batch_write_numpy()` input still work.
 
 In 0.14.x an object member nested in a structured field was written to the server as the raw bytes of the object pointers:
 
@@ -847,7 +849,7 @@ raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Ke
 ## Other changes
 
 - NumPy routing fields `_namespace` and `_set` must be scalar fixed-width UTF-8 bytes. Invalid layouts and invalid UTF-8 are rejected before the batch is sent. Raw void (`V<N>`) keys retain trailing zero bytes; padded string (`S<N>`) keys still trim trailing zeros. For example, an older writer stored a `V2` key containing `b"K\x00"` under the digest of `b"K"`. Migrate that record before switching writers if the new and old keys should name the same record.
-- In-doubt writes conditioned on a filter or specifying a relative TTL are excluded from binding-level retries. Inspect the returned row and its uncertainty before deciding whether to write again.
+- In-doubt writes conditioned on a filter, specifying a relative TTL or removing only bins are excluded from binding-level retries. Inspect the returned row and its uncertainty before deciding whether to write again.
 - Each AsyncClient runs up to 16 active queries by default. Set `max_concurrent_queries` to tune this per-client budget (0 for unlimited); unrelated CRUD calls have their own limit.
 
 - The client `timeout` and `idle_timeout` keep their 30-second defaults. Rust client 3.0 lowered its own defaults; aerospike-py sets the old values explicitly.

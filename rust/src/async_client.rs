@@ -1,11 +1,13 @@
+use std::future::Future;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::backpressure::OperationLimiter;
 use crate::client_common;
 use crate::client_ops;
 use aerospike_core::Client as AsClient;
 use arc_swap::ArcSwapOption;
+use futures::{channel::oneshot, future::Shared, FutureExt};
 use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -17,45 +19,33 @@ const CONNECTING: u8 = 1;
 const CONNECTED: u8 = 2;
 const CLOSING: u8 = 3;
 
-/// RAII guard that reverts a stuck `CONNECTING` state back to `DISCONNECTED`.
-///
-/// `connect()` transitions the state machine to `CONNECTING` synchronously,
-/// then drives `AsClient::new()` inside the returned Python awaitable. If that
-/// awaitable is dropped before completing — e.g. the coroutine is garbage
-/// collected, cancelled, or wrapped in an `asyncio.wait_for()` that times out —
-/// the success/failure arms that move the state to `CONNECTED`/`DISCONNECTED`
-/// never run. Without this guard the client stays `CONNECTING` forever:
-/// `connect()` and `close()` both refuse to proceed and the client is wedged
-/// with no recovery path.
-///
-/// The guard's `Drop` only ever performs the `CONNECTING -> DISCONNECTED`
-/// transition (via CAS), so it can never clobber a state that the connect
-/// future already advanced. On the normal success/failure paths the future
-/// calls `disarm()` before storing the terminal state.
-struct ConnectStateGuard {
+/// A connect or close owns its transition until it finishes. Dropping it
+/// early (e.g. a cancelled connect) makes the client reconnectable again.
+struct TransitionGuard {
     state: Arc<AtomicU8>,
+    from: u8,
     armed: bool,
 }
 
-impl ConnectStateGuard {
-    fn new(state: Arc<AtomicU8>) -> Self {
-        Self { state, armed: true }
+impl TransitionGuard {
+    fn new(state: Arc<AtomicU8>, from: u8) -> Self {
+        Self {
+            state,
+            from,
+            armed: true,
+        }
     }
 
-    /// Disarm the guard once the connect future has reached a terminal arm
-    /// and will itself store the final state.
     fn disarm(&mut self) {
         self.armed = false;
     }
 }
 
-impl Drop for ConnectStateGuard {
+impl Drop for TransitionGuard {
     fn drop(&mut self) {
         if self.armed {
-            // Only revert if still CONNECTING; never overwrite a state the
-            // connect future may have already advanced.
             let _ = self.state.compare_exchange(
-                CONNECTING,
+                self.from,
                 DISCONNECTED,
                 Ordering::SeqCst,
                 Ordering::SeqCst,
@@ -64,21 +54,8 @@ impl Drop for ConnectStateGuard {
     }
 }
 
-/// Outcome of preparing a close transition — see [`PyAsyncClient::prepare_close`].
-///
-/// Computed synchronously while holding `&mut self` so the subsequent async
-/// future borrows no references from `self`.
-enum CloseOutcome {
-    /// Client was already disconnected or mid-close; caller should resolve
-    /// its Python awaitable with the idempotent no-op value.
-    Idempotent,
-    /// Client was connected; caller should drive `client.close()` in the
-    /// returned future and transition state to `DISCONNECTED` on completion.
-    Proceed {
-        client: Option<Arc<AsClient>>,
-        state: Arc<AtomicU8>,
-    },
-}
+// All close waiters for one connection observe the same native result.
+type CloseCompletion = Shared<oneshot::Receiver<aerospike_core::Result<()>>>;
 
 use crate::batch_types::PendingBatchRead;
 use crate::errors::as_to_pyerr;
@@ -100,8 +77,8 @@ type SharedClientState = Arc<ArcSwapOption<AsClient>>;
 /// Asynchronous Aerospike client exposed to Python as `AsyncClient`.
 ///
 /// All I/O methods return Python awaitables via `future_into_py`.
-/// The underlying `aerospike_core::Client` is shared behind a `Mutex`
-/// to allow safe concurrent access from multiple Python coroutines.
+/// Reads acquire a shared client handle; only closing and registering close waiters
+/// share a mutex.
 #[pyclass(name = "AsyncClient")]
 pub struct PyAsyncClient {
     /// The underlying async client, wrapped in `ArcSwapOption` for lock-free access.
@@ -116,6 +93,7 @@ pub struct PyAsyncClient {
     query_slots: Option<Arc<tokio::sync::Semaphore>>,
     /// Lifecycle state: Disconnected(0) → Connecting(1) → Connected(2) → Closing(3).
     state: Arc<AtomicU8>,
+    closing: Mutex<Option<CloseCompletion>>,
 }
 
 #[pymethods]
@@ -129,6 +107,7 @@ impl PyAsyncClient {
             limiter: Arc::new(OperationLimiter::new(0, 0)),
             query_slots: None,
             state: Arc::new(AtomicU8::new(DISCONNECTED)),
+            closing: Mutex::new(None),
         })
     }
 
@@ -189,6 +168,10 @@ impl PyAsyncClient {
             )));
         }
 
+        *self
+            .closing
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner) = None;
         let inner = self.inner.clone();
         let state = self.state.clone();
 
@@ -205,12 +188,9 @@ impl PyAsyncClient {
 
         let hosts_str = parsed.connection_string;
         info!("Async connecting to Aerospike cluster: {}", hosts_str);
+        // Capture the guard before the future is built, even if it is never polled.
+        let mut guard = TransitionGuard::new(state.clone(), CONNECTING);
         future_into_py(py, async move {
-            // Armed guard: if this future is dropped/cancelled before the
-            // match below runs, Drop reverts CONNECTING -> DISCONNECTED so the
-            // client is not permanently wedged.
-            let mut guard = ConnectStateGuard::new(state.clone());
-
             let result = AsClient::new(
                 &client_policy,
                 &hosts_str as &(dyn aerospike_core::ToHosts + Send + Sync),
@@ -254,21 +234,9 @@ impl PyAsyncClient {
     }
 
     /// Close connection (async).
-    fn close<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         info!("Closing async client connection");
-        match self.prepare_close()? {
-            CloseOutcome::Idempotent => future_into_py(py, async move { Ok(()) }),
-            CloseOutcome::Proceed { client, state } => future_into_py(py, async move {
-                let result = if let Some(c) = client {
-                    c.close().await.map_err(as_to_pyerr)
-                } else {
-                    Ok(())
-                };
-                // Always transition to Disconnected — inner is already None.
-                state.store(DISCONNECTED, Ordering::SeqCst);
-                result
-            }),
-        }
+        future_into_py(py, self.close_connection()?)
     }
 
     /// Get node names (sync, no I/O, lock-free).
@@ -316,7 +284,7 @@ impl PyAsyncClient {
 
     /// Async context manager exit.
     ///
-    /// Shares the close path with `close()` via `prepare_close()`. In
+    /// Shares the close path with `close()` via `close_connection()`. In
     /// particular, exiting while `connect()` is still in flight raises
     /// `ClientError` — the same behaviour as calling `close()` explicitly —
     /// rather than silently leaking a half-initialized client.
@@ -330,25 +298,14 @@ impl PyAsyncClient {
     /// Python wrapper's delegation is ever removed.
     #[pyo3(signature = (_exc_type=None, _exc_val=None, _exc_tb=None))]
     fn __aexit__<'py>(
-        &mut self,
+        &self,
         py: Python<'py>,
         _exc_type: Option<&Bound<'_, PyAny>>,
         _exc_val: Option<&Bound<'_, PyAny>>,
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        match self.prepare_close()? {
-            CloseOutcome::Idempotent => future_into_py(py, async move { Ok(false) }),
-            CloseOutcome::Proceed { client, state } => future_into_py(py, async move {
-                let result = if let Some(c) = client {
-                    c.close().await.map_err(as_to_pyerr)
-                } else {
-                    Ok(())
-                };
-                // Always transition to Disconnected — inner is already None.
-                state.store(DISCONNECTED, Ordering::SeqCst);
-                result.map(|()| false)
-            }),
-        }
+        let close = self.close_connection()?;
+        future_into_py(py, async move { close.await.map(|()| false) })
     }
 
     // ── CRUD ──────────────────────────────────────────────────
@@ -1503,42 +1460,52 @@ impl PyAsyncClient {
         })
     }
 
-    /// Shared pre-close step for `close()` and `__aexit__`.
-    ///
-    /// Atomically inspects state and, when CONNECTED, transitions to CLOSING,
-    /// swaps the inner `AsClient` out, and resets connection metadata and the
-    /// limiter. Returns:
-    ///
-    /// - `Ok(CloseOutcome::Idempotent)` when state is already `DISCONNECTED`
-    ///   or `CLOSING` — both `close()` and `__aexit__` treat this as a no-op.
-    /// - `Err(ClientError)` when state is `CONNECTING` — closing while an
-    ///   in-flight `connect()` may still be racing the inner `Arc` would leak
-    ///   a half-initialized client.
-    /// - `Ok(CloseOutcome::Proceed { client, state })` when state is
-    ///   `CONNECTED` — the caller drives `client.close()` and stores
-    ///   `DISCONNECTED` on completion.
-    fn prepare_close(&mut self) -> PyResult<CloseOutcome> {
-        let current = self.state.load(Ordering::SeqCst);
-        match current {
-            DISCONNECTED | CLOSING => Ok(CloseOutcome::Idempotent),
-            CONNECTING => Err(crate::errors::ClientError::new_err(
-                "Cannot close: client is currently connecting.",
-            )),
-            CONNECTED => {
-                self.connection_info
-                    .closing
-                    .store(true, std::sync::atomic::Ordering::Release);
-                self.state.store(CLOSING, Ordering::SeqCst);
-                let client = self.inner.swap(None);
-                self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());
-                self.limiter = Arc::new(OperationLimiter::new(0, 0));
-                Ok(CloseOutcome::Proceed {
-                    client,
-                    state: self.state.clone(),
-                })
+    /// Start native shutdown independently of any Python waiter. A cancelled
+    /// waiter can go away while the tend task still drains; another close
+    /// joins that same operation, and connect is allowed only after it ends.
+    fn close_connection(&self) -> PyResult<impl Future<Output = PyResult<()>> + Send + 'static> {
+        // Publish the completion in the same critical section as CLOSING.
+        // No Python calls or awaits run under this lock.
+        let mut closing = self.closing.lock().unwrap_or_else(PoisonError::into_inner);
+        let completion = match self.state.load(Ordering::SeqCst) {
+            DISCONNECTED => None,
+            CLOSING => closing.clone(),
+            CONNECTING => {
+                return Err(crate::errors::ClientError::new_err(
+                    "Cannot close: client is currently connecting.",
+                ))
             }
-            _ => unreachable!("invalid AsyncClient state: {current}"),
-        }
+            CONNECTED => {
+                let client = self.get_client()?;
+                self.connection_info.closing.store(true, Ordering::Release);
+                self.state.store(CLOSING, Ordering::SeqCst);
+                self.inner.store(None);
+                let (sender, receiver) = oneshot::channel();
+                let completion = receiver.shared();
+                *closing = Some(completion.clone());
+                let guard = TransitionGuard::new(self.state.clone(), CLOSING);
+                pyo3_async_runtimes::tokio::get_runtime().spawn(async move {
+                    let result = client.close().await;
+                    drop(guard);
+                    let _ = sender.send(result);
+                });
+                Some(completion)
+            }
+            current => unreachable!("invalid AsyncClient state: {current}"),
+        };
+        Ok(async move {
+            if let Some(completion) = completion {
+                completion
+                    .await
+                    .map_err(|_| {
+                        crate::errors::ClientError::new_err(
+                            "Native close task stopped before returning its result.",
+                        )
+                    })?
+                    .map_err(as_to_pyerr)?;
+            }
+            Ok(())
+        })
     }
 
     /// Internal helper for index creation (async).
@@ -1578,7 +1545,7 @@ mod tests {
         // CONNECTING -> DISCONNECTED so the client is not wedged.
         let state = Arc::new(AtomicU8::new(CONNECTING));
         {
-            let _guard = ConnectStateGuard::new(state.clone());
+            let _guard = TransitionGuard::new(state.clone(), CONNECTING);
             assert_eq!(state.load(Ordering::SeqCst), CONNECTING);
         }
         assert_eq!(
@@ -1594,7 +1561,7 @@ mod tests {
         // CONNECTED; the guard's Drop must not revert that.
         let state = Arc::new(AtomicU8::new(CONNECTING));
         {
-            let mut guard = ConnectStateGuard::new(state.clone());
+            let mut guard = TransitionGuard::new(state.clone(), CONNECTING);
             guard.disarm();
             state.store(CONNECTED, Ordering::SeqCst);
         }
@@ -1611,7 +1578,7 @@ mod tests {
         // transition), an armed guard's CAS must be a no-op.
         for terminal in [DISCONNECTED, CONNECTED, CLOSING] {
             let state = Arc::new(AtomicU8::new(terminal));
-            drop(ConnectStateGuard::new(state.clone()));
+            drop(TransitionGuard::new(state.clone(), CONNECTING));
             assert_eq!(
                 state.load(Ordering::SeqCst),
                 terminal,

@@ -362,6 +362,9 @@ class AsyncClient:
     async def close(self) -> None:
         """Close the connection to the cluster.
 
+        Concurrent calls wait for the same shutdown. If a caller is cancelled,
+        shutdown continues. Await close() again before reconnecting.
+
         Example:
             ```python
             await client.close()
