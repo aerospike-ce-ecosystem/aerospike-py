@@ -41,8 +41,12 @@ pub(crate) enum RowOutcome {
     /// The row failed, either with a server result code or on the client side
     /// (timeout, connection loss, ...).
     Failed(ErrorClass),
-    /// Core stamped PARTITION_UNAVAILABLE locally because the row had no route.
-    NotRouted,
+    /// A row rejected locally during the initial split carries the routing
+    /// cause. A row stranded during a grouped retry carries only code 11.
+    NotRouted {
+        code: ResultCode,
+        initial_split: bool,
+    },
     /// No node answered for this row and no failure was recorded for it.
     NoResponse,
 }
@@ -61,17 +65,24 @@ impl RowOutcome {
         match (error, has_record) {
             // A failed UDF row keeps a record (its FAILURE bin) next to the
             // error; the error decides.
-            (Some(e), _) => Self::from_failure(ErrorClass::of(e), e.node()),
+            (Some(e), _) => Self::from_failure(ErrorClass::of(e), e.node(), e.cause().is_some()),
             (None, true) => Self::Ok,
             (None, false) => Self::NoResponse,
         }
     }
 
-    pub(crate) fn from_failure(class: ErrorClass, node: Option<&str>) -> Self {
-        if class == ErrorClass::Server(ResultCode::PartitionUnavailable) && node.is_none() {
-            Self::NotRouted
-        } else {
-            Self::Failed(class)
+    pub(crate) fn from_failure(class: ErrorClass, node: Option<&str>, has_cause: bool) -> Self {
+        match (class, node) {
+            (ErrorClass::Server(code), None)
+                if code == ResultCode::PartitionUnavailable
+                    || (code == ResultCode::InvalidNamespace && has_cause) =>
+            {
+                Self::NotRouted {
+                    code,
+                    initial_split: has_cause,
+                }
+            }
+            _ => Self::Failed(class),
         }
     }
 
@@ -86,7 +97,7 @@ impl RowOutcome {
         match self {
             Self::Ok => 0,
             Self::Failed(class) => class.result_code(),
-            Self::NotRouted => ErrorClass::Server(ResultCode::PartitionUnavailable).result_code(),
+            Self::NotRouted { code, .. } => ErrorClass::Server(code).result_code(),
             Self::NoResponse => CLIENT_SIDE_RESULT_CODE,
         }
     }
@@ -97,7 +108,7 @@ impl RowOutcome {
         match self {
             Self::Ok => None,
             Self::Failed(class) => Some(class.label()),
-            Self::NotRouted => Some(ErrorClass::Server(ResultCode::PartitionUnavailable).label()),
+            Self::NotRouted { code, .. } => Some(ErrorClass::Server(code).label()),
             Self::NoResponse => Some(Cow::Borrowed(NO_RESPONSE_LABEL)),
         }
     }
