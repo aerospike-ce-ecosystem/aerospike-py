@@ -9,7 +9,7 @@ Requires a running Aerospike server.
 
 import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 import pytest
 
@@ -93,22 +93,31 @@ class TestAsyncConnectRace:
 
     async def test_close_from_different_event_loop_threads(self):
         client = await aerospike_py.AsyncClient(AEROSPIKE_CONFIG).connect()
-        workers = 8
-        ready = threading.Barrier(workers, timeout=15)
+        registering = threading.Event()
+        release = threading.Event()
 
-        async def close_together():
-            # Exercise both the live transition and overlapping idempotent closes.
-            for _ in range(3):
-                ready.wait()
+        async def first_close():
+            loop = asyncio.get_running_loop()
+            create_future = loop.create_future
+
+            def pause_registration():
+                # Keep the first thread inside the native close method while
+                # the other loop registers its own awaitable.
+                registering.set()
+                assert release.wait(15)
+                return create_future()
+
+            with patch.object(loop, "create_future", pause_registration):
                 await client.close()
 
-        def run_loop():
-            asyncio.run(close_together())
-
+        first = asyncio.create_task(asyncio.to_thread(asyncio.run, first_close()))
         try:
-            loop = asyncio.get_running_loop()
-            with ThreadPoolExecutor(workers) as pool:
-                await asyncio.gather(*(loop.run_in_executor(pool, run_loop) for _ in range(workers)))
+            try:
+                assert await asyncio.to_thread(registering.wait, 10)
+                await asyncio.wait_for(client.close(), timeout=10)
+            finally:
+                release.set()
+                await first
             await client.connect()
             assert await client.ping()
         finally:
