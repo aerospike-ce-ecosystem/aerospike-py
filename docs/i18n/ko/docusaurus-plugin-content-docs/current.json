@@ -58,5 +58,13 @@
   "sidebar.docsSidebar.category.Administration": {
     "message": "관리",
     "description": "The label for category 'Administration' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.0.15 benchmarks": {
+    "message": "0.15 벤치마크",
+    "description": "The label for category '0.15 benchmarks' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Benchmarks before 0.14": {
+    "message": "0.14 이전 벤치마크",
+    "description": "The label for category 'Benchmarks before 0.14' in sidebar 'docsSidebar'"
   }
 }

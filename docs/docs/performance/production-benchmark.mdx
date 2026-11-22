@@ -1,6 +1,6 @@
 ---
-title: "Archive: April 2026 serving benchmarks"
-sidebar_label: April serving benchmarks
+title: Benchmarks before 0.14
+sidebar_label: Serving benchmarks
 sidebar_position: 5
 description: April 2026 measurements of direct batch reads and a FastAPI inference service using aerospike-py and the aerospike C extension.
 ---
@@ -8,7 +8,7 @@ description: April 2026 measurements of direct batch reads and a FastAPI inferen
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-These April 16–17, 2026 runs compared a development build of `aerospike-py` with the `aerospike` C extension. The accompanying profiling report identifies the builds as `aerospike-py v0.1.0` and `aerospike 19.2.0`. In this archive, `official` means the C extension. For the comparison with the previous `aerospike-py 0.14.4` release and the Rust-based `aerospike-sdk 1.0.0`, see [Client comparison](./client-comparison). [April profiling report](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/524cadf9d5864ed8aeeabdfca88861eca4113cfe/benchmark/results/bottleneck-analysis.md)
+On April 16–17, 2026, the serving tests compared an aerospike-py development build (`v0.1.0`) with the `aerospike` C extension (`19.2.0`). Tables label the C extension `official`. [April profiling report](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/524cadf9d5864ed8aeeabdfca88861eca4113cfe/benchmark/results/bottleneck-analysis.md)
 
 ## Where latency was measured {#where-the-gap-lives}
 

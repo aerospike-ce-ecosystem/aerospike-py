@@ -1,66 +1,50 @@
 ---
-title: Performance benchmarks
-sidebar_label: Overview
+title: aerospike-py 0.15 benchmarks
+sidebar_label: 0.15 benchmarks
 sidebar_position: 1
-description: Batch reads and writes, NumPy conversion, queries and async streaming on standard and free-threaded CPython.
+description: Batch and query performance compared with aerospike-py 0.14.4 and the official Aerospike Python SDK.
 ---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
+The measured 0.15 candidate (`4aabf09`) is compared with **aerospike-py 0.14.4** and the official **Aerospike Python SDK 1.0.0** (`aerospike-sdk`). [Measured build](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c) · [Official SDK](https://github.com/aerospike/aerospike-client-python-sdk/releases/tag/v1.0.0)
 
-## Which benchmark matches your workload?
+<span id="which-benchmark-matches-your-workload" />
 
-The benchmarks compare **aerospike-py 0.15** with two baselines, the previous **aerospike-py 0.14.4** release and the official **`aerospike-sdk` 1.0.0**. Measurements use a 0.15 release candidate built from [commit `4aabf09`](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c). Both benchmark environments use CPython 3.14.2 and 3.14.2t with Aerospike CE 8.2.0.1.
+## Batch read and write throughput {#batch-throughput}
 
-| Benchmark | What it measures |
-|---|---|
-| [Local client comparison](./client-comparison.md) | Throughput for 720-key batches, full scans and windows of independent point operations on a shared Mac. |
-| [Ncloud batch reads at equal throughput](./ncloud-equal-rate.mdx) | CPU per row, peak RSS and p99 for 500, 1,000 and 2,000 keys per batch on two Linux VMs. Includes sampled tracing and the digest reuse experiment. |
+Four threads on an M4 Pro processed 720 keys per batch. **Rows/s ↑ higher is better.** Percentages show the change in 0.15 relative to each baseline.
 
-For 2,000-key NumPy reads on free-threaded Linux at 90,000 rows/s, **0.15 vs. 0.14.4** used about **7% less CPU per row**, **8% more peak RSS** and had **6% lower p99**. **0.15 vs. the official SDK** used **44% less CPU per row**, **34% less peak RSS** and had **51% lower p99**. FT RSS comes from a shorter run at the same target rate after correcting the memory cost of the wheel hash check. [Ncloud data and methodology](./ncloud-equal-rate.mdx)
+| CPython | Workload | vs. 0.14.4 | vs. official SDK |
+| --- | --- | ---: | ---: |
+| Standard | NumPy read | +13.7% | +34.3% |
+| Standard | NumPy write | +17.9% | +18.6% |
+| Standard | Dictionary read | +5.3% | +19.2% |
+| Standard | Dictionary write | +7.5% | +15.7% |
+| Free-threaded | NumPy read | +18.8% | +17.3% |
+| Free-threaded | NumPy write | +11.6% | +16.8% |
+| Free-threaded | Dictionary read | +3.3% | +4.0% |
+| Free-threaded | Dictionary write | −2.3% | −16.4% |
 
-### Local batch throughput {#batch-throughput}
+[Throughput in rows/s and client APIs](./client-comparison.md)
 
-Four synchronous threads each read or wrote 720 records with eight integer bins. Each column shows the percentage change in **rows per second** from that baseline to 0.15. Dictionary writes include preparing each client's request from the input dictionaries.
+## 2,000-key NumPy reads at equal throughput
 
-<Tabs groupId="benchmark-interpreter" queryString="python">
+In the Ncloud repeat, standard CPython processed 60,000 rows/s and free-threaded CPython processed 90,000 rows/s. **CPU time, peak resident memory (RSS) and p99 latency ↓ lower is better.**
 
-<TabItem value="gil" label="CPython 3.14.2">
+| CPython | Metric ↓ | vs. 0.14.4 | vs. official SDK |
+| --- | --- | ---: | ---: |
+| Standard | CPU time per row | −6.1% | −38.7% |
+| Standard | Peak RSS | +10.7% | −34.7% |
+| Standard | p99 latency | −1.9% | −47.6% |
+| Free-threaded | CPU time per row | −1.7% | −43.1% |
+| Free-threaded | Peak RSS | +7.3% | −40.2% |
+| Free-threaded | p99 latency | +1.9% | −48.9% |
 
-| Workload | vs. 0.14.4 | vs. official SDK |
-|---|---:|---:|
-| Read to Python dictionaries | +5.3% | +19.2% |
-| Write from Python dictionaries | +7.5% | +15.7% |
-| Read to a NumPy array | +13.7% | +34.3% |
-| Write from a NumPy array | +17.9% | +18.6% |
+[500-, 1,000- and 2,000-key results](./ncloud-equal-rate.mdx) · [Memory at higher concurrency](../guides/migration-0.15.md#memory-under-concurrent-batch-load)
 
-</TabItem>
+## Async queries {#async-queries}
 
-<TabItem value="ft" label="Free-threaded 3.14.2t">
+For 12,000 records, 0.15 reduced async list collection time by **38.7%** on standard CPython and **22.6%** on free-threaded CPython compared with 0.14.4. With `async for`, the official SDK took **9.97×** and **4.70×** as long as 0.15, respectively. The public async iterator was introduced in 0.15. [Query timings](./client-comparison.md#full-set-queries) · [Iterator profile](./async-stream-profile.md)
 
-| Workload | vs. 0.14.4 | vs. official SDK |
-|---|---:|---:|
-| Read to Python dictionaries | +3.3% | +4.0% |
-| Write from Python dictionaries | −2.3% | −16.4% |
-| Read to a NumPy array | +18.8% | +17.3% |
-| Write from a NumPy array | +11.6% | +16.8% |
+## Benchmarks before 0.14 {#earlier-application-benchmarks}
 
-</TabItem>
-
-</Tabs>
-
-The [client comparison](./client-comparison.md) includes absolute throughput, CPU per row, p99 per batch and single-caller results. For peak RSS at higher batch concurrency, see [memory under concurrent batch load](../guides/migration-0.15.md#memory-under-concurrent-batch-load).
-
-### Async queries
-
-On standard Python, consuming 12,000 rows with `async for` took **33.75 ms** with 0.15 and **336.53 ms** with the SDK. On free-threaded Python the times were **41.80 ms** and **196.64 ms**. The [stream profile](./async-stream-profile.md) shows what happened when the record delivery size and event-loop wake-up transport were changed independently. The SDK's `get_many()` submits independent point reads and has its own [window benchmark](./client-comparison.md#independent-point-operations).
-
-## Earlier application benchmarks
-
-These studies used the classic `aerospike` C extension. The historical label `official-async` refers to synchronous C calls submitted to a Python thread pool.
-
-| Study | What was measured |
-|---|---|
-| [Isolated benchmark](./isolated-benchmark.mdx) | A local HTTP harness measuring five batch scenarios, including dict and NumPy conversion. |
-| [Production benchmark](./production-benchmark.mdx) | FastAPI serving latency and throughput, including the DLRM inference workload. |
-| [Bottleneck analysis](./bottleneck-analysis.mdx) | Batch-read stage measurements and how to interpret time spent around the event loop. |
+The earlier serving tests compared the development client with the `aerospike` C extension. [Serving benchmarks](./production-benchmark.mdx) · [ASGI smoke test](./isolated-benchmark.mdx) · [Batch-read profile](./bottleneck-analysis.mdx)

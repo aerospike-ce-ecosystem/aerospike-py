@@ -1,6 +1,6 @@
 ---
-title: 2026년 4월 서빙 벤치마크 기록
-sidebar_label: 4월 서빙 벤치마크
+title: 0.14 이전 벤치마크
+sidebar_label: 서빙 벤치마크
 sidebar_position: 5
 description: 2026년 4월 aerospike-py와 aerospike C 확장으로 측정한 배치 읽기 및 FastAPI 추론 서비스의 성능 기록.
 ---
@@ -8,7 +8,7 @@ description: 2026년 4월 aerospike-py와 aerospike C 확장으로 측정한 배
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-2026년 4월 16~17일 실험은 개발 중인 `aerospike-py`와 `aerospike` C 확장을 비교했습니다. 당시 프로파일링 보고서가 기록한 버전은 `aerospike-py v0.1.0`과 `aerospike 19.2.0`입니다. 이 기록의 `official`은 C 확장을 가리킵니다. 직전 릴리스 `aerospike-py 0.14.4` 및 Rust 기반 `aerospike-sdk 1.0.0`을 기준으로 한 수치는 [클라이언트 비교](./client-comparison)에 있습니다. [당시 프로파일링 보고서](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/524cadf9d5864ed8aeeabdfca88861eca4113cfe/benchmark/results/bottleneck-analysis.md)
+2026년 4월 16~17일, aerospike-py 개발판(`v0.1.0`)과 `aerospike` C 확장(`19.2.0`)으로 배치 읽기와 추론 서비스의 성능을 측정했습니다. 아래 표의 `official`은 C 확장을 뜻합니다. [당시 프로파일링 보고서](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/524cadf9d5864ed8aeeabdfca88861eca4113cfe/benchmark/results/bottleneck-analysis.md)
 
 ## 지연 시간을 측정한 범위 {#격차가-어디-있는가}
 

@@ -1,66 +1,50 @@
 ---
-title: 성능 벤치마크
-sidebar_label: 개요
+title: aerospike-py 0.15 벤치마크
+sidebar_label: 0.15 벤치마크
 sidebar_position: 1
-description: 일반·free-threaded CPython에서 측정한 배치 읽기·쓰기, NumPy 변환, 쿼리와 비동기 스트리밍 성능.
+description: aerospike-py 0.14.4 및 공식 Aerospike Python SDK 대비 배치·쿼리 성능.
 ---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
+aerospike-py 0.15 후보판(`4aabf09`)을 **직전 버전 0.14.4**, **공식 Aerospike Python SDK 1.0.0**(`aerospike-sdk`)과 비교했습니다. [측정 빌드](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c) · [공식 SDK](https://github.com/aerospike/aerospike-client-python-sdk/releases/tag/v1.0.0)
 
-## 내 워크로드에 맞는 결과 찾기 {#which-benchmark-matches-your-workload}
+<span id="which-benchmark-matches-your-workload" />
 
-벤치마크에서는 **aerospike-py 0.15**를 직전 배포판 **aerospike-py 0.14.4**, 공식 **`aerospike-sdk` 1.0.0**과 비교했습니다. 0.15는 [커밋 `4aabf09`](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c)의 릴리스 후보를 빌드해 측정했습니다. 두 환경 모두 CPython 3.14.2·3.14.2t와 Aerospike CE 8.2.0.1을 사용했습니다.
+## 배치 읽기·쓰기 처리량 {#batch-throughput}
 
-| 벤치마크 | 측정 대상 |
-|---|---|
-| [로컬 클라이언트 비교](./client-comparison.md) | Mac 한 대에서 720키 배치, 전체 조회, 독립 단건 묶음의 처리량을 측정했습니다. |
-| [Ncloud 동일 처리량 배치 읽기](./ncloud-equal-rate.mdx) | Linux VM 2대에서 배치당 500·1,000·2,000키의 CPU/행, 최대 RSS, p99를 측정했습니다. 샘플링한 trace와 digest 재사용 실험도 포함합니다. |
+M4 Pro에서 스레드 4개로 호출당 720키를 처리했습니다. **초당 처리 행 수 ↑ 높을수록 좋습니다.** 각 열은 비교 대상 대비 0.15의 변화율입니다.
 
-Free-threaded Linux에서 초당 9만 행을 처리한 2,000키 NumPy 읽기에서 **0.15는 0.14.4 대비** CPU/행이 약 **7% 낮고**, 최대 RSS는 **8% 높고**, p99는 **6% 낮았습니다**. **공식 SDK 대비** CPU/행·최대 RSS·p99는 각각 **44%·34%·51% 낮았습니다**. FT RSS는 wheel 해시 계산의 메모리 영향을 보정한 뒤 같은 목표 처리량의 짧은 실행에서 다시 측정했습니다. [Ncloud 수치와 측정 방법](./ncloud-equal-rate.mdx)
+| CPython | 작업 | 0.14.4 대비 | 공식 SDK 대비 |
+| --- | --- | ---: | ---: |
+| 일반 | NumPy 읽기 | +13.7% | +34.3% |
+| 일반 | NumPy 쓰기 | +17.9% | +18.6% |
+| 일반 | dict 읽기 | +5.3% | +19.2% |
+| 일반 | dict 쓰기 | +7.5% | +15.7% |
+| Free-threaded | NumPy 읽기 | +18.8% | +17.3% |
+| Free-threaded | NumPy 쓰기 | +11.6% | +16.8% |
+| Free-threaded | dict 읽기 | +3.3% | +4.0% |
+| Free-threaded | dict 쓰기 | −2.3% | −16.4% |
 
-### 로컬 배치 처리량 {#batch-throughput}
+[클라이언트별 처리량과 사용한 API](./client-comparison.md)
 
-호출 스레드 4개가 각각 정수 bin 8개를 가진 720개 레코드를 읽거나 썼습니다. 각 열은 비교 대상 대비 0.15의 **초당 처리 행 수** 변화입니다. dict 쓰기는 입력 dict로 요청을 만드는 시간까지 포함합니다.
+## 동일 처리량에서 2,000키 NumPy 읽기
 
-<Tabs groupId="benchmark-interpreter" queryString="python">
+Ncloud 재측정에서 일반 CPython은 초당 6만 행, free-threaded는 초당 9만 행을 처리했습니다. **CPU 시간·최대 상주 메모리(RSS)·p99 지연 ↓ 낮을수록 좋습니다.**
 
-<TabItem value="gil" label="CPython 3.14.2">
+| CPython | 지표 ↓ | 0.14.4 대비 | 공식 SDK 대비 |
+| --- | --- | ---: | ---: |
+| 일반 | 행당 CPU 시간 | −6.1% | −38.7% |
+| 일반 | 최대 RSS | +10.7% | −34.7% |
+| 일반 | p99 지연 | −1.9% | −47.6% |
+| Free-threaded | 행당 CPU 시간 | −1.7% | −43.1% |
+| Free-threaded | 최대 RSS | +7.3% | −40.2% |
+| Free-threaded | p99 지연 | +1.9% | −48.9% |
 
-| 작업 | 0.14.4 대비 | 공식 SDK 대비 |
-|---|---:|---:|
-| 읽기 → Python dict | +5.3% | +19.2% |
-| Python dict → 쓰기 | +7.5% | +15.7% |
-| 읽기 → NumPy 배열 | +13.7% | +34.3% |
-| NumPy 배열 → 쓰기 | +17.9% | +18.6% |
+[500·1,000·2,000키 상세 비교](./ncloud-equal-rate.mdx) · [동시 호출 수에 따른 메모리 사용량](../guides/migration-0.15.md#memory-under-concurrent-batch-load)
 
-</TabItem>
+## 비동기 쿼리 {#async-queries}
 
-<TabItem value="ft" label="Free-threaded 3.14.2t">
+12,000행을 비동기 목록으로 수집하는 데 걸린 시간은 0.14.4 대비 일반 CPython에서 **38.7%**, free-threaded에서 **22.6%** 줄었습니다. 0.15에서 추가된 `async for`로 같은 행을 순회하면 공식 SDK가 0.15보다 각각 **9.97배**, **4.70배** 오래 걸렸습니다. [조회 방식별 시간](./client-comparison.md#full-set-queries) · [비동기 순회 프로파일](./async-stream-profile.md)
 
-| 작업 | 0.14.4 대비 | 공식 SDK 대비 |
-|---|---:|---:|
-| 읽기 → Python dict | +3.3% | +4.0% |
-| Python dict → 쓰기 | −2.3% | −16.4% |
-| 읽기 → NumPy 배열 | +18.8% | +17.3% |
-| NumPy 배열 → 쓰기 | +11.6% | +16.8% |
+## 0.14 이전 벤치마크 {#earlier-application-benchmarks}
 
-</TabItem>
-
-</Tabs>
-
-[클라이언트 비교표](./client-comparison.md)에는 절대 처리량, 행당 CPU, 배치당 p99와 단일 호출자 결과가 있습니다. 동시 배치를 많이 실행할 때의 최대 RSS는 [마이그레이션 가이드](../guides/migration-0.15.md#memory-under-concurrent-batch-load)를 참고하세요.
-
-### 비동기 쿼리 {#async-queries}
-
-일반 Python에서 `async for`로 12,000행을 끝까지 읽는 데 0.15는 **33.75ms**, SDK는 **336.53ms**가 걸렸습니다. FT에서는 각각 **41.80ms**, **196.64ms**였습니다. [스트림 프로파일](./async-stream-profile.md)에서 레코드 전달 단위와 이벤트 루프 알림 방식을 하나씩 바꾼 결과를 확인할 수 있습니다. SDK의 `get_many()`는 독립 단건 요청을 묶어 제출하며, [단건 묶음 측정](./client-comparison.md#independent-point-operations)에 별도로 정리했습니다.
-
-## 이전 애플리케이션 벤치마크 {#earlier-application-benchmarks}
-
-아래 실험의 공식 클라이언트는 기존 `aerospike` C 확장입니다. 과거 표에서 `official-async`는 동기 C 호출을 Python 스레드 풀에서 실행한 경로를 가리킵니다.
-
-| 문서 | 측정 대상 |
-|---|---|
-| [격리 벤치마크](./isolated-benchmark.mdx) | dict·NumPy 변환을 포함한 다섯 가지 배치 시나리오의 로컬 HTTP 측정 |
-| [프로덕션 벤치마크](./production-benchmark.mdx) | DLRM 추론을 포함한 FastAPI 서빙 환경의 지연과 처리량 |
-| [병목 분석](./bottleneck-analysis.mdx) | 배치 읽기 단계별 측정과 이벤트 루프 주변에서 소요되는 시간의 해석 |
+당시 서빙 실험의 비교 대상은 `aerospike` C 확장입니다. [서빙 벤치마크](./production-benchmark.mdx) · [ASGI 부하 테스트](./isolated-benchmark.mdx) · [배치 읽기 프로파일](./bottleneck-analysis.mdx)

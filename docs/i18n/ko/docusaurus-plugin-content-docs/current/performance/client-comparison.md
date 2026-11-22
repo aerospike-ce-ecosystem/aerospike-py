@@ -1,19 +1,14 @@
 ---
-title: Python 클라이언트 벤치마크
-sidebar_label: 클라이언트 비교
+title: 0.15 벤치마크 · 배치 연산과 쿼리
+sidebar_label: 배치 연산과 쿼리
 sidebar_position: 2
 slug: /performance/client-comparison
-description: aerospike-py 0.15, aerospike-py 0.14.4과 공식 Python SDK의 서버 배치, NumPy, 전체 조회, 독립 단건 요청 성능을 비교합니다.
+description: aerospike-py 0.15, aerospike-py 0.14.4와 공식 Python SDK의 서버 배치, NumPy, 전체 조회, 독립 단건 요청 성능을 비교합니다.
 ---
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
-로컬 측정은 **aerospike-py 0.15**를 이전 배포판 **0.14.4**와 공식 **`aerospike-sdk` 1.0.0**에 각각 비교합니다. 0.15는 커밋 `4aabf09`에서 빌드한 릴리스 후보이며, 공식 SDK는 `aerospike-native` 1.0.0을 사용했습니다. [측정한 커밋](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c) · [이전 배포판](https://pypi.org/project/aerospike-py/0.14.4/) · [공식 SDK 릴리스](https://github.com/aerospike/aerospike-client-python-sdk/releases/tag/v1.0.0)
-
-- **0.15 vs. 0.14.4** — 스레드 4개의 720키 NumPy 읽기 처리량은 일반 Python에서 **13.7%**, free-threaded에서 **18.8%** 높았습니다. NumPy 쓰기 처리량은 각각 **17.9%**, **11.6%** 높았습니다. Free-threaded의 dict 배치 쓰기 처리량은 **2.3%** 낮았습니다.
-- **0.15 vs. 공식 SDK** — 같은 NumPy 읽기는 일반 Python에서 **34.3%**, free-threaded에서 **17.3%** 높았습니다. NumPy 쓰기 처리량은 각각 **18.6%**, **16.8%** 높았습니다. Free-threaded dict 배치 쓰기 처리량은 **16.4%** 낮았고, 독립 단건 32개를 묶은 실험에서도 SDK가 앞섰습니다.
-
-Linux VM 2대에서 완료 처리량을 맞춘 500·1,000·2,000키 비교는 [Ncloud 배치 읽기](./ncloud-equal-rate.mdx)에 있습니다.
+aerospike-py 0.15 후보판(`4aabf09`)을 **직전 버전 0.14.4**, **공식 Aerospike Python SDK 1.0.0**(`aerospike-sdk`)과 비교했습니다. [로컬 측정 조건](#measurement-conditions)
 
 ## 720키 서버 배치 {#server-batches-with-720-keys}
 
@@ -33,8 +28,8 @@ Linux VM 2대에서 완료 처리량을 맞춘 500·1,000·2,000키 비교는 [N
 aerospike-py 두 버전에서는 `batch_read().to_list()`, `to_numpy(dtype)`, `batch_write()`, `batch_write_numpy()`를 사용했습니다. 공식 SDK에서는 `session.query(*keys).execute()`의 결과를 `collect()`로 읽고, `session.upsert(dataset).bins(...).rows(...).execute()`로 썼습니다. dict 쓰기에는 준비된 키와 행별 dict로 각 클라이언트의 요청을 만드는 시간도 포함됩니다. 공식 SDK의 NumPy 읽기에는 `numpy.fromiter()`로 출력 배열을 만드는 시간, 쓰기에는 `tolist()`로 입력 배열을 변환하는 시간이 포함됩니다.
 
 - Free-threaded NumPy 읽기에서 행당 클라이언트 CPU 시간은 **0.15 2.26µs**, 0.14.4 2.43µs, 공식 SDK 4.97µs였습니다. 배치 호출의 p99는 **공식 SDK가 22.6ms**로 가장 짧았고, 0.15 26.8ms, 0.14.4 29.6ms였습니다.
-- 각 API에 맞는 쓰기 입력을 미리 만들어 재사용했을 때 일반 빌드의 처리량(천 행/초)은 0.14.4 / PR / 공식 SDK 순서로 189.8 / 204.9 / 190.7이었습니다. Free-threaded에서는 같은 순서로 162.0 / 163.8 / 194.1이었습니다.
-- 호출 스레드가 하나이면 일반 Python의 dict 읽기 처리량(천 행/초)은 0.14.4 / PR / 공식 SDK 순서로 104.2 / 103.8 / 98.5였습니다. 스레드 4개일 때 나타난 PR과 0.14.4의 차이가 스레드 하나에서는 1% 미만으로 줄었습니다.
+- 각 API에 맞는 쓰기 입력을 미리 만들어 재사용했을 때 일반 빌드의 처리량(천 행/초)은 0.14.4 / 0.15 / 공식 SDK 순서로 189.8 / 204.9 / 190.7이었습니다. Free-threaded에서는 같은 순서로 162.0 / 163.8 / 194.1이었습니다.
+- 호출 스레드가 하나이면 일반 Python의 dict 읽기 처리량(천 행/초)은 0.14.4 / 0.15 / 공식 SDK 순서로 104.2 / 103.8 / 98.5였습니다. 스레드 4개일 때 나타난 0.15와 0.14.4의 차이가 스레드 하나에서는 1% 미만으로 줄었습니다.
 
 ## 전체 조회 {#full-set-queries}
 
@@ -49,7 +44,7 @@ aerospike-py 두 버전에서는 `batch_read().to_list()`, `to_numpy(dtype)`, `b
 | Free-threaded | 비동기 목록 수집 | 46.68 | 36.12 | 191.88 |
 | Free-threaded | 비동기 iterator | — | 41.80 | 196.64 |
 
-동기 목록 수집은 두 빌드 모두 공식 SDK가 가장 빨랐습니다. 비동기 목록 수집에서 PR은 0.14.4보다 일반 빌드에서 **38.7%**, free-threaded에서 **22.6%** 짧은 시간에 끝났습니다. 0.14.4는 비동기 `foreach()` 콜백을 제공했고, 0.15에서 공개 비동기 iterator가 추가됐습니다. iterator끼리 비교한 공식 SDK의 소요 시간은 일반 빌드에서 PR의 **9.97배**, free-threaded에서 **4.70배**였습니다. [비동기 스트림 프로파일](./async-stream-profile.md)
+동기 목록 수집은 두 빌드 모두 공식 SDK가 가장 빨랐습니다. 비동기 목록 수집에서 0.15는 0.14.4보다 일반 빌드에서 **38.7%**, free-threaded에서 **22.6%** 짧은 시간에 끝났습니다. 0.14.4는 비동기 `foreach()` 콜백을 제공했고, 0.15에서 공개 비동기 iterator가 추가됐습니다. iterator끼리 비교한 공식 SDK의 소요 시간은 일반 빌드에서 0.15의 **9.97배**, free-threaded에서 **4.70배**였습니다. [비동기 스트림 프로파일](./async-stream-profile.md)
 
 ## 독립 단건 요청 {#independent-point-operations}
 
@@ -62,7 +57,7 @@ aerospike-py 두 버전에서는 `batch_read().to_list()`, `to_numpy(dtype)`, `b
 | Free-threaded | 읽기 | 18.20 | 17.35 | 25.48 |
 | Free-threaded | 쓰기 | 19.32 | 19.01 | 26.30 |
 
-Free-threaded에서 독립 단건을 읽을 때 행당 클라이언트 CPU 시간은 **공식 SDK 18.55µs**, 0.14.4 260.19µs, PR 258.19µs였습니다. 여러 키를 처리하는 애플리케이션에서는 각 키에 독립 명령을 보내는지, 서버 배치로 보내는지에 따라 적용할 수치가 달라집니다.
+Free-threaded에서 독립 단건을 읽을 때 행당 클라이언트 CPU 시간은 **공식 SDK 18.55µs**, 0.14.4 260.19µs, 0.15 258.19µs였습니다. 여러 키를 처리하는 애플리케이션에서는 각 키에 독립 명령을 보내는지, 서버 배치로 보내는지에 따라 적용할 수치가 달라집니다.
 
 ## 측정 환경 {#measurement-conditions}
 

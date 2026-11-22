@@ -1,6 +1,6 @@
 ---
-title: Python client benchmarks
-sidebar_label: Client comparison
+title: 0.15 benchmarks · Batch operations and queries
+sidebar_label: Batch operations and queries
 sidebar_position: 2
 slug: /performance/client-comparison
 description: Compare server batches, NumPy, scans, and independent point operations in aerospike-py 0.15, aerospike-py 0.14.4, and the official Python SDK.
@@ -8,12 +8,7 @@ description: Compare server batches, NumPy, scans, and independent point operati
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
-The local benchmark compares **aerospike-py 0.15** with the previous **0.14.4** release and the official **`aerospike-sdk` 1.0.0**. The 0.15 release candidate was built from commit `4aabf09`, and the official SDK used `aerospike-native` 1.0.0. [Measured commit](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c) · [Previous release](https://pypi.org/project/aerospike-py/0.14.4/) · [SDK release](https://github.com/aerospike/aerospike-client-python-sdk/releases/tag/v1.0.0)
-
-- **0.15 vs. 0.14.4** — With four threads reading 720 keys per NumPy batch, 0.15 processed **13.7%** more rows per second on standard CPython and **18.8%** more on free-threaded CPython. NumPy writes processed **17.9%** and **11.6%** more rows per second, respectively. Free-threaded writes from dictionaries processed **2.3%** fewer rows per second.
-- **0.15 vs. the official SDK** — The same NumPy reads processed **34.3%** more rows per second on standard CPython and **17.3%** more on free-threaded CPython. NumPy writes processed **18.6%** and **16.8%** more rows per second, respectively. Free-threaded writes from dictionaries processed **16.4%** fewer rows per second, and the SDK also led on windows of 32 independent point operations.
-
-See the [Ncloud batch-read benchmark](./ncloud-equal-rate.mdx) for the 500-, 1,000- and 2,000-key comparison at matched completed throughput across two Linux VMs.
+The measured 0.15 candidate (`4aabf09`) is compared with **aerospike-py 0.14.4** and the official **Aerospike Python SDK 1.0.0** (`aerospike-sdk`). [Local test conditions](#measurement-conditions)
 
 ## Server batches with 720 keys
 
