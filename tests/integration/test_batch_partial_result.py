@@ -60,6 +60,7 @@ def slow_udf():
         admin = aerospike_py.client(AEROSPIKE_CONFIG).connect()
     except Exception as e:
         skip_or_raise(e)
+        raise  # not reached: skip_or_raise() does not return. Static analysis cannot see that.
     admin.udf_put(SLOW_UDF_FILE)
     probe = (NS, SET_NAME, "udf_probe")
     admin.put(probe, {"v": 1})
