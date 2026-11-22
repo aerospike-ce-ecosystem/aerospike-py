@@ -81,6 +81,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'performance/overview',
         'performance/client-comparison',
+        'performance/ncloud-equal-rate',
         'performance/async-stream-profile',
         'performance/isolated-benchmark',
         'performance/production-benchmark',

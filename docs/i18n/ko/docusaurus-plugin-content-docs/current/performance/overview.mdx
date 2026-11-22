@@ -10,11 +10,18 @@ import TabItem from '@theme/TabItem';
 
 ## 내 워크로드에 맞는 결과 찾기 {#which-benchmark-matches-your-workload}
 
-[클라이언트 비교](./client-comparison.md)에서는 Rust 3.0으로 전환한 aerospike-py [커밋 `4aabf09`](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c), 직전 배포판 **aerospike-py 0.14.4**, Aerospike의 **`aerospike-sdk` 1.0.0**을 같은 조건에서 측정했습니다. 세 클라이언트 모두 일반 CPython 3.14.2와 free-threaded 3.14.2t에서 로컬 Aerospike CE 8.2.0.1 단일 노드를 사용했습니다.
+벤치마크에서는 **aerospike-py 0.15**를 직전 배포판 **aerospike-py 0.14.4**, 공식 **`aerospike-sdk` 1.0.0**과 비교했습니다. 0.15는 [커밋 `4aabf09`](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c)의 릴리스 후보를 빌드해 측정했습니다. 두 환경 모두 CPython 3.14.2·3.14.2t와 Aerospike CE 8.2.0.1을 사용했습니다.
 
-### 배치 처리량 {#batch-throughput}
+| 벤치마크 | 측정 대상 |
+|---|---|
+| [로컬 클라이언트 비교](./client-comparison.md) | Mac 한 대에서 720키 배치, 전체 조회, 독립 단건 묶음의 처리량을 측정했습니다. |
+| [Ncloud 동일 처리량 배치 읽기](./ncloud-equal-rate.mdx) | Linux VM 2대에서 배치당 500·1,000·2,000키의 CPU/행, 최대 RSS, p99를 측정했습니다. 샘플링한 trace와 digest 재사용 실험도 포함합니다. |
 
-호출 스레드 4개가 각각 정수 bin 8개를 가진 720개 레코드를 읽거나 썼습니다. 각 열은 새 빌드의 **초당 처리 행 수**가 해당 비교 대상보다 얼마나 늘거나 줄었는지 나타냅니다. dict 쓰기는 입력 dict로 요청을 만드는 시간까지 포함합니다.
+Free-threaded Linux에서 초당 9만 행을 처리한 2,000키 NumPy 읽기에서 **0.15는 0.14.4 대비** CPU/행이 약 **7% 낮고**, 최대 RSS는 **8% 높고**, p99는 **6% 낮았습니다**. **공식 SDK 대비** CPU/행·최대 RSS·p99는 각각 **44%·34%·51% 낮았습니다**. FT RSS는 wheel 해시 계산의 메모리 영향을 보정한 뒤 같은 목표 처리량의 짧은 실행에서 다시 측정했습니다. [Ncloud 수치와 측정 방법](./ncloud-equal-rate.mdx)
+
+### 로컬 배치 처리량 {#batch-throughput}
+
+호출 스레드 4개가 각각 정수 bin 8개를 가진 720개 레코드를 읽거나 썼습니다. 각 열은 비교 대상 대비 0.15의 **초당 처리 행 수** 변화입니다. dict 쓰기는 입력 dict로 요청을 만드는 시간까지 포함합니다.
 
 <Tabs groupId="benchmark-interpreter" queryString="python">
 
@@ -46,7 +53,7 @@ import TabItem from '@theme/TabItem';
 
 ### 비동기 쿼리 {#async-queries}
 
-일반 Python에서 `async for`로 12,000행을 끝까지 읽는 데 새 빌드는 **33.75ms**, SDK는 **336.53ms**가 걸렸습니다. FT에서는 각각 **41.80ms**, **196.64ms**였습니다. [스트림 프로파일](./async-stream-profile.md)에서 레코드 전달 단위와 이벤트 루프 알림 방식을 하나씩 바꾼 결과를 확인할 수 있습니다. SDK의 `get_many()`는 독립 단건 요청을 묶어 제출하며, [단건 묶음 측정](./client-comparison.md#independent-point-operations)에 별도로 정리했습니다.
+일반 Python에서 `async for`로 12,000행을 끝까지 읽는 데 0.15는 **33.75ms**, SDK는 **336.53ms**가 걸렸습니다. FT에서는 각각 **41.80ms**, **196.64ms**였습니다. [스트림 프로파일](./async-stream-profile.md)에서 레코드 전달 단위와 이벤트 루프 알림 방식을 하나씩 바꾼 결과를 확인할 수 있습니다. SDK의 `get_many()`는 독립 단건 요청을 묶어 제출하며, [단건 묶음 측정](./client-comparison.md#independent-point-operations)에 별도로 정리했습니다.
 
 ## 이전 애플리케이션 벤치마크 {#earlier-application-benchmarks}
 

@@ -8,9 +8,9 @@ description: How aerospike-py and the official SDK deliver query records to Pyth
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
-One `async for` consumer read the same 12,000 records with **48 native Future completions** in aerospike-py at `4aabf09` and **12,001** in the official `aerospike-sdk` 1.0.0 with `aerospike-native` 1.0.0. Both clients use Aerospike Rust core 3.0.0. Their Python bindings choose how many records to return on each wake-up.
+One `async for` consumer read the same 12,000 records with **48 native Future completions** in the aerospike-py 0.15 candidate at `4aabf09` and **12,001** in the official `aerospike-sdk` 1.0.0 with `aerospike-native` 1.0.0. Both clients use Aerospike Rust core 3.0.0. Their Python bindings choose how many records to return on each wake-up.
 
-| Wall time to consume 12,000 records | aerospike-py | Official SDK | SDK time / aerospike-py time |
+| Wall time to consume 12,000 records | aerospike-py 0.15 | Official SDK | SDK time / aerospike-py time |
 |---|---:|---:|---:|
 | CPython 3.14.2 | 33.75 ms | 336.53 ms | 9.97× |
 | Free-threaded CPython 3.14.2t, GIL off | 41.80 ms | 196.64 ms | 4.70× |

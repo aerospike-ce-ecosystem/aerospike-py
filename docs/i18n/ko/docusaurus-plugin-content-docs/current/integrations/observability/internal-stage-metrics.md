@@ -58,16 +58,18 @@ Native module은 초기화할 때 env var를 한 번 읽습니다. 이후 runtim
 
 | Stage | 측정 대상 |
 |---|---|
-| `key_parse` | Python keys → Rust tuple (GIL held) |
+| `key_parse` | Python 키 튜플을 Rust 키로 변환합니다. 필요한 digest 계산도 포함됩니다. |
 | `future_into_py_setup` | `future_into_py` sync setup (GIL held) |
 | `tokio_schedule_delay` | `future_into_py` setup *직전* 부터 Tokio worker 위 async body 시작까지의 gap. **참고:** synchronous `future_into_py_setup` window 와 순수 scheduling delay 를 모두 포함 — `future_into_py_setup` 을 빼면 격리된 scheduling 비용에 가깝게 근사 (작은 `stage_timer!` macro overhead 도 이 window 안에 포함). |
 | `limiter_wait` | backpressure semaphore 대기 시간 |
-| `io` | Aerospike network round-trip |
-| `spawn_blocking_delay` | I/O 완료와 spawn-blocking thread 위 `IntoPyObject::into_pyobject` 시작 사이의 gap (GIL-bound) |
+| `io` | Rust의 배치 읽기 호출 전체 시간입니다. 배치 준비·라우팅, 요청 전송, 서버 응답 대기와 디코딩이 포함됩니다. |
+| `spawn_blocking_delay` | Rust 배치 읽기 완료부터 spawn-blocking 스레드에서 `IntoPyObject::into_pyobject`가 시작될 때까지의 시간입니다. |
 | `into_pyobject` | `Arc` wrap + `LazyBatchRecords` 생성 |
-| `event_loop_resume_delay` | `into_pyobject` 반환과 event loop 에서 Python coroutine 실제 resume 사이의 gap |
+| `event_loop_resume_delay` | 비동기 결과 핸들 생성 직전부터 Python에서 `to_list()` 또는 `to_dict()`를 호출할 때까지의 시간입니다. 스케줄링과 변환 전 사용자 코드에 걸린 시간이 포함됩니다. |
 | `to_dict` | `batch_to_dict_py` 변환 (GIL held). |
-| `to_numpy` | `batch_to_numpy_py` structured-array fill. hot `Value → buffer` loop 는 `Python::detach` 하에서 실행되므로 **timer 가 감싸는 것은 GIL-held framing 만** (allocation, dtype parse, `key_map` build) — GIL-released fill 자체는 아님. |
+| `to_numpy` | 구조화 배열 변환 전체에 걸린 시간입니다. 메모리 할당, dtype 파싱, `Python::detach` 중 버퍼 채우기와 키 인덱스 생성이 포함됩니다. |
+| `to_list` | 요청 순서대로 Python dict 목록을 변환하는 시간입니다. |
+| `key_index` | NumPy 결과에서 사용자 키를 행 위치에 연결하는 시간입니다. `to_numpy`에 포함됩니다. |
 | `merge_to_dict` | static `LazyBatchRecords.merge_to_dict` — 여러 handle 의 single-GIL merge. |
 
 ## 왜 opt-in 인가

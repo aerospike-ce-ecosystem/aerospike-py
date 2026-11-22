@@ -5,6 +5,8 @@ sidebar_position: 6
 description: Where to measure batch-read time and how to interpret the archived April 2026 serving profiles.
 ---
 
+The [Ncloud batch-read benchmark](./ncloud-equal-rate.mdx) measures CPU, memory and p99 at matched completed throughput. Its OTLP experiment traces the batch read and times NumPy conversion separately.
+
 The April 2026 serving experiment read nine sets of 200 keys per HTTP request. The application timed the complete fan-out, while the client's histograms timed stages within each individual `batch_read()`. The nine requests can overlap. Adding their stage averages cannot reconstruct one HTTP request's elapsed time. The archived profiling report identifies the clients as development `aerospike-py v0.1.0` and C extension `aerospike 19.2.0`. [April report](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/524cadf9d5864ed8aeeabdfca88861eca4113cfe/benchmark/results/bottleneck-analysis.md)
 
 | Timing boundary | What it includes |

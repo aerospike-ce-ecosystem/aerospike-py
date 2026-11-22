@@ -1,0 +1,85 @@
+---
+title: Ncloud에서 측정한 aerospike-py 0.15 배치 읽기
+sidebar_label: Ncloud 배치 읽기
+sidebar_position: 4
+slug: /performance/ncloud-equal-rate
+description: Ncloud에서 500·1,000·2,000키 배치 읽기의 처리량을 맞춰 CPU, 최대 RSS, p99를 비교합니다.
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+각 Python 빌드에서 완료 처리량을 맞췄을 때 **PR #500의 aerospike-py 0.15 후보판**은 500·1,000·2,000키 모두에서 공식 SDK보다 클라이언트 CPU 사용량, 최대 RSS, p99가 낮았습니다. Free-threaded CPython에서 2,000키를 읽을 때 0.15는 공식 SDK보다 **행당 CPU 시간이 43.8%**, **최대 RSS가 34.4%**, **p99가 51.5%** 낮았습니다. 기존 aerospike-py 0.14.4와 비교하면 여섯 조건 모두에서 최대 RSS가 **5.3–11.0% 증가**했습니다. 2,000키 p99는 일반 CPython에서 **15.8% 증가**했고 free-threaded CPython에서 **6.2% 감소**했습니다. [측정한 커밋](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c)
+
+## 부하와 측정 지표 {#workload-and-metrics}
+
+2026년 11월 22일 Ncloud KR-1의 4 vCPU, 16 GiB Ubuntu 24.04 x86-64 VM에서 Aerospike CE 8.2.0.1을 실행했습니다. 인메모리 네임스페이스 크기는 1 GiB, 복제 계수는 1이었습니다. 같은 서브넷의 동일 사양 VM에서 클라이언트를 실행하고 사설 주소로 접속했습니다. aerospike-py 0.15 후보판(`4aabf09`의 릴리스 빌드), aerospike-py 0.14.4, 공식 `aerospike-sdk`와 `aerospike-native` 각 1.0.0의 휠을 측정했습니다. NumPy는 2.5.5를 사용했습니다. CPython 3.14.2와 3.14.2t에서 각 프로세스는 클라이언트를 가져온 직후 실제 GIL 상태를 확인했습니다. [기존 단일 호스트 비교](./client-comparison.md)
+
+각 요청은 정수 키 500개, 1,000개 또는 2,000개를 읽었고, 각 행에는 int64 빈 8개가 들어 있었습니다. aerospike-py는 `batch_read().to_numpy(dtype)`를 호출했습니다. 공식 SDK는 `session.query(*keys).execute()`로 조회하고 행을 수집한 뒤 `numpy.fromiter()`로 동일한 구조화 배열을 만들었습니다. 모든 클라이언트에 소켓 제한 시간 5초, 전체 제한 시간 10초, 재시도 0회를 적용했습니다.
+
+워밍업 이후 목표 행 처리량에 맞춰 요청을 예약하고 동기 호출을 최대 4개 동시에 진행했습니다. 각 조건을 새 프로세스에서 세 번 실행하며 클라이언트 실행 순서를 바꿨습니다. 본 측정에서는 호출마다 행 개수와 번갈아 선택한 행의 값을 확인했습니다. 최종 비교에 포함된 **20,250건의 호출과 23,625,000개 행**은 예약 시점에 요청을 놓치거나 연산 오류가 발생한 건 없이 완료됐습니다. 행당 CPU 시간과 최대 RSS는 실행별 측정값의 중앙값입니다. CPU 시간에는 클라이언트의 모든 스레드가 포함됩니다. 최대 RSS는 모듈 로딩과 워밍업을 포함한 Linux 프로세스 상주 메모리의 최고 기록(`VmHWM`)입니다. 지연은 예약 시각부터 결과 배열 생성과 표본 행 확인을 마칠 때까지 측정했습니다. p99는 세 실행에서 얻은 지연 표본을 모아 계산했습니다. 실제 요청 시작 시각을 기준으로 한 p99도 측정 자료에 포함했습니다.
+
+## 일반 CPython에서 초당 60,000행 {#standard-cpython}
+
+모든 클라이언트와 키 개수에서 실제 처리량은 **59,978–60,000행/초**였습니다. 클라이언트와 키 개수의 조합당 세 번에 걸쳐 총 1,050건을 측정했습니다. 먼저 초당 90,000행으로 시험했을 때 공식 SDK가 각 1,200건의 예약 중 500·1,000·2,000키에서 각각 **39건·13건·2건**을 놓쳤습니다. 초당 60,000행으로 다시 측정하자 세 클라이언트가 모두 예약된 요청을 완료했습니다.
+
+각 셀에는 **행당 CPU 시간(µs) / 최대 RSS(MiB) / p99(ms)**를 표시했습니다.
+
+| 호출당 키 개수 | aerospike-py 0.14.4 | aerospike-py 0.15 후보판 | 공식 SDK 1.0.0 |
+|---:|---:|---:|---:|
+| 500 | 6.61 / 55.6 / 6.35 | 6.70 / 60.1 / 6.13 | 9.19 / 103.1 / 9.58 |
+| 1,000 | 7.08 / 62.9 / 10.94 | 7.06 / 67.7 / 11.73 | 9.88 / 110.1 / 18.99 |
+| 2,000 | 7.04 / 75.4 / 21.40 | 7.30 / 83.7 / 24.78 | 11.49 / 126.2 / 42.09 |
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/gil-60000.png')} alt="일반 CPython에서 초당 60,000행을 읽을 때 키 개수별 행당 CPU 시간, 최대 RSS, 예약 시각 기준 p99를 세 클라이언트에서 비교한 그래프." />
+
+## Free-threaded CPython에서 초당 90,000행 {#free-threaded-cpython}
+
+모든 클라이언트와 키 개수에서 실제 처리량은 **89,869–89,999행/초**였습니다. CPU와 p99는 조합당 1,200건의 호출에서 구했습니다. 최대 RSS는 같은 목표 처리량으로 조합당 180건을 별도 측정한 값이며, 이때 실제 처리량은 89,019–89,993행/초였습니다. 최초 측정 도구가 해시 계산을 위해 네이티브 확장 파일 전체를 메모리에 읽어 들이면서 프로세스의 최대 RSS 기록을 높였습니다. RSS를 다시 측정할 때는 파일을 나눠 읽어 해시를 계산했습니다. 2,000키에서 0.15 후보판의 평균 CPU 사용량은 0.60 vCPU, 공식 SDK는 1.08 vCPU였습니다.
+
+각 셀에는 **행당 CPU 시간(µs) / 최대 RSS(MiB) / p99(ms)**를 표시했습니다.
+
+| 호출당 키 개수 | aerospike-py 0.14.4 | aerospike-py 0.15 후보판 | 공식 SDK 1.0.0 |
+|---:|---:|---:|---:|
+| 500 | 6.82 / 66.7 / 6.06 | 6.54 / 70.4 / 5.51 | 12.84 / 111.1 / 10.70 |
+| 1,000 | 6.96 / 73.7 / 12.49 | 7.05 / 77.6 / 11.69 | 12.34 / 133.7 / 20.78 |
+| 2,000 | 7.21 / 87.3 / 21.65 | 6.71 / 94.1 / 20.30 | 11.95 / 143.4 / 41.85 |
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/ft-90000.png')} alt="Free-threaded CPython에서 초당 90,000행을 읽을 때 키 개수별 행당 CPU 시간, 별도 해시 방식으로 재측정한 최대 RSS, 예약 시각 기준 p99를 비교한 그래프." />
+
+## aerospike-py 0.15 후보판의 변화 {#changes-in-015}
+
+각 셀은 비교 대상 대비 **행당 CPU 시간 / 최대 RSS / p99**의 변화율입니다. 반올림 전 실측값으로 계산했으며, 음수는 자원 사용량이나 지연이 줄었음을 뜻합니다. 일반 CPython과 free-threaded CPython의 목표 처리량은 서로 다르므로, 각 행은 같은 Python 빌드 안에서의 비교입니다.
+
+| CPython | 호출당 키 개수 | 0.15 vs aerospike-py 0.14.4 | 0.15 vs 공식 SDK 1.0.0 |
+|---|---:|---:|---:|
+| 일반 | 500 | +1.4% / +8.0% / −3.5% | −27.0% / −41.8% / −36.0% |
+| 일반 | 1,000 | −0.4% / +7.7% / +7.3% | −28.6% / −38.5% / −38.2% |
+| 일반 | 2,000 | +3.6% / +11.0% / +15.8% | −36.5% / −33.6% / −41.1% |
+| Free-threaded | 500 | −4.1% / +5.7% / −9.0% | −49.0% / −36.6% / −48.5% |
+| Free-threaded | 1,000 | +1.2% / +5.3% / −6.4% | −42.9% / −42.0% / −43.8% |
+| Free-threaded | 2,000 | −6.9% / +7.7% / −6.2% | −43.8% / −34.4% / −51.5% |
+
+## tracing으로 본 배치 읽기 경로 {#tracing-the-batch-path}
+
+동일 처리량 비교 중에는 tracing을 껐습니다. 별도 진단에서는 요청을 한 번에 하나씩 실행하고, Python 부모 span을 12.5%의 비율로 샘플링했습니다. **0.15의 Python 배치 span 206개**에 대응하는 Rust `BATCH_READ` 자식 span을 모두 부하 VM 내부의 OTLP 수신기에서 확인했습니다. Python 타이머는 세 클라이언트의 공개 API 반환 시점을 기준으로 구간을 나눴습니다. 공식 SDK는 API가 반환되기 전에 결과 객체를 만들며, 변환 구간에서는 `.bins`를 읽고 `numpy.fromiter()`로 배열을 생성합니다. 2,000키에서 공식 SDK의 별도 `collect()` 단계 p50은 **0.23 ms**였습니다. 각 열은 해당 구간에서 요청별 측정값의 중앙값입니다. [공식 SDK 배치 호출 경로](https://github.com/aerospike/aerospike-client-python-sdk/blob/v1.0.0/aerospike_sdk/sync/operations/query_dispatch.py#L584-L606) · [0.15 NumPy 버퍼 변환](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c/rust/src/numpy_support.rs#L864-L1060)
+
+| Free-threaded 동기 호출 진단, 2,000키 | 요청 시작부터 API 반환까지 p50 | NumPy 변환 p50 |
+|---|---:|---:|
+| 0.14.4 | 13.01 ms | 1.89 ms |
+| 0.15 후보판 | 12.52 ms | 1.89 ms |
+| 공식 SDK | 16.12 ms | 4.28 ms |
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/trace-phases.png')} alt="Free-threaded 진단에서 요청 시작부터 API 반환까지 걸린 시간과 NumPy 변환 시간을 나눠 비교한 막대그래프. 2,000키에서 공식 SDK의 NumPy 변환은 4.28ms, aerospike-py 두 버전은 각각 1.89ms였다." />
+
+별도로 측정한 0.15 free-threaded 비동기 경로의 2,000키 구간별 평균은 `io` **10.79 ms**, `key_parse` **1.20 ms**, `to_numpy` **1.44 ms**였습니다. `io`에는 배치 연산 생성, 라우팅, 네트워크 전송, 서버 처리, 응답 디코딩이 포함됩니다. 본 시험 전에 같은 네트워크에서 작은 상태 조회의 p50은 **0.214 ms**였고, 초당 90,000행 시험 중 DB 전체 CPU 사용률의 p95는 **6.02%**였습니다. `io` 안에서 배치 연산 생성, 연결 확보, 응답 읽기, 디코딩이 각각 얼마나 걸리는지는 내부 타이머를 추가해 측정해야 합니다. [비동기 구간 타이머](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c/rust/src/async_client.rs#L786-L834) · [배치 연산 생성](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c/rust/src/client_common.rs#L505-L545)
+
+### 최적화 후보 {#optimization-candidates}
+
+| 후보 | 관찰 결과와 추가 검증 |
+|---|---|
+| 반복 조회하는 키의 digest 재사용 | 2,000키에서 검증된 20바이트 digest를 재사용하니, 실행 순서를 바꾼 두 비교에서 평균 `key_parse`가 각각 **1.23 → 0.96 ms**, **1.24 → 0.77 ms**로 줄었습니다. 전체 지연은 한 번은 늘고 한 번은 줄었습니다. 동일 처리량에서 전체 CPU 시간과 p99를 다시 검증하고, API를 바꾼다면 키 순서와 중복 키, 기존 digest 동작을 유지해야 합니다. |
+| NumPy 키 인덱스를 첫 조회 시 생성 | Python 키 조회용 인덱스 생성은 2,000키 free-threaded 비동기 호출당 평균 **0.22 ms**였고, `to_numpy`에 포함됩니다. 행의 위치로만 접근하는 호출에서는 첫 키 조회까지 인덱스 생성을 미룰 수 있습니다. 변경 전 CPU와 RSS의 효과, 중복 키 선택 규칙, digest만 있는 결과의 동작을 검증해야 합니다. |
+
+이번 측정은 정수 빈 8개를 읽는 단일 인메모리 노드에서 짧게 진행했습니다. 장시간 부하의 RSS, 더 넓은 데이터, 다중 노드 라우팅, 다른 목표 처리량은 각각 별도 측정이 필요합니다.
+
+<a href={useBaseUrl('/benchmark/4aabf09/ncloud/evidence.zip')}>동일 처리량 측정값과 trace 요약 내려받기 (ZIP)</a>

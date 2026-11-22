@@ -8,9 +8,9 @@ description: aerospike-py와 공식 SDK가 쿼리 레코드를 Python으로 넘�
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
-하나의 `async for` 루프에서 같은 12,000행을 끝까지 읽었을 때, Python 소비자는 aerospike-py `4aabf09`에서 **48회**, 공식 `aerospike-sdk` 1.0.0과 `aerospike-native` 1.0.0에서 **12,001회** 네이티브 Future가 완료되기를 기다렸습니다. 두 클라이언트 모두 Aerospike Rust core 3.0.0을 씁니다. Python을 한 번 깨울 때 몇 행을 넘길지는 각 바인딩이 결정합니다.
+하나의 `async for` 루프에서 같은 12,000행을 끝까지 읽었을 때, Python 소비자는 aerospike-py 0.15 후보 빌드 `4aabf09`에서 **48회**, 공식 `aerospike-sdk` 1.0.0과 `aerospike-native` 1.0.0에서 **12,001회** 네이티브 Future가 완료되기를 기다렸습니다. 두 클라이언트 모두 Aerospike Rust core 3.0.0을 씁니다. Python을 한 번 깨울 때 몇 행을 넘길지는 각 바인딩이 결정합니다.
 
-| 12,000행을 모두 읽는 데 걸린 시간 | aerospike-py | 공식 SDK | 공식 SDK 시간 / aerospike-py 시간 |
+| 12,000행을 모두 읽는 데 걸린 시간 | aerospike-py 0.15 | 공식 SDK | 공식 SDK 시간 / aerospike-py 시간 |
 |---|---:|---:|---:|
 | CPython 3.14.2 | 33.75 ms | 336.53 ms | 9.97배 |
 | Free-threaded CPython 3.14.2t, GIL 꺼짐 | 41.80 ms | 196.64 ms | 4.70배 |

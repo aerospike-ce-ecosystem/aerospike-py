@@ -10,11 +10,18 @@ import TabItem from '@theme/TabItem';
 
 ## Which benchmark matches your workload?
 
-The [client comparison](./client-comparison.md) measures three versions side by side: aerospike-py built on Aerospike Rust client 3.0 at [commit `4aabf09`](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c), the previous aerospike-py release **0.14.4**, and Aerospike’s **`aerospike-sdk` 1.0.0**. Each ran on CPython 3.14.2 and 3.14.2t against one local Aerospike CE 8.2.0.1 node.
+The benchmarks compare **aerospike-py 0.15** with two baselines, the previous **aerospike-py 0.14.4** release and the official **`aerospike-sdk` 1.0.0**. Measurements use a 0.15 release candidate built from [commit `4aabf09`](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c). Both benchmark environments use CPython 3.14.2 and 3.14.2t with Aerospike CE 8.2.0.1.
 
-### Batch throughput
+| Benchmark | What it measures |
+|---|---|
+| [Local client comparison](./client-comparison.md) | Throughput for 720-key batches, full scans and windows of independent point operations on a shared Mac. |
+| [Ncloud batch reads at equal throughput](./ncloud-equal-rate.mdx) | CPU per row, peak RSS and p99 for 500, 1,000 and 2,000 keys per batch on two Linux VMs. Includes sampled tracing and the digest reuse experiment. |
 
-Four synchronous threads each read or wrote 720 records with eight integer bins. Each column shows the percentage change in **rows per second** from that baseline to the new build. Dictionary writes include preparing each client's request from the input dictionaries.
+For 2,000-key NumPy reads on free-threaded Linux at 90,000 rows/s, **0.15 vs. 0.14.4** used about **7% less CPU per row**, **8% more peak RSS** and had **6% lower p99**. **0.15 vs. the official SDK** used **44% less CPU per row**, **34% less peak RSS** and had **51% lower p99**. FT RSS comes from a shorter run at the same target rate after correcting the memory cost of the wheel hash check. [Ncloud data and methodology](./ncloud-equal-rate.mdx)
+
+### Local batch throughput {#batch-throughput}
+
+Four synchronous threads each read or wrote 720 records with eight integer bins. Each column shows the percentage change in **rows per second** from that baseline to 0.15. Dictionary writes include preparing each client's request from the input dictionaries.
 
 <Tabs groupId="benchmark-interpreter" queryString="python">
 
@@ -46,7 +53,7 @@ The [client comparison](./client-comparison.md) includes absolute throughput, CP
 
 ### Async queries
 
-On standard Python, consuming 12,000 rows with `async for` took **33.75 ms** with the new build and **336.53 ms** with the SDK. On free-threaded Python the times were **41.80 ms** and **196.64 ms**. The [stream profile](./async-stream-profile.md) shows what happened when the record delivery size and event-loop wake-up transport were changed independently. The SDK's `get_many()` submits independent point reads and has its own [window benchmark](./client-comparison.md#independent-point-operations).
+On standard Python, consuming 12,000 rows with `async for` took **33.75 ms** with 0.15 and **336.53 ms** with the SDK. On free-threaded Python the times were **41.80 ms** and **196.64 ms**. The [stream profile](./async-stream-profile.md) shows what happened when the record delivery size and event-loop wake-up transport were changed independently. The SDK's `get_many()` submits independent point reads and has its own [window benchmark](./client-comparison.md#independent-point-operations).
 
 ## Earlier application benchmarks
 

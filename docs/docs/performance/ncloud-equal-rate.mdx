@@ -1,0 +1,85 @@
+---
+title: aerospike-py 0.15 batch reads on Ncloud
+sidebar_label: Ncloud batch reads
+sidebar_position: 4
+slug: /performance/ncloud-equal-rate
+description: CPU, peak process RSS, and p99 for 500, 1,000, and 2,000-key reads at matched throughput on Ncloud.
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+At matched completed row rates within each Python build, the **aerospike-py 0.15 candidate from PR #500** used less client CPU and peak RSS and had lower p99 than the official SDK at 500, 1,000, and 2,000 keys. At 2,000 keys on free-threaded CPython, 0.15 used **43.8% less CPU per row** and **34.4% less peak RSS**, with **51.5% lower p99**. Compared with aerospike-py 0.14.4, peak RSS rose **5.3–11.0%** across all six cases. At 2,000 keys, p99 rose **15.8%** on standard CPython and fell **6.2%** on free-threaded CPython. [Measured revision](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c)
+
+## Workload and metrics {#workload-and-metrics}
+
+On November 22, 2026, a 4-vCPU, 16 GiB Ubuntu 24.04 x86-64 VM in Ncloud KR-1 ran Aerospike CE 8.2.0.1 with a 1 GiB in-memory namespace and replication factor 1. A separate VM of the same specification in the same subnet ran the clients over private addresses. The wheels tested were a release build of the aerospike-py 0.15 candidate at `4aabf09`, aerospike-py 0.14.4, and the official `aerospike-sdk` with `aerospike-native`, both 1.0.0. Each process checked the actual GIL state after importing its client on CPython 3.14.2 or 3.14.2t. The NumPy version was 2.5.5. [Earlier shared-host comparisons](./client-comparison.md)
+
+Each request read 500, 1,000, or 2,000 integer keys with eight int64 bins per row. aerospike-py called `batch_read().to_numpy(dtype)`. The official SDK called `session.query(*keys).execute()`, collected the rows, and built the equivalent structured NumPy array with `numpy.fromiter()`. All clients used a 5-second socket timeout, a 10-second total timeout, and zero retries.
+
+The driver scheduled calls at the target row rate after warmup, with up to four synchronous calls outstanding. It rotated client order across three runs in fresh processes. Each measured call checked the row count and a rotating row sample. The accepted comparisons completed **20,250 calls and 23,625,000 rows** with zero missed arrivals or operation errors. CPU per row and peak RSS are medians across runs. CPU includes all client threads. Peak RSS is the Linux process high-water mark (`VmHWM`), including imports and warmup. The pooled p99 runs from the scheduled request time through result materialization and the sample check. The evidence also includes p99 measured from actual dispatch.
+
+## Standard CPython at 60,000 rows/s {#standard-cpython}
+
+Completed rates were **59,978–60,000 rows/s** across all clients and sizes. Each client and size contributed 1,050 calls across three runs. At the 90,000-row/s trial rate, the standard-build SDK missed **39, 13, and 2** arrivals at 500, 1,000, and 2,000 keys, respectively, out of 1,200 scheduled calls per size. The 60,000-row/s retest completed every arrival for all three clients.
+
+Each cell shows **CPU (µs/row) / peak RSS (MiB) / p99 (ms)**.
+
+| Keys per call | aerospike-py 0.14.4 | aerospike-py 0.15 candidate | Official SDK 1.0.0 |
+|---:|---:|---:|---:|
+| 500 | 6.61 / 55.6 / 6.35 | 6.70 / 60.1 / 6.13 | 9.19 / 103.1 / 9.58 |
+| 1,000 | 7.08 / 62.9 / 10.94 | 7.06 / 67.7 / 11.73 | 9.88 / 110.1 / 18.99 |
+| 2,000 | 7.04 / 75.4 / 21.40 | 7.30 / 83.7 / 24.78 | 11.49 / 126.2 / 42.09 |
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/gil-60000.png')} alt="Standard CPython at 60,000 rows per second. Three line charts compare the three clients' CPU per row, peak RSS, and scheduled p99 across 500, 1,000, and 2,000 keys." />
+
+## Free-threaded CPython at 90,000 rows/s {#free-threaded-cpython}
+
+Completed rates were **89,869–89,999 rows/s** across all clients and sizes. CPU and p99 use 1,200 calls per client and size. Peak RSS comes from a separate rerun at the same target rate with 180 calls per client and size, completing 89,019–89,993 rows/s. The initial driver read the entire native extension into memory to hash it, inflating the process high-water mark. The RSS rerun used a streaming hash. At 2,000 keys the 0.15 candidate used an average of 0.60 vCPUs versus 1.08 for the SDK.
+
+Each cell shows **CPU (µs/row) / peak RSS (MiB) / p99 (ms)**.
+
+| Keys per call | aerospike-py 0.14.4 | aerospike-py 0.15 candidate | Official SDK 1.0.0 |
+|---:|---:|---:|---:|
+| 500 | 6.82 / 66.7 / 6.06 | 6.54 / 70.4 / 5.51 | 12.84 / 111.1 / 10.70 |
+| 1,000 | 6.96 / 73.7 / 12.49 | 7.05 / 77.6 / 11.69 | 12.34 / 133.7 / 20.78 |
+| 2,000 | 7.21 / 87.3 / 21.65 | 6.71 / 94.1 / 20.30 | 11.95 / 143.4 / 41.85 |
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/ft-90000.png')} alt="Free-threaded CPython at 90,000 rows per second. The three line charts compare CPU per row, RSS from the short streaming-hash rerun, and scheduled p99 across all three key counts." />
+
+## Changes in the aerospike-py 0.15 candidate {#changes-in-015}
+
+Each cell gives the percentage change in **CPU per row / peak RSS / p99** relative to the named baseline, calculated from the unrounded measurements. Negative values indicate lower resource use or latency. The standard and free-threaded builds ran at different target rates, so read each row as a comparison within that build.
+
+| CPython | Keys per call | 0.15 vs aerospike-py 0.14.4 | 0.15 vs official SDK 1.0.0 |
+|---|---:|---:|---:|
+| Standard | 500 | +1.4% / +8.0% / −3.5% | −27.0% / −41.8% / −36.0% |
+| Standard | 1,000 | −0.4% / +7.7% / +7.3% | −28.6% / −38.5% / −38.2% |
+| Standard | 2,000 | +3.6% / +11.0% / +15.8% | −36.5% / −33.6% / −41.1% |
+| Free-threaded | 500 | −4.1% / +5.7% / −9.0% | −49.0% / −36.6% / −48.5% |
+| Free-threaded | 1,000 | +1.2% / +5.3% / −6.4% | −42.9% / −42.0% / −43.8% |
+| Free-threaded | 2,000 | −6.9% / +7.7% / −6.2% | −43.8% / −34.4% / −51.5% |
+
+## Tracing the batch path {#tracing-the-batch-path}
+
+The fixed-rate trials ran without tracing. The diagnostics used one outstanding request and sampled Python parents at a rate of 12.5%. The local OTLP receiver on the load VM collected Rust `BATCH_READ` child spans matching all **206 sampled 0.15 Python batch spans**. The three clients' Python-side timers use corresponding public API boundaries. In the official SDK, the time before API return includes construction of result envelopes. Its conversion time includes reading `.bins` and building the array with `numpy.fromiter()`. The SDK's separate `collect()` step had a p50 of **0.23 ms** at 2,000 keys. Each column is a median over requests for that phase. [Official SDK batch dispatch](https://github.com/aerospike/aerospike-client-python-sdk/blob/v1.0.0/aerospike_sdk/sync/operations/query_dispatch.py#L584-L606) · [0.15 buffer conversion](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c/rust/src/numpy_support.rs#L864-L1060)
+
+| FT sync diagnostic, 2,000 keys | Submit to API return p50 | Convert to NumPy p50 |
+|---|---:|---:|
+| 0.14.4 | 13.01 ms | 1.89 ms |
+| 0.15 candidate | 12.52 ms | 1.89 ms |
+| Official SDK | 16.12 ms | 4.28 ms |
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/trace-phases.png')} alt="Free-threaded diagnostic bar charts separate the time from submit to API return and NumPy conversion at all three sizes. The SDK's NumPy conversion reaches 4.28 milliseconds at 2,000 keys compared with 1.89 for both aerospike-py builds." />
+
+In a separate 0.15 free-threaded async diagnostic at 2,000 keys, `io` averaged **10.79 ms**, `key_parse` **1.20 ms**, and `to_numpy` **1.44 ms**. These are per-stage means from the async path. The `io` timer includes batch operation construction, routing, transport, server work, and response decoding. A small database status request over the same network had a **0.214 ms** p50 before the trials, and aggregate DB CPU p95 during the 90,000-row/s trial was **6.02%**. Establishing the cost of each part of the `io` stage requires internal boundaries around batch construction, connection acquisition, response reads, and decoding. [Async stage timer](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c/rust/src/async_client.rs#L786-L834) · [Batch operation construction](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c/rust/src/client_common.rs#L505-L545)
+
+### Optimization candidates {#optimization-candidates}
+
+| Candidate | Observation and follow-up |
+|---|---|
+| Reuse digests for repeated keys | At 2,000 keys, reusing the verified 20-byte digests reduced mean `key_parse` from **1.23 to 0.96 ms** and from **1.24 to 0.77 ms** in two order-swapped comparisons. Total latency moved in opposite directions. Recheck end-to-end CPU and p99 at equal throughput and preserve key order, duplicate keys, and existing digest behavior in any API change. |
+| Build the NumPy key index lazily | Eager creation of the Python lookup index averaged **0.22 ms** per 2,000-key FT async call and is included in `to_numpy`. An index built on first key lookup could save work for positional consumers. Validate CPU and RSS, duplicate-key selection, and digest-only results before making the change. |
+
+The experiment measured short, in-memory batches on one node with eight integer bins. Sustained RSS, wider payloads, multi-node routing, and other request rates need separate measurements.
+
+<a href={useBaseUrl('/benchmark/4aabf09/ncloud/evidence.zip')}>Download fixed-rate measurements and trace summaries (ZIP)</a>

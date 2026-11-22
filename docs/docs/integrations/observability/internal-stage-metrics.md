@@ -58,16 +58,18 @@ A **histogram** tracking per-stage durations inside a single database operation.
 
 | Stage | What it measures |
 |---|---|
-| `key_parse` | Python keys → Rust tuples (GIL held) |
+| `key_parse` | Converts Python key tuples to Rust keys, including digest computation when required. |
 | `future_into_py_setup` | `future_into_py` sync setup (GIL held) |
 | `tokio_schedule_delay` | Gap from *before* `future_into_py` setup to the start of the async body on a Tokio worker. **Note:** includes the synchronous `future_into_py_setup` window as well as pure scheduling delay — subtracting `future_into_py_setup` approximates the isolated scheduling component (a small `stage_timer!` macro overhead also falls inside this window). |
 | `limiter_wait` | Time waiting for the backpressure semaphore |
-| `io` | Aerospike network round-trip |
-| `spawn_blocking_delay` | Gap between I/O completion and `IntoPyObject::into_pyobject` starting on a spawn-blocking thread (GIL-bound) |
+| `io` | Elapsed time of the Rust batch-read call, including batch preparation and routing, transport, server response and decoding. |
+| `spawn_blocking_delay` | From completion of the Rust batch read until `IntoPyObject::into_pyobject` starts on a blocking thread. |
 | `into_pyobject` | `Arc` wrap + `LazyBatchRecords` construction |
-| `event_loop_resume_delay` | Gap between `into_pyobject` returning and the Python coroutine actually resuming in the event loop |
+| `event_loop_resume_delay` | From just before the async result handle is created until Python invokes `to_list()` or `to_dict()`. Includes scheduling and any caller work before conversion. |
 | `to_dict` | `batch_to_dict_py` conversion (GIL held). |
-| `to_numpy` | `batch_to_numpy_py` structured-array fill. The hot `Value → buffer` loop runs under `Python::detach`, so the **timer wraps only the GIL-held framing** (allocation, dtype parse, `key_map` build) — not the GIL-released fill itself. |
+| `to_numpy` | Elapsed time of the whole structured-array conversion, including allocation, dtype parsing, filling the buffer under `Python::detach`, and building the key index. |
+| `to_list` | Converts results to Python dictionaries in request order. |
+| `key_index` | Builds the user-key-to-row index in a NumPy result. This stage is included in `to_numpy`. |
 | `merge_to_dict` | Static `LazyBatchRecords.merge_to_dict` — single-GIL merge of multiple handles. |
 
 ## Why This Is Opt-In

@@ -5,6 +5,8 @@ sidebar_position: 6
 description: 배치 읽기에서 시간을 측정할 구간과 2026년 4월 서빙 프로파일을 해석하는 방법.
 ---
 
+고정한 완료 처리량에서 CPU·메모리·p99를 비교하고, OTLP로 배치 읽기와 NumPy 변환의 시간 경계를 확인한 결과는 [Ncloud 배치 읽기](./ncloud-equal-rate.mdx)에 있습니다.
+
 2026년 4월 서빙 실험에서는 HTTP 요청마다 9개 set에서 200키씩 읽었습니다. 앱은 병렬 호출 전체를 측정하고, 클라이언트 히스토그램은 각 `batch_read()`의 세부 구간을 측정했습니다. 9개 호출의 실행 시간이 겹치므로 각 호출의 구간 평균을 더해 HTTP 요청 한 건의 지연 시간을 구할 수 없습니다. 당시 보고서는 개발 빌드 `aerospike-py v0.1.0`과 C 확장 `aerospike 19.2.0`을 사용했다고 기록합니다. [4월 분석 보고서](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/524cadf9d5864ed8aeeabdfca88861eca4113cfe/benchmark/results/bottleneck-analysis.md)
 
 | 측정 구간 | 포함되는 작업 |
