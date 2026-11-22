@@ -1,10 +1,12 @@
+# Regular version-update PRs are disabled. Security-fix PRs are controlled
+# separately in the repository settings.
 version: 2
 updates:
   - package-ecosystem: "cargo"
     directory: "/rust"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       rust-deps:
         patterns:
@@ -47,7 +49,7 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       python-deps:
         patterns:
@@ -60,7 +62,7 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       gha-deps:
         patterns:
@@ -73,7 +75,7 @@ updates:
     directory: "/docs"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       npm-deps:
         patterns:
