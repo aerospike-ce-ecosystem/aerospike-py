@@ -152,9 +152,11 @@ Active when developing through [Claude Code](https://docs.anthropic.com/en/docs/
 |---|---|---|
 | `ci.yaml` | `push` / `pull_request` to `main` | full validate (fmt + lint + typecheck + unit + integration matrix). |
 | `publish.yaml` | `release: published` / manual | build wheels + sdist, publish to PyPI. |
-| `daily-release.yml` | nightly cron / manual | nightly release pipeline. |
+| `release.yml` | manual (`workflow_dispatch`) | Create a GitHub release from the selected `main` commit. |
 | `docs.yaml` | PR touching `docs/` | Docusaurus build check. |
 | `docs-publish.yaml` | `push` to `main` | publish Docusaurus site to GitHub Pages. |
+
+To create the next release, run `gh workflow run release.yml --ref main`. Publishing the GitHub release starts the wheel and sdist builds. To retry PyPI publication for an existing release, run `gh workflow run publish.yaml --ref main -f publish_target=pypi -f release_tag=vX.Y.Z`.
 
 **Skill & docs follow-up notifications**
 
