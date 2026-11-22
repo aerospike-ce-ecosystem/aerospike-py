@@ -88,7 +88,7 @@ jobs:
             You are a release manager for the **aerospike-py** project.
 
             ## Task
-            Create a GitHub release for version **${{ steps.version.outputs.next_version }}**.
+            Write the release notes for version **${{ steps.version.outputs.next_version }}**.
             Previous version: **${{ steps.changes.outputs.latest_tag }}** (${{ steps.changes.outputs.commit_count }} commits)
 
             ### Step 1: Analyze Changes
@@ -120,17 +120,9 @@ jobs:
 
             Only include sections that have entries. Skip empty sections.
 
-            ### Step 3: Create the Release
-            Save the release notes to a file and create the release:
-            ```bash
-            gh release create "${{ steps.version.outputs.next_version }}" \
-              --title "release ${{ steps.version.outputs.next_version }}" \
-              --notes-file /tmp/release-notes.md \
-              --target "${{ github.sha }}"
-            ```
-
-            ### Step 4: Verify
-            Run `gh release view ${{ steps.version.outputs.next_version }}` to confirm the release was created.
+            ### Step 3: Save the Release Notes
+            Write the Markdown notes to `$RUNNER_TEMP/release-notes.md` for the publish step.
+            Stop after writing the notes.
 
             ## Constraints
             - Use Korean for descriptions, English for technical terms
@@ -142,3 +134,25 @@ jobs:
             --model ${{ vars.CLAUDE_MODEL }}
             --dangerously-skip-permissions
           settings: '${{ vars.CLAUDE_SETTINGS }}'
+
+      - name: Publish GitHub release at the dispatch commit
+        if: steps.changes.outputs.skip == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_AW_GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.next_version }}
+        run: |
+          notes="$RUNNER_TEMP/release-notes.md"
+          test -s "$notes"
+          # Creating the ref never moves an existing tag. Accept a pre-existing
+          # tag only if it resolves to the same commit (including annotated tags).
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent; then
+            tagged_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs%2Ftags%2F$TAG" --jq .sha)
+            if [[ "$tagged_sha" != "$GITHUB_SHA" ]]; then
+              echo "::error::Release tag $TAG points to $tagged_sha, expected $GITHUB_SHA"
+              exit 1
+            fi
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "release $TAG" --notes-file "$notes"
