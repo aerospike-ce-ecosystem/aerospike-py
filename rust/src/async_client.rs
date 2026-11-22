@@ -113,6 +113,7 @@ pub struct PyAsyncClient {
     connection_info: Arc<crate::tracing::ConnectionInfo>,
     /// Operation concurrency limiter (disabled by default).
     limiter: Arc<OperationLimiter>,
+    query_slots: Option<Arc<tokio::sync::Semaphore>>,
     /// Lifecycle state: Disconnected(0) → Connecting(1) → Connected(2) → Closing(3).
     state: Arc<AtomicU8>,
 }
@@ -126,6 +127,7 @@ impl PyAsyncClient {
             config,
             connection_info: Arc::new(crate::tracing::ConnectionInfo::default()),
             limiter: Arc::new(OperationLimiter::new(0, 0)),
+            query_slots: None,
             state: Arc::new(AtomicU8::new(DISCONNECTED)),
         })
     }
@@ -159,6 +161,14 @@ impl PyAsyncClient {
         let client_policy = parse_client_policy(&effective_config)?;
         let (max_ops, timeout_ms) = parse_backpressure_config(&effective_config)?;
 
+        let query_limit = effective_config
+            .get_item("max_concurrent_queries")?
+            .map_or(Ok(16usize), |value| value.extract())?;
+        if query_limit > tokio::sync::Semaphore::MAX_PERMITS {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_concurrent_queries exceeds the supported limit",
+            ));
+        }
         let cluster_name = client_common::extract_cluster_name(&effective_config)?;
 
         // Config parsed successfully — now atomically transition to Connecting.
@@ -183,12 +193,15 @@ impl PyAsyncClient {
         let state = self.state.clone();
 
         self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
+            closing: false.into(),
             server_address: Arc::from(parsed.first_address.as_str()),
             server_port: parsed.first_port as i64,
             cluster_name: Arc::from(cluster_name.as_str()),
         });
 
         self.limiter = Arc::new(OperationLimiter::new(max_ops, timeout_ms));
+        self.query_slots =
+            (query_limit != 0).then(|| Arc::new(tokio::sync::Semaphore::new(query_limit)));
 
         let hosts_str = parsed.connection_string;
         info!("Async connecting to Aerospike cluster: {}", hosts_str);
@@ -765,7 +778,14 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let a = client_common::prepare_apply_args(key, module, function, args, policy)?;
+        let a = client_common::prepare_apply_args(
+            key,
+            module,
+            function,
+            args,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "async apply UDF: ns={} set={} module={} function={}",
             a.key.namespace(),
@@ -1047,12 +1067,14 @@ impl PyAsyncClient {
     fn query(&self, namespace: &str, set_name: &str) -> PyResult<crate::query::PyQuery> {
         debug!("Creating async query: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
-        Ok(crate::query::PyQuery::new(
+        let mut query = crate::query::PyQuery::new(
             client,
             namespace.to_string(),
             set_name.to_string(),
             self.connection_info.clone(),
-        ))
+        );
+        query.query_slots.clone_from(&self.query_slots);
+        Ok(query)
     }
 
     // ── Index ─────────────────────────────────────────────────
@@ -1503,6 +1525,9 @@ impl PyAsyncClient {
                 "Cannot close: client is currently connecting.",
             )),
             CONNECTED => {
+                self.connection_info
+                    .closing
+                    .store(true, std::sync::atomic::Ordering::Release);
                 self.state.store(CLOSING, Ordering::SeqCst);
                 let client = self.inner.swap(None);
                 self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());

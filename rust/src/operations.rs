@@ -514,6 +514,7 @@ pub fn op_code_is_write(op_code: i32) -> bool {
 
 /// Convert a Python list of operation dicts to Rust Operations.
 /// Each operation is a dict: {"op": int, "bin": str, "val": any, ...}
+#[cfg(test)]
 pub fn py_ops_to_rust(ops_list: &Bound<'_, PyList>) -> PyResult<Vec<Operation>> {
     py_ops_to_rust_checked(ops_list).map(|(ops, _)| ops)
 }
@@ -535,7 +536,7 @@ pub fn py_ops_to_rust_ordered(
 ) -> PyResult<(Vec<Operation>, OrderedPlan)> {
     let mut plan = OrderedPlan::with_capacity(ops_list.len());
     let (ops, _) = convert_ops(ops_list, Some(&mut plan))?;
-    Ok((ops, plan))
+    Ok((plan.add_presence_checks(ops), plan))
 }
 
 fn convert_ops(
@@ -566,9 +567,13 @@ fn convert_ops(
             .map(|v| py_to_value(&v))
             .transpose()?;
 
-        if let Some(plan) = plan.as_deref_mut() {
+        let bin_name = if let Some(plan) = plan.as_deref_mut() {
             plan.note(op_code, bin_name.as_deref());
-        }
+            // The official ordered helper spells a whole-record read read("").
+            bin_name.filter(|name| op_code != OP_READ || !name.is_empty())
+        } else {
+            bin_name
+        };
 
         let op = match op_code {
             // ── Basic operations ─────────────────────────────

@@ -69,6 +69,8 @@ Query가 멈추는 시점과 memory 사용량은 [Async streaming](../guides/que
 
 Stream이 끝났을 때, `close()`를 호출했을 때, `async with` 블록을 벗어났을 때, stream이 garbage collection될 때 client와 server 양쪽에서 query가 멈춥니다. Client에서 대기하는 record는 query마다 최대 `record_queue_size`개(기본값 1024)이고, 여기에 Python으로 넘겨주는 중인 묶음과 자리가 나기를 기다리는 reader가 있는 node마다 record 하나가 더해집니다. 모든 record는 한 번씩만 넘겨주며, 여러 task가 같은 stream을 순회해도 됩니다. 각 record는 그중 한 task에만 전달됩니다.
 
+한 쿼리 안에서 안정된 레코드 집합을 다시 읽을 때 중복 전달을 방지합니다. 스캔 중 데이터가 바뀌면 결과도 달라질 수 있습니다. 콜백이 외부에 쓰는 작업의 확인과 재시도는 애플리케이션이 관리해야 합니다.
+
 다음 record를 기다리는 task를 취소하면 stream이 닫힙니다. 취소된 읽기가 이미 record를 가져갔을 수 있으므로, 그 뒤 같은 stream을 읽으면 순회가 끝나는 대신 `RuntimeError`가 발생합니다. `close()`로 닫은 stream은 그냥 끝납니다. 기다리는 시간을 제한하려면 `anext()` 하나가 아니라 loop 전체에 timeout을 거세요.
 
 Client를 닫아도 이미 실행 중인 stream은 멈추지 않습니다. Stream을 client보다 먼저 닫으세요.

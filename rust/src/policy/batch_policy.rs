@@ -33,8 +33,7 @@ pub enum BatchKind {
 
 /// Parse a Python policy dict into a BatchPolicy.
 ///
-/// `kind` only picks the starting defaults; a `max_retries` in the dict wins
-/// for either kind.
+/// The batch kind selects the retry defaults and which replica routes are safe for a write retry.
 pub fn parse_batch_policy(
     policy_dict: Option<&Bound<'_, PyDict>>,
     kind: BatchKind,
@@ -64,6 +63,19 @@ pub fn parse_batch_policy(
 
     if let Some(val) = dict.get_item("replica")? {
         policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;
+    }
+    // A same-node retry in core 3.0 resends even rows whose success was
+    // already decoded when the batch trailer was lost.
+    if kind == BatchKind::Write
+        && policy.base_policy.max_retries > 0
+        && !matches!(
+            policy.base_policy.replica,
+            aerospike_core::Replica::Sequence | aerospike_core::Replica::PreferRack
+        )
+    {
+        return Err(crate::errors::InvalidArgError::new_err(
+            "A write batch with max_retries > 0 requires replica SEQUENCE or PREFER_RACK; a MASTER retry may replay completed writes."
+        ));
     }
     if let Some(val) = dict.get_item("read_mode_ap")? {
         policy.base_policy.read_mode_ap = parse_read_mode_ap(val.extract::<i32>()?)?;
@@ -195,6 +207,15 @@ pub fn parse_batch_read_policy(
     Ok(policy)
 }
 
+fn reject_delete_exists(dict: &Bound<'_, PyDict>) -> PyResult<()> {
+    if dict.contains("exists")? {
+        return Err(crate::errors::InvalidArgError::new_err(
+            "batch_remove does not support exists in its policy or record meta",
+        ));
+    }
+    Ok(())
+}
+
 /// Parse the per-record-policy dict into a [`BatchDeletePolicy`].
 ///
 /// Covers `gen` (generation_policy), `commit_level`, `key` (send_key),
@@ -211,6 +232,7 @@ pub fn parse_batch_delete_policy(
         Some(d) => d,
         None => return Ok(policy),
     };
+    reject_delete_exists(dict)?;
 
     extract_policy_fields!(dict, {
         "durable_delete" => policy.durable_delete
@@ -242,6 +264,7 @@ pub fn apply_record_meta_for_delete(
     base: &BatchDeletePolicy,
     meta: &Bound<'_, PyDict>,
 ) -> PyResult<BatchDeletePolicy> {
+    reject_delete_exists(meta)?;
     let mut policy = base.clone();
 
     if let Some(gen) = meta.get_item("gen")? {
@@ -509,6 +532,22 @@ mod tests {
                 p.base_policy.replica,
                 aerospike_core::policy::Replica::Master
             );
+        });
+    }
+
+    #[test]
+    fn master_retries_are_allowed_only_for_read_batches() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("replica", 0).unwrap();
+                d.set_item("max_retries", 1).unwrap();
+            });
+            assert!(parse_batch_policy(Some(&d), BatchKind::Read).is_ok());
+            let err = parse_batch_policy(Some(&d), BatchKind::Write).unwrap_err();
+            assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
+            d.set_item("max_retries", 0).unwrap();
+            assert!(parse_batch_policy(Some(&d), BatchKind::Write).is_ok());
         });
     }
 

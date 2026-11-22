@@ -202,7 +202,7 @@ class BatchPolicy(TypedDict, total=False):
     # ``BATCH_CONCURRENCY_SEQUENTIAL`` (0) or ``BATCH_CONCURRENCY_PARALLEL``
     # (1) constants. Default: parallel.
     concurrency: int
-    # Batch-level write defaults — used by ``batch_write``. Per-record
+    # Batch-level write defaults for batch_write and writing batch_operate. Per-record
     # ``WriteMeta`` entries override these fields (matching the existing
     # ``ttl``/``gen`` precedence rule).
     key: int
@@ -368,6 +368,11 @@ class ClientConfig(TypedDict, total=False):
     conn_pools_per_node: int
     tend_interval: int
     use_services_alternate: bool
+    use_buffer_pool: bool
+    buffer_pool_min_size: int
+    buffer_pool_max_size: int
+    buffer_pool_tier_bytes: int
+    max_concurrent_queries: int
     max_concurrent_operations: int
     operation_queue_timeout_ms: int
 

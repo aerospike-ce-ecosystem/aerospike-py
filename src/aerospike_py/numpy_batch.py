@@ -148,6 +148,10 @@ def _assign_value(data: Any, i: int, field: str, field_dtype: Any, val: Any) -> 
     import numpy as np
 
     base = field_dtype.base
+    shape = field_dtype.shape
+    while base.subdtype is not None:
+        shape += base.shape
+        base = base.base
     if field_dtype.subdtype is not None and base.kind in "iuf":
         if isinstance(val, (bytes, bytearray, memoryview)):
             if len(val) != field_dtype.itemsize:
@@ -158,7 +162,7 @@ def _assign_value(data: Any, i: int, field: str, field_dtype: Any, val: Any) -> 
             # The native writer stores native-endian bytes; NumPy converts to
             # the field's own byte order on assignment.
             native = np.frombuffer(bytes(val), dtype=base.newbyteorder("="))
-            data[field][i] = native.reshape(field_dtype.shape)
+            data[field][i] = native.reshape(shape)
             return
         if isinstance(val, (bool, int, float)):
             count = field_dtype.itemsize // base.itemsize
@@ -174,10 +178,10 @@ def _assign_value(data: Any, i: int, field: str, field_dtype: Any, val: Any) -> 
             # Already an element sequence: NumPy would broadcast a shorter one,
             # so the shape is checked rather than left to assignment.
             arr = np.asarray(val)
-            if arr.shape != field_dtype.shape:
+            if arr.shape != shape:
                 raise ValueError(
                     f"vector length mismatch for field '{field}': the value has shape {arr.shape}, "
-                    f"the dtype expects {field_dtype.shape}"
+                    f"the dtype expects {shape}"
                 )
             _check_float_range_of_array(base, arr, field)
             data[field][i] = arr

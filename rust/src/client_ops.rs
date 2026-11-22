@@ -12,7 +12,7 @@ use aerospike_core::{
     Error as AsError, Key, Record, ResultCode, Task, Value,
 };
 
-use pyo3::{PyErr, PyResult};
+use pyo3::PyResult;
 
 use crate::batch_types::{PendingBatchRecords, RowOutcome};
 use crate::client_common::{
@@ -28,31 +28,66 @@ use crate::traced_op;
 
 // ── CRUD ────────────────────────────────────────────────────────────────────
 
+/// Core 3.0 returns a bare routing error when close clears the partition map
+/// between sends. In this case the last attempt failed before sending, but the
+/// binding cannot know whether an earlier one reached the server.
+async fn single_write_result<T>(
+    client: &AsClient,
+    connection: &crate::tracing::ConnectionInfo,
+    key: &Key,
+    policy: &aerospike_core::WritePolicy,
+    writes: bool,
+    operation: impl std::future::Future<Output = Result<T, AsError>>,
+) -> PyResult<T> {
+    use std::sync::atomic::Ordering;
+    let could_retry = writes
+        && policy.base_policy.max_retries > 0
+        && !connection.closing.load(Ordering::Acquire)
+        && client.is_strong_consistency(key.namespace()).is_some();
+    operation.await.map_err(|err| {
+        let lost_route_during_close = could_retry
+            && connection.closing.load(Ordering::Acquire)
+            && matches!(err.kind(), aerospike_core::ErrorKind::InvalidNamespace)
+            && !client.partition_map_ready();
+        crate::errors::as_to_pyerr_with_doubt(err, lost_route_during_close)
+    })
+}
+
+macro_rules! observed_write {
+    ($name:expr, $client:expr, $args:expr, $policy:expr, $writes:expr, $operation:expr) => {
+        crate::observed_op!(
+            $name,
+            $args.key.namespace(),
+            $args.key.set_name(),
+            $args.otel.parent_ctx,
+            $args.otel.conn_info,
+            single_write_result(
+                $client,
+                &$args.otel.conn_info,
+                &$args.key,
+                $policy,
+                $writes,
+                $operation
+            )
+            .await
+        )
+    };
+}
+
 /// Write a record to the cluster.
 pub async fn do_put(client: &AsClient, args: PutArgs) -> PyResult<()> {
-    match args.policy {
-        PutPolicy::Default => {
-            let wp = &*DEFAULT_WRITE_POLICY;
-            traced_op!(
-                "put",
-                &args.key.namespace(),
-                &args.key.set_name(),
-                args.otel.parent_ctx,
-                args.otel.conn_info,
-                client.put(wp, &args.key, &args.bins).await
-            )
-        }
-        PutPolicy::Custom(ref wp) => {
-            traced_op!(
-                "put",
-                &args.key.namespace(),
-                &args.key.set_name(),
-                args.otel.parent_ctx,
-                args.otel.conn_info,
-                client.put(wp, &args.key, &args.bins).await
-            )
-        }
-    }
+    let policy = match &args.policy {
+        PutPolicy::Default => &*DEFAULT_WRITE_POLICY,
+        PutPolicy::Custom(policy) => policy,
+    };
+    observed_write!(
+        "put",
+        client,
+        args,
+        policy,
+        true,
+        client.put(policy, &args.key, &args.bins)
+    )
 }
 
 /// Read all bins of a record.
@@ -97,13 +132,13 @@ pub async fn do_exists(client: &AsClient, args: &ExistsArgs) -> Result<Record, A
 
 /// Delete a record. Returns `PyErr(RecordNotFound)` if the record did not exist.
 pub async fn do_remove(client: &AsClient, args: RemoveArgs) -> PyResult<()> {
-    let existed = traced_op!(
+    let existed = observed_write!(
         "delete",
-        &args.key.namespace(),
-        &args.key.set_name(),
-        args.otel.parent_ctx,
-        args.otel.conn_info,
-        client.delete(&args.write_policy, &args.key).await
+        client,
+        args,
+        &args.write_policy,
+        true,
+        client.delete(&args.write_policy, &args.key)
     )?;
 
     if !existed {
@@ -121,69 +156,61 @@ pub async fn do_remove(client: &AsClient, args: RemoveArgs) -> PyResult<()> {
 
 /// Reset a record's TTL.
 pub async fn do_touch(client: &AsClient, args: TouchArgs) -> PyResult<()> {
-    traced_op!(
+    observed_write!(
         "touch",
-        &args.key.namespace(),
-        &args.key.set_name(),
-        args.otel.parent_ctx,
-        args.otel.conn_info,
-        client.touch(&args.write_policy, &args.key).await
+        client,
+        args,
+        &args.write_policy,
+        true,
+        client.touch(&args.write_policy, &args.key)
     )
 }
 
 /// Append string values to bins.
 pub async fn do_append(client: &AsClient, args: SingleBinWriteArgs) -> PyResult<()> {
-    traced_op!(
+    observed_write!(
         "append",
-        &args.key.namespace(),
-        &args.key.set_name(),
-        args.otel.parent_ctx,
-        args.otel.conn_info,
-        {
-            client
-                .append(&args.write_policy, &args.key, &args.bins)
-                .await
-        }
+        client,
+        args,
+        &args.write_policy,
+        true,
+        client.append(&args.write_policy, &args.key, &args.bins)
     )
 }
 
 /// Prepend string values to bins.
 pub async fn do_prepend(client: &AsClient, args: SingleBinWriteArgs) -> PyResult<()> {
-    traced_op!(
+    observed_write!(
         "prepend",
-        &args.key.namespace(),
-        &args.key.set_name(),
-        args.otel.parent_ctx,
-        args.otel.conn_info,
-        {
-            client
-                .prepend(&args.write_policy, &args.key, &args.bins)
-                .await
-        }
+        client,
+        args,
+        &args.write_policy,
+        true,
+        client.prepend(&args.write_policy, &args.key, &args.bins)
     )
 }
 
 /// Increment/add to numeric bins.
 pub async fn do_increment(client: &AsClient, args: SingleBinWriteArgs) -> PyResult<()> {
-    traced_op!(
+    observed_write!(
         "increment",
-        &args.key.namespace(),
-        &args.key.set_name(),
-        args.otel.parent_ctx,
-        args.otel.conn_info,
-        client.add(&args.write_policy, &args.key, &args.bins).await
+        client,
+        args,
+        &args.write_policy,
+        true,
+        client.add(&args.write_policy, &args.key, &args.bins)
     )
 }
 
 /// Remove bins from a record by setting them to nil.
 pub async fn do_remove_bin(client: &AsClient, args: RemoveBinArgs) -> PyResult<()> {
-    traced_op!(
+    observed_write!(
         "remove_bin",
-        &args.key.namespace(),
-        &args.key.set_name(),
-        args.otel.parent_ctx,
-        args.otel.conn_info,
-        client.put(&args.write_policy, &args.key, &args.bins).await
+        client,
+        args,
+        &args.write_policy,
+        true,
+        client.put(&args.write_policy, &args.key, &args.bins)
     )
 }
 
@@ -191,34 +218,26 @@ pub async fn do_remove_bin(client: &AsClient, args: RemoveBinArgs) -> PyResult<(
 
 /// Perform multiple operations on a single record.
 pub async fn do_operate(client: &AsClient, args: &OperateArgs) -> PyResult<Record> {
-    traced_op!(
+    observed_write!(
         "operate",
-        &args.key.namespace(),
-        &args.key.set_name(),
-        args.otel.parent_ctx,
-        args.otel.conn_info,
-        {
-            client
-                .operate(&args.write_policy, &args.key, &args.ops)
-                .await
-        }
+        client,
+        args,
+        &args.write_policy,
+        args.has_write,
+        client.operate(&args.write_policy, &args.key, &args.ops)
     )
 }
 
 /// Perform multiple operations on a single record (ordered variant).
 /// Uses the same underlying client.operate() call but different tracing name.
 pub async fn do_operate_ordered(client: &AsClient, args: &OperateArgs) -> PyResult<Record> {
-    traced_op!(
+    observed_write!(
         "operate_ordered",
-        &args.key.namespace(),
-        &args.key.set_name(),
-        args.otel.parent_ctx,
-        args.otel.conn_info,
-        {
-            client
-                .operate(&args.write_policy, &args.key, &args.ops)
-                .await
-        }
+        client,
+        args,
+        &args.write_policy,
+        args.has_write,
+        client.operate(&args.write_policy, &args.key, &args.ops)
     )
 }
 
@@ -252,7 +271,7 @@ fn collect_rows(ops: Vec<BatchOperation>) -> Vec<BatchRecord> {
 fn restore_keys<'k>(rows: &mut [BatchRecord], keys: impl Iterator<Item = &'k Key>) -> Vec<usize> {
     let mut stand_ins = Vec::new();
     for (index, (row, key)) in rows.iter_mut().zip(keys).enumerate() {
-        if row.key.digest() != key.digest() {
+        if row.key != *key {
             *row = BatchRecord::new(key.clone(), false);
             stand_ins.push(index);
         }
@@ -276,35 +295,6 @@ fn unanswered_rows_may_have_been_sent(class: ErrorClass) -> bool {
     !matches!(class, ErrorClass::InvalidArgument | ErrorClass::InvalidNode)
 }
 
-/// Send one batch, noting the class of the error it comes back with.
-///
-/// `traced_op!` turns that error into the Python exception. What the rows of
-/// a failed call mean depends on its class, and the class is not to be had
-/// from the exception without the GIL.
-async fn batch_noting_class(
-    client: &AsClient,
-    policy: &BatchPolicy,
-    ops: &mut [BatchOperation],
-    failed_with: &mut Option<ErrorClass>,
-) -> Result<(), AsError> {
-    let result = client.batch(policy, ops).await;
-    if let Err(e) = &result {
-        *failed_with = Some(ErrorClass::of(e));
-    }
-    result
-}
-
-/// What a write-type batch call knows about itself when it hands its rows to
-/// [`finish_batch`].
-struct SentBatch<'a> {
-    policy: &'a BatchPolicy,
-    /// Whether the batch changes records. `batch_operate` with nothing but
-    /// reads does not, and a read is never in doubt.
-    writes: bool,
-    /// The class of the error the call came back with, if it did.
-    failed_with: Option<ErrorClass>,
-}
-
 /// Turn a finished batch call into its rows, or into an exception that
 /// carries them.
 ///
@@ -324,25 +314,26 @@ struct SentBatch<'a> {
 /// what happened to its record and the call returns them.
 fn finish_batch<'k>(
     ops: Vec<BatchOperation>,
-    outcome: PyResult<()>,
+    outcome: Result<(), AsError>,
     keys: impl Iterator<Item = &'k Key>,
-    sent: SentBatch<'_>,
+    policy: &BatchPolicy,
+    writes: bool,
 ) -> PyResult<PendingBatchRecords> {
     let Settled {
         rows,
         failure,
         stand_ins,
     } = settle_batch(ops, outcome, keys);
-    let mut in_doubt_rows = rows_a_resend_leaves_in_doubt(&rows, sent.policy);
-    // The call gave up on rows it may already have sent: see
-    // `unanswered_rows_may_have_been_sent`. Without a class to go by, assume
-    // that it did.
-    let gave_up_after_sending = sent.writes
-        && failure.is_some()
+    let mut in_doubt_rows = if writes {
+        rows_a_resend_leaves_in_doubt(&rows, policy)
+    } else {
+        Vec::new()
+    };
+    let gave_up_after_sending = writes
         && !stand_ins.is_empty()
-        && sent
-            .failed_with
-            .is_none_or(unanswered_rows_may_have_been_sent);
+        && failure
+            .as_ref()
+            .is_some_and(|err| unanswered_rows_may_have_been_sent(ErrorClass::of(err)));
     if gave_up_after_sending {
         in_doubt_rows.extend(stand_ins);
         in_doubt_rows.sort_unstable();
@@ -356,27 +347,9 @@ fn finish_batch<'k>(
     match failure {
         None => Ok(pending),
         Some(err) => Err(crate::batch_types::attach_partial_result(
-            err,
+            as_to_pyerr(err),
             pending,
             gave_up_after_sending,
-        )),
-    }
-}
-
-/// [`finish_batch`] for a batch that only reads. A read is never in doubt, so
-/// the rows are all there is to report.
-fn finish_read_batch<'k>(
-    ops: Vec<BatchOperation>,
-    outcome: PyResult<()>,
-    keys: impl Iterator<Item = &'k Key>,
-) -> PyResult<Vec<BatchRecord>> {
-    let Settled { rows, failure, .. } = settle_batch(ops, outcome, keys);
-    match failure {
-        None => Ok(rows),
-        Some(err) => Err(crate::batch_types::attach_partial_result(
-            err,
-            PendingBatchRecords::without_retry(rows),
-            false,
         )),
     }
 }
@@ -386,14 +359,14 @@ struct Settled {
     rows: Vec<BatchRecord>,
     /// The call's error, if it failed as a whole (see [`finish_batch`] for
     /// when it did).
-    failure: Option<PyErr>,
+    failure: Option<AsError>,
     /// The rows aerospike-core left as stand-ins: see [`restore_keys`].
     stand_ins: Vec<usize>,
 }
 
 fn settle_batch<'k>(
     ops: Vec<BatchOperation>,
-    outcome: PyResult<()>,
+    outcome: Result<(), AsError>,
     keys: impl Iterator<Item = &'k Key>,
 ) -> Settled {
     let mut rows = collect_rows(ops);
@@ -479,16 +452,33 @@ fn row_has_a_server_answer(row: &BatchRecord) -> bool {
 
 /// Read multiple records in a batch.
 pub async fn do_batch_read(client: &AsClient, args: &BatchReadArgs) -> PyResult<Vec<BatchRecord>> {
-    let mut ops = args.to_batch_ops();
-    let outcome = traced_op!(
+    crate::observed_op!(
         "batch_read",
         &args.batch_ns,
         &args.batch_set,
         args.otel.parent_ctx,
         args.otel.conn_info,
-        client.batch(&args.batch_policy, &mut ops).await
-    );
-    finish_read_batch(ops, outcome, args.rust_keys.iter())
+        send_and_settle_batch(
+            client,
+            &args.batch_policy,
+            args.to_batch_ops(),
+            args.rust_keys.iter(),
+            false
+        )
+        .await
+    )
+    .map(|batch| batch.results)
+}
+
+async fn send_and_settle_batch<'k>(
+    client: &AsClient,
+    policy: &BatchPolicy,
+    mut ops: Vec<BatchOperation>,
+    keys: impl Iterator<Item = &'k Key>,
+    writes: bool,
+) -> PyResult<PendingBatchRecords> {
+    let outcome = client.batch(policy, &mut ops).await;
+    finish_batch(ops, outcome, keys, policy, writes)
 }
 
 /// Perform operations on multiple records in a batch.
@@ -496,25 +486,20 @@ pub async fn do_batch_operate(
     client: &AsClient,
     args: &BatchOperateArgs,
 ) -> PyResult<PendingBatchRecords> {
-    let mut ops = args.to_batch_ops();
-    let mut failed_with = None;
-    let outcome = traced_op!(
+    crate::observed_op!(
         "batch_operate",
         &args.batch_ns,
         &args.batch_set,
         args.otel.parent_ctx,
         args.otel.conn_info,
-        batch_noting_class(client, &args.batch_policy, &mut ops, &mut failed_with).await
-    );
-    finish_batch(
-        ops,
-        outcome,
-        args.rust_keys.iter(),
-        SentBatch {
-            policy: &args.batch_policy,
-            writes: args.has_write,
-            failed_with,
-        },
+        send_and_settle_batch(
+            client,
+            &args.batch_policy,
+            args.to_batch_ops(),
+            args.rust_keys.iter(),
+            args.has_write()
+        )
+        .await
     )
 }
 
@@ -523,25 +508,20 @@ pub async fn do_batch_remove(
     client: &AsClient,
     args: &BatchRemoveArgs,
 ) -> PyResult<PendingBatchRecords> {
-    let mut ops = args.to_batch_ops();
-    let mut failed_with = None;
-    let outcome = traced_op!(
+    crate::observed_op!(
         "batch_remove",
         &args.batch_ns,
         &args.batch_set,
         args.otel.parent_ctx,
         args.otel.conn_info,
-        batch_noting_class(client, &args.batch_policy, &mut ops, &mut failed_with).await
-    );
-    finish_batch(
-        ops,
-        outcome,
-        args.records.iter().map(|(key, _)| key),
-        SentBatch {
-            policy: &args.batch_policy,
-            writes: true,
-            failed_with,
-        },
+        send_and_settle_batch(
+            client,
+            &args.batch_policy,
+            args.to_batch_ops(),
+            args.records.iter().map(|(key, _)| key),
+            true
+        )
+        .await
     )
 }
 
@@ -550,25 +530,20 @@ pub async fn do_batch_apply(
     client: &AsClient,
     args: &BatchApplyArgs,
 ) -> PyResult<PendingBatchRecords> {
-    let mut ops = args.to_batch_ops();
-    let mut failed_with = None;
-    let outcome = traced_op!(
+    crate::observed_op!(
         "batch_apply",
         &args.batch_ns,
         &args.batch_set,
         args.otel.parent_ctx,
         args.otel.conn_info,
-        batch_noting_class(client, &args.batch_policy, &mut ops, &mut failed_with).await
-    );
-    finish_batch(
-        ops,
-        outcome,
-        args.records.iter().map(|entry| &entry.0),
-        SentBatch {
-            policy: &args.batch_policy,
-            writes: true,
-            failed_with,
-        },
+        send_and_settle_batch(
+            client,
+            &args.batch_policy,
+            args.to_batch_ops(),
+            args.records.iter().map(|entry| &entry.0),
+            true
+        )
+        .await
     )
 }
 
@@ -619,10 +594,13 @@ fn failure_may_pass(class: ErrorClass) -> bool {
 /// succeeds on a record in a particular state does not: once the first send
 /// has been applied, `CREATE_ONLY` finds the record it just created and a
 /// generation check finds the generation it just bumped, and the second send
-/// fails for a write that in fact went through.
+/// fails for a write that in fact went through. The first send may also
+/// invalidate a filter or start a requested relative TTL.
 fn put_is_idempotent(policy: &BatchWritePolicy) -> bool {
     policy.generation_policy == aerospike_core::GenerationPolicy::None
         && policy.record_exists_action != aerospike_core::RecordExistsAction::CreateOnly
+        && policy.filter_expression.is_none()
+        && !matches!(policy.expiration, aerospike_core::Expiration::Seconds(_))
 }
 
 /// What the retry loop needs to know about one row.
@@ -754,9 +732,9 @@ impl BatchWriteRetryStats {
 ///   a second send cannot do harm. A call that failed in a way that would
 ///   repeat (an unknown namespace, an invalid argument) is not attempted
 ///   again. A plain `put` overwrites its bins, so
-///   sending it twice is safe. A `CREATE_ONLY` or generation-checked put whose
-///   first send may have been applied (`in_doubt`) is left alone: the second
-///   send would fail for a write that went through.
+///   another send restores its bin values. A filtered, create-only or
+///   generation-checked put, or one setting an explicit relative TTL, is
+///   left alone when the first send may already have applied.
 /// - If, when the loop ends, a record still has no answer from a server, the
 ///   call raises the failure of the attempt that left it that way, with every
 ///   row attached as `partial_result`. Otherwise the call returns `Ok` and
@@ -791,110 +769,100 @@ pub async fn do_batch_write(
     max_retries: u32,
     op_name: &str,
 ) -> PyResult<PendingBatchRecords> {
-    // Fast path: no retry — build ops directly, no cache overhead
-    if max_retries == 0 {
-        let mut batch_ops: Vec<BatchOperation> = crate::stage_timer!("build_ops", op_name, {
-            records
-                .iter()
-                .map(|(key, bins, write_policy)| {
-                    let ops: Vec<aerospike_core::operations::Operation> =
-                        bins.iter().map(aerospike_core::operations::put).collect();
-                    BatchOperation::write(write_policy, key.clone(), ops)
-                })
-                .collect()
-        });
-        let mut failed_with = None;
-        let outcome = crate::stage_timer!("io", op_name, {
-            traced_op!(
+    let run = async {
+        // Fast path: no retry — build ops directly, no cache overhead
+        if max_retries == 0 {
+            let batch_ops: Vec<BatchOperation> = crate::stage_timer!("build_ops", op_name, {
+                records
+                    .iter()
+                    .map(|(key, bins, write_policy)| {
+                        let ops: Vec<aerospike_core::operations::Operation> =
+                            bins.iter().map(aerospike_core::operations::put).collect();
+                        BatchOperation::write(write_policy, key.clone(), ops)
+                    })
+                    .collect()
+            });
+            let mut pending = crate::stage_timer!(
+                "io",
                 op_name,
-                ns,
-                set,
-                parent_ctx,
-                conn_info,
-                batch_noting_class(client, batch_policy, &mut batch_ops, &mut failed_with).await
-            )
-        });
-        let stamp = |mut pending: PendingBatchRecords| {
+                send_and_settle_batch(
+                    client,
+                    batch_policy,
+                    batch_ops,
+                    records.iter().map(|(key, _, _)| key),
+                    true
+                )
+                .await
+            )?;
             pending.retry_stats = Some(BatchWriteRetryStats::SINGLE_ATTEMPT);
-            pending
-        };
-        return finish_batch(
-            batch_ops,
-            outcome,
-            records.iter().map(|(key, _, _)| key),
-            SentBatch {
-                policy: batch_policy,
-                writes: true,
-                failed_with,
-            },
-        )
-        .map(stamp);
-    }
-
-    // Retry path: pre-build ops once per record, reuse via clone on retry
-    let cached_ops: Vec<Vec<aerospike_core::operations::Operation>> = records
-        .iter()
-        .map(|(_, bins, _)| bins.iter().map(aerospike_core::operations::put).collect())
-        .collect();
-
-    let timeout_ms = batch_policy.base_policy.total_timeout as u64;
-    let env = ClusterAttempts {
-        client,
-        batch_policy,
-        records,
-        cached_ops,
-        ns,
-        set,
-        parent_ctx,
-        conn_info,
-        op_name,
-        retry_op_name: format!("{}_retry", op_name),
-        start: std::time::Instant::now(),
-        call_would_fail_again: std::sync::atomic::AtomicBool::new(false),
-        gave_up_after_sending: std::sync::atomic::AtomicBool::new(false),
-    };
-    let BatchWriteOutcome {
-        mut rows,
-        stats,
-        in_doubt_rows,
-        error,
-    } = drive_batch_write_retries(&env, max_retries, timeout_ms).await;
-
-    match error {
-        None => Ok(PendingBatchRecords {
-            results: rows,
-            retry_stats: Some(stats),
-            in_doubt_rows,
-        }),
-        Some(err) => {
-            restore_keys(&mut rows, records.iter().map(|(key, _, _)| key));
-            let gave_up_after_sending = env
-                .gave_up_after_sending
-                .load(std::sync::atomic::Ordering::Relaxed);
-            let mut in_doubt_rows = in_doubt_rows;
-            if gave_up_after_sending {
-                // A row without any answer cannot say that it is in doubt:
-                // that is known from the call, not from the row.
-                in_doubt_rows.extend(
-                    rows.iter()
-                        .enumerate()
-                        .filter(|(_, row)| RowOutcome::of(row) == RowOutcome::NoResponse)
-                        .map(|(index, _)| index),
-                );
-                in_doubt_rows.sort_unstable();
-                in_doubt_rows.dedup();
-            }
-            Err(crate::batch_types::attach_partial_result(
-                err,
-                PendingBatchRecords {
-                    results: rows,
-                    retry_stats: Some(stats),
-                    in_doubt_rows,
-                },
-                gave_up_after_sending,
-            ))
+            return Ok(pending);
         }
-    }
+
+        // Retry path: pre-build ops once per record, reuse via clone on retry
+        let cached_ops: Vec<Vec<aerospike_core::operations::Operation>> = records
+            .iter()
+            .map(|(_, bins, _)| bins.iter().map(aerospike_core::operations::put).collect())
+            .collect();
+
+        let timeout_ms = batch_policy.base_policy.total_timeout as u64;
+        let env = ClusterAttempts {
+            client,
+            batch_policy,
+            records,
+            cached_ops,
+            ns,
+            set,
+            parent_ctx: &parent_ctx,
+            conn_info: &conn_info,
+            retry_op_name: format!("{}_retry", op_name),
+            start: std::time::Instant::now(),
+            call_would_fail_again: std::sync::atomic::AtomicBool::new(false),
+            gave_up_after_sending: std::sync::atomic::AtomicBool::new(false),
+        };
+        let BatchWriteOutcome {
+            mut rows,
+            stats,
+            in_doubt_rows,
+            error,
+        } = drive_batch_write_retries(&env, max_retries, timeout_ms).await;
+
+        match error {
+            None => Ok(PendingBatchRecords {
+                results: rows,
+                retry_stats: Some(stats),
+                in_doubt_rows,
+            }),
+            Some(err) => {
+                restore_keys(&mut rows, records.iter().map(|(key, _, _)| key));
+                let gave_up_after_sending = env
+                    .gave_up_after_sending
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let mut in_doubt_rows = in_doubt_rows;
+                if gave_up_after_sending {
+                    // A row without any answer cannot say that it is in doubt:
+                    // that is known from the call, not from the row.
+                    in_doubt_rows.extend(
+                        rows.iter()
+                            .enumerate()
+                            .filter(|(_, row)| RowOutcome::of(row) == RowOutcome::NoResponse)
+                            .map(|(index, _)| index),
+                    );
+                    in_doubt_rows.sort_unstable();
+                    in_doubt_rows.dedup();
+                }
+                Err(crate::batch_types::attach_partial_result(
+                    err,
+                    PendingBatchRecords {
+                        results: rows,
+                        retry_stats: Some(stats),
+                        in_doubt_rows,
+                    },
+                    gave_up_after_sending,
+                ))
+            }
+        }
+    };
+    crate::observed_op!(op_name, ns, set, parent_ctx, conn_info, run.await)
 }
 
 /// The outside world the retry loop talks to: a clock, a sleep, and one send.
@@ -951,9 +919,8 @@ struct ClusterAttempts<'a> {
     cached_ops: Vec<Vec<aerospike_core::operations::Operation>>,
     ns: &'a str,
     set: &'a str,
-    parent_ctx: client_common::ParentContext,
-    conn_info: Arc<crate::tracing::ConnectionInfo>,
-    op_name: &'a str,
+    parent_ctx: &'a client_common::ParentContext,
+    conn_info: &'a Arc<crate::tracing::ConnectionInfo>,
     retry_op_name: String,
     start: std::time::Instant,
     /// The last attempt failed as a whole in a way that would repeat (an
@@ -998,26 +965,23 @@ impl BatchWriteAttempts for ClusterAttempts<'_> {
                 .collect(),
         };
 
-        let attempt_op_name: &str = if attempt == 0 {
-            self.op_name
+        // The enclosing span/timer covers the complete public call. Extra
+        // sends retain their own attempt-level metric and span.
+        let send = self.client.batch(self.batch_policy, &mut attempt_ops);
+        let result = if attempt == 0 {
+            send.await
         } else {
-            &self.retry_op_name
+            crate::observed_op!(
+                self.retry_op_name.as_str(),
+                self.ns,
+                self.set,
+                *self.parent_ctx,
+                *self.conn_info,
+                send.await
+            )
         };
-        let mut call_class: Option<ErrorClass> = None;
-        let outcome: PyResult<()> = traced_op!(
-            attempt_op_name,
-            self.ns,
-            self.set,
-            self.parent_ctx,
-            self.conn_info,
-            {
-                let result = self.client.batch(self.batch_policy, &mut attempt_ops).await;
-                if let Err(e) = &result {
-                    call_class = Some(ErrorClass::of(e));
-                }
-                result
-            }
-        );
+        let call_class = result.as_ref().err().map(ErrorClass::of);
+        let outcome = result.map_err(as_to_pyerr);
         self.call_would_fail_again.store(
             call_class.is_some_and(|class| !failure_may_pass(class)),
             std::sync::atomic::Ordering::Relaxed,
@@ -1330,16 +1294,21 @@ pub async fn do_apply(
     client: &AsClient,
     args: &client_common::ApplyArgs,
 ) -> PyResult<Option<Value>> {
-    client
-        .execute_udf(
+    single_write_result(
+        client,
+        &args.connection_info,
+        &args.key,
+        &args.write_policy,
+        true,
+        client.execute_udf(
             &args.write_policy,
             &args.key,
             &args.module,
             &args.function,
             args.args.as_deref().unwrap_or(&[]),
-        )
-        .await
-        .map_err(as_to_pyerr)
+        ),
+    )
+    .await
 }
 
 // ── Index ───────────────────────────────────────────────────────────────────
@@ -1839,6 +1808,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn filtered_and_expiring_puts_are_retried_only_after_a_definite_refusal() {
+        for policy in [
+            BatchWritePolicy {
+                filter_expression: Some(aerospike_core::expressions::bool_val(true)),
+                ..BatchWritePolicy::default()
+            },
+            BatchWritePolicy {
+                expiration: aerospike_core::Expiration::Seconds(120),
+                ..BatchWritePolicy::default()
+            },
+        ] {
+            let idempotent = put_is_idempotent(&policy);
+            assert!(!judge_row(RowOutcome::Failed(ErrorClass::Connection), true, idempotent).retry);
+            assert!(judge_row(server(ResultCode::KeyBusy), false, idempotent).retry);
+        }
+    }
+
     // ── collect_rows / restore_keys ─────────────────────────────────────────
 
     fn test_key(name: &str) -> Key {
@@ -1894,12 +1881,16 @@ mod tests {
             0,
         ));
         let mut rows = vec![stand_in, answered];
-        let keys = [test_key("a"), test_key("b")];
+        // The placeholder digest is also a legal explicitly supplied digest.
+        let keys = [
+            Key::with_digest("test", "demo", Some(Value::Int(7)), [0; 20]),
+            test_key("b"),
+        ];
 
         let stand_ins = restore_keys(&mut rows, keys.iter());
 
         assert_eq!(stand_ins, vec![0]);
-        assert_eq!(rows[0].key.digest(), keys[0].digest());
+        assert_eq!(rows[0].key, keys[0]);
         assert_eq!(rows[0].key.namespace(), "test");
         assert_eq!(RowOutcome::of(&rows[0]), RowOutcome::NoResponse);
         assert_eq!(
@@ -1930,16 +1921,12 @@ mod tests {
         pyo3::Python::initialize();
         let keys = [test_key("a"), test_key("b")];
         let policy = BatchPolicy::default();
-        let failed_with = Some(ErrorClass::of(&error));
         let raised = finish_batch(
             stand_in_ops(keys.len()),
-            Err(as_to_pyerr(error)),
+            Err(error),
             keys.iter(),
-            SentBatch {
-                policy: &policy,
-                writes,
-                failed_with,
-            },
+            &policy,
+            writes,
         )
         .err()
         .expect("a call that left rows without an answer fails as a whole");

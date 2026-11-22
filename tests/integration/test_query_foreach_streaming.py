@@ -47,7 +47,7 @@ def seeded(client):
     client.truncate(NS, SET_NAME, 0)
 
 
-def _scan_timings(client, seeded):
+def _scan_timings(client, seeded, policy=None):
     """Return (time-to-first-callback, whole-scan-time) for a full scan."""
     query = client.query(NS, SET_NAME)
     started = time.perf_counter()
@@ -61,7 +61,7 @@ def _scan_timings(client, seeded):
         count += 1
         return True
 
-    query.foreach(callback)
+    query.foreach(callback, policy=policy)
     total = time.perf_counter() - started
     assert count == seeded, f"scan saw {count} records, expected {seeded}"
     return first_callback_at, total
@@ -74,7 +74,10 @@ class TestStreamingContract:
         Measured on this suite's 20k-record set: ~0.47 buffered, ~0.08
         streaming.
         """
-        ttfc, total = _scan_timings(client, seeded)
+        # Pace this scan on the server so scheduler noise on a busy runner
+        # cannot dominate an otherwise ~40 ms scan. A buffered implementation
+        # would still wait for all rate-limited records before calling back.
+        ttfc, total = _scan_timings(client, seeded, {"records_per_second": max(1, seeded // 2)})
 
         assert ttfc / total < 0.30, (
             f"time-to-first-callback was {1000 * ttfc:.1f}ms of a {1000 * total:.1f}ms "

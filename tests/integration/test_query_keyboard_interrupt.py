@@ -8,7 +8,7 @@ log message to ``logging``. A logger has nobody to raise to, so the
 and a scan the user had interrupted ran to its end and returned normally.
 0.14.x did the same.
 
-The interrupt is now asked for again when it lands in the logging bridge, so
+The original interrupt is deferred when it lands in the logging bridge, so
 it is raised in the next Python code that is not the bridge: the callback of
 ``foreach()``, which stops the scan there, or the caller's own code once
 ``results()`` has returned. ``results()`` itself is still not cut short.
@@ -98,3 +98,43 @@ def test_foreach_is_stopped_by_the_interrupt(seeded):
 
     assert outcome == "interrupted"
     assert delivered < COUNT, "the interrupt was raised in the callback, which ends the scan"
+
+
+def test_signal_handler_runs_once_when_interrupt_arrives_in_logging(seeded):
+    script = textwrap.dedent(
+        f"""
+        import logging
+        import os
+        import signal
+        import threading
+        import aerospike_py
+
+        client = aerospike_py.client({AEROSPIKE_CONFIG!r}).connect()
+        received = []
+        def interrupt(signum, frame):
+            received.append(signum)
+            raise KeyboardInterrupt("original interrupt")
+        class InterruptDuringLog(logging.Handler):
+            fired = False
+            def emit(self, record):
+                if not self.fired and threading.current_thread() is threading.main_thread():
+                    self.fired = True
+                    os.kill(os.getpid(), signal.SIGINT)
+        log = logging.getLogger()
+        handler = InterruptDuringLog()
+        log.addHandler(handler)
+        log.setLevel(1)
+        signal.signal(signal.SIGINT, interrupt)
+        try:
+            client.get(({NS!r}, {SET_NAME!r}, 0))
+        except KeyboardInterrupt as exc:
+            assert exc.args == ("original interrupt",)
+        else:
+            raise AssertionError("interrupt lost")
+        finally:
+            log.removeHandler(handler)
+            client.close()
+        assert len(received) == 1, received
+        """
+    )
+    subprocess.run([sys.executable, "-c", script], check=True, timeout=30)

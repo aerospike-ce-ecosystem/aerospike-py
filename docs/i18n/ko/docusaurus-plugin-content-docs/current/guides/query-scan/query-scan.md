@@ -155,7 +155,7 @@ Callback이 발생시킨 exception은 query를 멈추고, `foreach()`에서 그�
 
 Sync client와 마찬가지로 `foreach()`는 scan이 실행되는 동안 record를 넘기므로, query가 실패하면 일부 record를 처리한 뒤에 exception이 발생할 수 있습니다. `results()`는 전부 아니면 전무입니다.
 
-실행 중인 query는 `max_concurrent_operations` slot을 차지하지 않으므로, consumer가 record마다 다른 값을 조회할 수 있습니다. 동시에 실행하는 scan 수는 application에서 제한하세요.
+실행 중인 query는 `max_concurrent_operations` slot을 차지하지 않으므로, consumer가 record마다 다른 값을 조회할 수 있습니다. 비동기 클라이언트는 `max_concurrent_queries`로 쿼리 동시성을 별도로 제한합니다(기본값 16, `0`은 무제한).
 
 ## Predicate Reference
 

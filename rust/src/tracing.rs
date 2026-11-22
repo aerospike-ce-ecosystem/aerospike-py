@@ -5,7 +5,7 @@
 // - W3C TraceContext propagation from Python → Rust
 // - `traced_op!` macro that wraps each DB operation in a span **and** records metrics
 //
-// When the `otel` feature is disabled, `traced_op!` falls back to `timed_op!`.
+// When the `otel` feature is disabled, `traced_op!` uses a metrics-only path.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// Populated during `connect()` from the first host in the config.
 /// Uses `Arc<str>` for server_address and cluster_name to avoid heap allocations
 /// when cloning for OTel attributes (atomic ref-count increment only).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ConnectionInfo {
     /// Address of the first seed host (e.g. `"127.0.0.1"`).
     pub server_address: Arc<str>,
@@ -23,6 +23,8 @@ pub struct ConnectionInfo {
     pub server_port: i64,
     /// Cluster name from the client config (empty string if unset).
     pub cluster_name: Arc<str>,
+    /// Set before this connection is closed; a reconnect gets its own marker.
+    pub closing: std::sync::atomic::AtomicBool,
 }
 
 impl Default for ConnectionInfo {
@@ -31,6 +33,7 @@ impl Default for ConnectionInfo {
             server_address: Arc::from(""),
             server_port: 0,
             cluster_name: Arc::from(""),
+            closing: false.into(),
         }
     }
 }
@@ -316,6 +319,62 @@ pub fn shutdown_tracing() {
     // no-op
 }
 
+/// Metrics and spans observe the error returned at the operation boundary.
+/// Batch settlement can attach rows and override in_doubt after a network attempt.
+pub(crate) trait ObservedError {
+    fn error_label(&self) -> Cow<'static, str>;
+    #[cfg(feature = "otel")]
+    fn record_on_span(&self, span: &opentelemetry::trace::SpanRef<'_>);
+}
+
+impl ObservedError for aerospike_core::Error {
+    fn error_label(&self) -> Cow<'static, str> {
+        crate::metrics::error_type_from_aerospike_error(self)
+    }
+
+    #[cfg(feature = "otel")]
+    fn record_on_span(&self, span: &opentelemetry::trace::SpanRef<'_>) {
+        otel_impl::record_error_on_span(span, self);
+    }
+}
+
+impl ObservedError for pyo3::PyErr {
+    fn error_label(&self) -> Cow<'static, str> {
+        use pyo3::prelude::*;
+        Python::attach(|py| {
+            self.value(py)
+                .getattr("error_type")
+                .and_then(|v| v.extract::<String>())
+                .map(Cow::Owned)
+                .unwrap_or(Cow::Borrowed("ClientError"))
+        })
+    }
+
+    #[cfg(feature = "otel")]
+    fn record_on_span(&self, span: &opentelemetry::trace::SpanRef<'_>) {
+        use opentelemetry::{trace::Status, KeyValue};
+        use pyo3::prelude::*;
+        span.set_attribute(KeyValue::new("error.type", self.error_label().into_owned()));
+        span.set_status(Status::error(self.to_string()));
+        Python::attach(|py| {
+            let exc = self.value(py);
+            if let Ok(code) = exc.getattr("result_code").and_then(|v| v.extract::<u8>()) {
+                span.set_attribute(KeyValue::new(
+                    "db.response.status_code",
+                    format!("{:?}", aerospike_core::ResultCode::from(code)),
+                ));
+            }
+            if exc
+                .getattr("in_doubt")
+                .and_then(|v| v.extract::<bool>())
+                .unwrap_or(false)
+            {
+                span.set_attribute(KeyValue::new("aerospike.in_doubt", true));
+            }
+        });
+    }
+}
+
 // ── traced_op! macro ────────────────────────────────────────────────────────
 
 /// Instrument a data operation with **both** an OTel span and Prometheus metrics.
@@ -323,13 +382,12 @@ pub fn shutdown_tracing() {
 /// When OTel is active: creates a span, records attributes, and collects metrics.
 /// When OTel is inactive: metrics-only fast path (zero Python calls, zero span alloc).
 ///
-/// Signature: `traced_op!(op, ns, set, parent_ctx, conn_info, { async_body })`
+/// Signature: `observed_op!(op, ns, set, parent_ctx, conn_info, { async_body })`
 ///
-/// The expression must return `Result<T, aerospike_core::Error>`.
-/// Returns `Result<T, PyErr>`.
+/// The body returns the final result to report; the macro preserves its error type.
 #[cfg(feature = "otel")]
 #[macro_export]
-macro_rules! traced_op {
+macro_rules! observed_op {
     ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {{
         if $crate::tracing::otel_impl::is_otel_active() {
             // Full OTel span + metrics path
@@ -369,7 +427,7 @@ macro_rules! traced_op {
                 match &result {
                     Ok(_) => timer.finish(""),
                     Err(e) => {
-                        let err_type = $crate::metrics::error_type_from_aerospike_error(e);
+                        let err_type = $crate::tracing::ObservedError::error_label(e);
                         timer.finish(&err_type);
                     }
                 }
@@ -381,17 +439,17 @@ macro_rules! traced_op {
             {
                 let span_ref = opentelemetry::trace::TraceContextExt::span(&_cx);
                 if let Err(e) = &result {
-                    $crate::tracing::otel_impl::record_error_on_span(&span_ref, e);
+                    $crate::tracing::ObservedError::record_on_span(e, &span_ref);
                 }
                 span_ref.end();
             }
 
-            result.map_err($crate::errors::as_to_pyerr)
+            result
         } else {
             // Metrics-only fast path: no span, no Python calls
             let _ = $parent_ctx;
             let _ = &$conn_info;
-            $crate::timed_op!($op, $ns, $set, $body)
+            $crate::timed_result!($op, $ns, $set, $body)
         }
     }};
 }
@@ -399,12 +457,21 @@ macro_rules! traced_op {
 /// When compiled without `otel`, fall back to plain metrics.
 #[cfg(not(feature = "otel"))]
 #[macro_export]
-macro_rules! traced_op {
+macro_rules! observed_op {
     ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {{
         let _ = $parent_ctx;
         let _ = &$conn_info;
-        $crate::timed_op!($op, $ns, $set, $body)
+        $crate::timed_result!($op, $ns, $set, $body)
     }};
+}
+
+/// Observe a single core operation and map its failure to Python.
+#[macro_export]
+macro_rules! traced_op {
+    ($op:expr, $ns:expr, $set:expr, $parent_ctx:expr, $conn_info:expr, $body:expr) => {
+        $crate::observed_op!($op, $ns, $set, $parent_ctx, $conn_info, $body)
+            .map_err($crate::errors::as_to_pyerr)
+    };
 }
 
 // ── traced_exists_op! macro ─────────────────────────────────────────────────

@@ -22,7 +22,7 @@ Only keys that the parser behind a call actually reads are tested:
 - ``batch_write`` / ``batch_write_numpy``: ``exists``, ``gen``,
   ``commit_level``, ``replica``, ``read_mode_ap``; per-record meta ``exists``
   and ``commit_level``.
-- ``batch_operate``: ``replica`` and ``read_mode_ap`` only.
+- ``batch_operate``: ``replica`` and ``read_mode_ap``; writing operations also validate exists, gen and commit_level.
 - ``batch_remove``: ``gen``, ``commit_level``, ``replica``, ``read_mode_ap``;
   per-record meta ``commit_level``.
 - reads and ``batch_read``: ``replica`` and ``read_mode_ap``.
@@ -334,7 +334,7 @@ class TestBatchWriteRejectsUnknownValues:
         assert await _state(any_client, key) == (SEED_BINS, 1)
         assert await _result_codes(any_client, [new_key]) == [2]
 
-    @pytest.mark.parametrize(("name", "bad"), _bad_params("replica", "read_mode_ap"))
+    @pytest.mark.parametrize(("name", "bad"), _bad_params("exists", "gen", "commit_level", "replica", "read_mode_ap"))
     async def test_batch_operate_policy(self, any_client, any_cleanup, name, bad):
         key = await _seed(any_client, any_cleanup, f"bo-{name}-{bad}")
 

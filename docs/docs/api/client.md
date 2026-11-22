@@ -882,7 +882,8 @@ Write multiple records from a numpy structured array.
 
 Each row of the structured array becomes a separate write operation.
 The dtype must contain a key field (default ``_key``) for the record key.
-Remaining non-underscore-prefixed fields become bins.
+Remaining non-underscore-prefixed fields become bins. Routing fields
+``_namespace`` and ``_set`` must hold scalar fixed-width UTF-8 bytes.
 
 | Parameter | Description |
 |-----------|-------------|
@@ -934,6 +935,10 @@ for br in results.batch_records:
 
 Execute operations on multiple records in a single batch call.
 
+Writes honor exists, commit_level, ttl, key and durable_delete. For a
+generation comparison use operate() with an expected generation.
+Read-only operations reject exists, gen and commit_level.
+
 | Parameter | Description |
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
@@ -981,6 +986,8 @@ for br in results.batch_records:
 ### `batch_remove(keys, policy=None)`
 
 Delete multiple records in a single batch call.
+
+The exists field is refused in both the policy and per-record metadata.
 
 | Parameter | Description |
 |-----------|-------------|

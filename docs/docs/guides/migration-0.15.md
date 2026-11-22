@@ -87,8 +87,8 @@ print(ordered({"x": 2, "m": {"k": 1}},
 
 **When an operation without a value appears.** An increment, a write or a read of a missing bin returns no value. Whether it gets an entry depends on the whole request:
 
-- If the request contains a **map, bit or HLL operation**, every operation that names a bin gets an entry, and one that returned no value appears as `(bin, None)`. An operation that names no bin, such as `touch`, never appears.
-- Otherwise only the operations that returned a value appear. List operations do not change this.
+- If the request contains a **map, bit or HLL operation**, every operation that names a bin gets an entry, and one that returned no value appears as `(bin, None)`. `touch` is omitted. In this mode `delete` returns `("", None)`.
+- Otherwise the response includes operations that returned a value. A read-only list request omits a nil element. When the request also writes, a nil list element is returned as `(bin, None)` and an absent list bin is omitted.
 
 | Request (initial record) | 0.15 `ordered_bins` |
 |---|---|
@@ -103,11 +103,7 @@ print(ordered({"x": 2, "m": {"k": 1}},
 
 The binding's results are compared with the official client's for these and more cases in `tests/compatibility/test_operate_ordered_contract.py`.
 
-**Known differences from the official client.** These remain in 0.15:
-
-- An operation that names no bin (`touch`, `delete`) never appears in the result. The official client emits `("", None)` for `delete` when the request also contains a map, bit or HLL operation.
-- In a request that writes but contains no map, bit or HLL operation, a list read that finds a nil element is left out. The official client reports `("l", None)` for it.
-- `MAP_RETURN_KEY_VALUE` results are a list of `(key, value)` tuples (`[("j", 2), ("k", 1)]`); the official client returns a flat list (`["j", 2, "k", 1]`). This applies to `operate()` as well.
+A read with the empty bin name (`read("")` in the official helper) returns the entire record. For `MAP_RETURN_KEY_VALUE`, the ordered result is a flat list such as `["j", 2, "k", 1]`. Ordinary `operate()` retains its list of key/value tuples for this return type.
 
 **`operate()` is unchanged.** It still returns a dict with one key per bin, a list when several operations answered the same bin, and no `None` for a write:
 
@@ -273,7 +269,7 @@ In 0.14.x every batch call started from a policy with `max_retries = 2`. When th
 | `batch_read`, and `batch_operate` whose operations all read | `2` (unchanged) |
 | `batch_write`, `batch_write_numpy`, `batch_remove`, `batch_apply`, and `batch_operate` with a write | `0` |
 
-An explicit `policy["max_retries"]` still wins.
+An explicit retry count on a write batch requires a replica policy other than `POLICY_REPLICA_MASTER`. MASTER with a positive retry count is rejected before sending because a same-node retry could replay acknowledged rows.
 
 The example uses a UDF that counts its own runs and takes longer than the socket timeout, so the client stops waiting while the server is still running it:
 
@@ -819,9 +815,9 @@ A client process uses more memory under concurrent batch load with 0.15. Process
 
 In both versions the memory climbs in steps that become rarer and then levels off: this is buffer memory the client keeps, not a leak. At 32 calls in flight the difference was 73 MiB (55–60 MiB in an earlier run of the same test), and 0.15 does not hand that memory back while the load continues. It comes from Rust client 3.0: a batch row takes about 20% more memory, every connection keeps a 64 KiB read buffer (4 KiB before), and the client keeps a bounded pool of large buffers for reuse instead of freeing them after each command (up to 4 MiB per size class; unused buffers are released about a minute after they stop being used).
 
-**What to do:** if a memory limit was sized closely for 0.14.x, leave headroom. The extra memory grows with the number of batch calls in flight: about 5–15 MiB at 8, about 55–75 MiB at 32 in these measurements. These buffer settings cannot be configured from Python in 0.15.
+**What to do:** if a memory limit was sized closely for 0.14.x, leave headroom. The extra memory grows with the number of batch calls in flight: about 5–15 MiB at 8, about 55–75 MiB at 32 in these measurements. Clients can set `use_buffer_pool=False` or tune `buffer_pool_tier_bytes`; measure peak RSS and latency together.
 
-For context: throughput and latency were equal or better in every scenario measured for this release (an HTTP load test of six scenarios: requests per second +0.1% to +12%, p50 latency −0.7% to −11%; a NumPy microbenchmark: `to_numpy` −10%, read −0.3%, write −2.7% time). Measure your own workload; these numbers are not a guarantee.
+Throughput, peak memory and latency can move in different directions. Measure tail latency and peak RSS under your usual record width and concurrency before sizing workers.
 
 ## Logging
 
@@ -849,6 +845,10 @@ raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Ke
 ```
 
 ## Other changes
+
+- NumPy routing fields `_namespace` and `_set` must be scalar fixed-width UTF-8 bytes. Invalid layouts and invalid UTF-8 are rejected before the batch is sent. Raw void (`V<N>`) keys retain trailing zero bytes; padded string (`S<N>`) keys still trim trailing zeros. For example, an older writer stored a `V2` key containing `b"K\x00"` under the digest of `b"K"`. Migrate that record before switching writers if the new and old keys should name the same record.
+- In-doubt writes conditioned on a filter or specifying a relative TTL are excluded from binding-level retries. Inspect the returned row and its uncertainty before deciding whether to write again.
+- Each AsyncClient runs up to 16 active queries by default. Set `max_concurrent_queries` to tune this per-client budget (0 for unlimited); unrelated CRUD calls have their own limit.
 
 - The client `timeout` and `idle_timeout` keep their 30-second defaults. Rust client 3.0 lowered its own defaults; aerospike-py sets the old values explicitly.
 - A map bin is read back with its keys in the order the server returns them, the same on every read (on server 8.2: sorted by key, integers before strings). 0.14.x returned the keys of the same map in a different order on each read. Code that compares dicts is not affected; code that relied on iteration order was already unreliable.

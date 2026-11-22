@@ -104,6 +104,7 @@ impl PyClient {
         self.state = CONNECTING;
 
         self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
+            closing: false.into(),
             server_address: Arc::from(parsed.first_address.as_str()),
             server_port: parsed.first_port as i64,
             cluster_name: Arc::from(cluster_name.as_str()),
@@ -169,6 +170,9 @@ impl PyClient {
             ));
         }
 
+        self.connection_info
+            .closing
+            .store(true, std::sync::atomic::Ordering::Release);
         self.state = CLOSING;
         let result = if let Some(client) = self.inner.take() {
             py.detach(|| RUNTIME.block_on(async { client.close().await.map_err(as_to_pyerr) }))
@@ -777,7 +781,14 @@ impl PyClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
         let client = self.get_client()?.clone();
-        let a = client_common::prepare_apply_args(key, module, function, args, policy)?;
+        let a = client_common::prepare_apply_args(
+            key,
+            module,
+            function,
+            args,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "apply UDF: ns={} set={} module={} function={}",
             a.key.namespace(),

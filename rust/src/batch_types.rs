@@ -277,15 +277,6 @@ pub struct PendingBatchRecords {
 }
 
 impl PendingBatchRecords {
-    /// For batch calls that have no client-side retry loop to report on.
-    pub fn without_retry(results: Vec<BatchRecord>) -> Self {
-        Self {
-            results,
-            retry_stats: None,
-            in_doubt_rows: Vec::new(),
-        }
-    }
-
     /// Convert into the Python `BatchRecords` container (lazy bins).
     pub fn into_batch_records(self, py: Python<'_>) -> PyResult<PyBatchRecords> {
         build_batch_records(py, self.results, self.retry_stats, &self.in_doubt_rows)

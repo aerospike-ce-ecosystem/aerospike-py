@@ -21,16 +21,21 @@
 //!   per operation in request order. In a request with a map, bit or HLL
 //!   operation every operation that names a bin appears, with `None` when it
 //!   has no value. In any other request only operations that returned a value
-//!   appear. An operation that names no bin (`touch`, `delete`) never appears.
+//!   appear, including a nil list read in a mixed write. A delete appears with
+//!   an empty name in respond-all mode; touch never appears.
 //! - `operate` keeps the shape it always had: a dict with the value of each
 //!   bin that returned something — the value itself when the bin was answered
 //!   once, a list when it was answered several times.
 
-use aerospike_core::{Record, Value};
+use std::collections::HashMap;
+
+use aerospike_core::operations::exp::{read_exp, ExpReadFlags};
+use aerospike_core::{expressions, operations::Operation, Record, Value};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
-use crate::constants::OP_READ;
+use crate::constants::{OP_DELETE, OP_LIST_GET_RANGE, OP_LIST_SIZE, OP_READ, OP_TOUCH};
+use crate::operations::op_code_is_write;
 use crate::record_helpers::record_to_meta;
 use crate::types::key::key_to_py;
 use crate::types::value::value_to_py;
@@ -52,36 +57,82 @@ fn op_code_answers_every_op(op_code: i32) -> bool {
 /// result: aerospike-core does not expose the bin an `Operation` names.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OrderedPlan {
-    /// Per operation, in request order: the bin it names, if it names one.
-    bins: Vec<Option<String>>,
-    /// The request contains a map, HLL or bit operation.
+    operations: Vec<(i32, Option<String>)>,
     answers_every_op: bool,
-    /// The request contains a read of the whole record (`OPERATOR_READ`
-    /// without a bin), whose answers are the record's bins rather than one
-    /// value.
     reads_whole_record: bool,
+    has_write: bool,
+    presence_checks: usize,
+}
+
+fn may_return_nil_list_element(code: i32) -> bool {
+    (1000..2000).contains(&code)
+        && !op_code_is_write(code)
+        && !matches!(code, OP_LIST_SIZE | OP_LIST_GET_RANGE)
 }
 
 impl OrderedPlan {
+    pub fn has_write(&self) -> bool {
+        self.has_write
+    }
+
     pub fn with_capacity(operations: usize) -> Self {
         Self {
-            bins: Vec::with_capacity(operations),
+            operations: Vec::with_capacity(operations),
             ..Self::default()
         }
     }
 
-    /// Record the next operation of the request.
-    pub fn note(&mut self, op_code: i32, bin: Option<&str>) {
-        self.answers_every_op |= op_code_answers_every_op(op_code);
-        self.reads_whole_record |= op_code == OP_READ && bin.is_none();
-        self.bins.push(bin.map(str::to_owned));
+    pub fn note(&mut self, code: i32, bin: Option<&str>) {
+        self.answers_every_op |= op_code_answers_every_op(code);
+        self.reads_whole_record |= code == OP_READ && bin.unwrap_or_default().is_empty();
+        self.has_write |= op_code_is_write(code);
+        let name = match code {
+            OP_TOUCH => None,
+            OP_DELETE => Some(""),
+            _ => bin,
+        };
+        self.operations.push((code, name.map(str::to_owned)));
     }
 
-    /// The `(bin, value)` entries of `operate_ordered`, in request order.
+    /// In a mixed write the official client returns a nil list-read result if
+    /// the list exists, but omits a read of an absent list. The core requests
+    /// RESPOND_ALL_OPS for all writes, erasing that distinction. Test existence
+    /// immediately after the affected operation, in the same atomic command:
+    /// later operations may create or delete that bin. The expression returns
+    /// a boolean regardless of the list's size.
+    pub fn add_presence_checks(&mut self, ops: Vec<Operation>) -> Vec<Operation> {
+        if !self.has_write || self.answers_every_op || self.reads_whole_record {
+            return ops;
+        }
+        self.presence_checks = self
+            .operations
+            .iter()
+            .filter(|(code, _)| may_return_nil_list_element(*code))
+            .count();
+        if self.presence_checks == 0 {
+            return ops;
+        }
+        let mut with_checks = Vec::with_capacity(ops.len() + self.presence_checks);
+        for (op, (code, name)) in ops.into_iter().zip(&self.operations) {
+            with_checks.push(op);
+            if let Some(name) = name
+                .as_deref()
+                .filter(|_| may_return_nil_list_element(*code))
+            {
+                with_checks.push(read_exp(
+                    name,
+                    expressions::bin_exists(name),
+                    ExpReadFlags::DEFAULT,
+                ));
+            }
+        }
+        with_checks
+    }
+
+    /// Public answers in request order. A whole-record read has a variable
+    /// number of results and its bin names come directly from the record.
     pub fn entries<'a>(&'a self, record: &'a Record) -> Vec<(&'a str, &'a Value)> {
         if self.reads_whole_record {
-            // The answers of a whole-record read are bins, not one value per
-            // operation, so there is no request order to restore.
             return record
                 .bins
                 .iter()
@@ -90,52 +141,66 @@ impl OrderedPlan {
                 .collect();
         }
 
-        let mut entries = Vec::with_capacity(self.bins.len());
-        let mut keep = |name: &'a str, value: &'a Value| {
-            if self.answers_every_op || !matches!(value, Value::Nil) {
-                entries.push((name, value));
+        let mut entries = Vec::with_capacity(self.operations.len());
+        // When every op has a slot, positional lookup avoids hashing bin
+        // names. Otherwise consume a separate cursor for each named bin:
+        // touch, for example, may contribute no response at all.
+        let mut positional = record
+            .results
+            .as_deref()
+            .filter(|values| values.len() == self.operations.len() + self.presence_checks)
+            .map(|values| values.iter());
+        let mut offsets = HashMap::<&str, usize>::new();
+        let mut next = |name: &'a str| {
+            if let Some(values) = &mut positional {
+                return values.next();
+            }
+            let offset = offsets.entry(name).or_default();
+            let i = *offset;
+            *offset += 1;
+            match record.bins.get(name) {
+                Some(Value::MultiResult(values)) => values.get(i),
+                Some(value) if i == 0 => Some(value),
+                _ => None,
             }
         };
-
-        match record.results.as_deref() {
-            // One answer per operation: the positions line up with the request.
-            Some(results) if results.len() == self.bins.len() => {
-                for (bin, value) in self.bins.iter().zip(results) {
-                    if let Some(name) = bin {
-                        keep(name, value);
-                    }
+        for (code, name) in &self.operations {
+            let Some(name) = name.as_deref() else {
+                next("");
+                continue;
+            };
+            let value = next(name);
+            let list_exists = self.presence_checks != 0
+                && may_return_nil_list_element(*code)
+                && matches!(next(name), Some(Value::Bool(true)));
+            match value {
+                Some(value)
+                    if self.answers_every_op || list_exists || !matches!(value, Value::Nil) =>
+                {
+                    entries.push((name, value));
                 }
-            }
-            // Fewer answers than operations: the server left some out, and
-            // the ones it sent carry no position. `operate_ordered` asks for
-            // one answer per operation, so this is a server that did not
-            // comply. Which operation an answer belongs to cannot be known
-            // then; each bin's answers go to the first operations that name
-            // it, and no bin gets more entries than it has answers. (Handing
-            // the last answer to every further operation, as this once did,
-            // reported `list_get(l, 0)` as 5 when only `l[1]` was.)
-            _ => {
-                for (position, bin) in self.bins.iter().enumerate() {
-                    let Some(name) = bin else { continue };
-                    let earlier = self.bins[..position]
-                        .iter()
-                        .filter(|other| other.as_deref() == Some(name.as_str()))
-                        .count();
-                    match record.bins.get(name.as_str()) {
-                        Some(Value::MultiResult(answers)) => {
-                            if let Some(value) = answers.get(earlier) {
-                                keep(name, value);
-                            }
-                        }
-                        Some(value) if earlier == 0 => keep(name, value),
-                        Some(_) => {}
-                        None => keep(name, &NIL),
-                    }
+                None if self.answers_every_op
+                    && (!record.bins.contains_key(name) || *code == OP_DELETE) =>
+                {
+                    entries.push((name, &NIL));
                 }
+                _ => {}
             }
         }
         entries
     }
+}
+
+fn ordered_value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> {
+    if let Value::KeyValueList(pairs) = value {
+        let items = PyList::empty(py);
+        for (key, value) in pairs {
+            items.append(value_to_py(py, key)?)?;
+            items.append(value_to_py(py, value)?)?;
+        }
+        return Ok(items.into_any().unbind());
+    }
+    value_to_py(py, value)
 }
 
 /// The key tuple of an operate result: the key the server sent back when it
@@ -164,7 +229,7 @@ pub fn ordered_record_to_py(
                 py,
                 [
                     name.into_pyobject(py)?.into_any().unbind(),
-                    value_to_py(py, value)?,
+                    ordered_value_to_py(py, value)?,
                 ],
             )?;
             Ok(pair.into_any().unbind())
@@ -374,11 +439,15 @@ mod tests {
     }
 
     #[test]
-    fn an_operation_without_a_bin_never_appears() {
+    fn map_requests_include_delete_but_omit_touch() {
         for nameless in [OP_TOUCH, OP_DELETE] {
             let plan = plan(&[(nameless, None), (OP_MAP_SIZE, Some("m"))]);
             let record = answered(&[("", Value::Nil), ("m", Value::Int(1))]);
-            assert_eq!(pairs(&plan.entries(&record)), vec![("m", Value::Int(1))]);
+            let mut expected = vec![("m", Value::Int(1))];
+            if nameless == OP_DELETE {
+                expected.insert(0, ("", Value::Nil));
+            }
+            assert_eq!(pairs(&plan.entries(&record)), expected);
         }
     }
 

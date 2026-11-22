@@ -14,23 +14,24 @@ most cases contain writes.
 The rule the cases encode: the official client asks the server to answer every
 operation only when the request contains a map, bit, HLL or expression
 operation. In that mode an operation that names a bin appears even when it has
-no value (``(name, None)``), and an operation that names no bin (``touch``)
-produces no entry. Otherwise only operations that return a value appear. List
-operations do not switch the mode on.
+no value (``(name, None)``); delete has an empty name and touch is omitted.
+Outside that mode, a read of a nil list element appears in a request that
+writes, and is omitted in a read-only request.
 """
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import pytest
 
 import aerospike_py
-from aerospike_py import bit_operations as rust_bit
-from aerospike_py import hll_operations as rust_hll
-from aerospike_py import list_operations as rust_lop
-from aerospike_py import map_operations as rust_mop
+import aerospike_py.bit_operations as rust_bit
+import aerospike_py.hll_operations as rust_hll
+import aerospike_py.list_operations as rust_lop
+import aerospike_py.map_operations as rust_mop
 from tests import AEROSPIKE_CONFIG
 from tests.server import skip_or_raise
 
@@ -80,6 +81,67 @@ class Case:
 
 
 CASES: list[Case] = [
+    Case(
+        id="empty_name_reads_every_bin",
+        initial={"a": 1, "b": 2},
+        official_ops=lambda: [off_ops.read("")],
+        rust_ops=lambda: [_read("")],
+        expected=[("a", 1), ("b", 2)],
+    ),
+    Case(
+        id="whole_record_read_with_named_read",
+        initial={"a": 1, "b": 2},
+        official_ops=lambda: [off_ops.read(""), off_ops.read("a")],
+        rust_ops=lambda: [_read(""), _read("a")],
+        expected=[("a", 1), ("b", 2)],
+    ),
+    Case(
+        id="nil_list_read_and_missing_list_in_a_write",
+        initial={"l": [None, 5], "b": 2},
+        official_ops=lambda: [
+            off_ops.touch(),
+            off_lop.list_get("l", 0),
+            off_lop.list_get("no_list", 0),
+            off_ops.read("b"),
+            off_lop.list_get("l", 1),
+        ],
+        rust_ops=lambda: [
+            _touch(),
+            rust_lop.list_get("l", 0),
+            rust_lop.list_get("no_list", 0),
+            _read("b"),
+            rust_lop.list_get("l", 1),
+        ],
+        expected=[("l", None), ("b", 2), ("l", 5)],
+    ),
+    Case(
+        id="check_list_presence_at_the_operation",
+        initial={"l": [None]},
+        official_ops=lambda: [off_lop.list_get("l", 0), off_ops.write("l", None), off_lop.list_get("l", 0)],
+        rust_ops=lambda: [rust_lop.list_get("l", 0), _write("l", None), rust_lop.list_get("l", 0)],
+        expected=[("l", None)],
+    ),
+    Case(
+        id="delete_has_an_empty_name_in_respond_all_mode",
+        initial={"m": {"k": 1}},
+        official_ops=lambda: [off_mop.map_size("m"), off_ops.delete()],
+        rust_ops=lambda: [rust_mop.map_size("m"), {"op": aerospike_py.OPERATOR_DELETE}],
+        expected=[("m", 1), ("", None)],
+    ),
+    Case(
+        id="touch_ignores_an_extraneous_bin_name",
+        initial={"m": {"k": 1}},
+        official_ops=lambda: [dict(off_ops.touch(), bin="ignored"), off_mop.map_size("m")],
+        rust_ops=lambda: [dict(_touch(), bin="ignored"), rust_mop.map_size("m")],
+        expected=[("m", 1)],
+    ),
+    Case(
+        id="key_value_result_is_a_flat_list",
+        initial={"m": {"j": 2, "k": 1}},
+        official_ops=lambda: [off_mop.map_get_by_key_list("m", ["j", "k"], aerospike.MAP_RETURN_KEY_VALUE)],
+        rust_ops=lambda: [rust_mop.map_get_by_key_list("m", ["j", "k"], aerospike_py.MAP_RETURN_KEY_VALUE)],
+        expected=[("m", ["j", 2, "k", 1])],
+    ),
     # ── only operations that return a value appear ────────────────────
     Case(
         id="reads_keep_request_order_and_duplicates",
@@ -302,10 +364,8 @@ def _fresh_key(case: Case, who: str) -> tuple[str, str, str]:
 
 def _official_result(official_client, case: Case, key) -> tuple[list[tuple[str, Any]], int]:
     """Run the case with the official client on a freshly written record."""
-    try:
+    with suppress(aerospike.exception.RecordNotFound):
         official_client.remove(key)
-    except aerospike.exception.RecordNotFound:
-        pass
     official_client.put(key, case.initial)
     _, meta, ordered = official_client.operate_ordered(key, case.official_ops())
     return ordered, meta["gen"]
@@ -341,10 +401,8 @@ def test_sync_client_matches_official(case: Case, rust_client, official_client, 
 
     expected, expected_gen = _official_result(official_client, case, official_key)
 
-    try:
+    with suppress(aerospike_py.RecordNotFound):
         rust_client.remove(rust_key)
-    except aerospike_py.RecordNotFound:
-        pass
     rust_client.put(rust_key, case.initial)
     result = rust_client.operate_ordered(rust_key, case.rust_ops())
 
@@ -360,10 +418,8 @@ async def test_async_client_matches_official(case: Case, async_rust_client, offi
 
     expected, expected_gen = _official_result(official_client, case, official_key)
 
-    try:
+    with suppress(aerospike_py.RecordNotFound):
         await async_rust_client.remove(rust_key)
-    except aerospike_py.RecordNotFound:
-        pass
     await async_rust_client.put(rust_key, case.initial)
     result = await async_rust_client.operate_ordered(rust_key, case.rust_ops())
 

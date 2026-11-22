@@ -27,7 +27,6 @@ from typing import ClassVar
 import pytest
 
 import aerospike_py
-from aerospike_py import exp
 from aerospike_py.types import BatchRetryInfo, BatchWriteResult
 from tests import AEROSPIKE_CONFIG
 from tests.helpers import invoke
@@ -112,7 +111,7 @@ class TestRowsOfACallThatReturns:
         await invoke(any_client, "put", kept, {"v": 1})
         await invoke(any_client, "put", dropped, {"v": 2})
 
-        only_v1 = {"filter_expression": exp.eq(exp.int_bin("v"), exp.int_val(1))}
+        only_v1 = {"filter_expression": aerospike_py.exp.eq(aerospike_py.exp.int_bin("v"), aerospike_py.exp.int_val(1))}
         rows = await _rows_of_batch_read(any_client, [kept, dropped], policy=only_v1)
 
         assert [br.result for br in rows] == [0, aerospike_py.AEROSPIKE_ERR_FILTERED_OUT]
@@ -265,7 +264,7 @@ class TestAnAnswerWorthARetryIsStillAnAnswer:
             if any(was_refused(outcome) for outcome in outcomes):
                 return seen
             await asyncio.sleep(1.1)  # stay under the node's error-rate limit
-        pytest.fail("the server never answered KEY_BUSY: this test proved nothing")
+        raise AssertionError("the server never answered KEY_BUSY: this test proved nothing")
 
     async def test_put_raises_the_servers_answer(self, async_client, async_cleanup, slow_udf):
         hot = (NS, SET_NAME, "busy_put")

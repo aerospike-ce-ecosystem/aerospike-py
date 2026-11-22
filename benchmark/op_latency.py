@@ -41,7 +41,6 @@ import time
 
 import aerospike_py
 import numpy as np
-from aerospike_py import list_operations
 
 NAMESPACE = "test"
 SINGLE_SET = "op_latency_single"
@@ -116,7 +115,7 @@ def _single_calls(client) -> dict[str, object]:
     ten_writes = [{"op": WRITE, "bin": f"w{n}", "val": n} for n in range(10)]
     incr_read = [{"op": INCR, "bin": "a", "val": 1}, {"op": READ, "bin": "a"}]
     two_reads = [{"op": READ, "bin": "a"}, {"op": READ, "bin": "s"}]
-    big_read = [list_operations.list_get_range("big", 0, BIG_LIST)]
+    big_read = [aerospike_py.list_operations.list_get_range("big", 0, BIG_LIST)]
     return {
         "get": lambda i: client.get(key(i)),
         "put": lambda i: client.put(key(i), {"a": i}),

@@ -19,7 +19,7 @@ use pyo3::types::PyAnyMethods;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
 use crate::operate_result::OrderedPlan;
-use crate::operations::{py_ops_to_rust, py_ops_to_rust_checked, py_ops_to_rust_ordered};
+use crate::operations::{py_ops_to_rust_checked, py_ops_to_rust_ordered};
 use crate::policy::admin_policy::parse_admin_policy;
 use crate::policy::batch_policy::{parse_batch_policy, reject_doubled_retry, BatchKind};
 use crate::policy::read_policy::{parse_read_policy, DEFAULT_READ_POLICY};
@@ -427,6 +427,7 @@ pub struct OperateArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
     pub ops: Vec<Operation>,
+    pub has_write: bool,
     pub otel: OtelContext,
 }
 
@@ -460,6 +461,7 @@ pub fn prepare_operate_ordered_args(
             key: rust_key,
             write_policy,
             ops: rust_ops,
+            has_write: plan.has_write(),
             otel: OtelContext::new(py, conn_info),
         },
         plan,
@@ -476,12 +478,13 @@ pub fn prepare_operate_args(
 ) -> PyResult<OperateArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, meta)?;
-    let rust_ops = py_ops_to_rust(ops)?;
+    let (rust_ops, has_write) = py_ops_to_rust_checked(ops)?;
 
     Ok(OperateArgs {
         key: rust_key,
         write_policy,
         ops: rust_ops,
+        has_write,
         otel: OtelContext::new(py, conn_info),
     })
 }
@@ -545,15 +548,16 @@ impl BatchReadArgs {
 
 // ── batch_operate ────────────────────────────────────────────────────────────
 
+enum BatchOperatePolicy {
+    Read(aerospike_core::BatchReadPolicy),
+    Write(BatchWritePolicy),
+}
+
 pub struct BatchOperateArgs {
     pub rust_keys: Vec<Key>,
     pub batch_policy: aerospike_core::BatchPolicy,
-    pub read_policy: aerospike_core::BatchReadPolicy,
+    row_policy: BatchOperatePolicy,
     pub ops: Vec<Operation>,
-    /// `true` when at least one op in `ops` is a write. An all-read op list must
-    /// be issued as a batch *read*: `aerospike-core` refuses to encode a batch
-    /// write that contains no write op.
-    pub has_write: bool,
     pub batch_ns: String,
     pub batch_set: String,
     pub otel: OtelContext,
@@ -575,7 +579,26 @@ pub fn prepare_batch_operate_args(
         BatchKind::Read
     };
     let batch_policy = parse_batch_policy(policy, kind)?;
-    let read_policy = parse_batch_read_policy(policy)?;
+    let row_policy = if has_write {
+        let write_policy = parse_batch_write_policy(policy)?;
+        if write_policy.generation_policy != aerospike_core::GenerationPolicy::None {
+            return Err(crate::errors::InvalidArgError::new_err(
+                "batch_operate cannot compare gen without an expected generation; use operate() with meta['gen']"
+            ));
+        }
+        BatchOperatePolicy::Write(write_policy)
+    } else {
+        if let Some(dict) = policy {
+            for field in ["exists", "gen", "commit_level"] {
+                if dict.contains(field)? {
+                    return Err(crate::errors::InvalidArgError::new_err(format!(
+                        "{field} requires a write operation in batch_operate"
+                    )));
+                }
+            }
+        }
+        BatchOperatePolicy::Read(parse_batch_read_policy(policy)?)
+    };
     let rust_keys = py_to_keys(py, keys)?;
 
     let (batch_ns, batch_set) = rust_keys
@@ -586,9 +609,8 @@ pub fn prepare_batch_operate_args(
     Ok(BatchOperateArgs {
         rust_keys,
         batch_policy,
-        read_policy,
+        row_policy,
         ops: rust_ops,
-        has_write,
         batch_ns,
         batch_set,
         otel: OtelContext::new(py, conn_info),
@@ -596,23 +618,21 @@ pub fn prepare_batch_operate_args(
 }
 
 impl BatchOperateArgs {
+    pub fn has_write(&self) -> bool {
+        matches!(self.row_policy, BatchOperatePolicy::Write(_))
+    }
+
     pub fn to_batch_ops(&self) -> Vec<BatchOperation> {
-        // An op list without a write cannot be sent as a batch write:
-        // `aerospike-core` fails buffer preparation with "Batch write
-        // operations do not contain a write". Read-only op lists (OPERATOR_READ,
-        // list_get*/map_get*/bit_get*/hll_get*, ...) are valid batch reads, so
-        // route them there instead.
-        if !self.has_write {
-            return self
-                .rust_keys
-                .iter()
-                .map(|k| BatchOperation::read_ops(&self.read_policy, k.clone(), self.ops.clone()))
-                .collect();
-        }
-        let write_policy = BatchWritePolicy::default();
         self.rust_keys
             .iter()
-            .map(|k| BatchOperation::write(&write_policy, k.clone(), self.ops.clone()))
+            .map(|key| match &self.row_policy {
+                BatchOperatePolicy::Read(policy) => {
+                    BatchOperation::read_ops(policy, key.clone(), self.ops.clone())
+                }
+                BatchOperatePolicy::Write(policy) => {
+                    BatchOperation::write(policy, key.clone(), self.ops.clone())
+                }
+            })
             .collect()
     }
 }
@@ -1072,6 +1092,7 @@ pub fn prepare_udf_remove_args(
 
 pub struct ApplyArgs {
     pub key: Key,
+    pub connection_info: Arc<ConnectionInfo>,
     pub write_policy: WritePolicy,
     pub module: String,
     pub function: String,
@@ -1084,6 +1105,7 @@ pub fn prepare_apply_args(
     function: &str,
     args: Option<&Bound<'_, PyList>>,
     policy: Option<&Bound<'_, PyDict>>,
+    connection_info: &Arc<ConnectionInfo>,
 ) -> PyResult<ApplyArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, None)?;
@@ -1099,6 +1121,7 @@ pub fn prepare_apply_args(
     };
 
     Ok(ApplyArgs {
+        connection_info: Arc::clone(connection_info),
         key: rust_key,
         write_policy,
         module: module.to_string(),

@@ -236,6 +236,12 @@ if retry_records:
 Use the built-in `retry` parameter for automatic transient-failure retries with exponential backoff: `client.batch_write(records, retry=3)`. It re-sends only the records that failed, never one that succeeded, and never a `CREATE_ONLY` or generation-checked record that is in doubt. It is bounded by `total_timeout` (default 1000 ms), and it cannot be combined with a non-zero `policy["max_retries"]` (that raises `InvalidArgError`). Write batches (`batch_write`, `batch_write_numpy`, `batch_remove`, `batch_apply`, a writing `batch_operate`) do not re-send anything by themselves: their `max_retries` defaults to `0`.
 :::
 
+A batch containing writes rejects `POLICY_REPLICA_MASTER` with a positive `max_retries` before sending any row. With Rust client 3.0 that combination can resend rows already acknowledged by the server if the final batch trailer is lost. Use the default of zero retries for non-idempotent writes. A read-only batch accepts this replica policy.
+
+The per-row retry loop also stops after an uncertain write carrying a filter expression or an explicit relative TTL. Repeating it could fail a predicate the first write changed or extend the requested expiry. For ordinary overwrites using the namespace default, opting into `retry=N` can still update generation and restart the server's default TTL. The public batch duration and error label describe the settled call, including retries. Extra attempts have separate `_retry` measurements.
+
+A writing `batch_operate()` applies `exists`, `commit_level`, `ttl`, `key` and `durable_delete` to its rows. Generation comparisons require an expected generation, which this API does not take. Use `operate(..., meta={"gen": expected})` for a generation-checked operation. A read-only `batch_operate()` rejects `exists`, `gen` and `commit_level`. A delete has no `exists` policy, so `batch_remove()` rejects this field in both its policy and per-record meta.
+
 ### Re-sent Writes and `in_doubt`
 
 Writes are not re-sent by default: `max_retries` is `0` for every write. When you set `max_retries > 0` on a write, the Rust client sends it again when its answer is lost. If the first send was applied, the second one meets its own work: a re-sent delete finds no record, a re-sent filtered write no longer matches, a re-sent UDF fails on what the first run left behind. The Rust client does not say whether a row was sent twice, so under such a policy:
@@ -246,7 +252,7 @@ Writes are not re-sent by default: `max_retries` is `0` for every write. When yo
 
 The call does not know whether it changed the record, and says so; it still returns normally with such rows. With the default policy nothing changes, and reads (`batch_read`) are never in doubt.
 
-One case is not covered. A single-record write (`put()`, `remove()`, `operate()`, ...) with `max_retries > 0` whose client is closed while the write waits to be sent again raises `InvalidArgError` ("Partition map empty") with `in_doubt == False`, although the first send may have been applied. A node that goes down does not take this path: there the attempts run out and the error is in doubt. Do not close a client that has writes in flight.
+Closing a connection while a retry-enabled single-record write is in progress can clear its partition map before the next send. When the namespace was routable as the call started and the operation then fails on that closed map, the exception carries `in_doubt=True`: a previous send may have applied. Reads, writes with zero retries, and a namespace already missing at the start do not acquire this flag from closing.
 
 ```python
 import aerospike_py

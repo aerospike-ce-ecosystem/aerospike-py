@@ -143,6 +143,8 @@ pass_env = [
     "AEROSPIKE_HOST",
     "AEROSPIKE_PORT",
     "AEROSPIKE_CLUSTER_NAME",
+    "RUNTIME",
+    "AEROSPIKE_MULTINODE_*",
     # Set by the CI jobs that provision a server: an unreachable server must
     # fail the job instead of silently skipping the suite (issue #428).
     "AEROSPIKE_REQUIRE_SERVER",

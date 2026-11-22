@@ -755,3 +755,33 @@ class TestTheLayoutIsNumpysOwn:
 
         assert [row.result for row in result.batch_records] == [0, 0]
         assert [client.get((NS, SET, k)).bins for k in (9401, 9402)] == [{"v": 1}, {"v": 2}]
+
+
+@pytest.mark.parametrize("route", ["_namespace", "_set"])
+async def test_routing_fields_reject_numeric_vectors_before_write(any_client, route):
+    data = np.array([(93481, [65], 7)], dtype=[("_key", "i8"), (route, "u1", (1,)), ("v", "i4")])
+    with pytest.raises(TypeError, match=route):
+        await invoke(any_client, "batch_write_numpy", data, NS, SET)
+    for set_name in (SET, "A"):
+        assert (await invoke(any_client, "exists", (NS, set_name, 93481))).meta is None
+
+
+async def test_nested_numeric_vectors_validate_full_blob(any_client, any_cleanup):
+    key = (NS, SET, 93482)
+    any_cleanup.append(key)
+    dtype = np.dtype([("v", np.dtype((np.dtype(("f4", (2,))), (2,))))])
+    payload = np.arange(4, dtype="f4").tobytes()
+    await invoke(any_client, "put", key, {"v": payload[:8]})
+    with pytest.raises(ValueError, match="vector length"):
+        await _read(any_client, [key], dtype)
+    await invoke(any_client, "put", key, {"v": payload})
+    result = await _read(any_client, [key], dtype)
+    np.testing.assert_array_equal(result.batch_records["v"][0], [[0, 1], [2, 3]])
+
+
+async def test_void_key_preserves_trailing_zero(any_client, any_cleanup):
+    data = np.array([(np.void(b"K\x00"), 876)], dtype=[("_key", "V2"), ("v", "i8")])
+    key = (NS, SET, b"K\x00")
+    any_cleanup.append(key)
+    await invoke(any_client, "batch_write_numpy", data, NS, SET)
+    assert (await invoke(any_client, "get", key)).bins["v"] == 876

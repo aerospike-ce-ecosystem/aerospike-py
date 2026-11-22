@@ -109,3 +109,58 @@ class TestEitherSettingAlone:
             result = await invoke(any_client, method, keys, policy={"max_retries": 1})
 
         assert [br.result for br in result.batch_records] == [0, 0, 0]
+
+
+async def test_master_write_retry_is_refused_before_any_record_changes(any_client, any_cleanup):
+    key = (NS, SET_NAME, "master_retry_guard")
+    any_cleanup.append(key)
+    await invoke(any_client, "put", key, {"v": 0})
+    policy = {"replica": aerospike_py.POLICY_REPLICA_MASTER, "max_retries": 1}
+    with pytest.raises(aerospike_py.InvalidArgError, match="MASTER"):
+        await invoke(
+            any_client,
+            "batch_operate",
+            [key],
+            [{"op": aerospike_py.OPERATOR_INCR, "bin": "v", "val": 1}],
+            policy=policy,
+        )
+    result = await invoke(
+        any_client, "batch_operate", [key], [{"op": aerospike_py.OPERATOR_READ, "bin": "v"}], policy=policy
+    )
+    assert result.batch_records[0].record.bins["v"] == 0
+
+
+async def test_batch_operate_enforces_create_only_on_each_write(any_client, any_cleanup):
+    existing = (NS, SET_NAME, "operate_create_existing")
+    new = (NS, SET_NAME, "operate_create_new")
+    any_cleanup.extend([existing, new])
+    await invoke(any_client, "put", existing, {"v": 0})
+    result = await invoke(
+        any_client,
+        "batch_operate",
+        [existing, new],
+        [{"op": aerospike_py.OPERATOR_WRITE, "bin": "v", "val": 9}],
+        policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY},
+    )
+    assert [br.result for br in result.batch_records] == [5, 0]
+    assert (await invoke(any_client, "get", existing)).bins["v"] == 0
+    assert (await invoke(any_client, "get", new)).bins["v"] == 9
+
+
+async def test_unsupported_batch_conditions_are_refused_before_send(any_client, any_cleanup):
+    key = (NS, SET_NAME, "unsupported_conditions")
+    any_cleanup.append(key)
+    await invoke(any_client, "put", key, {"v": 0})
+    with pytest.raises(aerospike_py.InvalidArgError, match="gen"):
+        await invoke(
+            any_client,
+            "batch_operate",
+            [key],
+            [{"op": aerospike_py.OPERATOR_INCR, "bin": "v", "val": 1}],
+            policy={"gen": aerospike_py.POLICY_GEN_EQ},
+        )
+    with pytest.raises(aerospike_py.InvalidArgError, match="exists"):
+        await invoke(any_client, "batch_remove", [key], policy={"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})
+    with pytest.raises(aerospike_py.InvalidArgError, match="exists"):
+        await invoke(any_client, "batch_remove", [(key, {"exists": aerospike_py.POLICY_EXISTS_CREATE_ONLY})])
+    assert (await invoke(any_client, "get", key)).bins["v"] == 0

@@ -54,7 +54,7 @@ def _says_stop(result: Any) -> bool:
     return kind.__module__ == "numpy" and kind.__name__ in ("bool", "bool_") and not result
 
 
-async def _in_thread_to_completion(function, argument, stop: threading.Event):
+async def _in_thread_to_completion(function, argument, stop: threading.Event, context: contextvars.Context):
     """Run ``function(argument)`` in a worker thread; return only once it has returned.
 
     A thread cannot be interrupted. If the awaiting task is cancelled while the
@@ -72,7 +72,6 @@ async def _in_thread_to_completion(function, argument, stop: threading.Event):
     reports itself done while its thread is still running.
     """
     loop = asyncio.get_running_loop()
-    context = contextvars.copy_context()
     started = threading.Event()
 
     def run():
@@ -149,14 +148,19 @@ class AsyncRecordStream:
 
     async def __anext__(self) -> Record:
         while self._position >= len(self._batch):
-            async with self._refill:
-                if self._position < len(self._batch):
-                    break  # another task fetched while this one waited
-                batch = await self._next_batch()
-                if batch is None or self._inner.closed:
-                    raise StopAsyncIteration
-                self._batch = batch
-                self._position = 0
+            try:
+                async with self._refill:
+                    if self._position < len(self._batch):
+                        break  # another task fetched while this one waited
+                    batch = await self._next_batch()
+                    if batch is None or self._inner.closed:
+                        raise StopAsyncIteration
+                    self._batch = batch
+                    self._position = 0
+            except asyncio.CancelledError:
+                self._read_was_cancelled = True
+                self.close()
+                raise
         raw = self._batch[self._position]
         self._position += 1
         return _wrap_record(raw)
@@ -168,16 +172,7 @@ class AsyncRecordStream:
                 "this stream was closed because a read on it was cancelled, and records may be missing; "
                 "open a new stream with query.stream()"
             )
-        try:
-            return await self._inner.next_batch(self._BATCH)
-        except asyncio.CancelledError:
-            # A record the read had already taken when the cancellation arrived
-            # cannot be put back. Ending the stream here, and refusing later
-            # reads, is what keeps a cancelled read from silently skipping
-            # records.
-            self._read_was_cancelled = True
-            self.close()
-            raise
+        return await self._inner.next_batch(self._BATCH)
 
     def close(self) -> None:
         """Stop the query and drop the records not yet handed out. Idempotent."""
@@ -251,12 +246,15 @@ class AsyncQuery:
             stream.close()
 
     async def foreach(self, callback, policy=None) -> None:
-        if inspect.iscoroutinefunction(callback):
+        if inspect.iscoroutinefunction(callback) or (
+            callable(callback) and inspect.iscoroutinefunction(callback.__call__)
+        ):
             raise TypeError(
                 "foreach() calls its callback from a worker thread and cannot await it; "
                 "to await something for each record, use 'async for record in query'"
             )
         stop = threading.Event()
+        context = contextvars.copy_context()
         raised_by_callback: list[BaseException] = []
 
         def deliver(batch: list) -> bool:
@@ -267,11 +265,21 @@ class AsyncQuery:
                 record = _wrap_record(raw)
                 try:
                     result = callback(record)
+                    if (
+                        result is not None
+                        and result is not True
+                        and result is not False
+                        and inspect.isawaitable(result)
+                    ):
+                        if inspect.iscoroutine(result):
+                            result.close()
+                        raise TypeError("foreach() cannot await a callback result; use async for record in query")
                 except BaseException as exc:
                     # Carried to the awaiting task by hand and raised there. A
                     # future cannot carry every exception: ``StopIteration``
                     # set on one is refused or replaced, depending on the
-                    # Python version.
+                    # Python version. A callback's CancelledError must also
+                    # reach its caller separately from cancellation of the worker await.
                     raised_by_callback.append(exc)
                     return False
                 if _says_stop(result):
@@ -281,7 +289,7 @@ class AsyncQuery:
         stream = self.stream(policy)
         try:
             while (batch := await stream._next_batch()) is not None:
-                goes_on = await _in_thread_to_completion(deliver, batch, stop)
+                goes_on = await _in_thread_to_completion(deliver, batch, stop, context)
                 if raised_by_callback:
                     raise raised_by_callback[0]
                 if not goes_on:

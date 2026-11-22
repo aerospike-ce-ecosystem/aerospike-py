@@ -155,7 +155,7 @@ When the task that awaits `foreach()` is cancelled, a callback that is already r
 
 As with the sync client, `foreach()` hands records over while the scan runs, so a failing query can raise after part of the records were processed. `results()` is all or nothing.
 
-A running query does not take one of the `max_concurrent_operations` slots, so a consumer can look things up for each record. Bound the number of scans that run at once in your application.
+A running query does not take one of the `max_concurrent_operations` slots, so a consumer can look things up for each record. On an async client, `max_concurrent_queries` limits concurrent queries separately (default 16, `0` for unlimited).
 
 ## Predicate Reference
 

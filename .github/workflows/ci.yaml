@@ -281,9 +281,32 @@ jobs:
         uses: ./.github/actions/wait-for-aerospike
 
       - name: Run all tests
-        run: uvx --with tox-uv tox -e all
+        run: uvx --with tox-uv tox -e all,compat
         env:
           AEROSPIKE_REQUIRE_SERVER: "1"
+
+  multinode:
+    name: Two-node partial failures and retries
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-build"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: make run-aerospike-multinode RUNTIME=docker
+      - run: uvx --with tox-uv tox -e multinode
+        env:
+          RUNTIME: docker
+          AEROSPIKE_REQUIRE_SERVER: "1"
+      - if: always()
+        run: docker compose -f compose.multinode.yaml down --volumes
 
   test-concurrency:
     name: Concurrency Tests

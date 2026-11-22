@@ -99,7 +99,7 @@ impl StopSignal {
 /// # Stopping
 ///
 /// **Dropping it stops the query**, and so does the [`StopSignal`] handed out
-/// by [`stopper`](Self::stopper). Without that the node readers would go on
+/// with the query. Without that the node readers would go on
 /// until the scan was through, or stay blocked on the full queue while the
 /// server kept the scan and its connections.
 pub(crate) struct RunningQuery {
@@ -163,14 +163,35 @@ impl RunningQuery {
         partition_filter: PartitionFilter,
         statement: Statement,
     ) -> Result<Self, AsError> {
+        Self::start_with_stop(
+            client,
+            policy,
+            partition_filter,
+            statement,
+            Arc::new(StopSignal::new()),
+            None,
+        )
+        .await
+    }
+
+    async fn start_with_stop(
+        client: &AsClient,
+        policy: &QueryPolicy,
+        partition_filter: PartitionFilter,
+        statement: Statement,
+        stop: Arc<StopSignal>,
+        query_slot: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Result<Self, AsError> {
         let room = Room::of(policy);
         let (queue, records) = mpsc::channel(room.queue);
-        let stop = Arc::new(StopSignal::new());
         let handle = {
             let queue = queue.clone();
             let stop = Arc::clone(&stop);
             client
                 .query_foreach(policy, partition_filter, statement, move |item| {
+                    // Each node reader owns the callback until it exits, including
+                    // after cancel() while a socket read is still in progress.
+                    let _admission = &query_slot;
                     hand_over(&queue, &stop, item)
                 })
                 .await?
@@ -223,11 +244,6 @@ impl RunningQuery {
         }
         self.taken.reverse();
         Some(self.taken.pop())
-    }
-
-    /// A handle that stops the query from outside, while a read is waiting.
-    fn stopper(&self) -> Arc<StopSignal> {
-        Arc::clone(&self.stop)
     }
 }
 
@@ -429,6 +445,7 @@ enum Phase {
 
 /// Everything needed to send the query on the first read.
 pub(crate) struct QueryRequest {
+    pub(crate) query_slots: Option<Arc<Semaphore>>,
     pub(crate) client: Arc<AsClient>,
     pub(crate) policy: QueryPolicy,
     pub(crate) partition_filter: PartitionFilter,
@@ -444,7 +461,7 @@ struct StreamState {
     phase: tokio::sync::Mutex<Phase>,
     /// Outside `phase`, so that `close()` reaches the query while a read holds
     /// the phase and waits for records.
-    stopper: Mutex<Option<Arc<StopSignal>>>,
+    stop: Arc<StopSignal>,
     closed: AtomicBool,
     telemetry: Mutex<Option<QueryTelemetry>>,
 }
@@ -469,11 +486,8 @@ impl StreamState {
 
     /// Stop the query and report it as ended. Safe to call at any time, from
     /// any thread, any number of times.
-    fn close(&self) {
-        self.closed.store(true, Ordering::Release);
-        if let Some(stop) = lock(&self.stopper).take() {
-            stop.stop();
-        }
+    fn close(self: &Arc<Self>) {
+        self.stop_and_discard();
         self.finish(None);
     }
 
@@ -481,13 +495,27 @@ impl StreamState {
     /// something other than the query ended: an exception from the caller's
     /// callback is not a result of the query, as it is not for the sync
     /// `foreach`. The span is closed; no duration is recorded.
-    fn abandon(&self) {
-        self.closed.store(true, Ordering::Release);
-        if let Some(stop) = lock(&self.stopper).take() {
-            stop.stop();
-        }
+    fn abandon(self: &Arc<Self>) {
+        self.stop_and_discard();
         if let Some(telemetry) = lock(&self.telemetry).take() {
             telemetry.abandon();
+        }
+    }
+
+    fn stop_and_discard(self: &Arc<Self>) {
+        if self.closed.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        self.stop.stop();
+        if let Ok(mut phase) = self.phase.try_lock() {
+            *phase = Phase::Done;
+        } else {
+            // A cancelled read may drop its future without polling the closed
+            // flag again. Discard its queue as soon as it releases the lock.
+            let state = Arc::clone(self);
+            crate::runtime::RUNTIME.spawn(async move {
+                *state.phase.lock().await = Phase::Done;
+            });
         }
     }
 
@@ -508,6 +536,15 @@ impl StreamState {
                 unreachable!("checked by the matches! above");
             };
             let request = *request;
+            let slot = if let Some(slots) = request.query_slots {
+                tokio::select! {
+                    biased;
+                    () = self.stop.stopped() => return Ok(None),
+                    result = slots.acquire_owned() => Some(result.map_err(|_| AsError::client_error("query admission closed"))?),
+                }
+            } else {
+                None
+            };
             // The clock starts when the query is sent, not when the stream
             // object was made: a stream nobody reads has no duration.
             *lock(&self.telemetry) = Some(QueryTelemetry::start(
@@ -516,20 +553,17 @@ impl StreamState {
                 &request.set_name,
                 &request.connection_info,
             ));
-            let running = RunningQuery::start(
+            let running = RunningQuery::start_with_stop(
                 &request.client,
                 &request.policy,
                 request.partition_filter,
                 request.statement,
+                Arc::clone(&self.stop),
+                slot,
             )
             .await
             .inspect_err(|e| self.finish(Some(e)))?;
-            *lock(&self.stopper) = Some(running.stopper());
             if self.is_closed() {
-                // close() ran between the check above and the line before this
-                // one, found no stopper, and so could not stop what is now
-                // running. Dropping `running` does.
-                lock(&self.stopper).take();
                 return Ok(None);
             }
             *phase = Phase::Running(running);
@@ -870,7 +904,7 @@ impl PyRecordStream {
         Self {
             state: Arc::new(StreamState {
                 phase: tokio::sync::Mutex::new(Phase::NotStarted(Box::new(request))),
-                stopper: Mutex::new(None),
+                stop: Arc::new(StopSignal::new()),
                 closed: AtomicBool::new(false),
                 telemetry: Mutex::new(None),
             }),
@@ -1017,6 +1051,7 @@ mod tests {
 
     fn telemetry() -> QueryTelemetry {
         let conn_info = crate::tracing::ConnectionInfo {
+            closing: false.into(),
             server_address: "127.0.0.1".into(),
             server_port: 3000,
             cluster_name: "test".into(),
@@ -1024,13 +1059,13 @@ mod tests {
         QueryTelemetry::start("query", "test", "demo", &conn_info)
     }
 
-    fn state(phase: Phase) -> StreamState {
-        StreamState {
+    fn state(phase: Phase) -> Arc<StreamState> {
+        Arc::new(StreamState {
             phase: tokio::sync::Mutex::new(phase),
-            stopper: Mutex::new(None),
+            stop: Arc::new(StopSignal::new()),
             closed: AtomicBool::new(false),
             telemetry: Mutex::new(Some(telemetry())),
-        }
+        })
     }
 
     #[tokio::test]
@@ -1039,10 +1074,24 @@ mod tests {
             "the stream failed",
         ))));
         state.close();
+        assert!(matches!(*state.phase.lock().await, Phase::Done));
 
         assert!(state.next_batch(8).await.expect("no error").is_none());
         assert!(state.next_batch(8).await.expect("no error").is_none());
         assert!(matches!(*state.phase.lock().await, Phase::Done));
+    }
+
+    #[tokio::test]
+    async fn close_drops_buffered_records_even_when_the_handle_is_retained() {
+        let (sender, _, running) = running(4);
+        sender.try_send(record(1)).unwrap();
+        let state = state(Phase::Running(running));
+        let phase = state.phase.lock().await;
+        state.close();
+        drop(phase);
+        tokio::time::timeout(std::time::Duration::from_secs(5), sender.closed())
+            .await
+            .expect("close must discard the receiver without another poll");
     }
 
     #[tokio::test]
@@ -1519,7 +1568,7 @@ mod tests {
     #[tokio::test]
     async fn a_consumer_told_to_stop_while_it_waits_gets_the_end() {
         let (_queue, stop, mut running) = running(16);
-        let stopper = running.stopper();
+        let stopper = Arc::clone(&running.stop);
         let reading = tokio::spawn(async move { running.next().await.is_none() });
         tokio::task::yield_now().await;
         stopper.stop();

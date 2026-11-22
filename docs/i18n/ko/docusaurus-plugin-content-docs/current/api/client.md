@@ -534,7 +534,7 @@ _, meta, bins = await client.operate(key, ops)
 
 ### `operate_ordered(key, ops, meta=None, policy=None)`
 
-`operate`와 동일하지만 결과를 [`OperateOrderedResult`](types.md#operateorderedresult) NamedTuple의 `ordered_bins` 필드에 `BinTuple(name, value)` 리스트로 반환합니다. 응답한 operation마다 항목 하나가 요청 순서대로 들어가며, 두 번 응답한 bin은 두 번 나타납니다. 값이 없는 operation이 `(bin, None)`으로 나타나는 경우는 [0.15로 업그레이드](../guides/migration-0.15.md#operate_ordered-returns-one-entry-per-operation)를 참고하세요.
+`operate`와 동일하지만 결과를 [`OperateOrderedResult`](types.md#operateorderedresult) NamedTuple의 `ordered_bins` 필드에 `BinTuple(name, value)` 리스트로 반환합니다. 응답한 operation마다 항목 하나가 요청 순서대로 들어가며, 두 번 응답한 bin은 두 번 나타납니다. 값이 없는 operation이 `(bin, None)`으로 나타나는 경우는 [0.15로 업그레이드](../guides/migration-0.15.md#operate_ordered-returns-one-entry-per-operation)를 참고하세요. 빈 bin 이름으로 읽으면 레코드 전체를 반환합니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -759,6 +759,8 @@ for batch_record in result.batch_records:
 
 여러 레코드에 연산을 실행합니다.
 
+쓰기 연산은 배치 정책의 `exists`, `commit_level`, `ttl`, `key`, `durable_delete`를 각 행에 적용합니다. 이 API에서는 예상 generation을 지정할 수 없으므로 세대 비교에는 `operate(..., meta={"gen": expected})`를 사용하세요. 읽기 전용 연산 목록은 `exists`·`gen`·`commit_level`을 거부합니다.
+
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
@@ -781,6 +783,8 @@ results = await client.batch_operate(keys, ops)
 ### `batch_remove(keys, policy=None)`
 
 여러 레코드를 삭제합니다.
+
+삭제에는 `exists` 정책이 없습니다. 배치 정책이나 개별 레코드 meta에 지정하면 `InvalidArgError`를 반환하며 어느 행도 삭제하지 않습니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>

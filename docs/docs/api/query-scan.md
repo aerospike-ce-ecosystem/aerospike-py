@@ -69,6 +69,8 @@ Returned by `AsyncQuery.stream()`; `async for record in query` uses one.
 
 The query stops, on the client and on the server, when the stream ends, when `close()` is called, when the `async with` block is left, or when the stream is garbage collected. At most `record_queue_size` records (default 1024) per query wait in the client, plus the batch being handed to Python and one record for each node whose reader is waiting for room. Every record is handed out once, and several tasks may iterate the same stream: each record goes to one of them.
 
+The delivery guarantee covers retries within one query over a stable record set. Concurrent modifications can change its results. A callback that writes externally must handle its own acknowledgements and retries.
+
 Cancelling a task that waits for the next record closes the stream. A later read on that stream raises `RuntimeError` instead of ending the iteration, because the cancelled read may already have taken records. A stream closed with `close()` simply ends. To bound a wait, put the timeout around the whole loop, not around one `anext()`.
 
 Closing the client does not stop a stream that is already running; close streams before the client.

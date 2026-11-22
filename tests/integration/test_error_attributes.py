@@ -338,3 +338,10 @@ class TestExpectedFailuresAreNotBugReports:
 
         offending = [record.getMessage()[:160] for record in caplog.records if BUG_REPORT_MARKER in record.getMessage()]
         assert offending == [], "a refused argument was logged as a possible bug"
+
+
+async def test_retryable_write_to_unknown_namespace_is_certain(any_client):
+    key = ("no_such_namespace", SET_NAME, "no_attempt")
+    with pytest.raises(aerospike_py.InvalidArgError) as excinfo:
+        await invoke(any_client, "put", key, {"v": 1}, policy={"max_retries": 1})
+    assert excinfo.value.in_doubt is False

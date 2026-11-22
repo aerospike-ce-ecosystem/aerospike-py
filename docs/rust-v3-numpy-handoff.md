@@ -28,7 +28,7 @@
 | `touch(), map_size(m)` | `[("m", 1)]` |
 | `write(x, 7), bit_count(b)` / `expression_read(r)` / `hll_get_count(h)` | `write`가 `("x", None)`으로 나타난다 |
 
-**판정 규칙.** 공식 클라이언트는 요청에 map·bit·HLL·expression 연산이 하나라도 있으면 서버에 모든 연산의 응답을 요구한다. 이때 bin 이름이 있는 연산은 값이 없어도 `(name, None)`으로 나타나고, `touch()`처럼 이름이 없는 연산은 항목을 만들지 않는다. 그런 연산이 없으면 값을 돌려준 연산만 나타난다. list 연산은 이 모드를 켜지 않는다. 18.1.0의 `operate_ordered()`는 정책 dict로 이 동작을 바꾸지 못했다.
+**판정 규칙.** 공식 클라이언트는 요청에 map·bit·HLL·expression 연산이 하나라도 있으면 서버에 모든 연산의 응답을 요구한다. 이때 bin 이름이 있는 연산은 값이 없어도 `(name, None)`으로 나타나고, `touch()`는 생략되고 `delete`는 `("", None)`을 반환한다. 그런 연산이 없으면 값을 돌려준 연산만 나타난다. list 연산은 이 모드를 켜지 않는다. 18.1.0의 `operate_ordered()`는 정책 dict로 이 동작을 바꾸지 못했다.
 
 Rust 3.0은 쓰기 연산이 하나라도 있으면 같은 응답 요구(`RESPOND_ALL_OPS`)를 항상 켠다. 그래서 요청과 `Record.results`를 단순히 `zip`하거나 모든 `Nil`을 제거하면 위 계약이 깨진다. **요청의 연산 종류로 모드를 정하고, 서버가 반환한 순서대로 이름과 값을 함께 보존한다.** 전체 bin 읽기처럼 응답 하나가 여러 결과로 확장되는 조합이 Rust 3.0.0 공개 API로 복원되지 않으면 응답 파서의 최소 upstream 변경을 검토하고, 필요하면 검증한 패치 커밋을 고정한다. 기존 `operate()`의 dict·스칼라 반환은 유지한다. sync·async는 변환기를 공유하고 기존 ordered 호환성 skip 5개를 해제한다. [호환성 테스트](../tests/compatibility/test_operate_ordered.py) · [공식 구현](https://github.com/aerospike/aerospike-client-python/blob/18.1.0/src/main/client/operate.c#L1070)
 
@@ -245,6 +245,8 @@ sync `results()`의 비자발적 문맥 전환은 22,015회 → 1,860회 → 448
 
 ### 결정 기록
 
+- **Ordered list 읽기.** 쓰기와 list 읽기가 섞일 때 nil 원소와 없는 bin을 구분하려고 nil을 반환할 수 있는 list 읽기 뒤에 작은 `bin_exists` 응답을 포함한다. 한 원자적 요청 안에서 확인하므로 뒤의 연산이 같은 bin을 만들거나 삭제해도 판정 시점이 맞다. 추가된 읽기도 서버의 요청당 연산 수 한도에 포함된다. 전체 bin 읽기 및 map·bit·HLL 요청에는 추가하지 않는다.
+
 - **Client 기본값.** `timeout`·`idle_timeout`은 30초를 명시적으로 유지한다(3.0은 1초와 0으로 낮췄다). `login_timeout` 5초를 포함한 나머지 기본값은 upstream 값을 받아들였다.
 - **재시도 소진.** `result_code`는 `-1`, `error_type`은 `"MaxRetriesExceeded"`다. Java 번호 체계의 클라이언트 코드는 Python으로 내보내지 않는다.
 - **`in_doubt`.** 예외, 배치 행, span 속성이 한 함수(`errors::may_have_been_applied`)를 읽는다. upstream 판정을 여섯 곳에서 보정한다. 서버가 `TIMEOUT`으로 답한 쓰기 행은 in doubt로 올린다. UDF 실패는 서버의 확정 응답이므로 내린다. 서버가 거절한 쓰기(`KEY_BUSY`·`DEVICE_OVERLOAD`·`PARTITION_UNAVAILABLE`)는 재시도 횟수가 다해 "시도 소진" 오류로 감싸여 와도 서버 응답을 따라 내린다. 반대로 호출자가 쓰기에 `max_retries > 0`을 준 경우에는 `KEY_NOT_FOUND`·`FILTERED_OUT`·`UDF_BAD_RESPONSE`로 끝난 쓰기 행과 `remove()`의 `RecordNotFound`를 in doubt로 올린다. 첫 전송이 적용된 뒤 재전송이 받은 응답일 수 있는데, Rust client가 그 행을 두 번 보냈는지 알려 주지 않기 때문이다. 같은 조건에서, 재전송할 때 노드를 찾지 못해 클라이언트가 스스로 `PARTITION_UNAVAILABLE`을 찍은 쓰기 행도 올린다. upstream은 "보낸 것이 없으니 확정"이라고 하지만 그 전의 전송은 적용됐을 수 있다. 클라이언트가 만든 코드는 노드 이름이 없다는 점으로 서버의 응답과 구분한다. 기본 정책(쓰기 재전송 없음)에서는 달라지는 것이 없다. 마지막으로, 노드별 작업을 join하지 못해 배치가 행을 하나도 돌려주지 않고 끝나면 쓰기 배치의 응답 없는 행을 in doubt로 올린다. 보내지 않았다고 확신할 수 있는 것은 첫 전송의 라우팅 실패(잘못된 인자·namespace, 노드 없는 파티션)뿐이다.
@@ -325,7 +327,7 @@ sync `results()`의 비자발적 문맥 전환은 22,015회 → 1,860회 → 448
 
 재검증이 확인하지 못한 것: 노드가 실제로 빠지는 경우의 `08ea4ed`(클라이언트를 닫는 방법으로만 재현했다), OpenTelemetry span 속성, Python 3.10~3.12.
 
-**고치지 않고 문서에만 적은 것.** `max_retries > 0`인 단건 쓰기가 재전송을 기다리는 동안 클라이언트를 닫으면 `InvalidArgError`("Partition map empty")가 `in_doubt=False`로 올라온다. 첫 전송은 적용됐을 수 있다. upstream이 이 라우팅 오류를 표시 없이 돌려주고, 바인딩은 이것을 아무것도 보내지 않은 "모르는 namespace"와 구분할 수 없다. 노드가 죽는 경우는 이 경로가 아니다. 그때는 시도가 소진되어 in doubt로 표시된다. 배치 재검증이 찾았고 수정 전 빌드도 같았다. `operate_ordered()`는 세 경우에 공식 클라이언트와 다르다. bin 이름이 없는 연산(`touch`·`delete`)은 결과에 나오지 않는데, 공식 클라이언트는 map·bit·HLL 연산이 섞인 요청에서 `delete`를 `("", None)`으로 낸다. 쓰기가 있고 map·bit·HLL 연산이 없는 요청에서 nil을 읽은 list 연산은 빠지는데, 공식 클라이언트는 `("l", None)`을 낸다. `MAP_RETURN_KEY_VALUE`는 `(key, value)` 튜플의 리스트이고 공식 클라이언트는 평평한 리스트다. 그리고 클라이언트를 닫아도 이미 읽고 있던 스트림은 쥐고 있는 연결로 끝까지 읽는다.
+**최초 PR에서 재현한 문제 (이후 수정).** `max_retries > 0`인 단건 쓰기가 재전송을 기다리는 동안 클라이언트를 닫으면 `InvalidArgError`("Partition map empty")가 `in_doubt=False`로 올라온다. 첫 전송은 적용됐을 수 있다. upstream이 이 라우팅 오류를 표시 없이 돌려주고, 바인딩은 이것을 아무것도 보내지 않은 "모르는 namespace"와 구분할 수 없다. 노드가 죽는 경우는 이 경로가 아니다. 그때는 시도가 소진되어 in doubt로 표시된다. 배치 재검증이 찾았고 수정 전 빌드도 같았다. PR 리뷰 후 `operate_ordered()`의 세 차이를 공식 18.1.0 비교 테스트와 함께 수정했다. map·bit·HLL 요청에서 `delete`는 `("", None)`을 반환하고, 쓰기와 함께 요청한 list 읽기는 없는 bin과 nil 원소를 구분한다. `MAP_RETURN_KEY_VALUE`의 ordered 결과는 평평한 리스트다. 빈 이름을 사용한 전체 bin 읽기도 테스트한다. 그리고 클라이언트를 닫아도 이미 읽고 있던 스트림은 쥐고 있는 연결로 끝까지 읽는다.
 
 **재현하지 못한 의심 네 건.** 배치·오류 리뷰어가 재현 없이 코드만으로 제기했다. 세 건은 코드상 실제로 가능한 경로여서 `195ff82`·`2cd260e`·`8337150`으로 고쳤다. 패닉 경로는 건강한 클러스터로 만들 수 없어 단위 테스트로만 고정했다. 남은 한 건은 `batch_write(retry=N)`이 여러 시도에서 호출 전체가 실패했을 때 마지막 시도의 예외를 올린다는 점인데, 행마다의 상태는 `partial_result`에 그대로 있으므로 바꾸지 않았다.
 
@@ -340,19 +342,32 @@ sync `results()`의 비자발적 문맥 전환은 22,015회 → 1,860회 → 448
 - podman VM의 시계는 호스트가 CPU를 다 쓰는 동안 어긋났다가 맞춰진다. 그 사이 truncate가 미래 시각을 기록하면 이후에 쓴 레코드가 한동안 보이지 않아, 전체 실행에서 TTL·generation 테스트 150여 개가 한꺼번에 실패한다. 세 번 겪었고 매번 시계가 맞은 뒤 다시 돌리면 통과했다. 전체 실행이 대량으로 실패하면 `date -u`와 `podman exec aerospike date -u`부터 비교한다. 대량 실패의 다른 원인은 [재시작 테스트 뒤 되살아난 레코드](#테스트)다. 앞의 세 번 가운데 일부도 그것이었을 수 있다. 그때는 둘을 구분하지 않았다.
 - 체크아웃한 `main` 작업 폴더에 이 문서가 untracked로 남아 있으면, 그 폴더에서 이 브랜치를 체크아웃할 때 충돌한다.
 
+
+## PR #500 리뷰 반영 (2026-11-22)
+
+| 재현한 경계 | 반영한 계약과 검증 |
+|---|---|
+| 배치 종료 응답 유실 | 행 400개를 이미 확인한 뒤 종료 프레임만 유실되는 경우를 포함했다. 쓰기 배치의 MASTER와 양수 SDK 재시도 조합은 전송 전에 거부한다. 모든 행이 성공하면 공개 API와 작업 지표도 성공이다. 필터 또는 명시적인 상대 TTL이 있는 불확실한 쓰기는 바인딩이 재전송하지 않는다. |
+| NumPy 목적지와 레이아웃 | `_namespace`·`_set`에 숫자 배열이 들어오면 첫 전송 전에 거부한다. 중첩 숫자 벡터도 전체 BLOB 길이를 검사하고, raw void 키는 끝의 0을 보존한다. 기존 scalar를 길이 1 벡터로 읽는 호환 경로를 유지한다. |
+| ordered 결과 | 공식 Python 18.1.0의 빈 문자열 전체 읽기, nil 리스트와 없는 bin, delete와 map 조합, flat key/value 결과를 sync·async에서 비교한다. 같은 bin의 앞선 연산을 재탐색하던 부분을 bin별 커서로 교체했다. CE 8.2에서 touch + 같은 bin 4,096회 읽기의 중앙값은 수정 전 21.73 ms, 수정 후 2.36 ms였다. |
+| 쿼리 취소와 부하 | 핸들을 보관한 채 close해도 큐를 해제한다. 한 foreach에 한 콜백 context를 사용하고 awaitable 반환은 명시적으로 거부한다. 독립된 per-client 쿼리 한도(기본 16)를 적용했다. CE 8.2에서 64개 동시 요청 burst는 수정 전 384건 중 61건이 거부됐고 수정 후 768건 모두 성공했다. |
+| 배포 검증 | CI의 7.2·8.1·8.2 행렬에서 공식 클라이언트 비교를 실행하고 격리된 2노드에서 실제 노드 중단·재시작 테스트를 실행하도록 구성했다. 이 섹션 이전의 성능표와 제한은 당시 커밋의 기록이다. |
+
+쓰기 재시도 중 같은 연결이 닫혀 파티션 맵이 사라진 경우, 호출 시작 시 라우팅 가능했던 쓰기만 이전 전송의 불확실성을 보존한다. 처음부터 알 수 없는 namespace나 읽기에는 이를 적용하지 않는다. 쓰기 `batch_operate`는 행 정책을 적용하며, 비교할 generation을 받을 수 없는 조건이나 삭제에 적용할 수 없는 `exists`는 전송 전에 거부한다.
+
+배치 읽기 720키 × 동시 32개 × 72라운드의 별도 release wheel 재측정에서 0.14.4의 최대 RSS는 155–157 MiB, 수정 후보는 204–217 MiB였다. 풀을 꺼도 206–213 MiB였다. 풀 설정은 보관 메모리 조절 수단이며, 이 부하에서 관찰한 최대 RSS 증가를 해소하지 않았다.
+
 ## 후속 작업
 
 이번 릴리스에서 구현하지 않는다. #499가 의존성 업그레이드의 선행 조건이 아닌 별도 결정으로 분류한 항목이고, #315·#318은 2026-08-17에 `NOT_PLANNED`로 닫혀 있다.
 
 - **SC 읽기 모드 4종**(`Session`·`Linearize`·`AllowReplica`·`AllowUnavailable`)과 **다중 레코드 트랜잭션**은 Enterprise Edition의 SC namespace가 있어야 검증할 수 있다. 저장소의 compose와 CI는 CE뿐이므로 EE 테스트 환경을 먼저 마련한다. 트랜잭션은 commit·abort·commit 결과 불확실 후 복구를 검증한다. [SC #315](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/315) · [트랜잭션 #466](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/466)
 - **직렬화 가능한 재개 커서**는 `PartitionFilter` 직렬화를 쓰며, 이는 현재 켜지 않은 `serialization` cargo feature 뒤에 있다. 커서 복원에 쓰는 `partitions`·`PartitionStatus`는 upstream이 지원 API가 아니라고 숨겨 둔 필드다. 중단·재시작 후 누락과 중복을 검증한다. [커서 #318](https://github.com/aerospike-ce-ecosystem/aerospike-py/issues/318)
-- **버퍼 설정 노출.** `use_buffer_pool`과 버퍼 크기 설정을 `ClientConfig`로 내보내면 [늘어난 메모리](#메모리는-늘었다)를 사용자가 조절할 수 있다.
-- **배치의 레코드별 정책.** `batch_operate`의 `exists`·`gen`·`commit_level`과 `batch_remove`의 `exists`를 적용하거나, 받지 않는다고 거부한다.
+- **버퍼 설정.** 리뷰 후 `use_buffer_pool`과 크기 등급별 보관 설정을 `ClientConfig`에 노출했다. [기존 메모리 측정](#메모리는-늘었다)과 별도로 실제 워크로드의 최대 RSS와 지연을 함께 측정한다.
 - **upstream 보고.** [작업 중 발견한 것](#작업-중-발견한-것)의 Rust client 3.0 동작 열 가지를 보고할지 결정한다. callback API가 레코드마다 future를 박싱하는 것(`Box::pin(callback(res))`)과, 네트워크 청크 단위로 넘겨주는 callback이 없는 것도 함께 다룰 만하다. 바인딩은 그 상자에 16~24바이트짜리 값(넣기에 성공했는지, 아니면 기다리는 future의 포인터)만 들어가도록 했지만 레코드마다의 할당 자체는 남는다.
 - **알려진 result code의 경고.** `FORBIDDEN`(22)처럼 이름이 있는 서버 코드에도 "Unmapped ResultCode" 경고가 남는다. 0.14.4도 같다. 부하 때 흔한 `KEY_BUSY`·`DEVICE_OVERLOAD`·`PARTITION_UNAVAILABLE`은 `08ea4ed`에서 경고를 없앴다.
 - **sync `results()`는 Ctrl-C로 끊기지 않는다.** `e76a1d1` 뒤로 인터럽트가 사라지지는 않지만, scan이 끝나 호출이 반환할 때 올라온다. 기다리는 동안 주기적으로 신호를 확인해 query를 멈추게 할 수 있다.
 - **태스크를 취소하지 않고 닫은 이벤트 루프.** 돌고 있던 `results()`가 아무도 기다리지 않는 채 끝까지 모으고 변환한다. 스트림 재검증에서 그 뒤의 `results()`가 0.07초 대신 2.3초 걸렸다. 변환 차례는 사라지지 않는다. `asyncio.run()`은 태스크를 취소하므로 해당하지 않는다.
-- **재전송을 기다리는 단건 쓰기와 `close()`.** 위 "고치지 않고 문서에만 적은 것"의 `in_doubt=False`를 고치려면 바인딩이 단건 쓰기의 재시도를 직접 돌리거나, upstream이 재전송 시점의 라우팅 오류를 표시해야 한다.
 - **라우팅하지 못한 행과 호출의 성패.** 클라이언트가 노드를 찾지 못해 스스로 코드(11, 20)를 찍은 행만 있는 배치는 예외 없이 행을 돌려준다. 서버가 답한 것이 아니므로 호출 실패로 볼지 정한다. 지금은 `test_batch_partial_result.py`가 반환하는 쪽을 고정하고 있다.
 - **`AsyncClient.close()`와 열린 스트림.** 클라이언트를 닫아도 읽고 있던 스트림은 끝까지 읽는다. 닫을 때 스트림을 멈추게 할지 정한다.
 - **`batch_write(retry=N)`이 올리는 예외.** 여러 시도에서 호출 전체가 실패하면 마지막 시도의 예외가 올라온다. 행마다의 상태는 `partial_result`에 있다.

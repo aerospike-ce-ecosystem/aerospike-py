@@ -312,13 +312,12 @@ macro_rules! stage_timer {
 
 /// Instrument a data operation with metrics.
 ///
-/// The expression must return `Result<T, AsError>`.
-/// Returns `Result<T, PyErr>`.
+/// Returns the original result after recording its outcome.
 ///
 /// When metrics are disabled via [`set_metrics_enabled(false)`], skips timer
 /// creation entirely (single atomic load, ~1ns overhead).
 #[macro_export]
-macro_rules! timed_op {
+macro_rules! timed_result {
     ($op:expr, $ns:expr, $set:expr, $body:expr) => {{
         if $crate::metrics::is_metrics_enabled() {
             let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
@@ -326,14 +325,13 @@ macro_rules! timed_op {
             match &result {
                 Ok(_) => timer.finish(""),
                 Err(e) => {
-                    let err_type = $crate::metrics::error_type_from_aerospike_error(e);
+                    let err_type = $crate::tracing::ObservedError::error_label(e);
                     timer.finish(&err_type);
                 }
             }
-            result.map_err($crate::errors::as_to_pyerr)
+            result
         } else {
-            let result = $body;
-            result.map_err($crate::errors::as_to_pyerr)
+            $body
         }
     }};
 }

@@ -21,26 +21,43 @@ fn rust_to_python_level(level: Level) -> u32 {
     }
 }
 
-/// Ctrl-C arrived while a message was being handed to Python's `logging`.
-///
-/// Python delivers a signal to the first Python code the main thread runs
-/// after it arrived. While the main thread is inside a long call of this
-/// library, a sync query for instance, that code is the forwarding of a log
-/// message, so the `KeyboardInterrupt` is raised in here, where nothing can
-/// pass it on: a logger has no caller to raise to. Dropped like a failure of
-/// the logging call, the interrupt was simply lost, and a scan that the user
-/// had interrupted ran to its end and returned normally.
-///
-/// It is not a failure of logging. The interrupt is asked for again, so that
-/// it is raised in the next Python code that is not this bridge: the callback
-/// of a `foreach`, or the caller's own code when the call returns.
-fn interrupted_while_logging(level: Level, target: &str, message: &str) {
-    // SAFETY: only sets the flag a SIGINT sets. Safe from any thread, with or
-    // without the GIL.
-    unsafe { pyo3::ffi::PyErr_SetInterrupt() };
-    if level <= Level::Warn {
-        eprintln!("[aerospike-py/{level}] {target}: {message}");
+// A Python signal handler has already run when its KeyboardInterrupt reaches
+// the bridge. Preserve the exception, including its arguments and traceback.
+thread_local! {
+    static INTERRUPT: std::cell::Cell<Option<PyErr>> = const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn check_interrupt() -> PyResult<()> {
+    INTERRUPT.with(|slot| slot.take().map_or(Ok(()), Err))
+}
+
+extern "C" fn restore_interrupt(_: *mut std::ffi::c_void) -> std::ffi::c_int {
+    if let Err(err) = check_interrupt() {
+        // SAFETY: CPython invokes a pending call with an attached thread state.
+        err.restore(unsafe { Python::assume_attached() });
+        -1
+    } else {
+        0
     }
+}
+
+fn defer_interrupt(py: Python<'_>, interrupt: PyErr) -> PyResult<()> {
+    let threads = py.import("threading")?;
+    if !threads
+        .call_method0("current_thread")?
+        .is(&threads.call_method0("main_thread")?)
+    {
+        return Err(interrupt);
+    }
+    INTERRUPT.with(|slot| {
+        if let Some(first) = slot.replace(Some(interrupt)) {
+            slot.set(Some(first));
+        }
+    });
+    // CPython will raise the original exception on the main thread. If the
+    // pending-call queue is full it is still available at the native boundary.
+    unsafe { pyo3::ffi::Py_AddPendingCall(Some(restore_interrupt), std::ptr::null_mut()) };
+    Ok(())
 }
 
 /// A `log::Log` implementation that forwards to Python's `logging` module.
@@ -82,8 +99,7 @@ impl Log for PyLogger {
             })();
             match forwarded {
                 Err(interrupt) if interrupt.is_instance_of::<PyKeyboardInterrupt>(py) => {
-                    interrupted_while_logging(record.level(), target, &message);
-                    Ok(())
+                    defer_interrupt(py, interrupt)
                 }
                 other => other,
             }

@@ -372,3 +372,11 @@ class TestKeysAndRows:
             with pytest.raises(KeyError):
                 result.get(absent)
         assert result._map == {1: 4, 0: 2}
+
+
+def test_nested_numeric_subdtype_shape_and_blob_length():
+    dtype = np.dtype([("v", np.dtype((np.dtype(("f4", (2,))), (2,))))])
+    payload = np.arange(4, dtype="f4").tobytes()
+    with pytest.raises(ValueError, match="vector length mismatch"):
+        _convert_one(dtype, {"v": payload[:8]})
+    np.testing.assert_array_equal(_convert_one(dtype, {"v": payload}).batch_records["v"][0], [[0, 1], [2, 3]])

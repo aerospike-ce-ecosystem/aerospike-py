@@ -87,8 +87,8 @@ print(ordered({"x": 2, "m": {"k": 1}},
 
 **값이 없는 연산이 나타나는 경우.** Increment, write, 없는 bin 읽기는 값을 반환하지 않습니다. 이런 연산이 항목을 갖는지는 요청 전체에 따라 정해집니다.
 
-- 요청에 **map, bit, HLL 연산**이 하나라도 있으면 bin을 지정한 모든 연산이 항목을 갖고, 값을 반환하지 않은 연산은 `(bin, None)`으로 나타납니다. `touch`처럼 bin을 지정하지 않은 연산은 나타나지 않습니다.
-- 그렇지 않으면 값을 반환한 연산만 나타납니다. List 연산은 이 규칙을 바꾸지 않습니다.
+- 요청에 **map, bit, HLL 연산**이 하나라도 있으면 bin을 지정한 모든 연산이 항목을 갖고, 값을 반환하지 않은 연산은 `(bin, None)`으로 나타납니다. `touch`는 생략되며 이 모드에서 `delete`의 결과는 `("", None)`입니다.
+- 그 밖의 요청에는 값을 돌려준 연산이 나타납니다. 읽기 전용 list 요청에서는 nil 원소가 생략됩니다. 쓰기를 함께 요청하면 존재하는 list의 nil 원소는 `(bin, None)`으로 반환되고, 없는 list bin은 생략됩니다.
 
 | 요청 (초기 record) | 0.15의 `ordered_bins` |
 |---|---|
@@ -103,11 +103,7 @@ print(ordered({"x": 2, "m": {"k": 1}},
 
 `tests/compatibility/test_operate_ordered_contract.py`가 이 경우들을 포함한 여러 요청에서 binding의 결과를 공식 client의 결과와 비교합니다.
 
-**공식 client와 알려진 차이.** 0.15에도 다음 차이가 남아 있습니다.
-
-- `touch`, `delete`처럼 bin을 지정하지 않은 연산은 결과에 나타나지 않습니다. 공식 client는 요청에 map, bit, HLL 연산도 있으면 `delete`에 대해 `("", None)`을 내놓습니다.
-- 쓰기가 있지만 map, bit, HLL 연산은 없는 요청에서, nil 원소를 찾은 list 읽기는 빠집니다. 공식 client는 이를 `("l", None)`으로 알려 줍니다.
-- `MAP_RETURN_KEY_VALUE` 결과는 `(key, value)` tuple의 list입니다(`[("j", 2), ("k", 1)]`). 공식 client는 평평한 list를 반환합니다(`["j", 2, "k", 1]`). `operate()`도 마찬가지입니다.
+빈 bin 이름(공식 helper의 `read("")`)으로 읽으면 레코드 전체를 반환합니다. `MAP_RETURN_KEY_VALUE`의 ordered 결과는 `["j", 2, "k", 1]` 같은 평평한 리스트입니다. 일반 `operate()`는 기존처럼 key/value 튜플 리스트를 반환합니다.
 
 **`operate()`는 바뀌지 않았습니다.** 여전히 bin마다 key 하나인 dict를 반환하고, 여러 연산이 같은 bin에 응답하면 list를, write에는 `None`을 넣지 않습니다.
 
@@ -273,7 +269,7 @@ except aerospike_py.AerospikeError as exc:
 | `batch_read`, 그리고 연산이 모두 읽기인 `batch_operate` | `2` (변경 없음) |
 | `batch_write`, `batch_write_numpy`, `batch_remove`, `batch_apply`, 그리고 write가 있는 `batch_operate` | `0` |
 
-`policy["max_retries"]`를 명시하면 여전히 그 값이 우선합니다.
+쓰기 배치에서 양수 `max_retries`와 `POLICY_REPLICA_MASTER`를 함께 지정하면 전송 전에 거부합니다. 같은 노드에 재전송하면 이미 응답을 받은 행도 중복 실행될 수 있기 때문입니다.
 
 아래 예제는 실행 횟수를 직접 세고 socket timeout보다 오래 걸리는 UDF를 사용합니다. 그래서 server가 아직 실행하는 동안 client가 기다리기를 멈춥니다.
 
@@ -819,9 +815,9 @@ Node가 **같은 주소에서 새 node id로** 재시작하면(예: container �
 
 두 버전 모두 memory가 계단식으로 오르다가 오르는 간격이 길어지고 멈춥니다. 누수가 아니라 client가 보관하는 buffer memory입니다. 동시 호출 32개에서 차이는 73 MiB였고(같은 test의 이전 실행에서는 55–60 MiB), 0.15는 부하가 이어지는 동안 이 memory를 돌려주지 않습니다. 원인은 Rust client 3.0에 있습니다. Batch row 하나가 memory를 약 20% 더 차지하고, connection마다 64 KiB read buffer를 유지하며(이전 4 KiB), client가 큰 buffer를 명령마다 해제하지 않고 재사용하려고 크기가 제한된 pool에 보관합니다(크기 class마다 최대 4 MiB, 쓰지 않게 된 buffer는 약 1분 뒤에 해제).
 
-**대응:** memory 한도를 0.14.x에 맞춰 빠듯하게 잡았다면 여유를 두세요. 추가 memory는 동시에 진행 중인 batch 호출 수에 따라 늘어납니다. 두 번의 측정에서 8개일 때 약 5–15 MiB, 32개일 때 약 55–75 MiB였습니다. 0.15에서는 이 buffer 설정을 Python에서 바꿀 수 없습니다.
+**대응:** memory 한도를 0.14.x에 맞춰 빠듯하게 잡았다면 여유를 두세요. 추가 memory는 동시에 진행 중인 batch 호출 수에 따라 늘어납니다. 두 번의 측정에서 8개일 때 약 5–15 MiB, 32개일 때 약 55–75 MiB였습니다. `use_buffer_pool=False` 또는 `buffer_pool_tier_bytes` 설정을 조절하고 최대 RSS와 지연을 함께 측정할 수 있습니다.
 
-참고로, 이번 release에서 측정한 모든 시나리오에서 throughput과 latency는 같거나 더 좋았습니다(시나리오 6개의 HTTP 부하 테스트: 초당 요청 수 +0.1%~+12%, p50 latency −0.7%~−11%; NumPy microbenchmark: `to_numpy` −10%, 읽기 −0.3%, 쓰기 −2.7% 시간). 직접 workload로 측정하세요. 이 수치는 보장이 아닙니다.
+처리량, 꼬리 지연, 최대 RSS는 서로 다르게 변할 수 있습니다. 실제 레코드 너비와 동시성으로 꼬리 지연과 최대 RSS를 측정한 뒤 worker 수를 결정하세요.
 
 ## Logging
 
@@ -849,6 +845,10 @@ raised: Invalid key: Error 4: Invalid argument: Data type is not supported as Ke
 ```
 
 ## 그 밖의 변경
+
+- NumPy의 `_namespace`·`_set`은 UTF-8 고정 너비 스칼라 바이트 필드여야 합니다. 잘못된 레이아웃이나 UTF-8은 배치 전송 전에 거부합니다. `V<N>` 키는 끝의 0바이트를 보존하며 `S<N>` 키는 패딩을 제거합니다. 예전 writer로 `V2` 키 `b"K\x00"`를 저장했다면 레코드는 `b"K"`의 digest에 있습니다. 동일 레코드로 유지하려면 새 writer가 다른 digest에 쓰기 전에 데이터를 이관하세요.
+- 결과가 불확실한 필터 조건부 쓰기와 상대 TTL 쓰기는 바인딩의 재시도 대상에서 제외합니다. 행별 결과를 확인한 뒤 재전송 여부를 결정하세요.
+- AsyncClient 한 개가 동시에 실행하는 쿼리는 기본 16개입니다. `max_concurrent_queries`로 조정할 수 있고 0이면 무제한입니다. 일반 CRUD는 별도 제한을 사용합니다.
 
 - Client의 `timeout`과 `idle_timeout`은 30초 기본값을 유지합니다. Rust client 3.0은 자체 기본값을 낮췄지만, aerospike-py가 이전 값을 명시적으로 설정합니다.
 - Map bin을 읽으면 key가 server가 돌려준 순서로 나오고, 읽을 때마다 같습니다(server 8.2에서는 key 순 정렬이며 정수가 문자열보다 앞). 0.14.x는 같은 map의 key를 읽을 때마다 다른 순서로 돌려줬습니다. dict끼리 비교하는 코드는 영향이 없고, 순회 순서에 기대던 코드는 원래도 믿을 수 없었습니다.

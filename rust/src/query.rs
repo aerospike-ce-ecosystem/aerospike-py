@@ -506,6 +506,7 @@ fn execute_foreach(
 /// `foreach()`.
 #[pyclass(name = "Query")]
 pub struct PyQuery {
+    pub(crate) query_slots: Option<Arc<tokio::sync::Semaphore>>,
     client: Arc<AsClient>,
     namespace: String,
     set_name: String,
@@ -522,6 +523,7 @@ impl PyQuery {
         connection_info: Arc<crate::tracing::ConnectionInfo>,
     ) -> Self {
         Self {
+            query_slots: None,
             client,
             namespace,
             set_name,
@@ -930,6 +932,7 @@ impl PyQuery {
         )?;
         let (query_policy, partition_filter) = parse_query_policy(policy)?;
         Ok(PyRecordStream::new(QueryRequest {
+            query_slots: self.query_slots.clone(),
             client: Arc::clone(&self.client),
             policy: query_policy,
             partition_filter,

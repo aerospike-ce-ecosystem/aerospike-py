@@ -26,6 +26,7 @@ about 14 MB before the client's bounded queue and the socket buffers are full.
 """
 
 import asyncio
+import contextvars
 import gc
 import logging
 import os
@@ -37,6 +38,7 @@ import pytest
 
 import aerospike_py
 from aerospike_py import _async_client, exp
+from tests import AEROSPIKE_CONFIG
 from tests.helpers import invoke
 
 NS = "test"
@@ -309,7 +311,48 @@ class TestARoundTheClientHasToFetchAgain:
         self._assert_every_record_once([record.bins["v"] for record in records], seeded)
 
 
+class TestAsyncQueryAdmission:
+    async def test_waiting_queries_release_slots_and_allow_nested_crud(self, seeded):
+        client = await aerospike_py.AsyncClient({**AEROSPIKE_CONFIG, "max_concurrent_queries": 1}).connect()
+        first = client.query(NS, SET_NAME).stream({"record_queue_size": 1})
+        waiting = client.query(NS, SET_NAME).stream()
+        try:
+            await anext(first)
+            pending = asyncio.create_task(anext(waiting))
+            completed, _ = await asyncio.wait([pending], timeout=0.05)
+            assert not completed
+            assert (await client.get((NS, SET_NAME, 0))).bins["v"] == 0
+            waiting.close()
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(pending, 5)
+            first.close()
+            rows = await asyncio.wait_for(client.query(NS, SET_NAME).results({"max_records": 2}), 5)
+            assert len(rows) == 2
+        finally:
+            first.close()
+            waiting.close()
+            await client.close()
+
+
 class TestSeveralTasksOnOneStream:
+    async def test_cancelling_waiter_closes_the_stream_for_later_readers(self, async_client, seeded):
+        stream = async_client.query(NS, SET_NAME).stream(THROTTLED)
+        async with stream:
+            reading = asyncio.create_task(anext(stream))
+            try:
+                await _wait_for(stream._refill.locked)
+                waiting = asyncio.create_task(anext(stream))
+                await asyncio.sleep(0)
+                waiting.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await waiting
+                assert stream.closed
+                with pytest.raises(RuntimeError, match="cancelled"):
+                    await anext(stream)
+            finally:
+                stream.close()
+                await asyncio.gather(reading, return_exceptions=True)
+
     async def test_each_record_goes_to_one_of_them(self, async_client, seeded):
         stream = async_client.query(NS, SET_NAME).stream()
 
@@ -544,6 +587,40 @@ class TestForeach:
 
         with pytest.raises(TypeError, match="async for"):
             await async_client.query(NS, SET_NAME).foreach(callback)
+
+    async def test_async_callable_and_callback_returning_coroutine_are_refused(self, async_client, seeded):
+        class Callback:
+            async def __call__(self, record):
+                return True
+
+        callback = Callback()
+        for function in (callback, lambda record: callback(record)):
+            with pytest.raises(TypeError, match="async for"):
+                await async_client.query(NS, SET_NAME).foreach(function)
+
+    async def test_callback_context_survives_batches(self, async_client, seeded):
+        count = contextvars.ContextVar("callback_record_count", default=0)
+        seen = []
+
+        def callback(_record):
+            count.set(count.get() + 1)
+            seen.append(count.get())
+            return len(seen) < 300
+
+        await async_client.query(NS, SET_NAME).foreach(callback)
+        assert seen == list(range(1, 301))
+        assert count.get() == 0
+
+    @pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit, asyncio.CancelledError])
+    async def test_callback_propagates_control_flow_exception(self, async_client, seeded, signal):
+        original = signal("from callback")
+
+        def callback(_record):
+            raise original
+
+        with pytest.raises(signal) as raised:
+            await async_client.query(NS, SET_NAME).foreach(callback)
+        assert raised.value is original
 
     async def test_callbacks_run_off_the_event_loop(self, async_client, seeded):
         """A callback may block — it always could — without stalling the loop."""

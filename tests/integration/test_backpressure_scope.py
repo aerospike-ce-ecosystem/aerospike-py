@@ -132,3 +132,38 @@ class TestAnOpenStreamTakesNone:
             looked_up += 1
 
         assert looked_up == len(keys)
+
+
+async def test_close_during_retryable_put_preserves_possible_write(
+    one_slot_client, async_client, slow_udf, async_cleanup
+):
+    key = (NS, SET_NAME, "close_during_retry")
+    async_cleanup.append(key)
+    await async_client.put(key, {"v": 0})
+    # Hold the record with a UDF on an independent connection. The put's
+    # first socket deadline expires waiting for that record. Its retry delay
+    # lets the connection close before it can route a second send.
+    holder = asyncio.create_task(
+        async_client.apply(key, "slow_udf", "spin", [SPIN_ROUNDS * 4], policy={"total_timeout": 10_000})
+    )
+    call = None
+    try:
+        await asyncio.sleep(0.05)
+        call = asyncio.create_task(
+            one_slot_client.put(
+                key,
+                {"v": 1},
+                policy={"socket_timeout": 20, "total_timeout": 10_000, "sleep_between_retries": 1500, "max_retries": 1},
+            )
+        )
+        await asyncio.sleep(0.05)
+        with pytest.raises(aerospike_py.BackpressureError):
+            await one_slot_client.get(key)
+        await one_slot_client.close()
+        with pytest.raises(aerospike_py.InvalidArgError) as failure:
+            await call
+        assert failure.value.in_doubt is True
+    finally:
+        await asyncio.gather(holder, return_exceptions=True)
+        if call is not None:
+            await asyncio.gather(call, return_exceptions=True)

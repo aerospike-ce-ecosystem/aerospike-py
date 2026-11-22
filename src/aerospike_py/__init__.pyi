@@ -11,7 +11,37 @@ from collections.abc import Sequence
 from typing import Any, Callable, Literal, Optional, Union
 
 import numpy as np
+from numpy.typing import DTypeLike
 
+from aerospike_py.exception import (
+    AdminError as AdminError,
+    AerospikeError as AerospikeError,
+    AerospikeIndexError as AerospikeIndexError,
+    AerospikeTimeoutError as AerospikeTimeoutError,
+    BackpressureError as BackpressureError,
+    BinExistsError as BinExistsError,
+    BinNameError as BinNameError,
+    BinNotFound as BinNotFound,
+    BinTypeError as BinTypeError,
+    ClientError as ClientError,
+    ClusterError as ClusterError,
+    FilteredOut as FilteredOut,
+    IndexError as IndexError,
+    IndexFoundError as IndexFoundError,
+    IndexNotFound as IndexNotFound,
+    InvalidArgError as InvalidArgError,
+    QueryAbortedError as QueryAbortedError,
+    QueryError as QueryError,
+    RecordError as RecordError,
+    RecordExistsError as RecordExistsError,
+    RecordGenerationError as RecordGenerationError,
+    RecordNotFound as RecordNotFound,
+    RecordTooBig as RecordTooBig,
+    RustPanicError as RustPanicError,
+    ServerError as ServerError,
+    TimeoutError as TimeoutError,
+    UDFError as UDFError,
+)
 from aerospike_py import exception as exception
 from aerospike_py import list_operations as list_operations
 from aerospike_py import map_operations as map_operations
@@ -123,7 +153,7 @@ class LazyBatchRecords:
         """
         ...
 
-    def to_numpy(self, dtype: "np.dtype") -> NumpyBatchRecords:
+    def to_numpy(self, dtype: DTypeLike | list[tuple[Any, ...]]) -> NumpyBatchRecords:
         """Materialise as a NumPy structured array.
 
         ``dtype`` is a structured ``numpy.dtype`` or anything
@@ -810,7 +840,8 @@ class Client:
 
         Each row of the structured array becomes a separate write operation.
         The dtype must contain a key field (default ``_key``) for the record key.
-        Remaining non-underscore-prefixed fields become bins.
+        Remaining non-underscore-prefixed fields become bins. Routing fields
+        ``_namespace`` and ``_set`` must hold scalar fixed-width UTF-8 bytes.
 
         Args:
             data: numpy structured array with record data. Its own
@@ -1017,6 +1048,10 @@ class Client:
     ) -> BatchWriteResult:
         """Execute operations on multiple records in a single batch call.
 
+        Writes honor exists, commit_level, ttl, key and durable_delete. For a
+        generation comparison use operate() with an expected generation.
+        Read-only operations reject exists, gen and commit_level.
+
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             ops: List of operation dicts to apply to each record.
@@ -1050,6 +1085,8 @@ class Client:
         policy: Optional[dict[str, Any]] = None,
     ) -> BatchWriteResult:
         """Delete multiple records in a single batch call.
+
+        The exists field is refused in both the policy and per-record metadata.
 
         Args:
             keys: Either a list of bare ``Key`` tuples (back-compat) or a
@@ -1988,7 +2025,8 @@ class AsyncClient:
 
         Each row of the structured array becomes a separate write operation.
         The dtype must contain a key field (default ``_key``) for the record key.
-        Remaining non-underscore-prefixed fields become bins.
+        Remaining non-underscore-prefixed fields become bins. Routing fields
+        ``_namespace`` and ``_set`` must hold scalar fixed-width UTF-8 bytes.
 
         Args:
             data: numpy structured array with record data. Its own
@@ -2159,6 +2197,10 @@ class AsyncClient:
     ) -> BatchWriteResult:
         """Execute operations on multiple records in a single batch call.
 
+        Writes honor exists, commit_level, ttl, key and durable_delete. For a
+        generation comparison use operate() with an expected generation.
+        Read-only operations reject exists, gen and commit_level.
+
         Args:
             keys: List of ``(namespace, set, primary_key)`` tuples.
             ops: List of operation dicts to apply to each record.
@@ -2192,6 +2234,8 @@ class AsyncClient:
         policy: Optional[dict[str, Any]] = None,
     ) -> BatchWriteResult:
         """Delete multiple records in a single batch call (async).
+
+        The exists field is refused in both the policy and per-record metadata.
 
         See :meth:`Client.batch_remove` for full description. Per-record
         ``BatchDeleteMeta`` overrides are supported via ``(key, meta)``
@@ -2796,7 +2840,7 @@ class AsyncQuery:
     A running query does not take one of the ``max_concurrent_operations``
     slots: it stays open for as long as its consumer reads, and a consumer
     that looks something up for each record would otherwise wait for itself.
-    Bound the number of scans an application runs at once in the application.
+    AsyncClient limits active queries separately with max_concurrent_queries (default 16, 0 for unlimited).
 
     Example:
         ```python
@@ -3159,42 +3203,6 @@ def shutdown_tracing() -> None:
     ...
 
 # -- Exceptions ----------------------------------------------------------
-
-class AerospikeError(Exception):
-    # Structured Aerospike result code (ADR-0027): the real server wire code
-    # for server errors, or -1 for client-side errors with no server response.
-    result_code: int
-
-class ClientError(AerospikeError): ...
-class BackpressureError(ClientError): ...
-class RustPanicError(ClientError): ...
-class ServerError(AerospikeError): ...
-class RecordError(AerospikeError): ...
-class ClusterError(AerospikeError): ...
-class AerospikeTimeoutError(AerospikeError): ...
-class TimeoutError(AerospikeError): ...
-class InvalidArgError(AerospikeError): ...
-
-# Record-level
-class RecordNotFound(RecordError): ...
-class RecordExistsError(RecordError): ...
-class RecordGenerationError(RecordError): ...
-class RecordTooBig(RecordError): ...
-class BinNameError(RecordError): ...
-class BinExistsError(RecordError): ...
-class BinNotFound(RecordError): ...
-class BinTypeError(RecordError): ...
-class FilteredOut(RecordError): ...
-
-# Server-level
-class AerospikeIndexError(ServerError): ...
-class IndexError(ServerError): ...
-class IndexNotFound(AerospikeIndexError): ...
-class IndexFoundError(AerospikeIndexError): ...
-class QueryError(ServerError): ...
-class QueryAbortedError(QueryError): ...
-class AdminError(ServerError): ...
-class UDFError(ServerError): ...
 
 # -- Constants -----------------------------------------------------------
 #

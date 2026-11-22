@@ -634,6 +634,10 @@ fn build_pyerr(class: ErrorClass, detail: &str, node: Option<&str>, in_doubt: bo
 /// its message and its `result_code` / `error_type` / `in_doubt` attributes
 /// all follow from that class.
 pub fn as_to_pyerr(err: AsError) -> PyErr {
+    as_to_pyerr_with_doubt(err, false)
+}
+
+pub(crate) fn as_to_pyerr_with_doubt(err: AsError, possible_earlier_write: bool) -> PyErr {
     debug!("Mapping aerospike error: {}", err);
     let class = ErrorClass::of(&err);
     if class == ErrorClass::Unknown {
@@ -649,7 +653,7 @@ pub fn as_to_pyerr(err: AsError) -> PyErr {
         class,
         &describe(&err),
         err.node(),
-        may_have_been_applied(&err),
+        possible_earlier_write || may_have_been_applied(&err),
     )
 }
 

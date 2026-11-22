@@ -196,7 +196,12 @@ fn parse_dtype_fields_with(
         let field_dtype = field_info.get_item(0)?;
         let offset: usize = field_info.get_item(1)?.extract()?;
 
-        let base = field_dtype.getattr("base")?;
+        let mut base = field_dtype.getattr("base")?;
+        // NumPy preserves nested subdtype descriptors, e.g. ((f4, 2), 2).
+        // Walk to the scalar dtype for width, byte order and blob validation.
+        while !base.getattr("subdtype")?.is_none() {
+            base = base.getattr("base")?;
+        }
         let kind_str: String = base.getattr("kind")?.extract()?;
         let kind = match kind_str.as_str() {
             "i" => DtypeKind::Int,
@@ -290,6 +295,10 @@ pub fn validate_numpy_dtype(
     dtype: &Bound<'_, PyAny>,
     require_native_byteorder: bool,
 ) -> PyResult<()> {
+    let np_dtype = dtype.py().import("numpy")?.getattr("dtype")?;
+    if !dtype.is_instance(&np_dtype)? {
+        return Err(PyTypeError::new_err("dtype must be a numpy.dtype instance"));
+    }
     parse_dtype_fields_with(dtype, require_native_byteorder).map(|_| ())
 }
 
@@ -1253,7 +1262,9 @@ pub fn numpy_to_records(
     set_name: &str,
     key_field: &str,
 ) -> PyResult<Vec<(Key, Vec<Bin>)>> {
-    if !data_array.hasattr("dtype")? {
+    if !data_array.hasattr("dtype")?
+        || !data_array.is_instance(&py.import("numpy")?.getattr("ndarray")?)?
+    {
         return Err(PyTypeError::new_err(format!(
             "data must be a numpy structured array, got {}",
             data_array.get_type().name()?
@@ -1353,9 +1364,24 @@ fn records_of_array(
         )));
     }
 
-    // Check for optional _namespace and _set fields
-    let ns_field = fields.iter().find(|f| f.name == "_namespace");
-    let set_field = fields.iter().find(|f| f.name == "_set");
+    // Routing fields have their own contract; interpreting vector bytes as
+    // text can send a valid write to an entirely different namespace or set.
+    let routing_field = |name: &str| -> PyResult<Option<&FieldInfo>> {
+        let field = fields.iter().find(|field| field.name == name);
+        if let Some(field) = field {
+            if !matches!(field.kind, DtypeKind::FixedBytes | DtypeKind::VoidBytes)
+                || field.is_subarray
+                || is_structured_field(dtype_obj, name)?
+            {
+                return Err(PyTypeError::new_err(format!(
+                    "routing field '{name}' must contain scalar fixed-width UTF-8 bytes"
+                )));
+            }
+        }
+        Ok(field)
+    };
+    let ns_field = routing_field("_namespace")?;
+    let set_field = routing_field("_set")?;
 
     // The row count is whatever the array says, and an array whose rows have
     // no bytes can say any number at no cost to itself: `np.zeros(2**40, ...)`
@@ -1376,7 +1402,7 @@ fn records_of_array(
         // This mirrors the trimming already applied to _namespace and _set fields.
         let key_value = unsafe { read_value_from_buffer(row_ptr, key_fi)? };
         let key_value = match key_value {
-            Value::Blob(ref b) => {
+            Value::Blob(ref b) if key_fi.kind == DtypeKind::FixedBytes => {
                 let end = b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1);
                 if end < b.len() {
                     Value::Blob(b[..end].to_vec())
@@ -1387,34 +1413,26 @@ fn records_of_array(
             _ => key_value,
         };
 
-        // Extract namespace (from field or default)
-        let ns = if let Some(ns_fi) = ns_field {
-            match unsafe { read_value_from_buffer(row_ptr, ns_fi)? } {
-                Value::Blob(b) => {
-                    // Trim trailing null bytes for fixed-length fields
-                    let trimmed = &b[..b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1)];
-                    String::from_utf8_lossy(trimmed).into_owned()
-                }
-                Value::String(s) => s,
-                _ => namespace.to_string(),
-            }
-        } else {
-            namespace.to_string()
+        let route = |field: Option<&FieldInfo>, default: &str| -> PyResult<String> {
+            let Some(field) = field else {
+                return Ok(default.to_owned());
+            };
+            // SAFETY: parse_dtype_fields checked the byte range of this
+            // fixed-width field against the row layout.
+            let bytes =
+                unsafe { std::slice::from_raw_parts(row_ptr.add(field.offset), field.itemsize) };
+            let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |p| p + 1);
+            std::str::from_utf8(&bytes[..end])
+                .map(str::to_owned)
+                .map_err(|_| {
+                    PyValueError::new_err(format!(
+                        "routing field '{}' at row {i} is not UTF-8",
+                        field.name
+                    ))
+                })
         };
-
-        // Extract set name (from field or default)
-        let set = if let Some(set_fi) = set_field {
-            match unsafe { read_value_from_buffer(row_ptr, set_fi)? } {
-                Value::Blob(b) => {
-                    let trimmed = &b[..b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1)];
-                    String::from_utf8_lossy(trimmed).into_owned()
-                }
-                Value::String(s) => s,
-                _ => set_name.to_string(),
-            }
-        } else {
-            set_name.to_string()
-        };
+        let ns = route(ns_field, namespace)?;
+        let set = route(set_field, set_name)?;
 
         // Build the Key with a properly computed digest.
         // For Blob (bytes) keys, use STRING particle type (3) for cross-client

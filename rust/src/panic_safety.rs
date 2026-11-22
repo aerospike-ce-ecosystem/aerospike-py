@@ -59,7 +59,10 @@ where
     F: FnOnce() -> PyResult<R>,
 {
     match catch_unwind(AssertUnwindSafe(f)) {
-        Ok(result) => result,
+        Ok(result) => {
+            crate::logging::check_interrupt()?;
+            result
+        }
         Err(payload) => Err(payload_to_pyerr(op, payload)),
     }
 }
