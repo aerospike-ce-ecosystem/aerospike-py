@@ -52,7 +52,7 @@ const sidebars: SidebarsConfig = {
         },
         'guides/troubleshooting',
         'guides/admin/error-handling',
-        'guides/config/migration',
+        'guides/version-compatibility',
         'guides/api-comparison',
         'guides/architecture',
       ],
@@ -78,10 +78,25 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Performance',
       items: [
-        'performance/overview',
-        'performance/isolated-benchmark',
-        'performance/production-benchmark',
-        'performance/bottleneck-analysis',
+        {
+          type: 'category',
+          label: '0.15 benchmarks',
+          link: {type: 'doc', id: 'performance/overview'},
+          items: [
+            'performance/client-comparison',
+            'performance/ncloud-equal-rate',
+            'performance/async-stream-profile',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Benchmarks before 0.14',
+          link: {type: 'doc', id: 'performance/production-benchmark'},
+          items: [
+            'performance/isolated-benchmark',
+            'performance/bottleneck-analysis',
+          ],
+        },
       ],
     },
     {

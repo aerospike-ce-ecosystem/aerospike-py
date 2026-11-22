@@ -32,14 +32,19 @@ Client가 예상과 다른 cluster name을 가진 server를 거부해야 할 때
 | `cluster_name` | `str \| None` | `""` | 예상 cluster name. `None` 은 field 생략과 동일 처리. |
 | `auth_mode` | `int` | `AUTH_INTERNAL` | auth mode |
 | `user` / `password` | `str` | `""` | 자격 증명 |
-| `timeout` | `int` | `1000` | 연결 timeout (ms) |
-| `idle_timeout` | `int` | `55` | idle connection timeout (초) |
+| `timeout` | `int` | `30000` | 연결 timeout (ms) |
+| `idle_timeout` | `int` | `30000` | idle connection timeout (ms) |
 | `max_conns_per_node` | `int` | `256` | node 당 최대 connection |
 | `min_conns_per_node` | `int` | `0` | pre-warm connection |
 | `conn_pools_per_node` | `int` | `1` | node 당 connection pool 수 (8+ CPU core 에서 증가) |
 | `tend_interval` | `int` | `1000` | cluster tend interval (ms) |
+| `use_buffer_pool` | `bool` | `true` | 연결 간에 큰 요청 버퍼를 재사용합니다. |
+| `buffer_pool_min_size` | `int` | `8192` | 풀에 보관하는 최소 버퍼 크기(바이트). |
+| `buffer_pool_max_size` | `int` | `1048576` | 풀에 보관하는 최대 버퍼 크기(바이트). |
+| `buffer_pool_tier_bytes` | `int` | `4194304` | 크기 등급별 버퍼 보관 예산(바이트). |
 | `use_services_alternate` | `bool` | `false` | alternate address 사용 |
 | `max_concurrent_operations` | `int` | `0` (disabled) | client 당 in-flight operation 최대 수. `0` = 무제한. |
+| `max_concurrent_queries` | `int` | `16` | AsyncClient당 실행 중인 쿼리 수. 한도에 도달하면 대기하며 `0`은 무제한. |
 | `operation_queue_timeout_ms` | `int` | `0` (infinite) | backpressure slot 의 최대 wait time (ms). `0` = 영원히 대기. |
 
 ## Multi-Node Cluster

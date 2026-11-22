@@ -136,7 +136,7 @@ numpy structured array             Aerospike
 
 ## Key Field
 
-기본적으로 `"_key"` 라는 dtype field 가 record key 로 사용. `key_field` 로 다른 field 지정 가능:
+기본적으로 `"_key"` 라는 dtype field 가 record key 로 사용. Key field는 값 하나, 즉 scalar 정수이거나 고정 폭 bytes field여야 합니다. 원소가 하나인 `("_key", "i8", (1,))`를 포함한 sub-array나 중첩된 structured field는 무엇이든 쓰기 전에 `TypeError`를 발생시키므로 `("_key", "i8")`로 선언하세요. `key_field` 로 다른 field 지정 가능:
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -191,7 +191,7 @@ custom `key_field` 사용 시 그 field 가 bin 으로도 저장되길 원하면
 | Float | `f` | `"f4"`, `"f8"` | `Float(f64)` |
 | Fixed bytes | `S` | `"S8"`, `"S16"` | `Blob(bytes)` 또는 `String` |
 | Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` |
-| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` |
+| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` — shape `(1,)`도 마찬가지이며, 0.14.x는 이를 scalar로 저장했습니다. Writer를 바꾸기 전에 [원소가 하나인 벡터](../version-compatibility.md#one-element-vectors-are-stored-as-a-blob)를 참고하세요 |
 
 :::tip[지원 안 되는 dtype]
 
@@ -478,7 +478,7 @@ results: BatchWriteResult = client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
-    _dtype: np.dtype,
+    _dtype: np.dtype | None = None,
     key_field: str = "_key",
     policy: dict | None = None,
     retry: int = 0,
@@ -489,7 +489,7 @@ results: BatchWriteResult = await client.batch_write_numpy(
     data: np.ndarray,
     namespace: str,
     set_name: str,
-    _dtype: np.dtype,
+    _dtype: np.dtype | None = None,
     key_field: str = "_key",
     policy: dict | None = None,
     retry: int = 0,
@@ -498,14 +498,14 @@ results: BatchWriteResult = await client.batch_write_numpy(
 
 | Parameter | Type | Default | 설명 |
 |-----------|------|---------|-------------|
-| `data` | `np.ndarray` | required | record 데이터의 structured numpy array |
+| `data` | `np.ndarray` | required | record 데이터의 structured numpy array. Layout은 `data.dtype`이 정합니다. Row는 `numpy.asarray(data)`에서 읽으므로, `numpy.recarray` 같은 array subclass는 그 바탕의 일반 array로 쓰이고 masked array의 mask는 무시됩니다. |
 | `namespace` | `str` | required | target Aerospike namespace |
 | `set_name` | `str` | required | target set 이름 |
-| `_dtype` | `np.dtype` | required | array 레이아웃을 describing 하는 structured dtype |
-| `key_field` | `str` | `"_key"` | record user key 로 사용할 dtype field 이름 |
-| `policy` | `dict \| None` | `None` | 선택적 [`BatchPolicy`](/docs/api/types#batchpolicy) override |
-| `retry` | `int` | `0` | transient 실패 (timeout, device overload, key busy) 의 최대 retry. `0` = retry 없음. |
+| `_dtype` | `np.dtype \| None` | `None` | array가 가져야 할 dtype(선택). 주어졌는데 `data.dtype`과 다르면 아무것도 보내기 전에 `ValueError`가 발생합니다. |
+| `key_field` | `str` | `"_key"` | record user key 로 사용할 dtype field 이름. Scalar 정수이거나 고정 폭 bytes field여야 하며, sub-array나 중첩된 structured field는 `TypeError`를 발생시킵니다. |
+| `policy` | `dict \| None` | `None` | 선택적 [`BatchPolicy`](/docs/api/types#batchpolicy) override. `max_retries` 기본값은 `0`이며 `retry`와 함께 쓸 수 없습니다. |
+| `retry` | `int` | `0` | transient 실패 (timeout, device overload, key busy) 의 최대 retry. `0` = retry 없음. 실패한 record만 다시 보내며, `in_doubt`인 `CREATE_ONLY`·generation 검사 record는 다시 보내지 않습니다. 0이 아닌 `policy["max_retries"]`를 함께 주면 `InvalidArgError`가 발생합니다. |
 
-**Returns:** `BatchWriteResult` — `batch_records: list[BatchRecord]` 를 가진 NamedTuple. 각 `BatchRecord` 가 `key`, `result` (0=success), `record` (`Record` 또는 `None`), `in_doubt` (transport-ambiguity flag) carry.
+**Returns:** `BatchWriteResult` — `batch_records: list[BatchRecord]`와 `retry`(`BatchRetryInfo`)를 가진 NamedTuple. 각 `BatchRecord`는 `key`, `result`(`0` 성공, server의 code, 어떤 server도 응답하지 않았으면 `-1`), `record`(`Record` 또는 `None`), `in_doubt`(write가 적용되었을 수 있음), `error_type`(성공이면 `None`, 아니면 실패 종류)을 갖습니다. 호출 전체가 실패하면 exception의 `partial_result`에 이 row가 들어 있습니다.
 
 **See also:** numpy array 로 record read back 하려면 [NumPy Batch Read Guide](./numpy-batch.md) 참조.

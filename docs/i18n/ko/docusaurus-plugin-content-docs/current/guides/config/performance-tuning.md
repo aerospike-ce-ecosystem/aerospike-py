@@ -141,6 +141,22 @@ config = {
 - 슬롯이 비기 전에 `operation_queue_timeout_ms`가 만료되면
   `aerospike_py.BackpressureError`가 발생합니다.
 
+**슬롯을 차지하는 작업:** 모든 단일 record 명령(`get`, `put`, `operate`,
+`operate_ordered`, `increment`, ..., 그리고 UDF 호출 `apply()`)과 모든 batch
+명령(`batch_read`, `batch_write`, `batch_write_numpy`, `batch_operate`,
+`batch_remove`, `batch_apply`)입니다. 명령은 전송되는 순간부터 응답이 도착할
+때까지 슬롯을 차지합니다. Query·scan stream은 슬롯을 차지하지 않습니다.
+Stream은 consumer가 읽는 동안 계속 열려 있으므로, record마다 무언가를 조회하는
+consumer는 자기 stream이 차지한 슬롯을 기다리게 되기 때문입니다. Info,
+truncate, UDF 등록, index, admin 명령도 슬롯을 차지하지 않습니다.
+
+`AsyncClient`에서는 `max_concurrent_queries`로 클라이언트당 쿼리 수를 제한합니다(기본값 16, `0`은 무제한).
+한도에 도달하면 다음 쿼리는 서버에 요청을 보내기 전에 대기하며 취소할 수 있습니다.
+쿼리 슬롯은 단건·배치 연산과 별개이므로 콜백 안에서 레코드를 읽을 수 있습니다.
+서버를 공유하는 클라이언트와 프로세스 수를 고려해 설정하세요. 같은 슬롯을 써야 하는 다음 쿼리를
+기다릴 때는 먼저 부분 소비한 스트림을 닫으세요. 모든 슬롯을 외부 쿼리가 점유한 동안 콜백에서 중첩 쿼리 결과를 기다려야 한다면 중첩 쿼리에 별도 클라이언트를 사용하세요. 속도 제한이 걸린 쿼리를 취소하면 현재 소켓 읽기가
+끝날 때까지 슬롯을 점유할 수 있습니다.
+
 **값 선택:** `max_conns_per_node`(기본값 `256`)에 가깝게 설정하되 이 값을
 넘기지 마세요. 3-node cluster에서는 `64`부터 시작하는 것이 안전합니다.
 Connection pool을 보호하면서 throughput을 유지할 수 있는 보수적인 값입니다.

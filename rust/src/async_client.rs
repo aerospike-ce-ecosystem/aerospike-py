@@ -1,11 +1,13 @@
+use std::future::Future;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::backpressure::OperationLimiter;
 use crate::client_common;
 use crate::client_ops;
 use aerospike_core::Client as AsClient;
 use arc_swap::ArcSwapOption;
+use futures::{channel::oneshot, future::Shared, FutureExt};
 use log::{debug, info, trace, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -17,45 +19,33 @@ const CONNECTING: u8 = 1;
 const CONNECTED: u8 = 2;
 const CLOSING: u8 = 3;
 
-/// RAII guard that reverts a stuck `CONNECTING` state back to `DISCONNECTED`.
-///
-/// `connect()` transitions the state machine to `CONNECTING` synchronously,
-/// then drives `AsClient::new()` inside the returned Python awaitable. If that
-/// awaitable is dropped before completing — e.g. the coroutine is garbage
-/// collected, cancelled, or wrapped in an `asyncio.wait_for()` that times out —
-/// the success/failure arms that move the state to `CONNECTED`/`DISCONNECTED`
-/// never run. Without this guard the client stays `CONNECTING` forever:
-/// `connect()` and `close()` both refuse to proceed and the client is wedged
-/// with no recovery path.
-///
-/// The guard's `Drop` only ever performs the `CONNECTING -> DISCONNECTED`
-/// transition (via CAS), so it can never clobber a state that the connect
-/// future already advanced. On the normal success/failure paths the future
-/// calls `disarm()` before storing the terminal state.
-struct ConnectStateGuard {
+/// A connect or close owns its transition until it finishes. Dropping it
+/// early (e.g. a cancelled connect) makes the client reconnectable again.
+struct TransitionGuard {
     state: Arc<AtomicU8>,
+    from: u8,
     armed: bool,
 }
 
-impl ConnectStateGuard {
-    fn new(state: Arc<AtomicU8>) -> Self {
-        Self { state, armed: true }
+impl TransitionGuard {
+    fn new(state: Arc<AtomicU8>, from: u8) -> Self {
+        Self {
+            state,
+            from,
+            armed: true,
+        }
     }
 
-    /// Disarm the guard once the connect future has reached a terminal arm
-    /// and will itself store the final state.
     fn disarm(&mut self) {
         self.armed = false;
     }
 }
 
-impl Drop for ConnectStateGuard {
+impl Drop for TransitionGuard {
     fn drop(&mut self) {
         if self.armed {
-            // Only revert if still CONNECTING; never overwrite a state the
-            // connect future may have already advanced.
             let _ = self.state.compare_exchange(
-                CONNECTING,
+                self.from,
                 DISCONNECTED,
                 Ordering::SeqCst,
                 Ordering::SeqCst,
@@ -64,28 +54,17 @@ impl Drop for ConnectStateGuard {
     }
 }
 
-/// Outcome of preparing a close transition — see [`PyAsyncClient::prepare_close`].
-///
-/// Computed synchronously while holding `&mut self` so the subsequent async
-/// future borrows no references from `self`.
-enum CloseOutcome {
-    /// Client was already disconnected or mid-close; caller should resolve
-    /// its Python awaitable with the idempotent no-op value.
-    Idempotent,
-    /// Client was connected; caller should drive `client.close()` in the
-    /// returned future and transition state to `DISCONNECTED` on completion.
-    Proceed {
-        client: Option<Arc<AsClient>>,
-        state: Arc<AtomicU8>,
-    },
-}
+// All close waiters for one connection observe the same native result.
+type CloseCompletion = Shared<oneshot::Receiver<aerospike_core::Result<()>>>;
 
-use crate::batch_types::{PendingBatchRead, PendingBatchRecords};
+use crate::batch_types::PendingBatchRead;
 use crate::errors::as_to_pyerr;
 use crate::panic_safety::future_into_py_panic_safe;
 use crate::policy::admin_policy::{parse_privileges, role_to_py, user_to_py};
 use crate::policy::client_policy::{parse_backpressure_config, parse_client_policy};
-use crate::record_helpers::{PendingExists, PendingOrderedRecord, PendingRecord};
+use crate::record_helpers::{
+    PendingExists, PendingOperateRecord, PendingOrderedRecord, PendingRecord,
+};
 use crate::types::host::parse_hosts_from_config;
 use crate::types::key::key_to_py;
 
@@ -98,8 +77,8 @@ type SharedClientState = Arc<ArcSwapOption<AsClient>>;
 /// Asynchronous Aerospike client exposed to Python as `AsyncClient`.
 ///
 /// All I/O methods return Python awaitables via `future_into_py`.
-/// The underlying `aerospike_core::Client` is shared behind a `Mutex`
-/// to allow safe concurrent access from multiple Python coroutines.
+/// Reads acquire a shared client handle; only closing and registering close waiters
+/// share a mutex.
 #[pyclass(name = "AsyncClient")]
 pub struct PyAsyncClient {
     /// The underlying async client, wrapped in `ArcSwapOption` for lock-free access.
@@ -111,8 +90,10 @@ pub struct PyAsyncClient {
     connection_info: Arc<crate::tracing::ConnectionInfo>,
     /// Operation concurrency limiter (disabled by default).
     limiter: Arc<OperationLimiter>,
+    query_slots: Option<Arc<tokio::sync::Semaphore>>,
     /// Lifecycle state: Disconnected(0) → Connecting(1) → Connected(2) → Closing(3).
     state: Arc<AtomicU8>,
+    closing: Mutex<Option<CloseCompletion>>,
 }
 
 #[pymethods]
@@ -124,7 +105,9 @@ impl PyAsyncClient {
             config,
             connection_info: Arc::new(crate::tracing::ConnectionInfo::default()),
             limiter: Arc::new(OperationLimiter::new(0, 0)),
+            query_slots: None,
             state: Arc::new(AtomicU8::new(DISCONNECTED)),
+            closing: Mutex::new(None),
         })
     }
 
@@ -157,6 +140,14 @@ impl PyAsyncClient {
         let client_policy = parse_client_policy(&effective_config)?;
         let (max_ops, timeout_ms) = parse_backpressure_config(&effective_config)?;
 
+        let query_limit = effective_config
+            .get_item("max_concurrent_queries")?
+            .map_or(Ok(16usize), |value| value.extract())?;
+        if query_limit > tokio::sync::Semaphore::MAX_PERMITS {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_concurrent_queries exceeds the supported limit",
+            ));
+        }
         let cluster_name = client_common::extract_cluster_name(&effective_config)?;
 
         // Config parsed successfully — now atomically transition to Connecting.
@@ -177,25 +168,29 @@ impl PyAsyncClient {
             )));
         }
 
+        *self
+            .closing
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner) = None;
         let inner = self.inner.clone();
         let state = self.state.clone();
 
         self.connection_info = Arc::new(crate::tracing::ConnectionInfo {
+            closing: false.into(),
             server_address: Arc::from(parsed.first_address.as_str()),
             server_port: parsed.first_port as i64,
             cluster_name: Arc::from(cluster_name.as_str()),
         });
 
         self.limiter = Arc::new(OperationLimiter::new(max_ops, timeout_ms));
+        self.query_slots =
+            (query_limit != 0).then(|| Arc::new(tokio::sync::Semaphore::new(query_limit)));
 
         let hosts_str = parsed.connection_string;
         info!("Async connecting to Aerospike cluster: {}", hosts_str);
+        // Capture the guard before the future is built, even if it is never polled.
+        let mut guard = TransitionGuard::new(state.clone(), CONNECTING);
         future_into_py(py, async move {
-            // Armed guard: if this future is dropped/cancelled before the
-            // match below runs, Drop reverts CONNECTING -> DISCONNECTED so the
-            // client is not permanently wedged.
-            let mut guard = ConnectStateGuard::new(state.clone());
-
             let result = AsClient::new(
                 &client_policy,
                 &hosts_str as &(dyn aerospike_core::ToHosts + Send + Sync),
@@ -239,21 +234,9 @@ impl PyAsyncClient {
     }
 
     /// Close connection (async).
-    fn close<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         info!("Closing async client connection");
-        match self.prepare_close()? {
-            CloseOutcome::Idempotent => future_into_py(py, async move { Ok(()) }),
-            CloseOutcome::Proceed { client, state } => future_into_py(py, async move {
-                let result = if let Some(c) = client {
-                    c.close().await.map_err(as_to_pyerr)
-                } else {
-                    Ok(())
-                };
-                // Always transition to Disconnected — inner is already None.
-                state.store(DISCONNECTED, Ordering::SeqCst);
-                result
-            }),
-        }
+        future_into_py(py, self.close_connection()?)
     }
 
     /// Get node names (sync, no I/O, lock-free).
@@ -301,7 +284,7 @@ impl PyAsyncClient {
 
     /// Async context manager exit.
     ///
-    /// Shares the close path with `close()` via `prepare_close()`. In
+    /// Shares the close path with `close()` via `close_connection()`. In
     /// particular, exiting while `connect()` is still in flight raises
     /// `ClientError` — the same behaviour as calling `close()` explicitly —
     /// rather than silently leaking a half-initialized client.
@@ -315,25 +298,14 @@ impl PyAsyncClient {
     /// Python wrapper's delegation is ever removed.
     #[pyo3(signature = (_exc_type=None, _exc_val=None, _exc_tb=None))]
     fn __aexit__<'py>(
-        &mut self,
+        &self,
         py: Python<'py>,
         _exc_type: Option<&Bound<'_, PyAny>>,
         _exc_val: Option<&Bound<'_, PyAny>>,
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        match self.prepare_close()? {
-            CloseOutcome::Idempotent => future_into_py(py, async move { Ok(false) }),
-            CloseOutcome::Proceed { client, state } => future_into_py(py, async move {
-                let result = if let Some(c) = client {
-                    c.close().await.map_err(as_to_pyerr)
-                } else {
-                    Ok(())
-                };
-                // Always transition to Disconnected — inner is already None.
-                state.store(DISCONNECTED, Ordering::SeqCst);
-                result.map(|()| false)
-            }),
-        }
+        let close = self.close_connection()?;
+        future_into_py(py, async move { close.await.map(|()| false) })
     }
 
     // ── CRUD ──────────────────────────────────────────────────
@@ -354,7 +326,8 @@ impl PyAsyncClient {
         let limiter = self.limiter.clone();
         debug!(
             "async put: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         future_into_py_panic_safe(py, "AsyncClient.put", async move {
             let _permit = limiter.acquire_named("put").await?;
@@ -375,7 +348,8 @@ impl PyAsyncClient {
         let args = client_common::prepare_get_args(py, key, policy, &self.connection_info)?;
         debug!(
             "async get: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let key_py = key_to_py(py, &args.key)?;
 
@@ -401,7 +375,8 @@ impl PyAsyncClient {
             client_common::prepare_select_args(py, key, bins, policy, &self.connection_info)?;
         debug!(
             "async select: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let key_py = key_to_py(py, &args.key)?;
 
@@ -425,7 +400,8 @@ impl PyAsyncClient {
         let args = client_common::prepare_exists_args(py, key, policy, &self.connection_info)?;
         debug!(
             "async exists: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         let key_py = key_to_py(py, &args.key)?;
 
@@ -451,7 +427,8 @@ impl PyAsyncClient {
             client_common::prepare_remove_args(py, key, meta, policy, &self.connection_info)?;
         debug!(
             "async remove: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         future_into_py_panic_safe(py, "AsyncClient.remove", async move {
             let _permit = limiter.acquire_named("remove").await?;
@@ -475,7 +452,8 @@ impl PyAsyncClient {
             client_common::prepare_touch_args(py, key, val, meta, policy, &self.connection_info)?;
         debug!(
             "async touch: ns={} set={}",
-            args.key.namespace, args.key.set_name
+            args.key.namespace(),
+            args.key.set_name()
         );
         future_into_py_panic_safe(py, "AsyncClient.touch", async move {
             let _permit = limiter.acquire_named("touch").await?;
@@ -510,7 +488,9 @@ impl PyAsyncClient {
         let limiter = self.limiter.clone();
         debug!(
             "async increment: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         future_into_py_panic_safe(py, "AsyncClient.increment", async move {
             let _permit = limiter.acquire_named("increment").await?;
@@ -534,8 +514,8 @@ impl PyAsyncClient {
             client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
         debug!(
             "async operate: ns={} set={} ops_count={}",
-            args.key.namespace,
-            args.key.set_name,
+            args.key.namespace(),
+            args.key.set_name(),
             args.ops.len()
         );
         let key_py = key_to_py(py, &args.key)?;
@@ -543,7 +523,7 @@ impl PyAsyncClient {
         future_into_py_panic_safe(py, "AsyncClient.operate", async move {
             let _permit = limiter.acquire_named("operate").await?;
             let record = client_ops::do_operate(&client, &args).await?;
-            Ok(PendingRecord { record, key_py })
+            Ok(PendingOperateRecord { record, key_py })
         })
     }
 
@@ -573,7 +553,9 @@ impl PyAsyncClient {
         )?;
         debug!(
             "async append: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         future_into_py_panic_safe(py, "AsyncClient.append", async move {
             let _permit = limiter.acquire_named("append").await?;
@@ -605,7 +587,9 @@ impl PyAsyncClient {
         )?;
         debug!(
             "async prepend: ns={} set={} bin={}",
-            args.key.namespace, args.key.set_name, bin
+            args.key.namespace(),
+            args.key.set_name(),
+            bin
         );
         future_into_py_panic_safe(py, "AsyncClient.prepend", async move {
             let _permit = limiter.acquire_named("prepend").await?;
@@ -653,12 +637,19 @@ impl PyAsyncClient {
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
         let limiter = self.limiter.clone();
-        let args =
-            client_common::prepare_operate_args(py, key, ops, meta, policy, &self.connection_info)?;
+        let client_common::OperateOrderedArgs { args, plan } =
+            client_common::prepare_operate_ordered_args(
+                py,
+                key,
+                ops,
+                meta,
+                policy,
+                &self.connection_info,
+            )?;
         debug!(
             "async operate_ordered: ns={} set={} ops_count={}",
-            args.key.namespace,
-            args.key.set_name,
+            args.key.namespace(),
+            args.key.set_name(),
             args.ops.len()
         );
         let pre_key_py = key_to_py(py, &args.key)?;
@@ -668,6 +659,7 @@ impl PyAsyncClient {
             let record = client_ops::do_operate_ordered(&client, &args).await?;
             Ok(PendingOrderedRecord {
                 record,
+                plan,
                 key_py: pre_key_py,
             })
         })
@@ -743,13 +735,25 @@ impl PyAsyncClient {
         policy: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.get_client()?;
-        let a = client_common::prepare_apply_args(key, module, function, args, policy)?;
+        let a = client_common::prepare_apply_args(
+            key,
+            module,
+            function,
+            args,
+            policy,
+            &self.connection_info,
+        )?;
         debug!(
             "async apply UDF: ns={} set={} module={} function={}",
-            a.key.namespace, a.key.set_name, a.module, a.function
+            a.key.namespace(),
+            a.key.set_name(),
+            a.module,
+            a.function
         );
 
+        let limiter = self.limiter.clone();
         future_into_py_panic_safe(py, "AsyncClient.apply", async move {
+            let _permit = limiter.acquire_named("apply").await?;
             let result = client_ops::do_apply(&client, &a).await?;
             Python::attach(|py| client_common::batch_udf_value_to_py(py, result.as_ref()))
         })
@@ -850,8 +854,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_operate", async move {
             let _permit = limiter.acquire_named("batch_operate").await?;
-            let results = client_ops::do_batch_operate(&client, &args).await?;
-            Ok(PendingBatchRecords::without_retry(results))
+            client_ops::do_batch_operate(&client, &args).await
         })
     }
 
@@ -878,7 +881,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_write", async move {
             let _permit = limiter.acquire_named("batch_write").await?;
-            let (results, retry_stats) = client_ops::do_batch_write(
+            client_ops::do_batch_write(
                 &client,
                 &args.batch_policy,
                 &args.records,
@@ -889,24 +892,20 @@ impl PyAsyncClient {
                 args.max_retries,
                 "batch_write",
             )
-            .await?;
-            Ok(PendingBatchRecords {
-                results,
-                retry_stats: Some(retry_stats),
-            })
+            .await
         })
     }
 
     /// Write multiple records from a numpy structured array (async).
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (data, namespace, set_name, _dtype, key_field="_key", policy=None, retry=0))]
+    #[pyo3(signature = (data, namespace, set_name, _dtype=None, key_field="_key", policy=None, retry=0))]
     fn batch_write_numpy<'py>(
         &self,
         py: Python<'py>,
         data: &Bound<'_, PyAny>,
         namespace: &str,
         set_name: &str,
-        _dtype: &Bound<'_, PyAny>,
+        _dtype: Option<&Bound<'_, PyAny>>,
         key_field: &str,
         policy: Option<&Bound<'_, PyDict>>,
         retry: u32,
@@ -917,31 +916,39 @@ impl PyAsyncClient {
         );
         let client = self.get_client()?;
         let limiter = self.limiter.clone();
-        let batch_policy = crate::policy::batch_policy::parse_batch_policy(policy)?;
+        let batch_policy = crate::policy::batch_policy::parse_batch_policy(
+            policy,
+            crate::policy::batch_policy::BatchKind::Write,
+        )?;
+        crate::policy::batch_policy::reject_doubled_retry(retry, &batch_policy)?;
         #[allow(clippy::let_unit_value)]
         let parent_ctx = client_common::extract_parent_context(py);
         let conn_info = self.connection_info.clone();
 
-        let raw_records = crate::numpy_support::numpy_to_records(
-            py, data, _dtype, namespace, set_name, key_field,
-        )?;
+        let raw_records = crate::stage_timer!("row_parse", "batch_write_numpy", {
+            crate::numpy_support::numpy_to_records(
+                py, data, _dtype, namespace, set_name, key_field,
+            )?
+        });
         // Share one BatchWritePolicy allocation across every record via Arc;
         // `numpy_to_records` never emits per-record meta, so the same policy
         // applies to all N rows.
         let write_policy = Arc::new(crate::policy::batch_policy::parse_batch_write_policy(
             policy,
         )?);
-        let records: Vec<_> = raw_records
-            .into_iter()
-            .map(|(k, b)| (k, b, Arc::clone(&write_policy)))
-            .collect();
+        let records: Vec<_> = crate::stage_timer!("attach_policy", "batch_write_numpy", {
+            raw_records
+                .into_iter()
+                .map(|(k, b)| (k, b, Arc::clone(&write_policy)))
+                .collect()
+        });
 
         let ns = namespace.to_string();
         let set = set_name.to_string();
 
         future_into_py_panic_safe(py, "AsyncClient.batch_write_numpy", async move {
             let _permit = limiter.acquire_named("batch_write_numpy").await?;
-            let (results, retry_stats) = client_ops::do_batch_write(
+            client_ops::do_batch_write(
                 &client,
                 &batch_policy,
                 &records,
@@ -952,11 +959,7 @@ impl PyAsyncClient {
                 retry,
                 "batch_write_numpy",
             )
-            .await?;
-            Ok(PendingBatchRecords {
-                results,
-                retry_stats: Some(retry_stats),
-            })
+            .await
         })
     }
 
@@ -976,8 +979,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_remove", async move {
             let _permit = limiter.acquire_named("batch_remove").await?;
-            let results = client_ops::do_batch_remove(&client, &args).await?;
-            Ok(PendingBatchRecords::without_retry(results))
+            client_ops::do_batch_remove(&client, &args).await
         })
     }
 
@@ -1012,8 +1014,7 @@ impl PyAsyncClient {
 
         future_into_py_panic_safe(py, "AsyncClient.batch_apply", async move {
             let _permit = limiter.acquire_named("batch_apply").await?;
-            let results = client_ops::do_batch_apply(&client, &args).await?;
-            Ok(PendingBatchRecords::without_retry(results))
+            client_ops::do_batch_apply(&client, &args).await
         })
     }
 
@@ -1023,12 +1024,14 @@ impl PyAsyncClient {
     fn query(&self, namespace: &str, set_name: &str) -> PyResult<crate::query::PyQuery> {
         debug!("Creating async query: ns={} set={}", namespace, set_name);
         let client = self.get_client()?.clone();
-        Ok(crate::query::PyQuery::new(
+        let mut query = crate::query::PyQuery::new(
             client,
             namespace.to_string(),
             set_name.to_string(),
             self.connection_info.clone(),
-        ))
+        );
+        query.query_slots.clone_from(&self.query_slots);
+        Ok(query)
     }
 
     // ── Index ─────────────────────────────────────────────────
@@ -1457,39 +1460,52 @@ impl PyAsyncClient {
         })
     }
 
-    /// Shared pre-close step for `close()` and `__aexit__`.
-    ///
-    /// Atomically inspects state and, when CONNECTED, transitions to CLOSING,
-    /// swaps the inner `AsClient` out, and resets connection metadata and the
-    /// limiter. Returns:
-    ///
-    /// - `Ok(CloseOutcome::Idempotent)` when state is already `DISCONNECTED`
-    ///   or `CLOSING` — both `close()` and `__aexit__` treat this as a no-op.
-    /// - `Err(ClientError)` when state is `CONNECTING` — closing while an
-    ///   in-flight `connect()` may still be racing the inner `Arc` would leak
-    ///   a half-initialized client.
-    /// - `Ok(CloseOutcome::Proceed { client, state })` when state is
-    ///   `CONNECTED` — the caller drives `client.close()` and stores
-    ///   `DISCONNECTED` on completion.
-    fn prepare_close(&mut self) -> PyResult<CloseOutcome> {
-        let current = self.state.load(Ordering::SeqCst);
-        match current {
-            DISCONNECTED | CLOSING => Ok(CloseOutcome::Idempotent),
-            CONNECTING => Err(crate::errors::ClientError::new_err(
-                "Cannot close: client is currently connecting.",
-            )),
-            CONNECTED => {
-                self.state.store(CLOSING, Ordering::SeqCst);
-                let client = self.inner.swap(None);
-                self.connection_info = Arc::new(crate::tracing::ConnectionInfo::default());
-                self.limiter = Arc::new(OperationLimiter::new(0, 0));
-                Ok(CloseOutcome::Proceed {
-                    client,
-                    state: self.state.clone(),
-                })
+    /// Start native shutdown independently of any Python waiter. A cancelled
+    /// waiter can go away while the tend task still drains; another close
+    /// joins that same operation, and connect is allowed only after it ends.
+    fn close_connection(&self) -> PyResult<impl Future<Output = PyResult<()>> + Send + 'static> {
+        // Publish the completion in the same critical section as CLOSING.
+        // No Python calls or awaits run under this lock.
+        let mut closing = self.closing.lock().unwrap_or_else(PoisonError::into_inner);
+        let completion = match self.state.load(Ordering::SeqCst) {
+            DISCONNECTED => None,
+            CLOSING => closing.clone(),
+            CONNECTING => {
+                return Err(crate::errors::ClientError::new_err(
+                    "Cannot close: client is currently connecting.",
+                ))
             }
-            _ => unreachable!("invalid AsyncClient state: {current}"),
-        }
+            CONNECTED => {
+                let client = self.get_client()?;
+                self.connection_info.closing.store(true, Ordering::Release);
+                self.state.store(CLOSING, Ordering::SeqCst);
+                self.inner.store(None);
+                let (sender, receiver) = oneshot::channel();
+                let completion = receiver.shared();
+                *closing = Some(completion.clone());
+                let guard = TransitionGuard::new(self.state.clone(), CLOSING);
+                pyo3_async_runtimes::tokio::get_runtime().spawn(async move {
+                    let result = client.close().await;
+                    drop(guard);
+                    let _ = sender.send(result);
+                });
+                Some(completion)
+            }
+            current => unreachable!("invalid AsyncClient state: {current}"),
+        };
+        Ok(async move {
+            if let Some(completion) = completion {
+                completion
+                    .await
+                    .map_err(|_| {
+                        crate::errors::ClientError::new_err(
+                            "Native close task stopped before returning its result.",
+                        )
+                    })?
+                    .map_err(as_to_pyerr)?;
+            }
+            Ok(())
+        })
     }
 
     /// Internal helper for index creation (async).
@@ -1529,7 +1545,7 @@ mod tests {
         // CONNECTING -> DISCONNECTED so the client is not wedged.
         let state = Arc::new(AtomicU8::new(CONNECTING));
         {
-            let _guard = ConnectStateGuard::new(state.clone());
+            let _guard = TransitionGuard::new(state.clone(), CONNECTING);
             assert_eq!(state.load(Ordering::SeqCst), CONNECTING);
         }
         assert_eq!(
@@ -1545,7 +1561,7 @@ mod tests {
         // CONNECTED; the guard's Drop must not revert that.
         let state = Arc::new(AtomicU8::new(CONNECTING));
         {
-            let mut guard = ConnectStateGuard::new(state.clone());
+            let mut guard = TransitionGuard::new(state.clone(), CONNECTING);
             guard.disarm();
             state.store(CONNECTED, Ordering::SeqCst);
         }
@@ -1562,7 +1578,7 @@ mod tests {
         // transition), an armed guard's CAS must be a no-op.
         for terminal in [DISCONNECTED, CONNECTED, CLOSING] {
             let state = Arc::new(AtomicU8::new(terminal));
-            drop(ConnectStateGuard::new(state.clone()));
+            drop(TransitionGuard::new(state.clone(), CONNECTING));
             assert_eq!(
                 state.load(Ordering::SeqCst),
                 terminal,

@@ -8,8 +8,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use super::{
-    extract_filter_expression, extract_policy_fields, parse_consistency_level,
-    parse_read_touch_ttl, parse_replica,
+    extract_filter_expression, extract_policy_fields, parse_read_mode_ap, parse_read_touch_ttl,
+    parse_replica,
 };
 
 /// Lazily-initialized default read policy used when no policy dict is provided.
@@ -32,12 +32,13 @@ pub fn parse_read_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<Re
         "sleep_between_retries" => policy.base_policy.sleep_between_retries;
         "timeout_delay" => policy.base_policy.timeout_delay
     });
+    super::check_max_retries(policy.base_policy.max_retries)?;
 
     if let Some(val) = dict.get_item("replica")? {
-        policy.replica = parse_replica(val.extract::<i32>()?);
+        policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_mode_ap")? {
-        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?);
+        policy.base_policy.read_mode_ap = parse_read_mode_ap(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
         policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
@@ -52,7 +53,7 @@ pub fn parse_read_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<Re
 mod tests {
     use super::*;
     use aerospike_core::policy::Replica;
-    use aerospike_core::{ConsistencyLevel, ReadTouchTTL};
+    use aerospike_core::{ReadModeAp, ReadTouchTtl};
 
     fn build_dict<'py>(
         py: Python<'py>,
@@ -71,7 +72,7 @@ mod tests {
                 d.set_item("replica", 2i32).unwrap();
             });
             let p = parse_read_policy(Some(&d)).unwrap();
-            assert_eq!(p.replica, Replica::PreferRack);
+            assert_eq!(p.base_policy.replica, Replica::PreferRack);
         });
     }
 
@@ -83,10 +84,7 @@ mod tests {
                 d.set_item("read_mode_ap", 1i32).unwrap();
             });
             let p = parse_read_policy(Some(&d)).unwrap();
-            assert_eq!(
-                p.base_policy.consistency_level,
-                ConsistencyLevel::ConsistencyAll
-            );
+            assert_eq!(p.base_policy.read_mode_ap, ReadModeAp::All);
         });
     }
 
@@ -100,7 +98,7 @@ mod tests {
             let p = parse_read_policy(Some(&d)).unwrap();
             assert!(matches!(
                 p.base_policy.read_touch_ttl,
-                ReadTouchTTL::Percent(50)
+                ReadTouchTtl::Percent(50)
             ));
         });
     }
@@ -132,14 +130,11 @@ mod tests {
     #[test]
     fn parse_read_policy_default_when_dict_is_none() {
         let p = parse_read_policy(None).unwrap();
-        assert_eq!(p.replica, Replica::Sequence);
-        assert_eq!(
-            p.base_policy.consistency_level,
-            ConsistencyLevel::ConsistencyOne
-        );
+        assert_eq!(p.base_policy.replica, Replica::Sequence);
+        assert_eq!(p.base_policy.read_mode_ap, ReadModeAp::One);
         assert!(matches!(
             p.base_policy.read_touch_ttl,
-            ReadTouchTTL::ServerDefault
+            ReadTouchTtl::ServerDefault
         ));
     }
 }

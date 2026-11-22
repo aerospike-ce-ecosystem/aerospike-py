@@ -799,10 +799,12 @@ keys used by `put()`:
 |-----------|-------------|
 | `records` | List of ``(key, bins)`` or ``(key, bins, meta)`` tuples. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. Accepts the write fields above plus standard batch transport keys (``socket_timeout``, ``total_timeout``, ``max_retries``, ``filter_expression``, ``allow_inline``, ``allow_inline_ssd``, ``respond_all_keys``). |
-| `retry` | Maximum number of retries for failed records (default ``0``). When > 0, records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff (Full Jitter, max 500ms). Retries stop early if the elapsed time approaches ``total_timeout``. **Note:** If a transport error occurs during retry, retries stop and partial results are returned. Always check each ``BatchRecord.result`` code. Total wall-clock time may exceed ``total_timeout`` by up to one additional timeout window. |
+| `retry` | Maximum number of *retries* for failed records (default ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When > 0, the records that failed with a transient error (timeout, device overload, key busy, a lost connection, a node that is down) are sent again with exponential backoff (Full Jitter, max 500 ms). Only the records that failed are re-sent; a record that already succeeded never is. A ``CREATE_ONLY`` or generation-checked record whose first send may have been applied (``in_doubt``) is not re-sent either: the second send would fail for a write that went through. **`retry` is bounded by `total_timeout`, which defaults to 1000 ms.** Retries stop once ``elapsed + backoff`` would reach that budget, so with the default policy ``retry=10`` yields far fewer than 11 attempts — the backoff ladder alone can consume half of it, before counting each attempt's own network time. To actually get ``N + 1`` attempts, raise it yourself with ``policy={"total_timeout": 30000}`` — the client never lengthens the budget on your behalf. ``retry`` cannot be combined with ``policy["max_retries"]``. The two would multiply — each of the ``retry + 1`` attempts re-sent ``max_retries`` times underneath — so giving both raises ``InvalidArgError``. A batch write starts from ``max_retries = 0``. Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo)) to see what happened: ``attempts`` versus ``max_attempts``, ``truncated_by_timeout``, and how many records are still ``unresolved``. If a record still has no answer from a server when the attempts run out, the call raises (``ClusterError``, ``AerospikeTimeoutError``, ...) and ``exc.partial_result`` holds every row together with the same ``retry`` counters. Total wall-clock time may still exceed ``total_timeout`` by up to one additional timeout window, because the guard does not account for the in-flight attempt. Always check each ``BatchRecord.result`` code regardless of whether the call returned successfully. |
 
 **Returns:** A ``BatchWriteResult`` containing per-record result codes in
-``batch_records: list[BatchRecord]``.
+``batch_records: list[BatchRecord]``, plus ``retry``
+([`BatchRetryInfo`](types.md#batchretryinfo)) describing how the
+retry loop behaved.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -874,26 +876,29 @@ results = await client.batch_write(records_with_meta)
   </TabItem>
 </Tabs>
 
-### `batch_write_numpy(data, namespace, set_name, _dtype, key_field='_key', policy=None, retry=0)`
+### `batch_write_numpy(data, namespace, set_name, _dtype=None, key_field='_key', policy=None, retry=0)`
 
 Write multiple records from a numpy structured array.
 
 Each row of the structured array becomes a separate write operation.
 The dtype must contain a key field (default ``_key``) for the record key.
-Remaining non-underscore-prefixed fields become bins.
+Remaining non-underscore-prefixed fields become bins. Routing fields
+``_namespace`` and ``_set`` must hold scalar fixed-width UTF-8 bytes.
 
 | Parameter | Description |
 |-----------|-------------|
-| `data` | numpy structured array with record data. |
+| `data` | numpy structured array with record data. Its own ``data.dtype`` defines the layout. |
 | `namespace` | Target namespace. |
 | `set_name` | Target set. |
-| `_dtype` | numpy dtype describing the array layout. |
-| `key_field` | Name of the dtype field to use as the user key (default ``"_key"``). |
+| `_dtype` | Optional dtype the array is expected to have. When given and different from ``data.dtype``, ``ValueError`` is raised before anything is sent. |
+| `key_field` | Name of the dtype field to use as the user key (default ``"_key"``). The field must be one value, a scalar integer or a fixed-width bytes field: a sub-array or a nested structured field raises ``TypeError`` before anything is written. |
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
-| `retry` | Maximum number of retries for failed records (default ``0``). When > 0, records that fail with transient errors (timeout, device overload, key busy) are automatically retried with exponential backoff (Full Jitter, max 500ms). Retries stop early if the elapsed time approaches ``total_timeout``. **Note:** If a transport error occurs during retry, retries stop and partial results are returned. Always check each ``BatchRecord.result`` code. Total wall-clock time may exceed ``total_timeout`` by up to one additional timeout window. |
+| `retry` | Maximum number of *retries* for failed records (default ``0``), so ``retry=N`` asks for up to ``N + 1`` attempts. When > 0, the records that failed with a transient error (timeout, device overload, key busy, a lost connection, a node that is down) are sent again with exponential backoff (Full Jitter, max 500 ms). Only the records that failed are re-sent; a record that already succeeded never is. A ``CREATE_ONLY`` or generation-checked record whose first send may have been applied (``in_doubt``) is not re-sent either: the second send would fail for a write that went through. **`retry` is bounded by `total_timeout`, which defaults to 1000 ms.** Retries stop once ``elapsed + backoff`` would reach that budget, so with the default policy ``retry=10`` yields far fewer than 11 attempts — the backoff ladder alone can consume half of it, before counting each attempt's own network time. To actually get ``N + 1`` attempts, raise it yourself with ``policy={"total_timeout": 30000}`` — the client never lengthens the budget on your behalf. ``retry`` cannot be combined with ``policy["max_retries"]``. The two would multiply — each of the ``retry + 1`` attempts re-sent ``max_retries`` times underneath — so giving both raises ``InvalidArgError``. A batch write starts from ``max_retries = 0``. Inspect ``result.retry`` ([`BatchRetryInfo`](types.md#batchretryinfo)) to see what happened: ``attempts`` versus ``max_attempts``, ``truncated_by_timeout``, and how many records are still ``unresolved``. If a record still has no answer from a server when the attempts run out, the call raises (``ClusterError``, ``AerospikeTimeoutError``, ...) and ``exc.partial_result`` holds every row together with the same ``retry`` counters. Total wall-clock time may still exceed ``total_timeout`` by up to one additional timeout window, because the guard does not account for the in-flight attempt. Always check each ``BatchRecord.result`` code regardless of whether the call returned successfully. |
 
 **Returns:** A ``BatchWriteResult`` with per-record result codes in
-``batch_records: list[BatchRecord]``.
+``batch_records: list[BatchRecord]``, plus ``retry``
+([`BatchRetryInfo`](types.md#batchretryinfo)) describing how the
+retry loop behaved.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -903,7 +908,7 @@ import numpy as np
 
 dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
 data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-results = client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+results = client.batch_write_numpy(data, "test", "demo", retry=10)
 for br in results.batch_records:
     if br.result != 0:
         print(f"Failed: {br.key}, code={br.result}")
@@ -917,7 +922,7 @@ import numpy as np
 
 dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
 data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+results = await client.batch_write_numpy(data, "test", "demo", retry=10)
 for br in results.batch_records:
     if br.result != 0:
         print(f"Failed: {br.key}, code={br.result}")
@@ -930,6 +935,10 @@ for br in results.batch_records:
 
 Execute operations on multiple records in a single batch call.
 
+Writes honor exists, commit_level, ttl, key and durable_delete. For a
+generation comparison use operate() with an expected generation.
+Read-only operations reject exists, gen and commit_level.
+
 | Parameter | Description |
 |-----------|-------------|
 | `keys` | List of ``(namespace, set, primary_key)`` tuples. |
@@ -937,7 +946,9 @@ Execute operations on multiple records in a single batch call.
 | `policy` | Optional [`BatchPolicy`](types.md#batchpolicy) dict. |
 
 **Returns:** A ``BatchWriteResult`` with per-record result codes in
-``batch_records: list[BatchRecord]``.
+``batch_records: list[BatchRecord]``. Its ``retry`` field is always
+the default — this method has no ``retry`` parameter and issues a
+single batch call.
 Each ``BatchRecord`` also includes an ``in_doubt`` flag
 (see `batch_write()` for details).
 
@@ -976,13 +987,17 @@ for br in results.batch_records:
 
 Delete multiple records in a single batch call.
 
+The exists field is refused in both the policy and per-record metadata.
+
 | Parameter | Description |
 |-----------|-------------|
 | `keys` | Either a list of bare ``Key`` tuples (back-compat) or a list mixing bare keys and ``(key, meta)`` pairs where ``meta`` is a [`BatchDeleteMeta`](types.md#batchdeletemeta) dict for per-record overrides (CAS deletes, durable_delete per record, etc.). |
 | `policy` | Optional dict combining a transport-level [`BatchPolicy`](types.md#batchpolicy) with batch-level [`BatchDeletePolicy`](types.md#batchdeletepolicy) defaults: ``gen``, ``key`` (send_key), ``commit_level``, ``durable_delete``, ``filter_expression``. |
 
 **Returns:** A ``BatchWriteResult`` with per-record result codes in
-``batch_records: list[BatchRecord]``.
+``batch_records: list[BatchRecord]``. Its ``retry`` field is always
+the default — this method has no ``retry`` parameter and issues a
+single batch call.
 Each ``BatchRecord`` also includes an ``in_doubt`` flag
 (see `batch_write()` for details).
 
@@ -1441,6 +1456,9 @@ query = client.query("test", "demo")
 query.select("name", "age")
 query.where(predicates.between("age", 20, 30))
 records = await query.results()
+
+async for record in query:      # the same query, streamed
+    await handle(record)
 ```
 
   </TabItem>
@@ -1509,15 +1527,55 @@ for record in records:
 
 ### `foreach(callback, policy=None)`
 
-Execute the query and invoke a callback for each record.
+Execute the query and invoke a callback for each record, streaming.
 
 The callback receives a ``Record`` NamedTuple. Return ``False``
 from the callback to stop iteration early.
 
+Records are delivered **as they arrive**, so this is the API to reach
+for on a result set too large to hold in memory. Peak memory is bounded
+by the client's internal record queue rather than by the size of the
+result set: at most ``record_queue_size`` records (default 1024) per
+query wait in the client, counting the queue and the records taken out
+of it but not yet handed over, plus the batch being handed to Python
+and one record for each node whose reader is waiting for room. The
+first callback runs at the first record's latency rather than after
+the whole scan. Returning ``False`` stops fetching from the server, so it bounds
+both time and memory — use it for "scan until I find the first match".
+
+Every record reaches the callback once, also when a node's connection
+fails in the middle of the scan and the client fetches part of the set
+again.
+
+The callback runs on the calling thread, outside the client's async
+runtime, so it may call back into the client (for example to look
+something up per record).
+
+**Behaviour change — a failing query may now raise after processing
+part of the result set.** This method previously fetched everything
+before invoking the callback, so a query error — a `total_timeout`
+expiring, a node going away, any transport fault — was decided *before
+the first callback ran*: you got either zero callbacks and an exception,
+or a complete iteration. Now the scan stays open for as long as the
+callback takes, so such an error raises **after** an arbitrary prefix of
+records has already been handed to the callback.
+
+Concretely: a callback that writes each record into another system, and
+an outer ``except`` that treats the exception as "nothing was written",
+is now wrong — some rows were written. The exception type and message are
+unchanged, so nothing at the call site reveals this.
+
+Bounded memory and all-or-nothing delivery cannot both hold. If your
+callback has side effects that must not be applied to a partial result
+set, use `results()` instead — it is unchanged, still materialises
+everything before returning, and still fails without delivering anything.
+Note this is separate from a callback raising on its own, which has
+always left preceding records processed.
+
 | Parameter | Description |
 |-----------|-------------|
-| `callback` | Function called with each record. Return ``False`` to stop. |
-| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
+| `callback` | Function called with each record. Return ``False`` to stop. Any other return value, including ``None``, continues. |
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. Set ``record_queue_size`` to trade buffered memory against how far the client reads ahead of a slow callback. |
 
 <Tabs>
   <TabItem value="sync" label="Query" default>
@@ -1541,6 +1599,27 @@ await query.foreach(process)
 
   </TabItem>
 </Tabs>
+
+### `stream(policy=None)`
+
+Open the query as an async iterator of records.
+
+The policy is checked here; nothing is sent until the first record is
+asked for. See `AsyncRecordStream` for when the query stops and
+how much memory it uses.
+
+| Parameter | Description |
+|-----------|-------------|
+| `policy` | Optional [`QueryPolicy`](types.md#querypolicy) dict. |
+
+**Returns:** An ``AsyncRecordStream``, usable with ``async for`` and
+``async with``.
+
+```python
+async with query.stream({"max_records": 1000}) as records:
+    async for record in records:
+        await handle(record)
+```
 
 ## Partition Filter Helpers
 

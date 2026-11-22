@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import inspect
 import logging
+import threading
 from typing import Any
 
 from typing import TYPE_CHECKING
 
+from aerospike_py._aerospike import AerospikeError
 from aerospike_py._aerospike import AsyncClient as _NativeAsyncClient
 from aerospike_py._aerospike import Query as _NativeQuery
-from aerospike_py._bug_report import catch_unexpected
+from aerospike_py._bug_report import _maybe_log, catch_unexpected
 from aerospike_py._client import (
     _wrap_batch_write_result,
+    _wrap_partial_result,
     _wrap_exists,
     _wrap_operate_ordered,
     _wrap_record,
@@ -36,12 +41,174 @@ logger = logging.getLogger("aerospike_py")
 # ---------------------------------------------------------------------------
 
 
+def _says_stop(result: Any) -> bool:
+    """Whether a ``foreach`` callback's return value asks for the query to stop.
+
+    ``False`` does, and so does NumPy's ``False`` (what a comparison on a NumPy
+    scalar returns). Nothing else: ``None``, ``0`` and ``""`` mean "go on", as
+    they do for the sync ``Query.foreach``.
+    """
+    if result is False:
+        return True
+    kind = type(result)
+    return kind.__module__ == "numpy" and kind.__name__ in ("bool", "bool_") and not result
+
+
+async def _in_thread_to_completion(function, argument, stop: threading.Event, context: contextvars.Context):
+    """Run ``function(argument)`` in a worker thread; return only once it has returned.
+
+    A thread cannot be interrupted. If the awaiting task is cancelled while the
+    worker runs, ``stop`` is set, so that the worker starts nothing new, and the
+    cancellation is raised after the worker has finished what it was doing. When
+    the ``CancelledError`` reaches the caller, nothing of ``function`` is running
+    any more and nothing of it will start.
+
+    ``function`` must look at ``stop`` before it does anything: a call that is
+    still waiting for a thread when the cancellation arrives is not waited for.
+
+    The worker is a plain future of the executor and not a task. A task would
+    be cancelled together with the caller by anything that cancels every task
+    of the loop (``asyncio.run()`` on its way out does), and a cancelled task
+    reports itself done while its thread is still running.
+    """
+    loop = asyncio.get_running_loop()
+    started = threading.Event()
+
+    def run():
+        started.set()
+        return context.run(function, argument)
+
+    worker = loop.run_in_executor(None, run)
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        stop.set()
+        # Not started: when it does start it finds ``stop`` set (it was set
+        # before ``started`` was looked at) and returns without doing anything.
+        while started.is_set() and not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                # Cancelled again while waiting. The worker still cannot be
+                # interrupted, so keep waiting for it.
+                continue
+            except BaseException:  # the cancellation outranks whatever the worker raised
+                break
+        if worker.done() and not worker.cancelled():
+            worker.exception()  # retrieved, so asyncio does not log it as unhandled
+        raise
+
+
+class AsyncRecordStream:
+    """The records of a running query, one at a time, as they arrive.
+
+    Returned by ``AsyncQuery.stream()``; ``async for record in query`` uses one.
+    Nothing is sent to the cluster until the first record is asked for.
+
+    The query stops when the stream ends, when ``close()`` is called, when the
+    ``async with`` block is left, or when the stream is garbage collected —
+    which, in CPython, is the moment an ``async for`` loop is left with
+    ``break`` or by an exception and nothing else refers to the stream.
+
+    Every record is handed out once. Several tasks may iterate the same
+    stream: each record goes to one of them.
+
+    Memory stays bounded whatever the pace of the consumer: at most
+    ``record_queue_size`` records (default 1024) wait in the client, plus the
+    batch being handed out. While they wait the server is not read from. If
+    the consumer pauses for longer than the server is willing to wait, the
+    server drops the connection and the client fetches the rest again when
+    reading resumes, without repeating a record; a query that is dropped more
+    often than its ``max_retries`` allows fails.
+
+    Cancelling a task that is waiting for the next record closes the stream:
+    a record the read had already taken cannot be put back. A later read on
+    that stream raises ``RuntimeError`` instead of ending the iteration, so
+    that records lost this way cannot be mistaken for the end of the query.
+    ``asyncio.wait_for(anext(stream), ...)`` cancels the read when it times
+    out; to bound a wait, put the timeout around the whole loop.
+    """
+
+    #: How many records are taken from the client in one go. Records beyond the
+    #: first are only taken when they have already arrived, so this bounds the
+    #: batch without delaying anything.
+    _BATCH = 256
+
+    def __init__(self, inner):
+        self._inner = inner
+        self._batch: list = []
+        self._position = 0
+        # Held by the task that fetches the next batch; the others wait for it
+        # and then find the batch it fetched.
+        self._refill = asyncio.Lock()
+        self._read_was_cancelled = False
+
+    def __aiter__(self) -> "AsyncRecordStream":
+        return self
+
+    async def __anext__(self) -> Record:
+        while self._position >= len(self._batch):
+            try:
+                async with self._refill:
+                    if self._position < len(self._batch):
+                        break  # another task fetched while this one waited
+                    batch = await self._next_batch()
+                    if batch is None or self._inner.closed:
+                        raise StopAsyncIteration
+                    self._batch = batch
+                    self._position = 0
+            except asyncio.CancelledError:
+                self._read_was_cancelled = True
+                self.close()
+                raise
+        raw = self._batch[self._position]
+        self._position += 1
+        return _wrap_record(raw)
+
+    async def _next_batch(self) -> list | None:
+        """The records that have arrived (at least one), or ``None`` at the end."""
+        if self._read_was_cancelled:
+            raise RuntimeError(
+                "this stream was closed because a read on it was cancelled, and records may be missing; "
+                "open a new stream with query.stream()"
+            )
+        return await self._inner.next_batch(self._BATCH)
+
+    def close(self) -> None:
+        """Stop the query and drop the records not yet handed out. Idempotent."""
+        self._inner.close()
+        self._batch = []
+        self._position = 0
+
+    def _abandon(self) -> None:
+        """Stop the query without recording a duration for it: the caller's code failed, not the query."""
+        self._inner.abandon()
+        self._batch = []
+        self._position = 0
+
+    async def aclose(self) -> None:
+        """Same as ``close()``; for ``contextlib.aclosing`` and similar helpers."""
+        self.close()
+
+    @property
+    def closed(self) -> bool:
+        """Whether ``close()`` has been called."""
+        return self._inner.closed
+
+    async def __aenter__(self) -> "AsyncRecordStream":
+        return self
+
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any) -> bool:
+        self.close()
+        return False
+
+
 class AsyncQuery:
     """Async Python wrapper around the native Query object that returns typed records.
 
-    ``select()`` and ``where()`` are synchronous setup methods.
-    ``results()`` and ``foreach()`` are async and run the blocking native
-    query in a thread pool to avoid blocking the event loop.
+    ``select()`` and ``where()`` are synchronous setup methods. ``results()``,
+    ``foreach()`` and ``async for record in query`` read the query's record
+    stream by awaiting it, so cancelling the task that runs them stops the query.
     """
 
     def __init__(self, inner: _NativeQuery):
@@ -53,20 +220,91 @@ class AsyncQuery:
     def where(self, predicate) -> None:
         self._inner.where(predicate)
 
+    def stream(self, policy=None) -> AsyncRecordStream:
+        """Open the query as an async iterator of records. See ``AsyncRecordStream``."""
+        return AsyncRecordStream(self._inner.stream(policy))
+
+    def __aiter__(self) -> AsyncRecordStream:
+        return self.stream()
+
     @catch_unexpected("AsyncQuery.results")
     async def results(self, policy=None) -> list[Record]:
-        raw = await asyncio.to_thread(self._inner.results, policy)
-        return [_wrap_record(r) for r in raw]
+        # Not a loop over the stream's batches: every batch would be a trip
+        # through the event loop, and a result that is kept whole anyway gains
+        # nothing from arriving in pieces. The records are wrapped where they
+        # are converted, a chunk at a time and off this thread, so the loop is
+        # not held up for the length of the result. See ``RecordStream.read_all``.
+        stream = self.stream(policy)
+        try:
+            gathered = await stream._inner.read_all(_wrap_record)
+            # Taken out of what the awaited call resolved to. asyncio keeps a
+            # future's result alive until the awaiting task next goes through
+            # the event loop, and that must not be a whole query's records
+            # once the caller has dropped the list.
+            return gathered.take()
+        finally:
+            stream.close()
 
-    @catch_unexpected("AsyncQuery.foreach")
     async def foreach(self, callback, policy=None) -> None:
-        def _sync_foreach():
-            def _cb(raw):
-                return callback(_wrap_record(raw))
+        if inspect.iscoroutinefunction(callback) or (
+            callable(callback) and inspect.iscoroutinefunction(callback.__call__)
+        ):
+            raise TypeError(
+                "foreach() calls its callback from a worker thread and cannot await it; "
+                "to await something for each record, use 'async for record in query'"
+            )
+        stop = threading.Event()
+        context = contextvars.copy_context()
+        raised_by_callback: list[BaseException] = []
 
-            self._inner.foreach(_cb, policy)
+        def deliver(batch: list) -> bool:
+            """Call the callback for each record; False when the query should stop."""
+            for raw in batch:
+                if stop.is_set():
+                    return False
+                record = _wrap_record(raw)
+                try:
+                    result = callback(record)
+                    if (
+                        result is not None
+                        and result is not True
+                        and result is not False
+                        and inspect.isawaitable(result)
+                    ):
+                        if inspect.iscoroutine(result):
+                            result.close()
+                        raise TypeError("foreach() cannot await a callback result; use async for record in query")
+                except BaseException as exc:
+                    # Carried to the awaiting task by hand and raised there. A
+                    # future cannot carry every exception: ``StopIteration``
+                    # set on one is refused or replaced, depending on the
+                    # Python version. A callback's CancelledError must also
+                    # reach its caller separately from cancellation of the worker await.
+                    raised_by_callback.append(exc)
+                    return False
+                if _says_stop(result):
+                    return False
+            return True
 
-        await asyncio.to_thread(_sync_foreach)
+        stream = self.stream(policy)
+        try:
+            while (batch := await stream._next_batch()) is not None:
+                goes_on = await _in_thread_to_completion(deliver, batch, stop, context)
+                if raised_by_callback:
+                    raise raised_by_callback[0]
+                if not goes_on:
+                    break
+        except Exception as exc:
+            # What the caller's own callback raised is the caller's to handle,
+            # not a sign of a bug in this library.
+            if not raised_by_callback:
+                _maybe_log("AsyncQuery.foreach", exc)
+            raise
+        finally:
+            if raised_by_callback:
+                stream._abandon()
+            else:
+                stream.close()
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +361,9 @@ class AsyncClient:
 
     async def close(self) -> None:
         """Close the connection to the cluster.
+
+        Concurrent calls wait for the same shutdown. If a caller is cancelled,
+        shutdown continues. Await close() again before reconnecting.
 
         Example:
             ```python
@@ -199,11 +440,15 @@ class AsyncClient:
                 print(user_key, bins_dict)
             ```
         """
-        return await self._inner.batch_read(keys, bins, policy)
+        try:
+            return await self._inner.batch_read(keys, bins, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
 
     @catch_unexpected("AsyncClient.batch_write_numpy")
     async def batch_write_numpy(
-        self, data, namespace: str, set_name: str, _dtype, key_field: str = "_key", policy=None, retry: int = 0
+        self, data, namespace: str, set_name: str, _dtype=None, key_field: str = "_key", policy=None, retry: int = 0
     ) -> BatchWriteResult:
         """Write multiple records from a numpy structured array (async).
 
@@ -211,11 +456,17 @@ class AsyncClient:
         The dtype must contain a key field (default ``_key``) for the record key.
         Remaining non-underscore-prefixed fields become bins.
 
+        Every row is copied out of the array before this coroutine first
+        yields, so mutating ``data`` afterwards does not affect the write.
+
         Args:
-            data: numpy structured array with record data.
+            data: numpy structured array with record data. Its own
+                ``data.dtype`` defines the layout.
             namespace: Target namespace.
             set_name: Target set.
-            _dtype: numpy dtype describing the array layout.
+            _dtype: Optional dtype the array is expected to have. When given
+                and different from ``data.dtype``, ``ValueError`` is raised
+                before anything is sent.
             key_field: Name of the dtype field to use as the user key (default ``"_key"``).
             policy: Optional batch policy dict.
             retry: Maximum number of retries for failed records (default ``0``).
@@ -231,13 +482,17 @@ class AsyncClient:
             import numpy as np
             dtype = np.dtype([("_key", "i4"), ("score", "f8"), ("count", "i4")])
             data = np.array([(1, 0.95, 10), (2, 0.87, 20)], dtype=dtype)
-            results = await client.batch_write_numpy(data, "test", "demo", dtype, retry=10)
+            results = await client.batch_write_numpy(data, "test", "demo", retry=10)
             for br in results.batch_records:
                 if br.result != 0:
                     print(f"Failed: {br.key}, code={br.result}")
             ```
         """
-        raw = await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        try:
+            raw = await self._inner.batch_write_numpy(data, namespace, set_name, _dtype, key_field, policy, retry)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_write")
@@ -246,17 +501,29 @@ class AsyncClient:
 
         See :meth:`AsyncClient.batch_write` in ``__init__.pyi`` for full documentation.
         """
-        raw = await self._inner.batch_write(records, policy, retry)
+        try:
+            raw = await self._inner.batch_write(records, policy, retry)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_operate")
     async def batch_operate(self, keys, ops, policy=None) -> BatchWriteResult:
-        raw = await self._inner.batch_operate(keys, ops, policy)
+        try:
+            raw = await self._inner.batch_operate(keys, ops, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.batch_remove")
     async def batch_remove(self, keys, policy=None) -> BatchWriteResult:
-        raw = await self._inner.batch_remove(keys, policy)
+        try:
+            raw = await self._inner.batch_remove(keys, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     @catch_unexpected("AsyncClient.ping")
@@ -343,7 +610,11 @@ class AsyncClient:
 
     @catch_unexpected("AsyncClient.batch_apply")
     async def batch_apply(self, keys, module, function, args=None, policy=None) -> BatchWriteResult:
-        raw = await self._inner.batch_apply(keys, module, function, args, policy)
+        try:
+            raw = await self._inner.batch_apply(keys, module, function, args, policy)
+        except AerospikeError as exc:
+            _wrap_partial_result(exc)
+            raise
         return _wrap_batch_write_result(raw)
 
     # -- Admin: User --

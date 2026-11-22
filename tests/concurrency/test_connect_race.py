@@ -8,6 +8,8 @@ Requires a running Aerospike server.
 """
 
 import asyncio
+import threading
+from unittest.mock import patch
 
 import pytest
 
@@ -68,6 +70,58 @@ class TestAsyncConnectRace:
         await client.close()  # should not raise
 
         assert client.is_connected() is False
+
+    @pytest.mark.parametrize("context_exit", [False, True], ids=["close", "context_exit"])
+    async def test_cancelled_close_finishes_before_reconnect(self, context_exit):
+        client = await aerospike_py.AsyncClient(AEROSPIKE_CONFIG).connect()
+        try:
+            close = client.__aexit__(None, None, None) if context_exit else client.close()
+            first = asyncio.create_task(close)
+            await asyncio.sleep(0)  # let it hand the connection to native shutdown
+            assert not client.is_connected()
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+
+            # Either closer may run while the original native shutdown is still
+            # in progress. Both must finish before connect can reopen the client.
+            await asyncio.wait_for(asyncio.gather(client.close(), client.close()), timeout=10)
+            await client.connect()
+            assert await client.ping()
+        finally:
+            await client.close()
+
+    async def test_close_from_different_event_loop_threads(self):
+        client = await aerospike_py.AsyncClient(AEROSPIKE_CONFIG).connect()
+        registering = threading.Event()
+        release = threading.Event()
+
+        async def first_close():
+            loop = asyncio.get_running_loop()
+            create_future = loop.create_future
+
+            def pause_registration():
+                # Keep the first thread inside the native close method while
+                # the other loop registers its own awaitable.
+                registering.set()
+                assert release.wait(15)
+                return create_future()
+
+            with patch.object(loop, "create_future", pause_registration):
+                await client.close()
+
+        first = asyncio.create_task(asyncio.to_thread(asyncio.run, first_close()))
+        try:
+            try:
+                assert await asyncio.to_thread(registering.wait, 10)
+                await asyncio.wait_for(client.close(), timeout=10)
+            finally:
+                release.set()
+                await first
+            await client.connect()
+            assert await client.ping()
+        finally:
+            await client.close()
 
     async def test_connect_close_reconnect_cycle(self):
         """Multiple connect→close→reconnect cycles should work cleanly."""

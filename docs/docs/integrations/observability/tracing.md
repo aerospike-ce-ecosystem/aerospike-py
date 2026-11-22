@@ -73,6 +73,8 @@ With `aerospike-py[otel]` installed, W3C TraceContext is automatically propagate
 | `aerospike-py[otel]` + no active span | Root span created |
 | `aerospike-py` (base) | Root span (no propagation) |
 
+A query inherits the span active when you run `results()` or `foreach()`. An async query stream captures it on the first read, even if the query or stream was created under another span. Later reads keep that parent.
+
 ## Framework Integration
 
 ### FastAPI

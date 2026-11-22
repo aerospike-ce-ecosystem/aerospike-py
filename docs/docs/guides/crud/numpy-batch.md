@@ -129,7 +129,7 @@ Rows with `result_codes[i] != 0`, including `RecordNotFound`, keep the dtype's z
 | `batch_records` | `np.ndarray` | Structured array with the user-specified dtype |
 | `meta` | `np.ndarray` | Structured array with dtype `[("gen", "u4"), ("ttl", "u4")]` |
 | `result_codes` | `np.ndarray` | `int32` array of per-record result codes (0 = success) |
-| `_map` | `dict` | `{primary_key: index}` mapping for key-based lookup |
+| `_map` | `dict` | `{primary_key: index}` mapping for key-based lookup. Only real user keys are indexed: a row requested by digest only is reachable by position only, and a user key requested twice points at its last row. |
 
 ### Methods
 
@@ -143,14 +143,18 @@ Rows with `result_codes[i] != 0`, including `RecordNotFound`, keep the dtype's z
 |------------|------|---------|-----------------|
 | Signed int | `i` | `"i1"`, `"i2"`, `"i4"`, `"i8"` | `Int(i64)` — truncated to target size |
 | Unsigned int | `u` | `"u1"`, `"u2"`, `"u4"`, `"u8"` | `Int(i64)` — cast to unsigned |
-| Float | `f` | `"f2"`, `"f4"`, `"f8"` | `Float(f64)` — cast to target precision |
+| Float | `f` | `"f2"`, `"f4"`, `"f8"` | `Float(f64)` — cast to target precision; a finite value too large for `f2`/`f4` raises `OverflowError` (NaN and ±inf are kept) |
 | Fixed bytes | `S` | `"S8"`, `"S16"` | `Blob(bytes)` or `String` — truncated/zero-padded |
 | Void bytes | `V` | `"V4"`, `"V16"` | `Blob(bytes)` — truncated/zero-padded |
-| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` — raw copy (e.g., vector embeddings) |
+| Sub-array | — | `("f4", (128,))` | `Blob(bytes)` of exactly the field's size (e.g., vector embeddings); any other length raises `ValueError`. A scalar fills only a one-element `(1,)` field. |
+
+An HLL bin, a GeoJSON bin and a bin of a particle type the client does not interpret (what `get()` returns as `bytes` or `str`) are copied like any other bytes: into `S<N>` and `V<N>` fields, truncated or zero-padded to the field width, and into a numeric vector field of exactly their length. Fields of no bytes (`S0`, `V0`, a `(0,)` sub-array) are accepted and carry nothing. `to_numpy(dtype)` accepts whatever `numpy.dtype(...)` accepts and lays the rows out by the dtype NumPy makes of it.
+
+When reading, each non-empty output field needs its own byte range. `to_numpy` raises `ValueError` for overlapping fields because independent bin values would overwrite each other. Padding, out-of-order offsets, field titles and zero-width fields are supported. On input, `batch_write_numpy` can read multiple bins from overlapping fields.
 
 :::tip[Unsupported dtypes]
 
-Unicode strings (`U`) and Python objects (`O`) are rejected with `TypeError`. Use `S` (fixed bytes) for string data.
+Unicode strings (`U`), Python objects (`O`, also nested inside a structured field), variable-length `StringDType` and dtypes without named fields are rejected with `TypeError`; non-native byte order with `ValueError`. Use `S` (fixed bytes) for string data.
 
 :::
 

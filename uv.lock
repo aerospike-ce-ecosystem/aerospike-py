@@ -87,6 +87,8 @@ test-all = [
 ]
 test-compat = [
     { name = "aerospike" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -153,6 +155,7 @@ test-all = [
 ]
 test-compat = [
     { name = "aerospike" },
+    { name = "numpy", specifier = ">=2.0" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]

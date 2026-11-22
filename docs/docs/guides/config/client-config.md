@@ -32,14 +32,19 @@ configured cluster name does not match the expected value.
 | `cluster_name` | `str \| None` | `""` | Expected cluster name. `None` is treated the same as omitting the field. |
 | `auth_mode` | `int` | `AUTH_INTERNAL` | Auth mode |
 | `user` / `password` | `str` | `""` | Credentials |
-| `timeout` | `int` | `1000` | Connection timeout (ms) |
-| `idle_timeout` | `int` | `55` | Idle connection timeout (s) |
+| `timeout` | `int` | `30000` | Connection timeout (ms) |
+| `idle_timeout` | `int` | `30000` | Idle connection timeout (ms) |
 | `max_conns_per_node` | `int` | `256` | Max connections per node |
 | `min_conns_per_node` | `int` | `0` | Pre-warm connections |
 | `conn_pools_per_node` | `int` | `1` | Connection pools per node (increase on 8+ CPU cores) |
 | `tend_interval` | `int` | `1000` | Cluster tend interval (ms) |
+| `use_buffer_pool` | `bool` | `true` | Reuse large request buffers across connections. |
+| `buffer_pool_min_size` | `int` | `8192` | Smallest pooled size (bytes). |
+| `buffer_pool_max_size` | `int` | `1048576` | Largest pooled size (bytes). |
+| `buffer_pool_tier_bytes` | `int` | `4194304` | Retention budget per size class (bytes). |
 | `use_services_alternate` | `bool` | `false` | Use alternate addresses |
 | `max_concurrent_operations` | `int` | `0` (disabled) | Max in-flight operations per client. `0` = unlimited. |
+| `max_concurrent_queries` | `int` | `16` | Per-AsyncClient limit on active queries. Additional queries wait. `0` = unlimited. |
 | `operation_queue_timeout_ms` | `int` | `0` (infinite) | Max wait time for a backpressure slot (ms). `0` = wait forever. |
 
 ## Multi-Node Cluster

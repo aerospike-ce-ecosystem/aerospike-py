@@ -737,7 +737,7 @@ client.operate(key, ops)
 | `MAP_RETURN_COUNT` | 매칭된 entry 수 반환 |
 | `MAP_RETURN_KEY` | key 반환 |
 | `MAP_RETURN_VALUE` | value 반환 |
-| `MAP_RETURN_KEY_VALUE` | key-value 쌍 반환 |
+| `MAP_RETURN_KEY_VALUE` | key-value 쌍을 `(key, value)` tuple의 list로 반환: `[("j", 2), ("k", 1)]` (공식 client는 평평한 list `["j", 2, "k", 1]`를 반환) |
 | `MAP_RETURN_EXISTS` | boolean 존재 여부 반환 |
 | `MAP_UNORDERED` | unordered map (default) |
 | `MAP_KEY_ORDERED` | key 로 ordered |

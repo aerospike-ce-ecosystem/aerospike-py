@@ -85,7 +85,7 @@ import aerospike
 import aerospike_py as aerospike
 ```
 
-Most API signatures, constants, exception classes, and policy dicts are compatible. See the [Migration Guide](/docs/guides/migration) for a step-by-step walkthrough and the [API Comparison](/docs/guides/api-comparison) for a detailed side-by-side table.
+Most API signatures, constants, exception classes, and policy dicts are compatible. [Compare the client APIs](/docs/guides/api-comparison).
 
 ## How do I enable OpenTelemetry tracing?
 
@@ -132,11 +132,24 @@ Scrape `http://localhost:9464/metrics` from Prometheus. Operation latency histog
 
 ## What Aerospike server versions are supported?
 
-CI runs the integration suite against the current
-`aerospike/aerospike-server:latest` image, while the local Compose examples pin
-Aerospike CE 8.1.0.3. The package uses Aerospike Rust Client 2.0.0. If you need
-to support an older server release, run the integration suite against that
-version before deploying.
+aerospike-py 0.15 is built on Aerospike Rust Client 3.0 (0.14.x used 2.2). Its
+minimum supported server is **6.4**.
+
+| Server version | Status |
+|---|---|
+| 8.2 | Tested: the CI integration suite runs against it |
+| 8.1 | Tested: the CI integration suite runs against it |
+| 7.2 | Tested: the CI integration suite runs against it |
+| Other releases from 6.4 on | Expected to work, not tested |
+| Older than 6.4 | Not supported |
+
+The CI integration matrix is pinned to exactly these three versions. The local
+Compose examples pin Aerospike CE 8.1.0.3. If you run a version CI does not
+test, run the integration suite against it before deploying.
+
+## Where can I find compatibility changes before upgrading?
+
+[Compatibility by version](/docs/guides/version-compatibility) covers changes to existing calls, return values and stored data.
 
 ## How do I report a bug or request a feature?
 

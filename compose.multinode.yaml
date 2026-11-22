@@ -1,0 +1,48 @@
+# Two-node Aerospike CE cluster for the node-failure scenarios in
+# tests/multinode. Not used by the regular test suites.
+#
+#   make run-aerospike-multinode    # start both nodes, wait for the cluster
+#   make test-multinode             # run tests/multinode (stops and restarts node 2)
+#   make stop-aerospike-multinode
+#
+# Seed: 127.0.0.1:18720. Cluster name: multinode.
+
+x-node: &node
+  image: aerospike:ce-8.1.0.3_1
+  cpus: 1
+  mem_limit: 2g
+  volumes:
+    - ./scripts/aerospike.multinode.template.conf:/etc/aerospike/aerospike.template.conf
+  healthcheck:
+    test: ["CMD", "asinfo", "-v", "status"]
+    interval: 5s
+    timeout: 5s
+    retries: 10
+    start_period: 10s
+
+services:
+  aerospike-node-1:
+    <<: *node
+    container_name: aerospike-node-1
+    ports:
+      - "127.0.0.1:18720:3000"
+    environment:
+      NAMESPACE: test
+      CLUSTER_NAME: multinode
+      ACCESS_PORT: "18720"
+      NODE_ID: A1
+      MESH_SEED_1: aerospike-node-1
+      MESH_SEED_2: aerospike-node-2
+
+  aerospike-node-2:
+    <<: *node
+    container_name: aerospike-node-2
+    ports:
+      - "127.0.0.1:18721:3000"
+    environment:
+      NAMESPACE: test
+      CLUSTER_NAME: multinode
+      ACCESS_PORT: "18721"
+      NODE_ID: A2
+      MESH_SEED_1: aerospike-node-1
+      MESH_SEED_2: aerospike-node-2

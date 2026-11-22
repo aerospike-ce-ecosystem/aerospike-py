@@ -1,13 +1,17 @@
 //! Bidirectional conversion between Python objects and `aerospike_core::Value`.
 
-use aerospike_core::Value;
-use log::warn;
+use aerospike_core::{IndexMap, Value};
+use log::{debug, warn};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
-use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Maximum recursion depth for nested list/dict values to prevent stack overflow.
 const MAX_NESTING_DEPTH: usize = 64;
+
+/// Whether a value of each particle type the client does not interpret has
+/// already been announced in the log (indexed by the particle type).
+static UNKNOWN_PARTICLE_ANNOUNCED: [AtomicBool; 256] = [const { AtomicBool::new(false) }; 256];
 
 /// Convert a Python object to an Aerospike Value
 pub fn py_to_value(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
@@ -67,13 +71,17 @@ fn py_to_value_inner(obj: &Bound<'_, PyAny>, depth: usize) -> PyResult<Value> {
         return Ok(Value::List(values));
     }
     if let Ok(dict) = obj.cast::<PyDict>() {
-        let mut map = HashMap::with_capacity(dict.len());
+        // `OrderedMap` is an insertion-ordered map that is still an unordered
+        // map on the wire, so the entries reach the server in the order the
+        // Python dict holds them. A `HashMap` would send them in hash order,
+        // which changes from run to run.
+        let mut map = IndexMap::with_capacity(dict.len());
         for (k, v) in dict.iter() {
             let key = py_to_value_inner(&k, depth + 1)?;
             let val = py_to_value_inner(&v, depth + 1)?;
             map.insert(key, val);
         }
-        return Ok(Value::HashMap(map));
+        return Ok(Value::OrderedMap(map));
     }
 
     Err(pyo3::exceptions::PyTypeError::new_err(format!(
@@ -109,7 +117,16 @@ pub fn value_to_py(py: Python<'_>, val: &Value) -> PyResult<Py<PyAny>> {
             }
             Ok(dict.into_any().unbind())
         }
+        // The server's maps decode as `OrderedMap` in the order the server
+        // returned the entries; the Python dict keeps that order.
         Value::OrderedMap(map) => {
+            let dict = PyDict::new(py);
+            for (k, v) in map {
+                dict.set_item(value_to_py(py, k)?, value_to_py(py, v)?)?;
+            }
+            Ok(dict.into_any().unbind())
+        }
+        Value::SortedMap(map) => {
             let dict = PyDict::new(py);
             for (k, v) in map {
                 dict.set_item(value_to_py(py, k)?, value_to_py(py, v)?)?;
@@ -124,10 +141,41 @@ pub fn value_to_py(py: Python<'_>, val: &Value) -> PyResult<Py<PyAny>> {
             let py_list = PyList::new(py, &items)?;
             Ok(py_list.into_any().unbind())
         }
-        Value::GeoJSON(s) => Ok(s.into_pyobject(py)?.into_any().unbind()),
-        Value::HLL(b) => Ok(PyBytes::new(py, b).into_any().unbind()),
+        Value::GeoJson(s) => Ok(s.into_pyobject(py)?.into_any().unbind()),
+        Value::Hll(b) => Ok(PyBytes::new(py, b).into_any().unbind()),
         Value::Infinity => Ok(py.None()),
         Value::Wildcard => Ok(py.None()),
+        // A particle type the Rust client does not interpret — in practice a
+        // language-specific blob written by an old client (PYTHON_BLOB,
+        // JAVA_BLOB, ...). Rust client 2.x panicked on these (issue #280);
+        // 3.0 hands over the raw payload, which is returned as `bytes` so the
+        // rest of the record stays readable.
+        Value::Unknown(particle_type, bytes) => {
+            // Once per particle type and process at WARNING: a scan over old
+            // data meets such a value in every record, and a warning for each
+            // would bury the log and slow the scan down.
+            if UNKNOWN_PARTICLE_ANNOUNCED[usize::from(*particle_type)].swap(true, Ordering::Relaxed)
+            {
+                debug!(
+                    "bin value has particle type {particle_type}, which this client does not \
+                     interpret; returning its {} raw bytes",
+                    bytes.len()
+                );
+            } else {
+                warn!(
+                    "bin value has particle type {particle_type}, which this client does not \
+                     interpret; returning its {} raw bytes (further values of this type are \
+                     logged at debug level)",
+                    bytes.len()
+                );
+            }
+            Ok(PyBytes::new(py, bytes).into_any().unbind())
+        }
+        // `Value` is non-exhaustive: a variant added by a newer Rust client
+        // must not be silently turned into something else.
+        other => Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "Unsupported Aerospike value type: {other:?}"
+        ))),
     }
 }
 

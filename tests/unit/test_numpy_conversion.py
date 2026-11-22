@@ -363,49 +363,38 @@ class TestEmptyBatch:
 # ── key fallback warning tests ──────────────────────────────────
 
 
-class TestKeyFallbackWarning:
-    def test_none_key_warns(self):
+class TestRowsWithoutUserKey:
+    """A row without a user key is reachable by position only.
+
+    No stand-in key is put in the index for it: an invented integer would make
+    ``get(0)`` succeed for a key the caller never used, and could shadow a real
+    integer key.
+    """
+
+    @pytest.mark.parametrize(
+        "key",
+        [None, ("test",), (), ("test", "demo", None, b"\x01" * 20)],
+        ids=["none", "short", "empty", "digest_only"],
+    )
+    def test_row_is_not_indexed_and_no_warning_is_raised(self, key):
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
-                _make_batch_record(None, 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
+                _make_batch_record(key, 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
             ]
         )
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = _batch_records_to_numpy(batch, dtype, [])
-            assert len(w) == 1
-            assert "missing or malformed key" in str(w[0].message)
-        # fallback to integer index
+        assert w == []
+        assert result._map == {}
+        assert 0 not in result
+        with pytest.raises(KeyError):
+            result.get(0)
+        # The row itself is still there, at its position.
+        assert len(result) == 1
         assert result.batch_records[0]["val"] == 10
-        assert result._map[0] == 0
-
-    def test_short_key_warns(self):
-        dtype = np.dtype([("val", "i4")])
-        batch = _make_batch_records(
-            [
-                _make_batch_record(("test",), 0, (None, {"gen": 1, "ttl": 0}, {"val": 20})),
-            ]
-        )
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result = _batch_records_to_numpy(batch, dtype, [])
-            assert len(w) == 1
-            assert "missing or malformed key" in str(w[0].message)
-        assert result._map[0] == 0
-
-    def test_empty_key_warns(self):
-        dtype = np.dtype([("val", "i4")])
-        batch = _make_batch_records(
-            [
-                _make_batch_record((), 0, (None, {"gen": 1, "ttl": 0}, {"val": 30})),
-            ]
-        )
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result = _batch_records_to_numpy(batch, dtype, [])
-            assert len(w) == 1
-        assert result._map[0] == 0
+        assert result.result_codes[0] == 0
 
 
 # ── Large batch tests ──────────────────────────────────────────
@@ -704,12 +693,14 @@ class TestVeryLargeBatch:
 # ── key collision warning tests ─────────────────────────────────
 
 
-class TestKeyCollision:
-    def test_integer_key_collides_with_fallback_index(self):
-        """Verify warning when fallback index collides with an actual integer PK."""
+class TestKeyIndex:
+    def test_keyless_row_cannot_shadow_a_real_integer_key(self):
+        """Row 0 has no user key; row 1 has the real key ``0``.
+
+        The index used to hold ``0 -> row 0`` for the keyless row first, so a
+        real key equal to a row position collided with it.
+        """
         dtype = np.dtype([("val", "i4")])
-        # Record 0: key=None → fallback to index 0
-        # Record 1: key=(test, demo, 0) → pk=0, collides with record 0
         batch = _make_batch_records(
             [
                 _make_batch_record(None, 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
@@ -719,14 +710,29 @@ class TestKeyCollision:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result = _batch_records_to_numpy(batch, dtype, [])
-            collision_warns = [x for x in w if "collides with" in str(x.message)]
-            assert len(collision_warns) == 1
-            assert "index 0" in str(collision_warns[0].message)
-        # The second record should overwrite the first in the map
-        assert result._map[0] == 1
+        assert w == []
+        assert result._map == {0: 1}
+        assert result.get(0)["val"] == 20
 
-    def test_no_collision_with_distinct_keys(self):
-        """Verify no warnings when all keys are unique."""
+    def test_repeated_user_key_points_at_the_last_row(self):
+        dtype = np.dtype([("val", "i4")])
+        batch = _make_batch_records(
+            [
+                _make_batch_record(("test", "demo", "dup"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 10})),
+                _make_batch_record(("test", "demo", "other"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 20})),
+                _make_batch_record(("test", "demo", "dup"), 0, (None, {"gen": 1, "ttl": 0}, {"val": 30})),
+            ]
+        )
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = _batch_records_to_numpy(batch, dtype, [])
+        assert w == []
+        assert result._map == {"dup": 2, "other": 1}
+        assert result.get("dup")["val"] == 30
+        # Every row keeps its own position.
+        assert list(result.batch_records["val"]) == [10, 20, 30]
+
+    def test_distinct_keys_are_all_indexed(self):
         dtype = np.dtype([("val", "i4")])
         batch = _make_batch_records(
             [
@@ -737,9 +743,9 @@ class TestKeyCollision:
         )
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            _batch_records_to_numpy(batch, dtype, [])
-            collision_warns = [x for x in w if "collides with" in str(x.message)]
-            assert len(collision_warns) == 0
+            result = _batch_records_to_numpy(batch, dtype, [])
+        assert w == []
+        assert result._map == {"k1": 0, "k2": 1, "k3": 2}
 
 
 # ── Type conversion error context tests ─────────────────────────
@@ -785,25 +791,23 @@ class TestTypeConversionErrors:
         assert "strict_pk" in msg
         assert "count" in msg
 
-    def test_error_message_uses_index_fallback_for_malformed_key(self):
-        """When the record key is malformed, the conversion-error message must
-        reference the same index-fallback primary key the loop computed."""
+    def test_error_message_for_a_keyless_row_names_the_position(self):
+        """A row without a user key is identified by its position; the message
+        must not present an invented key as if it were the record's."""
         dtype = np.dtype([("count", "i4")])
         batch = _make_batch_records(
             [
                 _make_batch_record(
-                    None,  # malformed key → pk falls back to integer index 0
+                    None,
                     0,
                     (None, {"gen": 1, "ttl": 0}, {"count": "not_a_number"}),
                 ),
             ]
         )
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with pytest.raises((ValueError, TypeError)) as exc_info:
-                _batch_records_to_numpy(batch, dtype, [None])
+        with pytest.raises((ValueError, TypeError)) as exc_info:
+            _batch_records_to_numpy(batch, dtype, [None])
         msg = str(exc_info.value)
-        assert "key=0" in msg
+        assert "key=None" in msg
         assert "index 0" in msg
 
 

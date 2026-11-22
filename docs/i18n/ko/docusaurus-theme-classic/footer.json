@@ -33,7 +33,7 @@
   },
   "link.item.label.GitHub": {
     "message": "GitHub",
-    "description": "The label of footer link with label=GitHub linking to https://github.com/KimSoungRyoul/aerospike-py"
+    "description": "The label of footer link with label=GitHub linking to https://github.com/aerospike-ce-ecosystem/aerospike-py"
   },
   "copyright": {
     "message": "Copyright © 2026 aerospike-py. Built with Docusaurus.",

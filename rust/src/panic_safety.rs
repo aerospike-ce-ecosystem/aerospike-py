@@ -28,6 +28,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use futures::FutureExt;
 use pyo3::prelude::*;
+use pyo3::BoundObject;
 use pyo3_async_runtimes::tokio::future_into_py;
 
 use crate::bug_report::log_unexpected_error;
@@ -58,13 +59,50 @@ where
     F: FnOnce() -> PyResult<R>,
 {
     match catch_unwind(AssertUnwindSafe(f)) {
-        Ok(result) => result,
+        Ok(result) => {
+            crate::logging::check_interrupt()?;
+            result
+        }
         Err(payload) => Err(payload_to_pyerr(op, payload)),
     }
 }
 
+/// The result of an awaited operation on its way to Python.
+///
+/// `future_into_py` converts the value a future resolved to after the future
+/// is over, on a thread of its own. A panic in that conversion is outside
+/// anything the future could catch, and it ends the thread before the Python
+/// future is given a result or an error: the `await` then never returns. A
+/// result of at most 256 query records, which is converted there, did just
+/// that when its conversion panicked. Converting through this type turns the
+/// panic into the `RustPanicError` a panic anywhere else in the operation is.
+struct ConvertedWithoutPanic<R> {
+    value: R,
+    op: &'static str,
+}
+
+impl<'py, R> IntoPyObject<'py> for ConvertedWithoutPanic<R>
+where
+    R: IntoPyObject<'py>,
+{
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        let Self { value, op } = self;
+        catch_panic_sync(op, || {
+            value
+                .into_pyobject(py)
+                .map(|converted| converted.into_any().into_bound())
+                .map_err(Into::into)
+        })
+    }
+}
+
 /// Drop-in replacement for `future_into_py` that catches panics from the
-/// inner future and surfaces them as `RustPanicError`.
+/// inner future, and from the conversion of what it resolved to, and
+/// surfaces them as `RustPanicError`.
 pub fn future_into_py_panic_safe<'py, F, R>(
     py: Python<'py>,
     op: &'static str,
@@ -76,7 +114,7 @@ where
 {
     future_into_py(py, async move {
         match AssertUnwindSafe(fut).catch_unwind().await {
-            Ok(result) => result,
+            Ok(result) => result.map(|value| ConvertedWithoutPanic { value, op }),
             Err(payload) => Err(payload_to_pyerr(op, payload)),
         }
     })
@@ -107,6 +145,44 @@ mod tests {
     fn panic_msg_unknown_payload_falls_back() {
         let payload: Box<dyn Any + Send> = Box::new(42_i32);
         assert_eq!(panic_msg(&*payload), "<non-string panic payload>");
+    }
+
+    /// Stands in for a result whose conversion to Python panics.
+    struct PanicsWhenConverted;
+
+    impl<'py> IntoPyObject<'py> for PanicsWhenConverted {
+        type Target = PyAny;
+        type Output = Bound<'py, PyAny>;
+        type Error = PyErr;
+
+        fn into_pyobject(self, _py: Python<'py>) -> Result<Self::Output, Self::Error> {
+            panic!("the conversion gave out");
+        }
+    }
+
+    #[test]
+    fn a_panic_while_the_result_is_converted_is_an_error_too() {
+        ensure_python();
+        Python::attach(|py| {
+            let guarded = ConvertedWithoutPanic {
+                value: PanicsWhenConverted,
+                op: "some_operation",
+            };
+            let err = guarded
+                .into_pyobject(py)
+                .expect_err("a panic, turned into an error");
+            assert!(err.is_instance_of::<RustPanicError>(py));
+            let text = err.to_string();
+            assert!(text.contains("some_operation"), "{text}");
+            assert!(text.contains("the conversion gave out"), "{text}");
+
+            let fine = ConvertedWithoutPanic {
+                value: 7_u32,
+                op: "some_operation",
+            };
+            let seven: u32 = fine.into_pyobject(py).unwrap().extract().unwrap();
+            assert_eq!(seven, 7);
+        });
     }
 
     #[test]

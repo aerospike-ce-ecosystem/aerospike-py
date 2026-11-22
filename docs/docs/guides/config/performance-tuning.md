@@ -142,6 +142,25 @@ When enabled:
 - `aerospike_py.BackpressureError` is raised only if
   `operation_queue_timeout_ms` expires before a slot frees up.
 
+**What takes a slot:** every single-record command (`get`, `put`, `operate`,
+`operate_ordered`, `increment`, ..., and the UDF call `apply()`) and every batch
+command (`batch_read`, `batch_write`, `batch_write_numpy`, `batch_operate`,
+`batch_remove`, `batch_apply`). A command holds its slot from the moment it is
+sent until its answer has arrived. Query and scan streams take no slot: a stream
+stays open for as long as its consumer reads, and a consumer that looks
+something up for each record would otherwise wait for a slot its own stream
+holds. Info, truncate, UDF registration, index and admin commands take no slot
+either.
+
+`AsyncClient` admits up to `max_concurrent_queries` queries per client (default
+16, `0` for unlimited). Additional queries wait before contacting the server;
+waiting can be cancelled. This pool is separate from the operation slots, so a
+callback can still issue a record lookup. Choose a limit for the server capacity
+shared by all clients and processes. Close a partial stream before awaiting
+another query that needs its slot. If a callback must wait for a nested query while all
+slots are held by outer queries, use a separate client for the nested queries. Cancelling a rate-limited scan can retain its
+slot until the node reader leaves the current socket read.
+
 **Choose a value:** keep it close to, but no higher than,
 `max_conns_per_node` (default `256`). For a three-node cluster, start at `64`.
 This conservative value protects the pool while preserving throughput.

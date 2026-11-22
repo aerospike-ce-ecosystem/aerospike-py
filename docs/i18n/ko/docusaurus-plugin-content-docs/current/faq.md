@@ -86,7 +86,7 @@ import aerospike
 import aerospike_py as aerospike
 ```
 
-대부분의 API signature, 상수, exception class, policy dict가 호환됩니다. 단계별 절차는 [Migration Guide](/docs/guides/migration), 자세한 비교는 [API Comparison](/docs/guides/api-comparison)을 참고하세요.
+대부분의 API signature, 상수, exception class, policy dict가 호환됩니다. [클라이언트 API 비교](/docs/guides/api-comparison)
 
 ## OpenTelemetry tracing 은 어떻게 활성화하나요?
 
@@ -131,13 +131,26 @@ aerospike_py.stop_metrics_server()
 
 Prometheus에서 `http://localhost:9464/metrics`를 scrape하세요. Operation type별 latency histogram이 기록됩니다. 자세한 내용은 [Metrics guide](/docs/integrations/observability/metrics)를 참고하세요.
 
-## 어떤 Aerospike server 버전을 지원하나요?
+## 어떤 Aerospike server 버전을 지원하나요? {#what-aerospike-server-versions-are-supported}
 
-CI는 현재 `aerospike/aerospike-server:latest` image를 대상으로 integration
-suite를 실행하고, 로컬 Compose 예제는 Aerospike CE 8.1.0.3을 고정해서
-사용합니다. Package는 Aerospike Rust Client 2.0.0을 사용합니다. 더 오래된
-server release를 지원해야 한다면 배포 전에 해당 version으로 integration suite를
-실행하세요.
+aerospike-py 0.15는 Aerospike Rust Client 3.0을 기반으로 합니다(0.14.x는 2.2).
+지원하는 최소 server 버전은 **6.4**입니다.
+
+| Server 버전 | 상태 |
+|---|---|
+| 8.2 | 테스트함: CI integration suite가 이 버전으로 실행됩니다 |
+| 8.1 | 테스트함: CI integration suite가 이 버전으로 실행됩니다 |
+| 7.2 | 테스트함: CI integration suite가 이 버전으로 실행됩니다 |
+| 그 밖의 6.4 이상 release | 동작할 것으로 예상하지만 테스트하지 않음 |
+| 6.4 미만 | 지원하지 않음 |
+
+CI integration matrix는 정확히 이 세 버전으로 고정되어 있습니다. 로컬 Compose
+예제는 Aerospike CE 8.1.0.3을 고정해서 사용합니다. CI가 테스트하지 않는 버전을
+사용한다면 배포 전에 그 버전으로 integration suite를 실행하세요.
+
+## 업그레이드 시 호환성 변경은 어디서 확인하나요?
+
+[버전별 호환성 변경](/docs/guides/version-compatibility)에서 기존 함수의 호출 방식, 반환값, 저장 형식에 영향을 주는 변경을 확인할 수 있습니다.
 
 ## bug 신고 또는 기능 요청은 어떻게 하나요?
 

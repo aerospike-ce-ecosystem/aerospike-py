@@ -4,6 +4,7 @@ import pytest
 
 import aerospike_py
 from aerospike_py import exp, list_operations
+from tests.helpers import CLOCK_SKEW_SECONDS
 
 
 class TestBatchRead:
@@ -697,7 +698,7 @@ class TestBatchWriteTTL:
             assert meta is not None
             # TTL should be close to what we set (server may subtract a second)
             assert meta.ttl > 0
-            assert meta.ttl <= ttl_seconds
+            assert meta.ttl <= ttl_seconds + CLOCK_SKEW_SECONDS
 
     def test_batch_write_per_record_meta_ttl(self, client, cleanup):
         """Per-record TTL via (key, bins, {"ttl": N}) meta tuple."""
@@ -711,7 +712,7 @@ class TestBatchWriteTTL:
         _, meta, _ = client.get(key)
         assert meta is not None
         assert meta.ttl > 0
-        assert meta.ttl <= ttl_seconds
+        assert meta.ttl <= ttl_seconds + CLOCK_SKEW_SECONDS
 
     def test_batch_write_per_record_meta_overrides_policy_ttl(self, client, cleanup):
         """Per-record meta TTL overrides batch-level policy TTL."""
@@ -739,7 +740,7 @@ class TestBatchWriteTTL:
         # Record with meta should use per-record TTL (~1 hour)
         _, meta_m, _ = client.get(key_meta)
         assert meta_m is not None
-        assert meta_m.ttl <= meta_ttl
+        assert meta_m.ttl <= meta_ttl + CLOCK_SKEW_SECONDS
         assert meta_m.ttl > 0
 
     def test_batch_write_ttl_never_expire(self, client, cleanup):
@@ -812,13 +813,13 @@ class TestBatchWriteTTL:
 
         # key_a: ~3600
         assert meta_a.ttl > 300
-        assert meta_a.ttl <= 3600
+        assert meta_a.ttl <= 3600 + CLOCK_SKEW_SECONDS
         # key_b: ~86400
         assert meta_b.ttl > 3600
-        assert meta_b.ttl <= 86400
+        assert meta_b.ttl <= 86400 + CLOCK_SKEW_SECONDS
         # key_c: ~300 (batch policy default)
         assert meta_c.ttl > 0
-        assert meta_c.ttl <= 300
+        assert meta_c.ttl <= 300 + CLOCK_SKEW_SECONDS
 
 
 class TestBatchWriteGen:
@@ -860,7 +861,7 @@ class TestBatchWriteGen:
         _, meta2, bins = client.get(key)
         assert bins["val"] == 2
         assert meta2.ttl > 0
-        assert meta2.ttl <= 3600
+        assert meta2.ttl <= 3600 + CLOCK_SKEW_SECONDS
 
 
 class TestBatchWriteSendKey:

@@ -45,6 +45,8 @@ A **histogram** tracking the duration of every data operation.
 `exists()` treats `KeyNotFoundError` as success since "not found" is a normal outcome.
 :::
 
+A `query` stopped by a `foreach()` callback that raised is recorded neither as a success nor as an error, on the sync and the async client: the code that failed is the callback, not the query.
+
 ## Framework Integration
 
 ### FastAPI

@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 # MSRV: 1.87 is the floor that the *dependency tree* requires. The
-# resolved lock graph pulls in `aerospike-rt 2.2.0`, whose manifest
+# resolved lock graph pulls in `aerospike-rt 3.0.0`, whose manifest
 # declares `rust-version = "1.87"`, so cargo refuses to build the graph
-# on older toolchains with `aerospike-rt@2.2.0 requires rustc 1.87`.
+# on older toolchains with `aerospike-rt@3.0.0 requires rustc 1.87`.
 # This 1.87 floor subsumes the intermediate 1.85 requirement from
 # `block-buffer 0.12.0` (via `digest 0.11`), whose manifest declares
 # `edition = "2024"` (stabilised in Rust 1.85), and the older 1.80 floor
@@ -27,8 +27,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 pyo3 = { version = "0.29" }
 pyo3-async-runtimes = { version = "0.29", features = ["tokio-runtime"] }
-aerospike = { version = "2.2.0", features = ["async", "rt-tokio"], default-features = false }
-aerospike-core = { version = "2.2.0" }
+aerospike = { version = "3.0.0", features = ["async", "rt-tokio"], default-features = false }
+aerospike-core = { version = "3.0.0" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "io-util", "macros"] }
 arc-swap = "1"
 futures = "0.3"
@@ -41,17 +41,15 @@ opentelemetry = { version = "0.32", optional = true }
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"], optional = true }
 
-[dev-dependencies]
-# Compile-time layout guards for the test-only #[repr(C)] mirror struct
-# used to construct aerospike_core::BatchRecord fixtures (see client_ops.rs).
-static_assertions = "1"
-
 [features]
 # extension-module activates pyo3/extension-module which avoids linking Python.
 # Must be enabled when building the Python extension (maturin handles this).
 # Do NOT enable during `cargo test` — omitting it lets the linker find Python.
 extension-module = ["pyo3/extension-module"]
 default = []
+# Exposes `_aerospike::fuzzing`: safe shims over the NumPy buffer writer and
+# reader for the targets in `rust/fuzz`. Never enabled in a wheel.
+fuzzing = []
 otel = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",

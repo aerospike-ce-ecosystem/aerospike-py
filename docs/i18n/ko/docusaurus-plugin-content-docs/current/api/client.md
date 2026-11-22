@@ -534,7 +534,7 @@ _, meta, bins = await client.operate(key, ops)
 
 ### `operate_ordered(key, ops, meta=None, policy=None)`
 
-`operate`와 동일하지만 결과를 [`OperateOrderedResult`](types.md#operateorderedresult) NamedTuple의 `ordered_bins` 필드에 `BinTuple(name, value)` 리스트로 반환합니다.
+`operate`와 동일하지만 결과를 [`OperateOrderedResult`](types.md#operateorderedresult) NamedTuple의 `ordered_bins` 필드에 `BinTuple(name, value)` 리스트로 반환합니다. 응답한 operation마다 항목 하나가 요청 순서대로 들어가며, 두 번 응답한 bin은 두 번 나타납니다. 값이 없는 operation이 `(bin, None)`으로 나타나는 경우는 [연산별 반환값](../guides/version-compatibility.md#operate_ordered-returns-one-entry-per-operation)를 참고하세요. 빈 bin 이름으로 읽으면 레코드 전체를 반환합니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -626,9 +626,9 @@ for br in batch.batch_records:
 |-----------|------|
 | `records` | `(key, bins)` 또는 `(key, bins, meta)` 튜플 리스트 |
 | `policy` | 선택적 [`BatchPolicy`](types.md#batchpolicy) dict. Batch 전송 설정과 쓰기 기본값을 함께 지정합니다. |
-| `retry` | 일시적 오류가 발생한 레코드의 최대 재시도 횟수. 기본값은 `0`이며 자동 재시도하지 않습니다. |
+| `retry` | 일시적 오류가 발생한 레코드의 최대 재시도 횟수. 기본값은 `0`이며 자동 재시도하지 않습니다. 실패한 레코드만 다시 보내고, 이미 성공한 레코드나 `in_doubt`인 `CREATE_ONLY`·generation 검사 레코드는 다시 보내지 않습니다. `total_timeout`(기본값 1000 ms)이 상한입니다. 0이 아닌 `policy["max_retries"]`와 함께 주면 `InvalidArgError`가 발생합니다. |
 
-**반환값:** 레코드별 결과를 `batch_records`에 담은 [`BatchWriteResult`](types.md#batchwriteresult). 각 `BatchRecord.result`가 `0`인지 확인하세요.
+**반환값:** 레코드별 결과를 `batch_records`에 담은 [`BatchWriteResult`](types.md#batchwriteresult). `retry`에는 retry loop가 한 일([`BatchRetryInfo`](types.md#batchretryinfo))이 들어 있습니다. 각 `BatchRecord.result`가 `0`인지 확인하세요.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -682,23 +682,23 @@ for batch_record in result.batch_records:
 
 :::note
 
-재시도 도중 전송 오류가 발생하면 재시도를 중단하고 부분 결과를 반환할 수 있습니다. `batch_write` 결과를 성공으로 간주하기 전에 모든 `BatchRecord.result`를 확인하세요.
+마지막 시도 후에도 server의 응답을 받지 못한 레코드가 남으면 호출은 exception(`ClusterError`, `AerospikeTimeoutError` 등)을 발생시키고, `exc.partial_result`에 모든 row와 같은 retry counter가 들어 있습니다. 호출이 반환되었더라도 `batch_write` 결과를 성공으로 간주하기 전에 모든 `BatchRecord.result`를 확인하세요.
 
 :::
 
-### `batch_write_numpy(data, namespace, set_name, _dtype, key_field='_key', policy=None, retry=0)`
+### `batch_write_numpy(data, namespace, set_name, _dtype=None, key_field='_key', policy=None, retry=0)`
 
 NumPy 구조화 배열의 각 행을 별도 Record로 씁니다. `key_field`로 지정한 field가 Record key가 되고, 이름이 밑줄로 시작하지 않는 나머지 field가 bin이 됩니다.
 
 | 파라미터 | 설명 |
 |-----------|------|
-| `data` | Record 데이터가 들어 있는 NumPy 구조화 배열 |
+| `data` | Record 데이터가 들어 있는 NumPy 구조화 배열. Layout은 `data.dtype`이 정합니다. |
 | `namespace` | 대상 namespace |
 | `set_name` | 대상 set |
-| `_dtype` | 배열 layout을 설명하는 NumPy dtype |
-| `key_field` | user key로 사용할 dtype field 이름. 기본값은 `"_key"` |
+| `_dtype` | 배열이 가져야 할 NumPy dtype(선택). 주어졌는데 `data.dtype`과 다르면 아무것도 보내기 전에 `ValueError`가 발생합니다. |
+| `key_field` | user key로 사용할 dtype field 이름. 기본값은 `"_key"`. 이 field는 값 하나, 즉 scalar 정수이거나 고정 폭 bytes field여야 합니다. Sub-array나 중첩 structured field는 아무것도 쓰기 전에 `TypeError`를 발생시킵니다. |
 | `policy` | 선택적 [`BatchPolicy`](types.md#batchpolicy) dict |
-| `retry` | 일시적 오류가 발생한 Record의 최대 재시도 횟수. 기본값은 `0` |
+| `retry` | 일시적 오류가 발생한 Record의 최대 재시도 횟수. 기본값은 `0`. `batch_write`의 `retry`와 같은 규칙을 따릅니다. |
 
 **반환값:** 레코드별 결과를 `batch_records`에 담은 [`BatchWriteResult`](types.md#batchwriteresult)
 
@@ -759,6 +759,8 @@ for batch_record in result.batch_records:
 
 여러 레코드에 연산을 실행합니다.
 
+쓰기 연산은 배치 정책의 `exists`, `commit_level`, `ttl`, `key`, `durable_delete`를 각 행에 적용합니다. 이 API에서는 예상 generation을 지정할 수 없으므로 세대 비교에는 `operate(..., meta={"gen": expected})`를 사용하세요. 읽기 전용 연산 목록은 `exists`·`gen`·`commit_level`을 거부합니다.
+
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
 
@@ -781,6 +783,8 @@ results = await client.batch_operate(keys, ops)
 ### `batch_remove(keys, policy=None)`
 
 여러 레코드를 삭제합니다.
+
+삭제에는 `exists` 정책이 없습니다. 배치 정책이나 개별 레코드 meta에 지정하면 `InvalidArgError`를 반환하며 어느 행도 삭제하지 않습니다.
 
 <Tabs>
   <TabItem value="sync" label="Sync Client" default>
@@ -1325,7 +1329,7 @@ for record in records:
 
 ### `foreach(callback, policy=None)`
 
-Query를 실행해 각 Record마다 callback을 호출합니다. callback이 `False`를 반환하면 순회를 일찍 종료합니다.
+Query를 실행해 각 Record마다 callback을 호출합니다. callback이 `False`를 반환하면 순회를 일찍 종료합니다. Scan 도중 node 연결이 끊겨 client가 일부를 다시 가져오더라도 모든 Record는 callback에 한 번씩만 전달됩니다.
 
 | 파라미터 | 설명 |
 |-----------|------|
@@ -1354,6 +1358,18 @@ await query.foreach(process)
 
   </TabItem>
 </Tabs>
+
+`AsyncQuery.foreach()`의 callback은 event loop 밖의 worker thread에서 실행되는 일반 함수여야 하며, `async def` 함수를 넘기면 `TypeError`가 발생합니다. Callback은 서로 겹쳐 실행되지 않지만 모두 같은 thread에서 실행되지는 않으므로 thread-local에 상태를 두지 마세요. Callback이 발생시킨 exception은 query를 멈추고 `foreach()`에서 그대로 다시 발생합니다. 단, `StopIteration`은 `StopIteration`을 `__cause__`로 가진 `RuntimeError`로 전달됩니다. Await하는 task를 취소하면 query가 멈추고, 실행 중인 callback이 끝난 뒤에 `CancelledError`가 발생합니다.
+
+### `stream(policy=None)` (AsyncQuery)
+
+Query를 record의 async iterator(`AsyncRecordStream`)로 엽니다. `async for record in query`도 같습니다. 첫 record를 요청하기 전에는 아무것도 보내지 않으며, stream은 async context manager이기도 합니다. 일찍 빠져나오면 server의 query도 멈춥니다. 자세한 내용은 [Async streaming](../guides/query-scan/query-scan.md#async-streaming)을 참고하세요.
+
+```python
+async with query.stream({"max_records": 1000}) as records:
+    async for record in records:
+        await handle(record)
+```
 
 ## Partition Filter helper
 

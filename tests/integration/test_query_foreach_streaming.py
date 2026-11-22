@@ -47,7 +47,7 @@ def seeded(client):
     client.truncate(NS, SET_NAME, 0)
 
 
-def _scan_timings(client, seeded):
+def _scan_timings(client, seeded, policy=None):
     """Return (time-to-first-callback, whole-scan-time) for a full scan."""
     query = client.query(NS, SET_NAME)
     started = time.perf_counter()
@@ -61,7 +61,7 @@ def _scan_timings(client, seeded):
         count += 1
         return True
 
-    query.foreach(callback)
+    query.foreach(callback, policy=policy)
     total = time.perf_counter() - started
     assert count == seeded, f"scan saw {count} records, expected {seeded}"
     return first_callback_at, total
@@ -74,7 +74,10 @@ class TestStreamingContract:
         Measured on this suite's 20k-record set: ~0.47 buffered, ~0.08
         streaming.
         """
-        ttfc, total = _scan_timings(client, seeded)
+        # Pace this scan on the server so scheduler noise on a busy runner
+        # cannot dominate an otherwise ~40 ms scan. A buffered implementation
+        # would still wait for all rate-limited records before calling back.
+        ttfc, total = _scan_timings(client, seeded, {"records_per_second": max(1, seeded // 2)})
 
         assert ttfc / total < 0.30, (
             f"time-to-first-callback was {1000 * ttfc:.1f}ms of a {1000 * total:.1f}ms "
@@ -162,7 +165,7 @@ class TestCallbackEnvironment:
 
 class TestAsyncQueryForeach:
     async def test_async_foreach_streams_too(self, async_client, client, seeded):
-        """``AsyncQuery.foreach`` runs the same native path via ``to_thread``."""
+        """``AsyncQuery.foreach`` streams too: the first callback runs long before the scan ends."""
         query = async_client.query(NS, SET_NAME)
         started = time.perf_counter()
         first_callback_at = None
@@ -265,13 +268,15 @@ class TestQueryErrorsReachTheCaller:
         PR changes, which callers with side-effecting callbacks must know about).
 
         The budget is derived from a measured baseline rather than hard-coded, so
-        the test tracks machine speed, and it halves on a miss so a fast run
-        cannot turn into a flake.
+        the test tracks machine speed, and it moves towards the scan on a miss in
+        either direction: halved when the scan finished inside it, raised when it
+        ran out before the first record arrived (a busy moment on the machine,
+        which says nothing about the behaviour under test).
         """
         baseline_ms = _scan_timings(client, seeded)[1] * 1000
         budget_ms = max(15, round(baseline_ms * 0.5))
 
-        for _ in range(5):
+        for _ in range(8):
             calls = 0
 
             def callback(_record):
@@ -282,10 +287,9 @@ class TestQueryErrorsReachTheCaller:
             try:
                 client.query(NS, SET_NAME).foreach(callback, policy={"total_timeout": budget_ms})
             except aerospike_py.AerospikeError:
-                assert calls > 0, (
-                    "the query failed before any record was delivered — this test needs a "
-                    "failure *during* the scan to pin the partial-delivery semantics"
-                )
+                if calls == 0:
+                    budget_ms = round(budget_ms * 1.5) + 1
+                    continue
                 assert calls < seeded, "the scan must not have completed"
                 return
             budget_ms = max(5, budget_ms // 2)

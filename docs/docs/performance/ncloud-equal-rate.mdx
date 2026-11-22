@@ -1,0 +1,97 @@
+---
+title: 0.15 benchmarks · Large batch reads
+sidebar_label: Large batch reads
+sidebar_position: 4
+slug: /performance/ncloud-equal-rate
+description: CPU, peak memory and p99 for 500-, 1,000- and 2,000-key NumPy reads on Linux.
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+The measured 0.15 candidate (`4aabf09`) is compared with **aerospike-py 0.14.4** and the official **Aerospike Python SDK 1.0.0** (`aerospike-sdk`).
+
+## NumPy batch reads {#changes-in-015}
+
+On two Ncloud Linux VMs, each client read eight integer bins into a structured NumPy array. Standard CPython targeted 60,000 rows/s and free-threaded CPython 90,000 rows/s. **All three metrics ↓ lower is better.**
+
+<Tabs groupId="batch-metric">
+
+<TabItem value="cpu" label="CPU time per row ↓">
+
+| CPython | Keys | 0.15 (µs) | vs. 0.14.4 | vs. official SDK |
+| --- | ---: | ---: | ---: | ---: |
+| Standard | 500 | 6.42 | −3.8% | −38.5% |
+| Standard | 1,000 | 6.90 | −2.9% | −34.3% |
+| Standard | 2,000 | 6.71 | −6.1% | −38.7% |
+| Free-threaded | 500 | 6.70 | +0.5% | −41.0% |
+| Free-threaded | 1,000 | 7.04 | +5.0% | Excluded¹ |
+| Free-threaded | 2,000 | 6.83 | −1.7% | −43.1% |
+
+</TabItem>
+
+<TabItem value="rss" label="Peak RSS ↓">
+
+| CPython | Keys | 0.15 (MiB) | vs. 0.14.4 | vs. official SDK |
+| --- | ---: | ---: | ---: | ---: |
+| Standard | 500 | 59.4 | +6.2% | −42.4% |
+| Standard | 1,000 | 68.9 | +9.2% | −37.7% |
+| Standard | 2,000 | 83.8 | +10.7% | −34.7% |
+| Free-threaded | 500 | 70.7 | +6.4% | −36.7% |
+| Free-threaded | 1,000 | 77.8 | +5.6% | −42.0% |
+| Free-threaded | 2,000 | 94.1 | +7.3% | −40.2% |
+
+</TabItem>
+
+<TabItem value="p99" label="p99 latency ↓">
+
+| CPython | Keys | 0.15 (ms) | vs. 0.14.4 | vs. official SDK |
+| --- | ---: | ---: | ---: | ---: |
+| Standard | 500 | 5.94 | −1.0% | −42.6% |
+| Standard | 1,000 | 11.21 | +1.0% | −50.3% |
+| Standard | 2,000 | 19.68 | −1.9% | −47.6% |
+| Free-threaded | 500 | 6.55 | +20.8% | −34.6% |
+| Free-threaded | 1,000 | 11.52 | +6.8% | Excluded¹ |
+| Free-threaded | 2,000 | 20.49 | +1.9% | −48.9% |
+
+</TabItem>
+
+</Tabs>
+
+¹ At 1,000 keys on free-threaded CPython, the SDK missed two of 1,200 scheduled requests in the repeat. Its CPU and p99 comparison is excluded. The separate short RSS run completed all requests.
+
+At 2,000 keys, 0.15 used more peak memory than 0.14.4 in both runs. On standard CPython, 0.15 p99 was **15.8% higher** in the first run and **1.9% lower** in the repeat.
+
+<a href={useBaseUrl('/benchmark/4aabf09/ncloud/repeat-comparison.csv')}>Repeat measurements for all three clients (CSV)</a>
+
+## Measurement conditions {#workload-and-metrics}
+
+- Ncloud KR-1, two 4-vCPU, 16 GiB Ubuntu 24.04 VMs on one subnet. Aerospike CE 8.2.0.1 ran on a single node with a 1 GiB in-memory namespace.
+- CPython 3.14.2 and 3.14.2t, NumPy 2.5.5. aerospike-py used `batch_read().to_numpy(dtype)`. The SDK used `session.query(*keys).execute()`, `collect()` and `numpy.fromiter()`. Each client used zero retries.
+- Up to four synchronous requests in flight. Three runs per condition in fresh processes. CPU per row and Linux peak RSS include all client threads. Each is a median across runs. Pooled p99 covers scheduled arrival through array conversion and validation.
+- Regular Python completed 1,050 calls per client and size. Free-threaded CPU and latency used 1,200 scheduled calls, with 180 calls in a shorter run for RSS.
+
+## First run and profiling {#tracing-the-batch-path}
+
+The charts below show the first run. CPU and latency were measured with tracing off. Free-threaded RSS came from a separate run that streamed the wheel hash to avoid raising the process high-water mark during setup.
+
+### Standard CPython {#standard-cpython}
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/gil-60000.png')} alt="Standard CPython at 60,000 rows per second. Three line charts compare the three clients' CPU per row, peak RSS, and scheduled p99 across 500, 1,000, and 2,000 keys." />
+
+### Free-threaded CPython {#free-threaded-cpython}
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/ft-90000.png')} alt="Free-threaded CPython at 90,000 rows per second. The three line charts compare CPU per row, RSS from the short streaming-hash rerun, and scheduled p99 across all three key counts." />
+
+### Time to convert the result
+
+For one 2,000-key request at a time on free-threaded CPython, median NumPy conversion took **1.89 ms** in both aerospike-py versions and **4.28 ms** in the official SDK. All 206 sampled Python batch spans from 0.15 matched a Rust `BATCH_READ` child span.
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/trace-phases.png')} alt="Free-threaded diagnostic bar charts separate the time from submit to API return and NumPy conversion at all three sizes. The SDK's NumPy conversion reaches 4.28 milliseconds at 2,000 keys compared with 1.89 for both aerospike-py builds." />
+
+### Optimization probes {#optimization-candidates}
+
+In a separate 2,000-key async run, the Rust batch call averaged **10.79 ms**, key parsing **1.20 ms**, and NumPy conversion **1.44 ms**, including **0.22 ms** to build the key index. Reusing digests reduced key parsing in both trials, while total latency improved in one trial. The Rust batch timer includes routing, transport, server work and decoding.
+
+<a href={useBaseUrl('/benchmark/4aabf09/ncloud/evidence.zip')}>Download fixed-rate measurements and trace summaries (ZIP)</a>

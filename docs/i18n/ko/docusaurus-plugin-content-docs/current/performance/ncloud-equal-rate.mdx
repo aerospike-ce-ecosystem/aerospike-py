@@ -1,0 +1,97 @@
+---
+title: 0.15 벤치마크 · 대규모 배치 읽기
+sidebar_label: 대규모 배치 읽기
+sidebar_position: 4
+slug: /performance/ncloud-equal-rate
+description: Linux에서 측정한 500·1,000·2,000키 NumPy 읽기의 CPU·최대 메모리·p99 비교.
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+aerospike-py 0.15 후보판(`4aabf09`)을 **직전 버전 0.14.4**, **공식 Aerospike Python SDK 1.0.0**(`aerospike-sdk`)과 비교했습니다.
+
+## NumPy 배치 읽기 {#changes-in-015}
+
+Ncloud Linux VM 두 대에서 정수 bin 8개를 읽고 NumPy 구조화 배열을 만들었습니다. 목표 처리량은 일반 CPython 초당 6만 행, free-threaded 초당 9만 행입니다. **세 지표 모두 ↓ 낮을수록 좋습니다.**
+
+<Tabs groupId="batch-metric">
+
+<TabItem value="cpu" label="행당 CPU 시간 ↓">
+
+| CPython | 키 수 | 0.15 (µs) | 0.14.4 대비 | 공식 SDK 대비 |
+| --- | ---: | ---: | ---: | ---: |
+| 일반 | 500 | 6.42 | −3.8% | −38.5% |
+| 일반 | 1,000 | 6.90 | −2.9% | −34.3% |
+| 일반 | 2,000 | 6.71 | −6.1% | −38.7% |
+| Free-threaded | 500 | 6.70 | +0.5% | −41.0% |
+| Free-threaded | 1,000 | 7.04 | +5.0% | 비교 제외¹ |
+| Free-threaded | 2,000 | 6.83 | −1.7% | −43.1% |
+
+</TabItem>
+
+<TabItem value="rss" label="최대 RSS ↓">
+
+| CPython | 키 수 | 0.15 (MiB) | 0.14.4 대비 | 공식 SDK 대비 |
+| --- | ---: | ---: | ---: | ---: |
+| 일반 | 500 | 59.4 | +6.2% | −42.4% |
+| 일반 | 1,000 | 68.9 | +9.2% | −37.7% |
+| 일반 | 2,000 | 83.8 | +10.7% | −34.7% |
+| Free-threaded | 500 | 70.7 | +6.4% | −36.7% |
+| Free-threaded | 1,000 | 77.8 | +5.6% | −42.0% |
+| Free-threaded | 2,000 | 94.1 | +7.3% | −40.2% |
+
+</TabItem>
+
+<TabItem value="p99" label="p99 지연 ↓">
+
+| CPython | 키 수 | 0.15 (ms) | 0.14.4 대비 | 공식 SDK 대비 |
+| --- | ---: | ---: | ---: | ---: |
+| 일반 | 500 | 5.94 | −1.0% | −42.6% |
+| 일반 | 1,000 | 11.21 | +1.0% | −50.3% |
+| 일반 | 2,000 | 19.68 | −1.9% | −47.6% |
+| Free-threaded | 500 | 6.55 | +20.8% | −34.6% |
+| Free-threaded | 1,000 | 11.52 | +6.8% | 비교 제외¹ |
+| Free-threaded | 2,000 | 20.49 | +1.9% | −48.9% |
+
+</TabItem>
+
+</Tabs>
+
+¹ 재측정에서 공식 SDK는 free-threaded 1,000키 요청 1,200건 중 2건을 놓쳤습니다. 이 조건의 CPU·p99 비교는 제외했습니다. 최대 RSS를 따로 측정한 실행에서는 모든 요청이 완료됐습니다.
+
+2,000키에서 0.15의 최대 RSS는 두 차례 모두 0.14.4보다 높았습니다. 일반 CPython의 p99는 첫 측정에서 **15.8% 증가**했고, 재측정에서는 **1.9% 감소**했습니다.
+
+<a href={useBaseUrl('/benchmark/4aabf09/ncloud/repeat-comparison.csv')}>클라이언트별 재측정값 (CSV)</a>
+
+## 측정 조건 {#workload-and-metrics}
+
+- Ncloud KR-1, 같은 서브넷의 Ubuntu 24.04 VM 2대(각 4 vCPU, 16 GiB). Aerospike CE 8.2.0.1 단일 노드에 1 GiB 인메모리 네임스페이스를 구성했습니다.
+- CPython 3.14.2·3.14.2t, NumPy 2.5.5. aerospike-py는 `batch_read().to_numpy(dtype)`를, 공식 SDK는 `session.query(*keys).execute()`, `collect()`, `numpy.fromiter()`를 사용했습니다. 재시도는 0회입니다.
+- 동기 호출을 최대 4개까지 허용하고 조건마다 새 프로세스로 3회 반복했습니다. 행당 CPU 시간과 최대 RSS는 프로세스 전체의 실행별 측정값 중앙값입니다. p99는 요청 예약부터 결과 배열 검증까지 걸린 시간을 세 실행에서 모아 계산했습니다.
+- 일반 CPython은 클라이언트·배치 크기별 1,050건을 완료했습니다. Free-threaded에서는 CPU·지연 측정에 1,200건, 별도 최대 RSS 측정에 180건을 예약했습니다.
+
+## 첫 측정과 프로파일링 {#tracing-the-batch-path}
+
+아래 그래프는 첫 측정 결과입니다. CPU·지연을 잴 때는 tracing을 껐습니다. Free-threaded 최대 RSS는 휠 해시를 나눠 읽어 초기 메모리 사용을 보정한 별도 실행에서 측정했습니다.
+
+### 일반 CPython {#standard-cpython}
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/gil-60000.png')} alt="일반 CPython에서 초당 60,000행을 읽을 때 키 개수별 행당 CPU 시간, 최대 RSS, 예약 시각 기준 p99를 세 클라이언트에서 비교한 그래프." />
+
+### Free-threaded CPython {#free-threaded-cpython}
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/ft-90000.png')} alt="Free-threaded CPython에서 초당 90,000행을 읽을 때 키 개수별 행당 CPU 시간, 별도 해시 방식으로 재측정한 최대 RSS, 예약 시각 기준 p99를 비교한 그래프." />
+
+### 결과 변환 시간
+
+Free-threaded에서 2,000키 요청을 하나씩 실행했을 때 NumPy 변환 중앙값은 aerospike-py 두 버전 모두 **1.89 ms**, 공식 SDK는 **4.28 ms**였습니다. 0.15에서 샘플링한 Python 배치 span 206개 모두 Rust `BATCH_READ` 자식 span에 연결됐습니다.
+
+<img src={useBaseUrl('/benchmark/4aabf09/ncloud/trace-phases.png')} alt="Free-threaded 진단에서 요청 시작부터 API 반환까지 걸린 시간과 NumPy 변환 시간을 나눠 비교한 막대그래프. 2,000키에서 공식 SDK의 NumPy 변환은 4.28ms, aerospike-py 두 버전은 각각 1.89ms였다." />
+
+### 최적화 실험 {#optimization-candidates}
+
+별도 비동기 2,000키 실험에서 Rust 배치 호출은 평균 **10.79 ms**, 키 파싱은 **1.20 ms**, NumPy 변환은 **1.44 ms**였습니다. 변환 시간 중 **0.22 ms**가 키 인덱스 생성에 쓰였습니다. digest를 재사용하면 두 번 모두 키 파싱이 빨라졌고, 전체 지연은 한 번 줄었습니다. Rust 배치 호출 시간에는 라우팅·전송·서버 처리·디코딩이 포함됩니다.
+
+<a href={useBaseUrl('/benchmark/4aabf09/ncloud/evidence.zip')}>동일 처리량 측정값과 trace 요약 내려받기 (ZIP)</a>

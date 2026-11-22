@@ -43,7 +43,16 @@ jobs:
           # src/aerospike_py/ wrapper and stubs
           - language: python
             build-mode: none
-          # docs/ Docusaurus site
+          # rust/ — the PyO3 core, which is what runs inside a user's process
+          # and what the wheel ships. `none` is the only build mode CodeQL has
+          # for Rust: it reads the crate through rust-analyzer and never links
+          # it, so the `extension-module` feature this crate keeps off under
+          # `cargo test` does not come into it. It needs Cargo.toml (present)
+          # and rustup/cargo on the runner (ubuntu-latest has both).
+          - language: rust
+            build-mode: none
+          # docs/ only: the Docusaurus site's configuration and components.
+          # Nothing of this is in the wheel.
           - language: javascript-typescript
             build-mode: none
 

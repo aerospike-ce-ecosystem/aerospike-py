@@ -1,6 +1,8 @@
-# aerospike-py vs 공식 aerospike client — uvicorn ASGI 벤치마크
+# aerospike-py와 기존 C 클라이언트의 uvicorn ASGI 벤치마크
 
 uvicorn ASGI 위에서 **aerospike-py (Rust/PyO3 native async)** 와 **공식 aerospike Python client (C extension, sync → `run_in_executor` 래핑)** 의 성능을 시나리오별로 비교한다.
+
+직전 배포판 `aerospike-py 0.14.4` 및 새 공식 `aerospike-sdk 1.0.0`과의 비교는 [클라이언트 벤치마크](../docs/i18n/ko/docusaurus-plugin-content-docs/current/performance/client-comparison.md)에 있다. [비동기 스트리밍 프로파일](../docs/i18n/ko/docusaurus-plugin-content-docs/current/performance/async-stream-profile.md)에서는 두 Rust 클라이언트의 행별 전달 비용을 확인할 수 있다. 각 문서에서 해당 실험의 데이터와 스크립트를 내려받을 수 있다.
 
 본 디렉토리는 메인 패키지와 독립된 별도 uv 프로젝트다. 메인 venv 와 섞이지 않는다.
 

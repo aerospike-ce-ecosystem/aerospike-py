@@ -45,6 +45,8 @@ aerospike_py.stop_metrics_server()
 `exists()` 는 `KeyNotFoundError` 를 success 로 취급합니다 — "not found" 가 정상 결과이기 때문.
 :::
 
+`foreach()` callback이 exception을 발생시켜 멈춘 `query`는 sync client와 async client 모두에서 성공으로도 오류로도 기록되지 않습니다. 실패한 것은 query가 아니라 callback이기 때문입니다.
+
 ## Framework 통합
 
 ### FastAPI

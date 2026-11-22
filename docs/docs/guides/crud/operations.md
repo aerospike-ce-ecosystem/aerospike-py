@@ -737,7 +737,7 @@ client.operate(key, ops)
 | `MAP_RETURN_COUNT` | Return count of matched entries |
 | `MAP_RETURN_KEY` | Return key(s) |
 | `MAP_RETURN_VALUE` | Return value(s) |
-| `MAP_RETURN_KEY_VALUE` | Return key-value pair(s) |
+| `MAP_RETURN_KEY_VALUE` | Return key-value pair(s), as a list of `(key, value)` tuples: `[("j", 2), ("k", 1)]` (the official client returns a flat list, `["j", 2, "k", 1]`) |
 | `MAP_RETURN_EXISTS` | Return boolean existence |
 | `MAP_UNORDERED` | Unordered map (default) |
 | `MAP_KEY_ORDERED` | Ordered by key |

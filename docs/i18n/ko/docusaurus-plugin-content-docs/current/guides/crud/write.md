@@ -248,7 +248,7 @@ results = await client.batch_write(records, retry=5)
 </Tabs>
 
 :::tip[in_doubt flag]
-`br.in_doubt`가 `True`이면 error가 발생했어도 server에서 write를 완료했을 수 있습니다. Write를 보낸 뒤 timeout이 난 경우가 한 예입니다. Non-idempotent operation을 두 번 적용하지 않도록 retry 전에 `in_doubt`를 확인하세요.
+`br.in_doubt`가 `True`이면 error가 발생했어도 server에서 write를 완료했을 수 있습니다. Write를 보낸 뒤 timeout이 난 경우가 한 예입니다. Non-idempotent operation을 두 번 적용하지 않도록 retry 전에 `in_doubt`를 확인하세요. Write batch에 `max_retries > 0`을 주었다면 `KEY_NOT_FOUND`, `FILTERED_OUT`, `UDF_BAD_RESPONSE`로 끝난 row와, 다시 보낼 수 없어 client가 `PARTITION_UNAVAILABLE`을 준 row도 in doubt입니다. [다시 보낸 write와 `in_doubt`](../admin/error-handling.md#re-sent-writes-and-in_doubt)를 참고하세요.
 :::
 
 ## Batch Operate / Remove

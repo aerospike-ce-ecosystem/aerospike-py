@@ -54,9 +54,10 @@ Returned by: batch operations (inside `BatchWriteResult.batch_records`)
 | Field | Type | Description |
 |-------|------|-------------|
 | `key` | `AerospikeKey \| None` | Record key |
-| `result` | `int` | Per-record result code (0 = success) |
+| `result` | `int` | `0` when the server reported success, the server's result code when it reported a failure (`2` not found, `27` filtered out, ...), `-1` when no server answered for this record |
 | `record` | `Record \| None` | Record data (`None` if operation failed) |
-| `in_doubt` | `bool` | Whether the write may have completed despite a transient error (default `False`) |
+| `in_doubt` | `bool` | The record failed, but the write may have been applied: the request was sent and the answer never came back (default `False`). With `max_retries > 0` on a write batch, a row that ends in `KEY_NOT_FOUND`, `FILTERED_OUT` or `UDF_BAD_RESPONSE` is in doubt too, and so is a `PARTITION_UNAVAILABLE` row the client gave the record itself when it found no node to send it to again (see [Re-sent writes and `in_doubt`](../guides/admin/error-handling.md#re-sent-writes-and-in_doubt)) |
+| `error_type` | `str \| None` | `None` on success. Otherwise the kind of failure, by the same name an exception carries in `error_type`: a server code (`"KeyNotFoundError"`, `"FilteredOut"`, ...), a client-side failure (`"Timeout"`, `"Connection"`, ...), or `"NoResponse"` when no node answered for the record. Tells the `-1` results apart. Added in 0.15: code that unpacks a `BatchRecord` into four names must take five. |
 
 ```python
 results = client.batch_operate(keys, ops)
@@ -72,6 +73,22 @@ Returned by: `batch_write()`, `batch_operate()`, `batch_remove()`, `batch_write_
 | Field | Type | Description |
 |-------|------|-------------|
 | `batch_records` | `list[BatchRecord]` | Per-record results |
+| `retry` | `BatchRetryInfo` | What the `retry=N` loop of `batch_write` / `batch_write_numpy` did (`attempts`, `max_attempts`, `truncated_by_timeout`, `unresolved`). The default for methods that never retry. |
+
+Also the type of `exc.partial_result` when a batch call (`batch_read` included) fails as a whole: one `BatchRecord` per requested record, in request order.
+
+### `BatchRetryInfo`
+
+What the client-side retry loop of `batch_write` / `batch_write_numpy` (`retry=N`) actually did. Found in `BatchWriteResult.retry`, also on `exc.partial_result.retry` when the call raises. `retry=N` asks for `N + 1` attempts, but the loop stops once `total_timeout` (default 1000 ms) runs out.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `attempts` | `int` | `1` | Attempts actually issued, including the first. Always `>= 1`. |
+| `max_attempts` | `int` | `1` | Attempts the caller asked for: `1 + retry`, at most `2**32 - 1`. |
+| `truncated_by_timeout` | `bool` | `False` | `total_timeout` stopped the retries before `max_attempts`. |
+| `unresolved` | `int` | `0` | Records still carrying a retryable failure code when the loop ended. |
+
+The defaults describe a call that issued exactly one batch and never retried, which is what every other batch method reports.
 
 ### `BatchRecords`
 
@@ -90,11 +107,11 @@ through a lazy + cached `to_dict()`).
 
 | Method / Property | Type | Description |
 |-------------------|------|-------------|
-| `to_dict()` | `dict[UserKey, dict[str, Any]]` | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. |
+| `to_dict()` | `dict[UserKey, dict[str, Any]]` | Materialise as `dict[user_key, bins_dict]`. Excludes digest-only and failed records. Returns a shallow copy of the cached view: the bins dicts are shared with the handle, so copy one before you change it. |
 | `to_list()` | `list[dict[str, Any] \| None]` | Positional bulk conversion: one Rust pass returning bins dicts aligned 1:1 with the request key order. Failed reads and not-found records are `None` at their position; successful digest-only reads **do** return bins (key-agnostic — no `user_key` collisions, unlike the dict views). Check misses with `is None` (`{}` = found with no selected bins). Not cached — every call returns a fresh, freely mutable list. |
-| `to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` **must be a `np.dtype` object** (e.g. `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`). Each field name in the structured dtype maps to the bin of the same name; list-of-tuples shorthand and single-field strings are not auto-promoted — wrap them in `np.dtype(...)` first. The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. **Failed / missing reads (`result_code != 0`) leave their row at the dtype's zero value — always mask with `result_codes` before downstream math.** |
+| `to_numpy(dtype)` | `NumpyBatchRecords` | Materialise as a structured array. `dtype` is a structured `np.dtype` (e.g. `np.dtype([("age","<i4"),("height","<f4"),("name","S10")])`) or anything `np.dtype(...)` makes one of: a list of tuples, a dict spec, a comma-separated string. Each field name in the structured dtype maps to the bin of the same name; a dtype without named fields (`"i8"`) raises `TypeError`. The per-record fill loop runs with the GIL released (`py.detach`), so sibling work (torch inference, other asyncio tasks) can hold the GIL while the buffer fills. **Failed / missing reads (`result_code != 0`) leave their row at the dtype's zero value — always mask with `result_codes` before downstream math.** |
 | `batch_records` | `list[BatchRecord]` | Compat path: lazy NamedTuple conversion. |
-| `found_count()` | `int` | Count of successful records (no conversion needed). |
+| `found_count()` | `int` | Count of successful rows (no conversion needed). Counts rows, not keys: a user key requested twice and found twice counts twice, and a successful digest-only row counts too. |
 | `keys()` | `dict_keys` | Dict-style keys view, mirrors `to_dict().keys()` (missing / failed records excluded). |
 | `all_user_keys()` | `list[UserKey \| None]` | Every batch record's `user_key` in request order — positionally aligned with `batch_records` and a `NumpyBatchRecords` data array. Digest-only requests (no `user_key` element) yield `None` in their slot so `zip(handle.all_user_keys(), handle.batch_records)` always pairs every record with its requested key. |
 | `iter_records()` | `Iterator[BatchRecord]` | Iterate every record (including digest-only and failed) in insertion order. |
@@ -102,7 +119,7 @@ through a lazy + cached `to_dict()`).
 | `lazy_records[user_key]` | `dict[str, Any]` | Dict-style item access (`__getitem__`). |
 | `user_key in lazy_records` | `bool` | Dict-style membership (`__contains__`). |
 | `lazy_records.get(user_key, default=None)` | `dict[str, Any] \| Any` | Dict-style `get` with optional default; mirrors `dict.get` semantics. |
-| `len(lazy_records)` | `int` | Dict-view cardinality — matches `len(lazy_records.to_dict())` (successful reads with a `user_key` and a `record` body). Fast: a pure-Rust filter+count, no PyDict allocation. For the raw record count (including missing reads / per-record failures) use `len(lazy_records.batch_records)`. |
+| `len(lazy_records)` | `int` | Number of distinct keys in the dict view — always equals `len(lazy_records.to_dict())`, also when a user key was requested twice or from two sets. Fast: a pure-Rust pass, no PyDict allocation. For the number of successful rows use `found_count()`; for the raw row count (including missing reads / per-record failures) use `len(lazy_records.batch_records)`. |
 | `release_cache()` | `None` | Drop the cached `PyDict` built by the first Mapping access / `to_dict()`, keeping the raw Rust records (and therefore `batch_records`, `iter_records()`, `all_user_keys()`, `found_count()`, `to_numpy(dtype)`) intact. Subsequent Mapping access rebuilds the cache lazily. Useful after a large-batch materialisation that you no longer need. |
 
 ### `ExistsResult`
@@ -138,7 +155,7 @@ Returned by: `operate_ordered()`
 |-------|------|-------------|
 | `key` | `AerospikeKey \| None` | Record key |
 | `meta` | `RecordMetadata \| None` | Record metadata |
-| `ordered_bins` | `list[BinTuple]` | Ordered operation results |
+| `ordered_bins` | `list[BinTuple]` | One entry per operation that answered, in request order; a bin answered twice appears twice. See [Ordered results](../guides/version-compatibility.md#operate_ordered-returns-one-entry-per-operation) for when a value-less operation appears as `(bin, None)`. |
 
 ### `BinTuple`
 
@@ -178,8 +195,8 @@ Used by: `aerospike_py.client(config)`, `AsyncClient(config)`
 | `auth_mode` | `int` | `AUTH_INTERNAL` | `AUTH_INTERNAL`, `AUTH_EXTERNAL`, `AUTH_PKI` |
 | `user` | `str` | | Authentication username |
 | `password` | `str` | | Authentication password |
-| `timeout` | `int` | `1000` | Connection timeout (ms) |
-| `idle_timeout` | `int` | | Connection idle timeout (ms) |
+| `timeout` | `int` | `30000` | Connection timeout (ms) |
+| `idle_timeout` | `int` | `30000` | Connection idle timeout (ms) |
 | `max_conns_per_node` | `int` | `100` | Max connections per node |
 | `min_conns_per_node` | `int` | `0` | Pre-warm connections |
 | `tend_interval` | `int` | `1000` | Cluster tend interval (ms) |
@@ -196,7 +213,7 @@ Used by: `get()`, `select()`, `exists()`
 | `max_retries` | `int` | `2` | Max retries |
 | `sleep_between_retries` | `int` | `0` | Sleep between retries (ms) |
 | `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. Drains the socket so reused connections do not see stale responses. |
-| `filter_expression` | `Any` | | Expression filter built via `aerospike_py.exp`. |
+| `filter_expression` | `Any` | | Expression filter built via `aerospike_py.exp`. In every policy, any other value except `None` (a string, a number, a list, a dict) raises `InvalidArgError` before anything is sent. |
 | `replica` | `int` | `POLICY_REPLICA_SEQUENCE` | Replica selection algorithm. |
 | `read_mode_ap` | `int` | `POLICY_READ_MODE_AP_ONE` | AP namespace read consistency. Maps to `aerospike-core` `ConsistencyLevel`. |
 | `read_touch_ttl_percent` | `int` | `0` | Reset TTL on read when within N% of original write TTL (server v8+). `0` = server default, `-1` = never reset, `1..=100` = percent. |
@@ -232,7 +249,7 @@ Used by: `batch_read()`, `batch_operate()`, `batch_write()`, `batch_remove()`
 |-------|------|---------|-------------|
 | `socket_timeout` | `int` | `30000` | Socket timeout (ms) |
 | `total_timeout` | `int` | `1000` | Total transaction timeout (ms) |
-| `max_retries` | `int` | `2` | Max retries |
+| `max_retries` | `int` | `2` / `0` | Automatic re-sends inside the Rust client. `2` for a batch that only reads (`batch_read`, a `batch_operate` whose operations all read); `0` for a batch that writes, deletes or runs a UDF (`batch_write`, `batch_write_numpy`, `batch_remove`, `batch_apply`, a writing `batch_operate`), because a re-sent increment or UDF call would be applied twice. `batch_write` has its own `retry=` argument; giving both `retry=N` and a non-zero `max_retries` raises `InvalidArgError`. |
 | `sleep_between_retries` | `int` | `0` | Sleep between retries (ms) |
 | `timeout_delay` | `int` | `0` | Delay (ms) before timing out a request after the deadline. |
 | `concurrency` | `int` | `BATCH_CONCURRENCY_PARALLEL` | Per-node dispatch mode: `BATCH_CONCURRENCY_SEQUENTIAL` (one node at a time) or `BATCH_CONCURRENCY_PARALLEL` (all nodes in parallel — default). See [Batch Concurrency constants](constants.md#batch-concurrency). Other values raise `ValueError`. |
@@ -367,7 +384,7 @@ Per-record meta for `batch_apply()`. Pass as the second element of a `(key, meta
 | `durable_delete` | `bool` | Override durable_delete. |
 
 :::note
-`filter_expression` is **not** accepted in `BatchUDFMeta` — set it on the batch-level [`BatchUDFPolicy`](#batchudfpolicy) instead. (Per-record `filter_expression` is unwired in aerospike-core 2.0; matches the [`BatchDeleteMeta`](#batchdeletemeta) shape.)
+`filter_expression` is **not** accepted in `BatchUDFMeta` — set it on the batch-level [`BatchUDFPolicy`](#batchudfpolicy) instead, as with [`BatchDeleteMeta`](#batchdeletemeta).
 :::
 
 ```python

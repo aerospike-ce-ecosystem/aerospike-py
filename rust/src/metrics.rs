@@ -72,7 +72,7 @@ pub fn init_internal_stage_from_env() {
     INTERNAL_STAGE_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
-use aerospike_core::{Error as AsError, ResultCode};
+use aerospike_core::Error as AsError;
 use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::histogram::Histogram;
@@ -161,6 +161,22 @@ impl<'a> OperationTimer<'a> {
         }
     }
 
+    /// A timer for an operation that began at `start`, for callers that
+    /// cannot keep a borrowing timer alive while the operation runs.
+    pub fn started_at(
+        start: Instant,
+        op_name: &'a str,
+        namespace: &'a str,
+        set_name: &'a str,
+    ) -> Self {
+        Self {
+            start,
+            op_name,
+            namespace,
+            set_name,
+        }
+    }
+
     pub fn finish(self, error_type: &str) {
         let duration = self.start.elapsed().as_secs_f64();
         let labels = OperationLabels {
@@ -180,29 +196,15 @@ impl<'a> OperationTimer<'a> {
 
 /// Classify an `aerospike_core::Error` into a short error-type string for metric labels.
 ///
-/// Returns `Cow::Borrowed` for known error types (zero alloc) and `Cow::Owned`
-/// only for unknown `ResultCode` variants.
+/// The label is [`ErrorClass::label`](crate::errors::ErrorClass::label): the
+/// same classification the Python exception and the OpenTelemetry span use,
+/// so a failure counted here under `error_type="Connection"` is the one a
+/// caller catches as `ClusterError` with `error_type == "Connection"`.
+///
+/// Returns `Cow::Borrowed` for the common classes (zero alloc) and
+/// `Cow::Owned` only for a server result code without a dedicated label.
 pub fn error_type_from_aerospike_error(err: &AsError) -> Cow<'static, str> {
-    match err {
-        AsError::Connection(_) => Cow::Borrowed("Connection"),
-        AsError::Timeout(_) => Cow::Borrowed("Timeout"),
-        AsError::InvalidArgument(_) => Cow::Borrowed("InvalidArgument"),
-        AsError::ServerError(rc, _, _) => match rc {
-            ResultCode::KeyNotFoundError => Cow::Borrowed("KeyNotFoundError"),
-            ResultCode::KeyExistsError => Cow::Borrowed("KeyExistsError"),
-            ResultCode::GenerationError => Cow::Borrowed("GenerationError"),
-            ResultCode::RecordTooBig => Cow::Borrowed("RecordTooBig"),
-            ResultCode::BinTypeError => Cow::Borrowed("BinTypeError"),
-            ResultCode::BinNotFound => Cow::Borrowed("BinNotFound"),
-            ResultCode::FilteredOut => Cow::Borrowed("FilteredOut"),
-            ResultCode::Timeout => Cow::Borrowed("Timeout"),
-            _ => Cow::Owned(format!("{:?}", rc)),
-        },
-        AsError::InvalidNode(_) => Cow::Borrowed("InvalidNode"),
-        AsError::NoMoreConnections => Cow::Borrowed("NoMoreConnections"),
-        AsError::MaxErrorRate(_) => Cow::Borrowed("MaxErrorRate"),
-        _ => Cow::Borrowed("Unknown"),
-    }
+    crate::errors::ErrorClass::of(err).label()
 }
 
 /// Record an internal stage duration for fine-grained profiling.
@@ -310,13 +312,12 @@ macro_rules! stage_timer {
 
 /// Instrument a data operation with metrics.
 ///
-/// The expression must return `Result<T, AsError>`.
-/// Returns `Result<T, PyErr>`.
+/// Returns the original result after recording its outcome.
 ///
 /// When metrics are disabled via [`set_metrics_enabled(false)`], skips timer
 /// creation entirely (single atomic load, ~1ns overhead).
 #[macro_export]
-macro_rules! timed_op {
+macro_rules! timed_result {
     ($op:expr, $ns:expr, $set:expr, $body:expr) => {{
         if $crate::metrics::is_metrics_enabled() {
             let timer = $crate::metrics::OperationTimer::start($op, $ns, $set);
@@ -324,14 +325,13 @@ macro_rules! timed_op {
             match &result {
                 Ok(_) => timer.finish(""),
                 Err(e) => {
-                    let err_type = $crate::metrics::error_type_from_aerospike_error(e);
+                    let err_type = $crate::tracing::ObservedError::error_label(e);
                     timer.finish(&err_type);
                 }
             }
-            result.map_err($crate::errors::as_to_pyerr)
+            result
         } else {
-            let result = $body;
-            result.map_err($crate::errors::as_to_pyerr)
+            $body
         }
     }};
 }

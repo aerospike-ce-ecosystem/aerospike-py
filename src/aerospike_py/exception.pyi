@@ -44,10 +44,29 @@ record-not-found, ``5`` for record-exists, ``22`` for forbidden), matching the
 client-side errors that never received a server response (connection failures,
 client timeouts, invalid arguments) expose the sentinel ``-1``.
 
+The ``-1`` cases are told apart by ``error_type``, and a write that failed
+says whether it may have been applied anyway::
+
+    try:
+        client.put(key, bins)
+    except aerospike_py.AerospikeError as exc:
+        if exc.error_type == "Timeout" and exc.in_doubt:
+            ...  # the write may be in; read before writing again
+
+A batch call that fails as a whole keeps the rows it did collect::
+
+    try:
+        client.batch_write(records)
+    except aerospike_py.AerospikeError as exc:
+        if exc.partial_result is not None:
+            done = [br.key for br in exc.partial_result.batch_records if br.result == 0]
+
 Deprecated aliases (emit ``DeprecationWarning`` on access; **removed in v1.0.0**):
     - ``TimeoutError`` -- use ``AerospikeTimeoutError`` instead.
     - ``IndexError`` -- use ``AerospikeIndexError`` instead.
 """
+
+from aerospike_py.types import BatchWriteResult
 
 class AerospikeError(Exception):
     """Base exception for all Aerospike errors.
@@ -56,9 +75,52 @@ class AerospikeError(Exception):
         result_code: Structured Aerospike server result code (ADR-0027). The
             real wire code for server errors (e.g. ``2`` = record-not-found);
             ``-1`` for client-side errors that never received a server response.
+        error_type: What kind of failure this is, by the same name the
+            Prometheus ``error_type`` label and the OpenTelemetry
+            ``error.type`` attribute carry. A server result code is named
+            after the code (``"KeyNotFoundError"``, ``"KeyExistsError"``,
+            ``"GenerationError"``, ``"FilteredOut"``, ``"DeviceOverload"``,
+            ...), with ``"ServerTimeout"`` for a timeout the server reported.
+            Client-side failures are ``"Timeout"`` (the client's own
+            deadline), ``"MaxRetriesExceeded"``, ``"Connection"``,
+            ``"NoMoreConnections"``, ``"MaxErrorRate"``, ``"InvalidNode"``,
+            ``"InvalidArgument"``, ``"UdfBadResponse"``,
+            ``"StreamTerminated"``, ``"BadResponse"``, ``"Backpressure"``,
+            ``"RustPanic"`` and ``"Client"``.
+        in_doubt: ``True`` when a write was sent and no definite answer came
+            back, so the server may have applied it. ``False`` when the
+            server answered with a failure (record exists, a failed UDF, a
+            busy key, ...), and always for reads.
+
+            One answer is not definite when the caller has switched
+            re-sending on for a write (``max_retries > 0``; it is off by
+            default): "record not found" for a delete, "filtered out" and a
+            failed UDF can be the answer to a second send whose first one
+            was applied. The client cannot tell whether it sent twice, so
+            these are reported in doubt under such a policy. So is a write
+            batch row with "partition unavailable" that the client gave the
+            row itself because it found no node for the record when the
+            node's share was due to be sent again (the node was dropped
+            from the cluster, or the client was closed); the same code from
+            a server at the first send is a refusal, not in doubt.
+
+            The exception of a batch call that failed as a whole is in
+            doubt whenever any row of its ``partial_result`` is.
+        partial_result: The per-record rows of a batch call that failed as a
+            whole (a ``BatchWriteResult``), ``None`` for every other failure.
+            One entry per requested record, in request order: the records
+            other nodes answered keep their results, the rest say why they
+            have none (``result``, ``error_type``, ``in_doubt``). When the
+            call failed on several nodes, the exception is the error of one
+            of them (the first whose share failed), so its type and
+            ``result_code`` can differ with the order of the records; the
+            rows say what happened to each record.
     """
 
     result_code: int
+    error_type: str
+    in_doubt: bool
+    partial_result: BatchWriteResult | None
 
 class ClientError(AerospikeError):
     """Client-side error such as connection failure, misconfiguration, or internal error."""
@@ -93,13 +155,12 @@ class BackpressureError(ClientError):
 class RustPanicError(ClientError):
     """Raised when a native Rust panic was caught at a client API boundary.
 
-    The Python process survived; the operation did not complete. The most
-    common cause on legacy clusters is a record carrying a language-specific
-    blob particle type (``PYTHON_BLOB`` = 8, ``JAVA_BLOB`` = 5, etc.) that
-    ``aerospike-core`` 2.0.0 cannot decode. See issue #280.
+    The Python process survived; the operation did not complete.
 
-    Catch this per-record (in scans / batch reads) to skip the bad record
-    instead of failing the whole request.
+    Up to 0.14.x the usual cause was a record carrying a language-specific
+    blob particle type (``PYTHON_BLOB``, ``JAVA_BLOB``, ...), see issue #280.
+    Such a bin is now returned as ``bytes`` holding its raw payload, so this
+    exception means an actual defect: please report it.
     """
 
 class InvalidArgError(AerospikeError):

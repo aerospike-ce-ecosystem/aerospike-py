@@ -7,6 +7,7 @@ batch_operate scenarios not yet covered by any_client tests.
 """
 
 import aerospike_py
+from tests.helpers import CLOCK_SKEW_SECONDS
 
 
 class TestAsyncConnection:
@@ -196,7 +197,7 @@ class TestAsyncBatchWriteTTL:
             _, meta, _ = await async_client.get(k)
             assert meta is not None
             assert meta.ttl > 0
-            assert meta.ttl <= ttl_seconds
+            assert meta.ttl <= ttl_seconds + CLOCK_SKEW_SECONDS
 
     async def test_async_batch_write_per_record_meta_ttl(self, async_client, async_cleanup):
         """Per-record TTL via (key, bins, meta) tuple."""
@@ -210,7 +211,7 @@ class TestAsyncBatchWriteTTL:
         _, meta, _ = await async_client.get(key)
         assert meta is not None
         assert meta.ttl > 0
-        assert meta.ttl <= ttl_seconds
+        assert meta.ttl <= ttl_seconds + CLOCK_SKEW_SECONDS
 
     async def test_async_batch_write_ttl_never_expire(self, async_client, async_cleanup):
         """TTL_NEVER_EXPIRE via policy in async batch_write."""
@@ -251,7 +252,7 @@ class TestAsyncBatchWriteTTL:
 
         _, meta_m, _ = await async_client.get(key_meta)
         assert meta_m is not None
-        assert meta_m.ttl <= meta_ttl
+        assert meta_m.ttl <= meta_ttl + CLOCK_SKEW_SECONDS
         assert meta_m.ttl > 0
 
     async def test_async_batch_write_ttl_dont_update(self, async_client, async_cleanup):
@@ -290,11 +291,11 @@ class TestAsyncBatchWriteTTL:
         _, meta_c, _ = await async_client.get(key_c)
 
         assert meta_a.ttl > 300
-        assert meta_a.ttl <= 3600
+        assert meta_a.ttl <= 3600 + CLOCK_SKEW_SECONDS
         assert meta_b.ttl > 3600
-        assert meta_b.ttl <= 86400
+        assert meta_b.ttl <= 86400 + CLOCK_SKEW_SECONDS
         assert meta_c.ttl > 0
-        assert meta_c.ttl <= 300
+        assert meta_c.ttl <= 300 + CLOCK_SKEW_SECONDS
 
 
 class TestAsyncBatchWriteGen:
@@ -335,4 +336,4 @@ class TestAsyncBatchWriteGen:
         _, meta2, bins = await async_client.get(key)
         assert bins["val"] == 2
         assert meta2.ttl > 0
-        assert meta2.ttl <= 3600
+        assert meta2.ttl <= 3600 + CLOCK_SKEW_SECONDS

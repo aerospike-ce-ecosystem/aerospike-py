@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Compatibility by version</title>
+<script>
+  const target = new URL(location.href);
+  target.pathname = target.pathname.replace(/\/migration-0\.15(?:\/index\.html|\/)?$/, '/version-compatibility/');
+  target.hash ||= 'v0-15';
+  location.replace(target.href);
+</script>
+<meta http-equiv="refresh" content="0; url=../version-compatibility/#v0-15">
+<a href="../version-compatibility/#v0-15">Compatibility by version</a>
+</html>

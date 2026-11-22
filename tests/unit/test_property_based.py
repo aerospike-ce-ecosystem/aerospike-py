@@ -220,21 +220,20 @@ class TestNumPyDtypeProperties:
     )
     @settings(max_examples=50)
     def test_valid_dtypes_accepted(self, n_fields, data):
-        """Random valid structured dtypes are accepted by _batch_records_to_numpy."""
+        """Random valid structured dtypes are accepted by the shared dtype validator."""
         import numpy as np
 
-        from aerospike_py.numpy_batch import _ALLOWED_KINDS
+        from aerospike_py._aerospike import validate_numpy_dtype
 
-        kind_choices = [("i4", "i"), ("u4", "u"), ("f8", "f"), ("S10", "S"), ("V8", "V")]
+        kind_choices = ["i1", "i4", "i8", "u2", "u4", "f2", "f4", "f8", "S10", "V8", ("f4", (3,)), ("i8", (1,))]
         fields = []
         for i in range(n_fields):
-            kind_spec, _ = data.draw(st.sampled_from(kind_choices))
-            fields.append((f"field_{i}", kind_spec))
+            spec = data.draw(st.sampled_from(kind_choices))
+            fields.append((f"field_{i}", *spec) if isinstance(spec, tuple) else (f"field_{i}", spec))
 
-        dtype = np.dtype(fields)
-        # Validate all fields are in allowed kinds
-        for name in dtype.names:
-            assert dtype[name].base.kind in _ALLOWED_KINDS
+        # The validator is the single source of truth for both the native
+        # paths and the pure-Python conversion; it returns None on success.
+        assert validate_numpy_dtype(np.dtype(fields)) is None
 
 
 # ── Predicate properties ──────────────────────────────────────────

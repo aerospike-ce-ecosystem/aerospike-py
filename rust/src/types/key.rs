@@ -81,26 +81,26 @@ pub fn py_to_key(key_tuple: &Bound<'_, PyAny>) -> PyResult<Key> {
         let bytes_data = b.as_bytes();
         let digest =
             explicit_digest.unwrap_or_else(|| compute_bytes_key_digest(&set_name, bytes_data));
-        return Ok(Key {
+        return Ok(Key::with_digest(
             namespace,
             set_name,
-            user_key: Some(Value::Blob(bytes_data.to_vec())),
+            Some(Value::Blob(bytes_data.to_vec())),
             digest,
-        });
+        ));
     }
 
     let user_key = py_to_value(&key_item)?;
 
     if let Some(digest) = explicit_digest {
-        return Ok(Key {
+        return Ok(Key::with_digest(
             namespace,
             set_name,
-            user_key: match &user_key {
+            match &user_key {
                 Value::Nil => None,
                 _ => Some(user_key),
             },
             digest,
-        });
+        ));
     }
 
     Key::new(namespace, set_name, user_key)
@@ -109,13 +109,13 @@ pub fn py_to_key(key_tuple: &Bound<'_, PyAny>) -> PyResult<Key> {
 
 /// Convert Rust Key to Python tuple (namespace, set, key, digest)
 pub fn key_to_py(py: Python<'_>, key: &Key) -> PyResult<Py<PyAny>> {
-    let ns = key.namespace.as_str().into_pyobject(py)?;
-    let set = key.set_name.as_str().into_pyobject(py)?;
-    let user_key = match &key.user_key {
+    let ns = key.namespace().into_pyobject(py)?;
+    let set = key.set_name().into_pyobject(py)?;
+    let user_key = match &key.user_key() {
         Some(v) => value_to_py(py, v)?,
         None => py.None(),
     };
-    let digest = pyo3::types::PyBytes::new(py, &key.digest);
+    let digest = pyo3::types::PyBytes::new(py, &key.digest());
 
     let tuple = PyTuple::new(
         py,
@@ -199,12 +199,12 @@ fn py_to_pending_key(
     if let Ok(b) = key_item.cast::<PyBytes>() {
         let bytes_data = b.as_bytes();
         return Ok(match explicit_digest {
-            Some(digest) => PendingKey::Ready(Key {
+            Some(digest) => PendingKey::Ready(Key::with_digest(
                 namespace,
                 set_name,
-                user_key: Some(Value::Blob(bytes_data.to_vec())),
+                Some(Value::Blob(bytes_data.to_vec())),
                 digest,
-            }),
+            )),
             None => PendingKey::HashBytes {
                 namespace,
                 set_name,
@@ -216,15 +216,15 @@ fn py_to_pending_key(
     let user_key = py_to_value(&key_item)?;
 
     if let Some(digest) = explicit_digest {
-        return Ok(PendingKey::Ready(Key {
+        return Ok(PendingKey::Ready(Key::with_digest(
             namespace,
             set_name,
-            user_key: match &user_key {
+            match &user_key {
                 Value::Nil => None,
                 _ => Some(user_key),
             },
             digest,
-        }));
+        )));
     }
 
     Ok(PendingKey::Hash {
@@ -270,12 +270,12 @@ pub fn py_to_keys(py: Python<'_>, keys: &Bound<'_, PyList>) -> PyResult<Vec<Key>
                     blob,
                 } => {
                     let digest = compute_bytes_key_digest(&set_name, &blob);
-                    Ok(Key {
+                    Ok(Key::with_digest(
                         namespace,
                         set_name,
-                        user_key: Some(Value::Blob(blob)),
+                        Some(Value::Blob(blob)),
                         digest,
-                    })
+                    ))
                 }
             })
             .collect()
@@ -356,8 +356,8 @@ mod tests {
             let user_key = PyString::new(py, "pk1").into_any();
             let tuple = make_key_tuple(py, &user_key, None);
             let key = py_to_key(tuple.as_any()).expect("3-element tuple should parse");
-            assert_eq!(key.namespace, "test");
-            assert_eq!(key.set_name, "demo");
+            assert_eq!(key.namespace(), "test");
+            assert_eq!(key.set_name(), "demo");
         });
     }
 
@@ -370,7 +370,7 @@ mod tests {
             let digest = PyBytes::new(py, &[7u8; 20]).into_any();
             let tuple = make_key_tuple(py, &user_key, Some(&digest));
             let key = py_to_key(tuple.as_any()).expect("explicit 20-byte digest should parse");
-            assert_eq!(key.digest, [7u8; 20]);
+            assert_eq!(key.digest(), [7u8; 20]);
         });
     }
 
@@ -385,7 +385,7 @@ mod tests {
             let tuple = make_key_tuple(py, &user_key, Some(&none));
             let key = py_to_key(tuple.as_any()).expect("None digest should parse");
             // The digest is derived, not all-zero.
-            assert_ne!(key.digest, [0u8; 20]);
+            assert_ne!(key.digest(), [0u8; 20]);
         });
     }
 

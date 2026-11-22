@@ -19,11 +19,10 @@ use std::ptr;
 use aerospike_core::{BatchRecord, Bin, FloatValue, Key, Value};
 use half::f16;
 use log::{debug, warn};
-use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyMemoryError, PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use crate::errors::result_code_to_int;
 use crate::record_helpers::record_ttl_seconds;
 use crate::types::key::compute_bytes_key_digest;
 use crate::types::value::value_to_py;
@@ -55,6 +54,28 @@ pub struct FieldInfo {
     pub base_itemsize: usize,
     /// The kind of the base dtype element.
     pub kind: DtypeKind,
+    /// Whether the field is a NumPy sub-array (its `subdtype` is set), such as
+    /// `('vec', 'f8', (4,))`. This is tracked explicitly because a one-element
+    /// `(1,)` sub-array has `itemsize == base_itemsize` and cannot be told
+    /// apart from a scalar by size.
+    pub is_subarray: bool,
+}
+
+impl FieldInfo {
+    /// A numeric sub-array is a vector: it is stored as one BLOB holding all
+    /// `itemsize` bytes, never as a scalar.
+    fn is_numeric_vector(&self) -> bool {
+        self.is_subarray
+            && matches!(
+                self.kind,
+                DtypeKind::Int | DtypeKind::Uint | DtypeKind::Float
+            )
+    }
+
+    /// Number of base elements the field holds.
+    fn element_count(&self) -> usize {
+        self.itemsize / self.base_itemsize.max(1)
+    }
 }
 
 // ── dtype parsing ───────────────────────────────────────────────
@@ -117,10 +138,53 @@ fn check_native_byteorder(base: &Bound<'_, PyAny>, name: &str) -> PyResult<()> {
 
 /// Parse a NumPy structured dtype into field descriptors and the row stride.
 ///
-/// Validates that every field is a supported kind, is stored in native byte
-/// order, and fits within the row stride (no buffer overrun).
+/// This is the single layout validator. The read path (`to_numpy`), the write
+/// path (`batch_write_numpy`) and the pure-Python conversion all go through it,
+/// with these shared layout rules:
+///
+/// - the dtype must be structured (named fields);
+/// - no field may hold Python objects, at any nesting depth — an object slot is
+///   a pointer, and copying record bytes into or out of one is memory-unsafe;
+/// - every field's base must be an int, uint or float of a supported width, or
+///   fixed-width bytes (`S<N>` / `V<N>`);
+/// - the base must be stored in native byte order;
+/// - each field must fit inside the row (`offset + itemsize <= itemsize` of the
+///   record).
+///
+/// Sub-arrays (`subdtype` set, any shape) are recorded as such, including the
+/// one-element `(1,)` shape.
 fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usize)> {
+    parse_dtype_fields_with(dtype, true)
+}
+
+/// [`parse_dtype_fields`] with the byte-order rule made optional.
+///
+/// The native paths copy raw bytes and must require native byte order. The
+/// pure-Python conversion assigns through NumPy, which swaps bytes itself, so
+/// it passes `require_native_byteorder = false` and shares every other rule.
+fn parse_dtype_fields_with(
+    dtype: &Bound<'_, PyAny>,
+    require_native_byteorder: bool,
+) -> PyResult<(Vec<FieldInfo>, usize)> {
+    if !dtype.hasattr("names")? || !dtype.hasattr("fields")? {
+        return Err(PyTypeError::new_err(format!(
+            "dtype must be a numpy.dtype instance, got {}",
+            dtype.get_type().name()?
+        )));
+    }
     let names = dtype.getattr("names")?;
+    if names.is_none() {
+        let kind: String = dtype.getattr("kind")?.extract()?;
+        if kind == "T" {
+            return Err(PyTypeError::new_err(
+                "variable-length StringDType is not supported: use a structured dtype with \
+                 fixed-width 'S<N>' fields",
+            ));
+        }
+        return Err(PyTypeError::new_err(format!(
+            "dtype must be a structured dtype with named fields, got {dtype}"
+        )));
+    }
     let names: Vec<String> = names.extract()?;
     let fields_dict = dtype.getattr("fields")?;
     let row_stride: usize = dtype.getattr("itemsize")?.extract()?;
@@ -132,14 +196,40 @@ fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usi
         let field_dtype = field_info.get_item(0)?;
         let offset: usize = field_info.get_item(1)?.extract()?;
 
-        let base = field_dtype.getattr("base")?;
+        let mut base = field_dtype.getattr("base")?;
+        // NumPy preserves nested subdtype descriptors, e.g. ((f4, 2), 2).
+        // Walk to the scalar dtype for width, byte order and blob validation.
+        while !base.getattr("subdtype")?.is_none() {
+            base = base.getattr("base")?;
+        }
         let kind_str: String = base.getattr("kind")?.extract()?;
         let kind = match kind_str.as_str() {
             "i" => DtypeKind::Int,
             "u" => DtypeKind::Uint,
             "f" => DtypeKind::Float,
             "S" => DtypeKind::FixedBytes,
-            "V" => DtypeKind::VoidBytes,
+            "V" => {
+                // A nested structured field reports `kind='V'` and is handled
+                // as opaque bytes. `hasobject` is true when it contains an
+                // object member at any depth; such bytes are pointers, so the
+                // field cannot be copied. (A plain object field has
+                // `kind='O'` and is rejected by the arm below.)
+                if field_dtype.getattr("hasobject")?.extract::<bool>()? {
+                    warn!("dtype field '{}' holds nested Python objects", name);
+                    return Err(PyTypeError::new_err(format!(
+                        "dtype field '{name}' holds Python objects ({field_dtype}): an object \
+                         member nested inside a structured field is not supported. Use numeric \
+                         or fixed-width bytes fields.",
+                    )));
+                }
+                DtypeKind::VoidBytes
+            }
+            "T" => {
+                return Err(PyTypeError::new_err(format!(
+                    "dtype field '{name}' is a variable-length StringDType, which is not \
+                     supported: use a fixed-width 'S<N>' field",
+                )));
+            }
             other => {
                 warn!("Unsupported dtype kind '{}' for field '{}'", other, name);
                 return Err(PyTypeError::new_err(format!(
@@ -149,16 +239,34 @@ fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usi
             }
         };
 
-        check_native_byteorder(&base, name)?;
+        if require_native_byteorder {
+            check_native_byteorder(&base, name)?;
+        }
 
         let itemsize: usize = field_dtype.getattr("itemsize")?.extract()?;
         let base_itemsize: usize = base.getattr("itemsize")?.extract()?;
+        let is_subarray = !field_dtype.getattr("subdtype")?.is_none();
+
+        // Reject widths the buffer helpers have no scalar for (e.g. a 16-byte
+        // long double) here, before any row is converted or sent.
+        let width_ok = match kind {
+            DtypeKind::Int | DtypeKind::Uint => matches!(base_itemsize, 1 | 2 | 4 | 8),
+            DtypeKind::Float => matches!(base_itemsize, 2 | 4 | 8),
+            DtypeKind::FixedBytes | DtypeKind::VoidBytes => true,
+        };
+        if !width_ok {
+            return Err(PyTypeError::new_err(format!(
+                "dtype field '{name}' has an unsupported element width: {field_dtype} \
+                 ({base_itemsize} bytes per element)",
+            )));
+        }
 
         // Bounds check: field must fit within row stride
-        if offset + itemsize > row_stride {
+        let end = offset.checked_add(itemsize);
+        if end.is_none_or(|end| end > row_stride) {
             return Err(PyValueError::new_err(format!(
-                "dtype field '{}' exceeds row boundary: offset({}) + itemsize({}) = {} > row_stride({})",
-                name, offset, itemsize, offset + itemsize, row_stride,
+                "dtype field '{}' exceeds row boundary: offset({}) + itemsize({}) > row_stride({})",
+                name, offset, itemsize, row_stride,
             )));
         }
 
@@ -168,10 +276,55 @@ fn parse_dtype_fields(dtype: &Bound<'_, PyAny>) -> PyResult<(Vec<FieldInfo>, usi
             itemsize,
             base_itemsize,
             kind,
+            is_subarray,
         });
     }
 
     Ok((fields, row_stride))
+}
+
+/// Independent result bins need independent bytes (including a missing bin's
+/// zero-filled field). Input arrays are read-only here and may use unions.
+fn parse_output_dtype(
+    dtype: &Bound<'_, PyAny>,
+    require_native_byteorder: bool,
+) -> PyResult<(Vec<FieldInfo>, usize)> {
+    let (mut fields, row_stride) = parse_dtype_fields_with(dtype, require_native_byteorder)?;
+    // Result fields are looked up by name. Sorting these descriptors leaves
+    // NumPy's declared field order intact and also accepts reordered layouts.
+    fields.sort_unstable_by_key(|field| field.offset);
+    let mut previous: Option<&FieldInfo> = None;
+    for field in fields.iter().filter(|field| field.itemsize != 0) {
+        if let Some(prev) = previous {
+            if field.offset < prev.offset + prev.itemsize {
+                return Err(PyValueError::new_err(format!(
+                    "output dtype fields '{}' and '{}' overlap",
+                    prev.name, field.name
+                )));
+            }
+        }
+        previous = Some(field);
+    }
+    Ok((fields, row_stride))
+}
+
+/// Validate a NumPy structured dtype for independent batch result bins.
+///
+/// Exposed to Python so the pure-Python conversion in
+/// `aerospike_py.numpy_batch` applies the rules the native paths do. That
+/// conversion assigns through NumPy rather than copying raw bytes, so it turns
+/// the byte-order rule off; everything else is shared.
+#[pyfunction]
+#[pyo3(signature = (dtype, *, require_native_byteorder=true))]
+pub fn validate_numpy_dtype(
+    dtype: &Bound<'_, PyAny>,
+    require_native_byteorder: bool,
+) -> PyResult<()> {
+    let np_dtype = dtype.py().import("numpy")?.getattr("dtype")?;
+    if !dtype.is_instance(&np_dtype)? {
+        return Err(PyTypeError::new_err("dtype must be a numpy.dtype instance"));
+    }
+    parse_output_dtype(dtype, require_native_byteorder).map(|_| ())
 }
 
 // ── raw pointer from numpy array ────────────────────────────────
@@ -381,6 +534,16 @@ unsafe fn write_float_to_buffer(row_ptr: *mut u8, field: &FieldInfo, val: f64) -
         // SAFETY: dst points to at least 8 bytes of writable memory
         8 => unsafe { ptr::write_unaligned(dst as *mut f64, val) },
         2 => {
+            // A finite value outside the f16 range would silently become
+            // ±inf; reject it like the f32 arm does. NaN and ±inf themselves
+            // are kept as they are.
+            let f16_max = f16::MAX.to_f64();
+            if val.is_finite() && (val > f16_max || val < -f16_max) {
+                return Err(PyOverflowError::new_err(format!(
+                    "float overflow: value {} does not fit in f16 for field '{}'",
+                    val, field.name
+                )));
+            }
             // float16: use `half` crate for IEEE 754 compliant conversion
             // Handles denormals, rounding, and special values correctly
             let h = f16::from_f64(val);
@@ -490,6 +653,55 @@ unsafe fn write_value_to_buffer(
         Ok(v as i64)
     }
 
+    // A numeric sub-array is a vector stored as one BLOB of exactly
+    // `itemsize` bytes. Truncating or zero-padding a BLOB of another length
+    // would hand back a vector that silently differs from the stored one, so
+    // a length mismatch is an error.
+    //
+    // A scalar is accepted only by a one-element vector: releases up to
+    // 0.14.x wrote `(1,)` fields as scalars, and that data must stay
+    // readable. A scalar for a longer vector has no defined placement.
+    if field.is_numeric_vector() {
+        match value {
+            Value::Nil => return Ok(()),
+            // An HLL bin and a value of a particle type the client does not
+            // interpret reach Python as `bytes` everywhere else; here too.
+            Value::Blob(bytes) | Value::Hll(bytes) | Value::Unknown(_, bytes) => {
+                if bytes.len() != field.itemsize {
+                    return Err(PyValueError::new_err(format!(
+                        "vector length mismatch for field '{}': the stored blob has {} bytes, \
+                         the dtype expects {} ({} elements of {} bytes)",
+                        field.name,
+                        bytes.len(),
+                        field.itemsize,
+                        field.element_count(),
+                        field.base_itemsize,
+                    )));
+                }
+                // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
+                return unsafe { write_bytes_to_buffer(row_ptr, field, bytes) };
+            }
+            Value::Int(_) | Value::Float(_) | Value::Bool(_) if field.element_count() == 1 => {
+                // Fall through to the scalar dispatch below: the single
+                // element sits at the field offset.
+            }
+            Value::Int(_) | Value::Float(_) | Value::Bool(_) => {
+                return Err(PyValueError::new_err(format!(
+                    "vector length mismatch for field '{}': the stored value is a scalar, \
+                     the dtype expects {} elements",
+                    field.name,
+                    field.element_count(),
+                )));
+            }
+            _ => {
+                return Err(PyTypeError::new_err(format!(
+                    "unsupported Aerospike value type for numpy vector field '{}'",
+                    field.name
+                )));
+            }
+        }
+    }
+
     match value {
         Value::Int(v) => match field.kind {
             // SAFETY: forwarding caller's safety guarantees to write_*_to_buffer
@@ -533,24 +745,19 @@ unsafe fn write_value_to_buffer(
                 ))),
             }
         }
-        Value::Blob(bytes) => match field.kind {
+        Value::Blob(bytes) | Value::Hll(bytes) | Value::Unknown(_, bytes) => match field.kind {
             DtypeKind::FixedBytes | DtypeKind::VoidBytes => {
                 // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
                 unsafe { write_bytes_to_buffer(row_ptr, field, bytes) }
             }
-            // sub-array: bytes blob written directly to buffer
-            DtypeKind::Float | DtypeKind::Int | DtypeKind::Uint
-                if field.itemsize > field.base_itemsize =>
-            {
-                // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
-                unsafe { write_bytes_to_buffer(row_ptr, field, bytes) }
-            }
+            // Numeric vectors were handled above; a blob for a numeric scalar
+            // is a type error.
             _ => Err(PyTypeError::new_err(format!(
                 "cannot write bytes to numeric field '{}'",
                 field.name
             ))),
         },
-        Value::String(s) => match field.kind {
+        Value::String(s) | Value::GeoJson(s) => match field.kind {
             DtypeKind::FixedBytes | DtypeKind::VoidBytes => {
                 // SAFETY: forwarding caller's safety guarantees to write_bytes_to_buffer
                 unsafe { write_bytes_to_buffer(row_ptr, field, s.as_bytes()) }
@@ -663,8 +870,16 @@ pub fn batch_to_numpy_py(
     let np = py.import("numpy")?;
     let n = results.len();
 
-    // 1. Parse dtype fields
-    let (fields, row_stride) = parse_dtype_fields(dtype_obj)?;
+    // 1. Parse dtype fields.
+    //
+    // From the dtype NumPy makes of the argument, not from the argument: the
+    // rows below are written through raw pointers at the offsets parsed here,
+    // into the array `np.zeros` allocates. Anything with a `dtype` attribute
+    // passes for a dtype in NumPy, and its own `fields` / `itemsize` need not
+    // agree with what NumPy allocates for it. Parsed from the real dtype the
+    // two cannot differ.
+    let dtype_obj = &np.call_method1("dtype", (dtype_obj,))?;
+    let (fields, row_stride) = parse_output_dtype(dtype_obj, true)?;
 
     // Overflow check: ensure n * row_stride does not overflow usize
     if n.checked_mul(row_stride).is_none() {
@@ -730,7 +945,7 @@ pub fn batch_to_numpy_py(
     // 5. Fill data / meta / result_codes buffers WITHOUT the GIL.
     //
     // Every operation inside the loop is either pure Rust
-    // (`result_code_to_int`, `record_ttl_seconds`, `Value` matching) or a
+    // (`RowOutcome`, `record_ttl_seconds`, `Value` matching) or a
     // raw memory write (`ptr::write_unaligned`). Nothing touches the
     // Python interpreter, so another thread (e.g. a sibling FastAPI worker
     // running torch inference) can hold the GIL while this thread fills
@@ -763,9 +978,12 @@ pub fn batch_to_numpy_py(
         let rc_ptr = unsafe { rc_addr.as_ptr() };
 
         for (i, br) in results.iter().enumerate() {
-            let result_code = match &br.result_code {
-                Some(rc) => result_code_to_int(rc),
-                None => 0,
+            // The same judgement every other batch view uses: a row is OK
+            // only when a server said so.
+            let result_code = if crate::batch_types::row_ok(br) {
+                0
+            } else {
+                crate::batch_types::RowOutcome::of(br).result_code()
             };
 
             // SAFETY: rc_ptr points to an i32 array of length n; i < n.
@@ -821,18 +1039,20 @@ pub fn batch_to_numpy_py(
 
     // 6. Build key_map with the GIL reacquired. This is the only
     //    record-iterating step that genuinely needs Python objects.
+    //
+    //    Only real user keys are indexed. A digest-only row has no user key,
+    //    so it is reachable by position (`batch_records[i]`) and by nothing
+    //    else: inventing a key for it would let `get()` / `in` succeed for a
+    //    value the caller never used, and could shadow a real key. When the
+    //    same user key was requested more than once, the last row wins.
     let key_map = PyDict::new(py);
-    for (i, br) in results.iter().enumerate() {
-        // Use a sentinel string for None keys to avoid collision with integer user_keys.
-        let user_key = match &br.key.user_key {
-            Some(v) => value_to_py(py, v)?,
-            None => format!("__no_user_key_{i}__")
-                .into_pyobject(py)?
-                .into_any()
-                .unbind(),
-        };
-        key_map.set_item(user_key, i)?;
-    }
+    crate::stage_timer!("key_index", "batch_read", {
+        for (i, br) in results.iter().enumerate() {
+            if let Some(v) = &br.key.user_key() {
+                key_map.set_item(value_to_py(py, v)?, i)?;
+            }
+        }
+    });
 
     // 7. Construct NumpyBatchRecords Python object
     let numpy_batch_mod = py.import("aerospike_py.numpy_batch")?;
@@ -870,15 +1090,12 @@ unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyRes
     let src = unsafe { row_ptr.add(field.offset) };
 
     // Sub-array numeric field (e.g. ('vec','(4,)f8')): the field spans
-    // `itemsize` bytes across multiple base elements. A scalar read would
+    // `itemsize` bytes across its base elements. A scalar read would
     // capture only `base_itemsize` bytes and silently drop the rest, so
-    // read all `itemsize` bytes into a Blob — mirroring the write path,
-    // which routes such fields through `write_bytes_to_buffer`.
-    if matches!(
-        field.kind,
-        DtypeKind::Int | DtypeKind::Uint | DtypeKind::Float
-    ) && field.itemsize > field.base_itemsize
-    {
+    // read all `itemsize` bytes into a Blob — mirroring the other direction,
+    // which only accepts a Blob of exactly that length. A one-element `(1,)`
+    // sub-array is a vector too and is stored the same way.
+    if field.is_numeric_vector() {
         let mut buf = vec![0u8; field.itemsize];
         // SAFETY: src points to at least field.itemsize bytes of readable memory
         unsafe { ptr::copy_nonoverlapping(src, buf.as_mut_ptr(), field.itemsize) };
@@ -1042,22 +1259,84 @@ fn checked_row_offset(index: usize, row_stride: isize) -> PyResult<isize> {
 /// Alternatively, ``namespace``, ``set_name``, and ``key`` can be passed as
 /// separate arguments when all rows share the same namespace/set.
 ///
+/// The layout is always taken from `data_array.dtype`: that is the dtype the
+/// buffer was actually written with. `expected_dtype` is the optional dtype
+/// the caller passed alongside the array. When it is given and does not equal
+/// the array's own dtype the call is rejected with `ValueError` — before any
+/// row is converted, so nothing is sent. Reading the buffer through a dtype
+/// other than its own would reinterpret the bytes.
+///
+/// Every row is converted into owned `Key` / `Bin` values here, under the GIL.
+/// The array's buffer pointer never leaves this function, so the async client
+/// can release the GIL and run the write without the caller being able to
+/// mutate memory the write is still reading.
+///
 /// # Arguments
 ///
 /// * `py` - Python GIL token
 /// * `data_array` - numpy structured array with record data
-/// * `dtype_obj` - the numpy dtype describing the array layout
+/// * `expected_dtype` - optional dtype the caller declared for the array
 /// * `namespace` - default namespace (used when ``_namespace`` field is absent)
 /// * `set_name` - default set name (used when ``_set`` field is absent)
 /// * `key_field` - name of the dtype field to use as the user key (default: ``"_key"``)
 pub fn numpy_to_records(
-    _py: Python<'_>,
+    py: Python<'_>,
     data_array: &Bound<'_, PyAny>,
-    dtype_obj: &Bound<'_, PyAny>,
+    expected_dtype: Option<&Bound<'_, PyAny>>,
     namespace: &str,
     set_name: &str,
     key_field: &str,
 ) -> PyResult<Vec<(Key, Vec<Bin>)>> {
+    if !data_array.hasattr("dtype")?
+        || !data_array.is_instance(&py.import("numpy")?.getattr("ndarray")?)?
+    {
+        return Err(PyTypeError::new_err(format!(
+            "data must be a numpy structured array, got {}",
+            data_array.get_type().name()?
+        )));
+    }
+    // The rows are read through a raw pointer, `len` rows of `dtype.itemsize`
+    // bytes. An exact `numpy.ndarray` cannot misreport either; a subclass, or
+    // any object that only looks like an array, can override `__len__`,
+    // `dtype` or `__array_interface__` and send the reads past the buffer.
+    // `numpy.asarray` returns the base-class view of the same memory (no
+    // copy), whose attributes are NumPy's own.
+    let data_array = &py.import("numpy")?.call_method1("asarray", (data_array,))?;
+    records_of_array(data_array, expected_dtype, namespace, set_name, key_field)
+}
+
+/// Whether the field `name` of a structured dtype is itself structured, like
+/// `('pos', [('x', 'f4'), ('y', 'f4')])`. Such a field has `kind == 'V'` just
+/// as a plain `V<N>` field has, and field names of its own.
+fn is_structured_field(dtype: &Bound<'_, PyAny>, name: &str) -> PyResult<bool> {
+    let field_dtype = dtype.getattr("fields")?.get_item(name)?.get_item(0)?;
+    if !field_dtype.hasattr("names")? {
+        return Ok(false);
+    }
+    Ok(!field_dtype.getattr("names")?.is_none())
+}
+
+/// [`numpy_to_records`] for an array whose `dtype`, `len()` and
+/// `__array_interface__` can be trusted to describe its buffer — an exact
+/// `numpy.ndarray`, which is what the caller above makes of its argument.
+fn records_of_array(
+    data_array: &Bound<'_, PyAny>,
+    expected_dtype: Option<&Bound<'_, PyAny>>,
+    namespace: &str,
+    set_name: &str,
+    key_field: &str,
+) -> PyResult<Vec<(Key, Vec<Bin>)>> {
+    let dtype_obj = data_array.getattr("dtype")?;
+    if let Some(expected) = expected_dtype.filter(|d| !d.is_none()) {
+        if !dtype_obj.eq(expected)? {
+            return Err(PyValueError::new_err(format!(
+                "_dtype does not match the array: data.dtype is {dtype_obj}, _dtype is {expected}. \
+                 Omit _dtype to use data.dtype, or convert the array first with data.astype(_dtype).",
+            )));
+        }
+    }
+    let dtype_obj = &dtype_obj;
+
     let n: usize = data_array.len()?;
     debug!(
         "numpy_to_records: converting {} rows, key_field='{}'",
@@ -1090,12 +1369,53 @@ pub fn numpy_to_records(
             key_field
         ))
     })?;
+    // Rows without bins cannot be written: see `prepare_batch_write_args`.
+    if bin_fields.is_empty() {
+        return Err(PyValueError::new_err(format!(
+            "dtype has no bin fields: every field is the key field '{key_field}' or starts with \
+             '_', so there is nothing to write"
+        )));
+    }
+    // A key is one value. A sub-array field is read as the bytes of all its
+    // elements, so a `(1,)` integer key would be written under a bytes key —
+    // another record than the integer key it was up to 0.14.x — and trimming
+    // the trailing zero bytes, as is done for fixed-width bytes keys, would
+    // make [1, 0] and [1] the same key. A nested structured field is read as
+    // its raw bytes in the same way.
+    if key_fi.is_subarray || is_structured_field(dtype_obj, key_field)? {
+        return Err(PyTypeError::new_err(format!(
+            "the key field '{key_field}' must be a scalar integer or bytes field, not a sub-array \
+             or a nested structure; declare it as one value, for example ('{key_field}', 'i8')"
+        )));
+    }
 
-    // Check for optional _namespace and _set fields
-    let ns_field = fields.iter().find(|f| f.name == "_namespace");
-    let set_field = fields.iter().find(|f| f.name == "_set");
+    // Routing fields have their own contract; interpreting vector bytes as
+    // text can send a valid write to an entirely different namespace or set.
+    let routing_field = |name: &str| -> PyResult<Option<&FieldInfo>> {
+        let field = fields.iter().find(|field| field.name == name);
+        if let Some(field) = field {
+            if !matches!(field.kind, DtypeKind::FixedBytes | DtypeKind::VoidBytes)
+                || field.is_subarray
+                || is_structured_field(dtype_obj, name)?
+            {
+                return Err(PyTypeError::new_err(format!(
+                    "routing field '{name}' must contain scalar fixed-width UTF-8 bytes"
+                )));
+            }
+        }
+        Ok(field)
+    };
+    let ns_field = routing_field("_namespace")?;
+    let set_field = routing_field("_set")?;
 
-    let mut result = Vec::with_capacity(n);
+    // The row count is whatever the array says, and an array whose rows have
+    // no bytes can say any number at no cost to itself: `np.zeros(2**40, ...)`
+    // of `S0` fields is a valid array of zero bytes. Room that cannot be had
+    // is an error for the caller, not an abort of the process.
+    let mut result = Vec::new();
+    result.try_reserve_exact(n).map_err(|_| {
+        PyMemoryError::new_err(format!("cannot hold {n} rows in memory for one batch"))
+    })?;
 
     for i in 0..n {
         let row_offset = checked_row_offset(i, row_stride)?;
@@ -1107,7 +1427,7 @@ pub fn numpy_to_records(
         // This mirrors the trimming already applied to _namespace and _set fields.
         let key_value = unsafe { read_value_from_buffer(row_ptr, key_fi)? };
         let key_value = match key_value {
-            Value::Blob(ref b) => {
+            Value::Blob(ref b) if key_fi.kind == DtypeKind::FixedBytes => {
                 let end = b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1);
                 if end < b.len() {
                     Value::Blob(b[..end].to_vec())
@@ -1118,34 +1438,26 @@ pub fn numpy_to_records(
             _ => key_value,
         };
 
-        // Extract namespace (from field or default)
-        let ns = if let Some(ns_fi) = ns_field {
-            match unsafe { read_value_from_buffer(row_ptr, ns_fi)? } {
-                Value::Blob(b) => {
-                    // Trim trailing null bytes for fixed-length fields
-                    let trimmed = &b[..b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1)];
-                    String::from_utf8_lossy(trimmed).into_owned()
-                }
-                Value::String(s) => s,
-                _ => namespace.to_string(),
-            }
-        } else {
-            namespace.to_string()
+        let route = |field: Option<&FieldInfo>, default: &str| -> PyResult<String> {
+            let Some(field) = field else {
+                return Ok(default.to_owned());
+            };
+            // SAFETY: parse_dtype_fields checked the byte range of this
+            // fixed-width field against the row layout.
+            let bytes =
+                unsafe { std::slice::from_raw_parts(row_ptr.add(field.offset), field.itemsize) };
+            let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |p| p + 1);
+            std::str::from_utf8(&bytes[..end])
+                .map(str::to_owned)
+                .map_err(|_| {
+                    PyValueError::new_err(format!(
+                        "routing field '{}' at row {i} is not UTF-8",
+                        field.name
+                    ))
+                })
         };
-
-        // Extract set name (from field or default)
-        let set = if let Some(set_fi) = set_field {
-            match unsafe { read_value_from_buffer(row_ptr, set_fi)? } {
-                Value::Blob(b) => {
-                    let trimmed = &b[..b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1)];
-                    String::from_utf8_lossy(trimmed).into_owned()
-                }
-                Value::String(s) => s,
-                _ => set_name.to_string(),
-            }
-        } else {
-            set_name.to_string()
-        };
+        let ns = route(ns_field, namespace)?;
+        let set = route(set_field, set_name)?;
 
         // Build the Key with a properly computed digest.
         // For Blob (bytes) keys, use STRING particle type (3) for cross-client
@@ -1154,12 +1466,7 @@ pub fn numpy_to_records(
         let key = match &key_value {
             Value::Blob(bytes_data) => {
                 let digest = compute_bytes_key_digest(&set, bytes_data);
-                Key {
-                    namespace: ns,
-                    set_name: set,
-                    user_key: Some(key_value),
-                    digest,
-                }
+                Key::with_digest(ns, set, Some(key_value), digest)
             }
             _ => Key::new(ns, set, key_value)
                 .map_err(|e| PyValueError::new_err(format!("Invalid key at row {}: {}", i, e)))?,
@@ -1179,6 +1486,128 @@ pub fn numpy_to_records(
     Ok(result)
 }
 
+// ── entry points for the fuzz targets ───────────────────────────
+
+/// Safe entry points for the fuzz targets in `rust/fuzz`.
+///
+/// The targets used to carry their own copy of the buffer arithmetic, so they
+/// fuzzed that copy and could not notice a bug in the functions above. These
+/// shims describe a field the way dtype parsing does and call the production
+/// writer and reader on it.
+#[cfg(feature = "fuzzing")]
+pub mod fuzzing {
+    use aerospike_core::{FloatValue, Value};
+
+    use super::{read_value_from_buffer, write_value_to_buffer, FieldInfo};
+
+    pub use super::DtypeKind;
+
+    /// The largest field offset and field size a target may ask for. Large
+    /// enough for every code path, small enough to keep an iteration cheap.
+    pub const MAX_OFFSET: usize = 4096;
+    pub const MAX_ITEMSIZE: usize = 4096;
+
+    /// What a fuzz input asks to be written into the field.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Input {
+        Nil,
+        Int(i64),
+        Float(f64),
+        Bool(bool),
+        Bytes(Vec<u8>),
+        Text(String),
+    }
+
+    /// What the production reader found in the field.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Output {
+        Int(i64),
+        Float(f64),
+        Bytes(Vec<u8>),
+    }
+
+    /// One write and one read of a field.
+    #[derive(Debug)]
+    pub struct Outcome {
+        /// Whether the writer accepted the input.
+        pub written: bool,
+        /// The row afterwards: exactly `offset + itemsize` bytes.
+        pub row: Vec<u8>,
+        /// What the reader returned, or `None` when it refused the field's
+        /// content (an unsigned 64-bit value beyond the signed range).
+        pub read: Option<Output>,
+    }
+
+    /// A field as dtype parsing hands it to the buffer functions, or `None`
+    /// for a shape dtype parsing refuses: an element width with no scalar.
+    ///
+    /// `elements` is the sub-array length; a field that is not a sub-array has
+    /// one element. Bytes fields have one element of `base_itemsize` bytes.
+    ///
+    /// A field of no bytes at all is a field like any other: NumPy has `S0`,
+    /// `V0` and `('v', 'f4', (0,))`, and dtype parsing lets them through.
+    pub fn field(
+        kind: DtypeKind,
+        base_itemsize: usize,
+        elements: usize,
+        offset: usize,
+        is_subarray: bool,
+    ) -> Option<FieldInfo> {
+        let width_ok = match kind {
+            DtypeKind::Int | DtypeKind::Uint => matches!(base_itemsize, 1 | 2 | 4 | 8),
+            DtypeKind::Float => matches!(base_itemsize, 2 | 4 | 8),
+            DtypeKind::FixedBytes | DtypeKind::VoidBytes => true,
+        };
+        let elements = if is_subarray { elements } else { 1 };
+        let itemsize = base_itemsize.checked_mul(elements)?;
+        if !width_ok || itemsize > MAX_ITEMSIZE || offset > MAX_OFFSET {
+            return None;
+        }
+        Some(FieldInfo {
+            name: "fuzzed".to_string(),
+            offset,
+            itemsize,
+            base_itemsize,
+            kind,
+            is_subarray,
+        })
+    }
+
+    /// Write `input` into a zeroed row with the production writer, then read
+    /// the field back with the production reader.
+    ///
+    /// The row is allocated with exactly `offset + itemsize` bytes: what the
+    /// functions' safety contract promises them, and not one byte more. An
+    /// access past the field is then an access past the allocation, which the
+    /// address sanitizer the fuzzer runs under reports.
+    pub fn write_then_read(field: &FieldInfo, input: &Input) -> Outcome {
+        let value = match input {
+            Input::Nil => Value::Nil,
+            Input::Int(v) => Value::Int(*v),
+            Input::Float(v) => Value::Float(FloatValue::F64(v.to_bits())),
+            Input::Bool(v) => Value::Bool(*v),
+            Input::Bytes(v) => Value::Blob(v.clone()),
+            Input::Text(v) => Value::String(v.clone()),
+        };
+        let mut row = vec![0u8; field.offset + field.itemsize];
+
+        // SAFETY: `row` is `offset + itemsize` bytes, writable, and not shared.
+        let written = unsafe { write_value_to_buffer(row.as_mut_ptr(), field, &value) }.is_ok();
+        // SAFETY: `row` is `offset + itemsize` bytes and readable.
+        let read = match unsafe { read_value_from_buffer(row.as_ptr(), field) } {
+            Ok(Value::Int(v)) => Some(Output::Int(v)),
+            Ok(Value::Float(FloatValue::F64(bits))) => Some(Output::Float(f64::from_bits(bits))),
+            Ok(Value::Float(FloatValue::F32(bits))) => {
+                Some(Output::Float(f64::from(f32::from_bits(bits))))
+            }
+            Ok(Value::Blob(bytes)) => Some(Output::Bytes(bytes)),
+            Ok(other) => unreachable!("the reader returned {other:?}, which it never builds"),
+            Err(_) => None,
+        };
+        Outcome { written, row, read }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1193,11 +1622,13 @@ import ctypes
 import struct
 
 class FakeFieldDtype:
-    def __init__(self, kind, itemsize, byteorder='='):
+    def __init__(self, kind, itemsize, byteorder='=', hasobject=False):
         self.kind = kind
         self.itemsize = itemsize
         self.byteorder = byteorder
         self.base = self
+        self.subdtype = None
+        self.hasobject = hasobject
 
     def __str__(self):
         return f'{self.byteorder}{self.kind}{self.itemsize}'
@@ -1212,6 +1643,8 @@ class FakeSubArrayDtype:
         self.itemsize = base.itemsize * count
         self.byteorder = '|'
         self.base = base
+        self.subdtype = (base, (count,))
+        self.hasobject = base.hasobject
 
 
 class FakeNestedStructDtype:
@@ -1224,6 +1657,8 @@ class FakeNestedStructDtype:
         self.itemsize = inner.itemsize
         self.byteorder = '|'
         self.base = self
+        self.subdtype = None
+        self.hasobject = inner.hasobject
         self.names = ('b',)
         self.fields = {'b': (inner, 0)}
 
@@ -1233,6 +1668,19 @@ class FakeSingleFieldDtype:
         self.names = ('score',)
         self.fields = {'score': (field_dtype, 0)}
         self.itemsize = field_dtype.itemsize
+        self.kind = 'V'
+
+class FakeUnstructuredDtype:
+    '''A plain (non-record) dtype: `names` is None.'''
+
+    def __init__(self, kind):
+        self.names = None
+        self.fields = None
+        self.kind = kind
+        self.itemsize = 16
+
+    def __str__(self):
+        return f'Fake({self.kind})'
 
 class FakeDtype:
     def __init__(self):
@@ -1243,11 +1691,19 @@ class FakeDtype:
             'value': (i4, 4),
         }
         self.itemsize = 8
+        self.kind = 'V'
+
+    def __eq__(self, other):
+        return isinstance(other, FakeDtype)
+
+    def __hash__(self):
+        return 0
 
 class FakeArray:
     def __init__(self, buf, ptr, shape, strides):
         self._buf = buf
         self._length = shape[0]
+        self.dtype = FakeDtype()
         self.__array_interface__ = {
             'data': (ptr, False),
             'shape': shape,
@@ -1277,6 +1733,16 @@ def make_subarray_dtype(kind, itemsize, byteorder, count):
 def make_nested_struct_dtype(kind, itemsize, byteorder):
     inner = FakeFieldDtype(kind, itemsize, byteorder)
     return FakeSingleFieldDtype(FakeNestedStructDtype(inner))
+
+def make_nested_object_dtype():
+    inner = FakeFieldDtype('O', 8, '|', hasobject=True)
+    return FakeSingleFieldDtype(FakeNestedStructDtype(inner))
+
+def make_unstructured_dtype(kind):
+    return FakeUnstructuredDtype(kind)
+
+def make_other_dtype():
+    return FakeSingleFieldDtype(FakeFieldDtype('i', 8))
 
 def make_step_slice():
     buf = _build_buffer()
@@ -1465,6 +1931,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::Int,
+            is_subarray: false,
         };
         unsafe {
             write_int_to_buffer(buf.as_mut_ptr(), &field, 42)
@@ -1483,6 +1950,7 @@ def make_reverse_slice():
             itemsize: 1,
             base_itemsize: 1,
             kind: DtypeKind::Int,
+            is_subarray: false,
         };
         unsafe {
             let result = write_int_to_buffer(buf.as_mut_ptr(), &field, 300);
@@ -1499,6 +1967,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::Float,
+            is_subarray: false,
         };
         unsafe {
             write_float_to_buffer(buf.as_mut_ptr(), &field, std::f64::consts::PI)
@@ -1517,6 +1986,7 @@ def make_reverse_slice():
             itemsize: 8,
             base_itemsize: 8,
             kind: DtypeKind::Float,
+            is_subarray: false,
         };
         unsafe {
             write_float_to_buffer(buf.as_mut_ptr(), &field, std::f64::consts::PI)
@@ -1535,6 +2005,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::FixedBytes,
+            is_subarray: false,
         };
         unsafe {
             write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"abcdefgh")
@@ -1554,6 +2025,7 @@ def make_reverse_slice():
             itemsize: 8,
             base_itemsize: 8,
             kind: DtypeKind::FixedBytes,
+            is_subarray: false,
         };
         unsafe {
             write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"ab")
@@ -1572,6 +2044,7 @@ def make_reverse_slice():
             itemsize: 3,
             base_itemsize: 3,
             kind: DtypeKind::Int,
+            is_subarray: false,
         };
         unsafe {
             let result = write_int_to_buffer(buf.as_mut_ptr(), &field, 42);
@@ -1588,6 +2061,7 @@ def make_reverse_slice():
             itemsize: 2,
             base_itemsize: 2,
             kind: DtypeKind::Uint,
+            is_subarray: false,
         };
         unsafe {
             write_uint_to_buffer(buf.as_mut_ptr(), &field, 65535)
@@ -1606,6 +2080,7 @@ def make_reverse_slice():
             itemsize: 2,
             base_itemsize: 2,
             kind: DtypeKind::Float,
+            is_subarray: false,
         };
         unsafe {
             write_float_to_buffer(buf.as_mut_ptr(), &field, 1.5)
@@ -1625,6 +2100,7 @@ def make_reverse_slice():
             itemsize: 2,
             base_itemsize: 2,
             kind: DtypeKind::Float,
+            is_subarray: false,
         };
         // Smallest positive normal f16 is ~6.1e-5; test a denormal value
         let denorm_val = 5.96e-8_f64; // smallest f16 denormal
@@ -1647,6 +2123,7 @@ def make_reverse_slice():
             itemsize: 2,
             base_itemsize: 2,
             kind: DtypeKind::Float,
+            is_subarray: false,
         };
         unsafe {
             write_float_to_buffer(buf.as_mut_ptr(), &field, f64::INFINITY)
@@ -1667,6 +2144,7 @@ def make_reverse_slice():
             itemsize: 2,
             base_itemsize: 2,
             kind: DtypeKind::Float,
+            is_subarray: false,
         };
         unsafe {
             write_float_to_buffer(buf.as_mut_ptr(), &field, f64::NAN)
@@ -1686,6 +2164,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::FixedBytes,
+            is_subarray: false,
         };
         unsafe {
             write_bytes_to_buffer(buf.as_mut_ptr(), &field, b"")
@@ -1704,6 +2183,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::Int,
+            is_subarray: false,
         };
         unsafe {
             write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Nil)
@@ -1723,6 +2203,7 @@ def make_reverse_slice():
             itemsize: 2,
             base_itemsize: 2,
             kind: DtypeKind::Uint,
+            is_subarray: false,
         };
         unsafe {
             let err = write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Int(-1))
@@ -1743,6 +2224,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::Uint,
+            is_subarray: false,
         };
         unsafe {
             let err = write_value_to_buffer(
@@ -1767,6 +2249,7 @@ def make_reverse_slice():
             itemsize: 8,
             base_itemsize: 8,
             kind: DtypeKind::Uint,
+            is_subarray: false,
         };
         unsafe {
             let err = write_value_to_buffer(
@@ -1789,6 +2272,7 @@ def make_reverse_slice():
             itemsize: 8,
             base_itemsize: 8,
             kind: DtypeKind::Int,
+            is_subarray: false,
         };
         unsafe {
             let err = write_value_to_buffer(
@@ -1813,6 +2297,7 @@ def make_reverse_slice():
             itemsize: 8,
             base_itemsize: 8,
             kind: DtypeKind::Int,
+            is_subarray: false,
         };
         unsafe {
             let err = write_value_to_buffer(
@@ -1835,6 +2320,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::Uint,
+            is_subarray: false,
         };
         unsafe {
             let err = write_value_to_buffer(
@@ -1860,6 +2346,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::Int,
+            is_subarray: false,
         };
         unsafe {
             ptr::write_unaligned(buf.as_mut_ptr().add(4) as *mut i32, 42);
@@ -1878,6 +2365,7 @@ def make_reverse_slice():
             itemsize: 2,
             base_itemsize: 2,
             kind: DtypeKind::Uint,
+            is_subarray: false,
         };
         unsafe {
             ptr::write_unaligned(buf.as_mut_ptr().add(2) as *mut u16, 65535);
@@ -1897,6 +2385,7 @@ def make_reverse_slice():
             itemsize: 8,
             base_itemsize: 8,
             kind: DtypeKind::Uint,
+            is_subarray: false,
         };
         unsafe {
             ptr::write_unaligned(buf.as_mut_ptr().add(4) as *mut u64, i64::MAX as u64 + 1);
@@ -1920,6 +2409,7 @@ def make_reverse_slice():
             itemsize: 8,
             base_itemsize: 8,
             kind: DtypeKind::Float,
+            is_subarray: false,
         };
         unsafe {
             ptr::write_unaligned(buf.as_mut_ptr() as *mut f64, std::f64::consts::PI);
@@ -1943,6 +2433,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::FixedBytes,
+            is_subarray: false,
         };
         buf[0..4].copy_from_slice(b"abcd");
         unsafe {
@@ -1961,6 +2452,7 @@ def make_reverse_slice():
             itemsize: 4,
             base_itemsize: 4,
             kind: DtypeKind::Int,
+            is_subarray: false,
         };
         unsafe {
             write_int_to_buffer(buf.as_mut_ptr(), &field, -123)
@@ -1987,15 +2479,15 @@ def make_reverse_slice():
                 .call0()
                 .expect("step slice construction should succeed");
 
-            let records = numpy_to_records(py, &sliced, &dtype, "test", "demo", "_key")
+            let records = records_of_array(&sliced, Some(&dtype), "test", "demo", "_key")
                 .expect("positive-stride slice should convert");
             assert_eq!(records.len(), 2);
-            assert_eq!(records[0].0.user_key, Some(Value::Int(1)));
+            assert_eq!(records[0].0.user_key(), Some(&Value::Int(1)));
             assert_eq!(
                 records[0].1,
                 vec![Bin::new("value".to_string(), Value::Int(10))]
             );
-            assert_eq!(records[1].0.user_key, Some(Value::Int(3)));
+            assert_eq!(records[1].0.user_key(), Some(&Value::Int(3)));
             assert_eq!(
                 records[1].1,
                 vec![Bin::new("value".to_string(), Value::Int(30))]
@@ -2019,20 +2511,20 @@ def make_reverse_slice():
                 .call0()
                 .expect("reverse slice construction should succeed");
 
-            let records = numpy_to_records(py, &reversed, &dtype, "test", "demo", "_key")
+            let records = records_of_array(&reversed, Some(&dtype), "test", "demo", "_key")
                 .expect("negative-stride slice should convert");
             assert_eq!(records.len(), 3);
-            assert_eq!(records[0].0.user_key, Some(Value::Int(3)));
+            assert_eq!(records[0].0.user_key(), Some(&Value::Int(3)));
             assert_eq!(
                 records[0].1,
                 vec![Bin::new("value".to_string(), Value::Int(30))]
             );
-            assert_eq!(records[1].0.user_key, Some(Value::Int(2)));
+            assert_eq!(records[1].0.user_key(), Some(&Value::Int(2)));
             assert_eq!(
                 records[1].1,
                 vec![Bin::new("value".to_string(), Value::Int(20))]
             );
-            assert_eq!(records[2].0.user_key, Some(Value::Int(1)));
+            assert_eq!(records[2].0.user_key(), Some(&Value::Int(1)));
             assert_eq!(
                 records[2].1,
                 vec![Bin::new("value".to_string(), Value::Int(10))]
@@ -2098,6 +2590,7 @@ def make_reverse_slice():
             itemsize: 32,
             base_itemsize: 8,
             kind: DtypeKind::Float,
+            is_subarray: true,
         };
         let mut buf = [0u8; 32];
 
@@ -2143,6 +2636,7 @@ def make_reverse_slice():
             itemsize: 12,
             base_itemsize: 4,
             kind: DtypeKind::Int,
+            is_subarray: true,
         };
         let mut buf = [0u8; 12];
 
@@ -2171,5 +2665,272 @@ def make_reverse_slice():
                 other => panic!("expected Value::Blob for int sub-array field, got {other:?}"),
             }
         }
+    }
+
+    // ── vector contract ─────────────────────────────────────────
+
+    fn vector_field(count: usize) -> FieldInfo {
+        FieldInfo {
+            name: "vec".to_string(),
+            offset: 0,
+            itemsize: 8 * count,
+            base_itemsize: 8,
+            kind: DtypeKind::Float,
+            is_subarray: true,
+        }
+    }
+
+    /// A `(1,)` sub-array is a vector: it is written to the server as a blob,
+    /// not as the scalar releases up to 0.14.x produced.
+    #[test]
+    fn one_element_vector_is_read_from_the_buffer_as_a_blob() {
+        let field = vector_field(1);
+        let buf = 2.5_f64.to_ne_bytes();
+        let value = unsafe { read_value_from_buffer(buf.as_ptr(), &field) }.unwrap();
+        assert_eq!(value, Value::Blob(2.5_f64.to_ne_bytes().to_vec()));
+    }
+
+    /// Records written by 0.14.x hold a scalar in a `(1,)` field; they must
+    /// still load.
+    #[test]
+    fn one_element_vector_accepts_a_legacy_scalar() {
+        let field = vector_field(1);
+        let mut buf = [0u8; 8];
+        unsafe {
+            write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Float(FloatValue::F64(2.5_f64.to_bits())),
+            )
+            .expect("a scalar is a valid one-element vector");
+        }
+        assert_eq!(f64::from_ne_bytes(buf), 2.5);
+
+        let mut buf = [0u8; 8];
+        unsafe {
+            write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Int(7))
+                .expect("an integer scalar is a valid one-element float vector");
+        }
+        assert_eq!(f64::from_ne_bytes(buf), 7.0);
+    }
+
+    #[test]
+    fn one_element_vector_accepts_its_own_blob() {
+        let field = vector_field(1);
+        let mut buf = [0u8; 8];
+        unsafe {
+            write_value_to_buffer(
+                buf.as_mut_ptr(),
+                &field,
+                &Value::Blob(2.5_f64.to_ne_bytes().to_vec()),
+            )
+            .expect("a blob of exactly itemsize bytes must load");
+        }
+        assert_eq!(f64::from_ne_bytes(buf), 2.5);
+    }
+
+    /// A blob of the wrong length used to be truncated or zero-padded.
+    #[test]
+    fn vector_blob_length_mismatch_is_an_error() {
+        Python::initialize();
+        Python::attach(|py| {
+            let field = vector_field(4);
+            for len in [0usize, 8, 31, 33, 64] {
+                let mut buf = [0xAAu8; 32];
+                let err = unsafe {
+                    write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Blob(vec![1u8; len]))
+                }
+                .expect_err("a blob of the wrong length must be rejected");
+                assert!(err.is_instance_of::<PyValueError>(py), "len={len}");
+                assert!(err.to_string().contains("vector length mismatch"));
+                assert_eq!(buf, [0xAAu8; 32], "the row must be left untouched");
+            }
+        });
+    }
+
+    #[test]
+    fn scalar_for_a_longer_vector_is_an_error() {
+        Python::initialize();
+        Python::attach(|py| {
+            let field = vector_field(4);
+            let mut buf = [0u8; 32];
+            let err = unsafe {
+                write_value_to_buffer(
+                    buf.as_mut_ptr(),
+                    &field,
+                    &Value::Float(FloatValue::F64(1.0_f64.to_bits())),
+                )
+            }
+            .expect_err("a scalar cannot fill a four-element vector");
+            assert!(err.is_instance_of::<PyValueError>(py));
+            assert_eq!(buf, [0u8; 32]);
+        });
+    }
+
+    #[test]
+    fn nil_leaves_a_vector_field_zeroed() {
+        let field = vector_field(4);
+        let mut buf = [0u8; 32];
+        unsafe { write_value_to_buffer(buf.as_mut_ptr(), &field, &Value::Nil).unwrap() };
+        assert_eq!(buf, [0u8; 32]);
+    }
+
+    // ── float range contract ────────────────────────────────────
+
+    fn float_field(base_itemsize: usize) -> FieldInfo {
+        FieldInfo {
+            name: "x".to_string(),
+            offset: 0,
+            itemsize: base_itemsize,
+            base_itemsize,
+            kind: DtypeKind::Float,
+            is_subarray: false,
+        }
+    }
+
+    #[test]
+    fn finite_value_out_of_f16_range_is_an_overflow_error() {
+        Python::initialize();
+        Python::attach(|py| {
+            let field = float_field(2);
+            for val in [65_520.0_f64, -65_520.0, 1.0e10, f64::MAX] {
+                let mut buf = [0u8; 2];
+                let err = unsafe { write_float_to_buffer(buf.as_mut_ptr(), &field, val) }
+                    .expect_err("a finite value outside f16 must not become inf");
+                assert!(err.is_instance_of::<PyOverflowError>(py), "val={val}");
+            }
+            // The largest finite f16 still fits.
+            let mut buf = [0u8; 2];
+            unsafe { write_float_to_buffer(buf.as_mut_ptr(), &field, 65_504.0) }.unwrap();
+            assert_eq!(f16::from_bits(u16::from_ne_bytes(buf)).to_f64(), 65_504.0);
+        });
+    }
+
+    #[test]
+    fn non_finite_values_are_preserved_in_narrow_floats() {
+        let f16_field = float_field(2);
+        let f32_field = float_field(4);
+        for val in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            let mut b16 = [0u8; 2];
+            unsafe { write_float_to_buffer(b16.as_mut_ptr(), &f16_field, val) }.unwrap();
+            let h = f16::from_bits(u16::from_ne_bytes(b16)).to_f64();
+            let mut b32 = [0u8; 4];
+            unsafe { write_float_to_buffer(b32.as_mut_ptr(), &f32_field, val) }.unwrap();
+            let s = f32::from_ne_bytes(b32) as f64;
+            if val.is_nan() {
+                assert!(h.is_nan() && s.is_nan());
+            } else {
+                assert_eq!(h, val);
+                assert_eq!(s, val);
+            }
+        }
+    }
+
+    // ── layout validation contract ──────────────────────────────
+
+    #[test]
+    fn parse_dtype_fields_marks_a_one_element_subarray_as_a_vector() {
+        Python::initialize();
+        Python::attach(|py| {
+            let (fields, _) =
+                parse_helper_dtype(py, "make_subarray_dtype", ("f", 8usize, "=", 1usize))
+                    .expect("a (1,) sub-array must be accepted");
+            assert_eq!(fields[0].itemsize, fields[0].base_itemsize);
+            assert!(fields[0].is_subarray);
+            assert!(fields[0].is_numeric_vector());
+
+            let (fields, _) = parse_helper_dtype(py, "make_scalar_dtype", ("f", 8usize, "="))
+                .expect("a scalar must be accepted");
+            assert!(!fields[0].is_subarray);
+        });
+    }
+
+    /// A nested structured field reports `kind='V'`; without the `hasobject`
+    /// check its object pointers would be copied as opaque bytes.
+    #[test]
+    fn parse_dtype_fields_rejects_objects_nested_in_a_struct_field() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = parse_helper_dtype(py, "make_nested_object_dtype", ())
+                .expect_err("a nested object field must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+            let msg = err.to_string();
+            assert!(msg.contains("score"), "error should name the field: {msg}");
+            assert!(msg.contains("Python objects"), "{msg}");
+        });
+    }
+
+    #[test]
+    fn parse_dtype_fields_rejects_unstructured_and_string_dtypes() {
+        Python::initialize();
+        Python::attach(|py| {
+            let err = parse_helper_dtype(py, "make_unstructured_dtype", ("T",))
+                .expect_err("a StringDType array must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+            assert!(err.to_string().contains("StringDType"));
+
+            let err = parse_helper_dtype(py, "make_unstructured_dtype", ("f",))
+                .expect_err("a plain float dtype must be rejected");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+            assert!(err.to_string().contains("structured dtype"));
+
+            let not_a_dtype = pyo3::types::PyList::empty(py);
+            let err = parse_dtype_fields(not_a_dtype.as_any()).expect_err("a list is not a dtype");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+            assert!(err.to_string().contains("numpy.dtype instance"));
+        });
+    }
+
+    #[test]
+    fn parse_dtype_fields_rejects_unsupported_element_widths() {
+        Python::initialize();
+        Python::attach(|py| {
+            for (kind, width) in [("f", 16usize), ("i", 3usize), ("u", 16usize)] {
+                let err = parse_helper_dtype(py, "make_scalar_dtype", (kind, width, "="))
+                    .expect_err("an unsupported width must be rejected up front");
+                assert!(err.is_instance_of::<PyTypeError>(py), "{kind}{width}");
+                assert!(err.to_string().contains("unsupported element width"));
+            }
+        });
+    }
+
+    // ── declared dtype versus the array's own dtype ─────────────
+
+    #[test]
+    fn numpy_to_records_uses_the_arrays_own_dtype() {
+        Python::initialize();
+        Python::attach(|py| {
+            let module = fake_numpy_stride_module(py).unwrap();
+            let array = module.getattr("make_step_slice").unwrap().call0().unwrap();
+            let records = records_of_array(&array, None, "test", "demo", "_key")
+                .expect("the dtype argument is optional");
+            assert_eq!(records.len(), 2);
+            assert_eq!(records[0].0.user_key(), Some(&Value::Int(1)));
+        });
+    }
+
+    #[test]
+    fn numpy_to_records_rejects_a_dtype_that_differs_from_the_array() {
+        Python::initialize();
+        Python::attach(|py| {
+            let module = fake_numpy_stride_module(py).unwrap();
+            let array = module.getattr("make_step_slice").unwrap().call0().unwrap();
+            let other = module.getattr("make_other_dtype").unwrap().call0().unwrap();
+            let err = records_of_array(&array, Some(&other), "test", "demo", "_key")
+                .expect_err("a declared dtype that differs from data.dtype must be rejected");
+            assert!(err.is_instance_of::<PyValueError>(py));
+            assert!(err.to_string().contains("_dtype does not match"));
+        });
+    }
+
+    #[test]
+    fn numpy_to_records_rejects_non_arrays() {
+        Python::initialize();
+        Python::attach(|py| {
+            let not_an_array = pyo3::types::PyList::empty(py);
+            let err = numpy_to_records(py, not_an_array.as_any(), None, "test", "demo", "_key")
+                .expect_err("a list is not a structured array");
+            assert!(err.is_instance_of::<PyTypeError>(py));
+        });
     }
 }

@@ -1,7 +1,7 @@
 //! Batch policy parsing from Python dicts.
 
 use aerospike_core::{
-    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchUDFPolicy, BatchWritePolicy, Concurrency,
+    BatchDeletePolicy, BatchPolicy, BatchReadPolicy, BatchUdfPolicy, BatchWritePolicy, Concurrency,
     GenerationPolicy,
 };
 use log::trace;
@@ -11,14 +11,38 @@ use pyo3::types::PyDict;
 
 use super::write_policy::parse_ttl;
 use super::{
-    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_consistency_level,
-    parse_generation_policy, parse_read_touch_ttl, parse_record_exists_action, parse_replica,
+    extract_filter_expression, extract_policy_fields, parse_commit_level, parse_generation_policy,
+    parse_read_mode_ap, parse_read_touch_ttl, parse_record_exists_action, parse_replica,
 };
 
-/// Parse a Python policy dict into a BatchPolicy
-pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchPolicy> {
+/// Which defaults a batch call starts from.
+///
+/// The parent `BatchPolicy` is one type for every batch call, but the right
+/// number of automatic retries is not: a read can be sent again freely, while
+/// a write, delete or UDF call that is re-sent after the server already
+/// applied it is applied twice (issue #453).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchKind {
+    /// Every row only reads. Starts from `BatchPolicy::default()`, which
+    /// retries (`max_retries` 2).
+    Read,
+    /// At least one row writes, deletes or runs a UDF. Starts from
+    /// `BatchPolicy::write_default()`, which does not retry (`max_retries` 0).
+    Write,
+}
+
+/// Parse a Python policy dict into a BatchPolicy.
+///
+/// The batch kind selects the retry defaults and which replica routes are safe for a write retry.
+pub fn parse_batch_policy(
+    policy_dict: Option<&Bound<'_, PyDict>>,
+    kind: BatchKind,
+) -> PyResult<BatchPolicy> {
     trace!("Parsing batch policy");
-    let mut policy = BatchPolicy::default();
+    let mut policy = match kind {
+        BatchKind::Read => BatchPolicy::default(),
+        BatchKind::Write => BatchPolicy::write_default(),
+    };
 
     let dict = match policy_dict {
         Some(d) => d,
@@ -35,12 +59,26 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
         "allow_inline_ssd" => policy.allow_inline_ssd;
         "respond_all_keys" => policy.respond_all_keys
     });
+    super::check_max_retries(policy.base_policy.max_retries)?;
 
     if let Some(val) = dict.get_item("replica")? {
-        policy.replica = parse_replica(val.extract::<i32>()?);
+        policy.base_policy.replica = parse_replica(val.extract::<i32>()?)?;
+    }
+    // A same-node retry in core 3.0 resends even rows whose success was
+    // already decoded when the batch trailer was lost.
+    if kind == BatchKind::Write
+        && policy.base_policy.max_retries > 0
+        && !matches!(
+            policy.base_policy.replica,
+            aerospike_core::Replica::Sequence | aerospike_core::Replica::PreferRack
+        )
+    {
+        return Err(crate::errors::InvalidArgError::new_err(
+            "A write batch with max_retries > 0 requires replica SEQUENCE or PREFER_RACK; a MASTER retry may replay completed writes."
+        ));
     }
     if let Some(val) = dict.get_item("read_mode_ap")? {
-        policy.base_policy.consistency_level = parse_consistency_level(val.extract::<i32>()?);
+        policy.base_policy.read_mode_ap = parse_read_mode_ap(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("read_touch_ttl_percent")? {
         policy.base_policy.read_touch_ttl = parse_read_touch_ttl(val.extract::<i64>()?)?;
@@ -50,9 +88,31 @@ pub fn parse_batch_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<B
         policy.concurrency = parse_concurrency(val.extract::<i64>()?)?;
     }
 
-    policy.filter_expression = extract_filter_expression(dict)?;
+    policy.base_policy.filter_expression = extract_filter_expression(dict)?;
 
     Ok(policy)
+}
+
+/// Reject `retry=N` together with a `max_retries` in the batch policy.
+///
+/// The two would multiply: every one of the `retry + 1` client-side attempts
+/// would itself be re-sent `max_retries` times inside aerospike-core, and the
+/// inner re-sends ignore which rows already succeeded. `retry=` re-sends only
+/// the rows that failed, so it is the one to use for `batch_write`.
+///
+/// A write batch starts from `max_retries` 0, so a non-zero value here is one
+/// the caller asked for.
+pub fn reject_doubled_retry(retry: u32, policy: &BatchPolicy) -> PyResult<()> {
+    if retry > 0 && policy.base_policy.max_retries > 0 {
+        return Err(crate::errors::InvalidArgError::new_err(format!(
+            "retry={retry} and policy['max_retries']={} were both given; they would multiply \
+             into up to {} sends per record. Use retry= alone: it re-sends only the records \
+             that failed.",
+            policy.base_policy.max_retries,
+            (u64::from(retry) + 1).saturating_mul(policy.base_policy.max_retries as u64 + 1),
+        )));
+    }
+    Ok(())
 }
 
 /// Map a Python ``int`` to an [`aerospike_core::Concurrency`] variant.
@@ -98,17 +158,17 @@ pub fn parse_batch_write_policy(
 
     // Exists (record_exists_action) — POLICY_EXISTS_*
     if let Some(val) = dict.get_item("exists")? {
-        policy.record_exists_action = parse_record_exists_action(val.extract::<i32>()?);
+        policy.record_exists_action = parse_record_exists_action(val.extract::<i32>()?)?;
     }
 
     // Generation policy — POLICY_GEN_*
     if let Some(val) = dict.get_item("gen")? {
-        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?);
+        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?)?;
     }
 
     // Commit level — POLICY_COMMIT_LEVEL_*
     if let Some(val) = dict.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?)?;
     }
 
     // TTL / expiration
@@ -147,6 +207,15 @@ pub fn parse_batch_read_policy(
     Ok(policy)
 }
 
+fn reject_delete_exists(dict: &Bound<'_, PyDict>) -> PyResult<()> {
+    if dict.contains("exists")? {
+        return Err(crate::errors::InvalidArgError::new_err(
+            "batch_remove does not support exists in its policy or record meta",
+        ));
+    }
+    Ok(())
+}
+
 /// Parse the per-record-policy dict into a [`BatchDeletePolicy`].
 ///
 /// Covers `gen` (generation_policy), `commit_level`, `key` (send_key),
@@ -163,6 +232,7 @@ pub fn parse_batch_delete_policy(
         Some(d) => d,
         None => return Ok(policy),
     };
+    reject_delete_exists(dict)?;
 
     extract_policy_fields!(dict, {
         "durable_delete" => policy.durable_delete
@@ -172,10 +242,10 @@ pub fn parse_batch_delete_policy(
         policy.send_key = val.extract::<i32>()? == 1;
     }
     if let Some(val) = dict.get_item("gen")? {
-        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?);
+        policy.generation_policy = parse_generation_policy(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?)?;
     }
 
     policy.filter_expression = extract_filter_expression(dict)?;
@@ -194,6 +264,7 @@ pub fn apply_record_meta_for_delete(
     base: &BatchDeletePolicy,
     meta: &Bound<'_, PyDict>,
 ) -> PyResult<BatchDeletePolicy> {
+    reject_delete_exists(meta)?;
     let mut policy = base.clone();
 
     if let Some(gen) = meta.get_item("gen")? {
@@ -204,7 +275,7 @@ pub fn apply_record_meta_for_delete(
         policy.send_key = key.extract::<i32>()? == 1;
     }
     if let Some(commit_level) = meta.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?)?;
     }
     if let Some(durable_delete) = meta.get_item("durable_delete")? {
         policy.durable_delete = durable_delete.extract::<bool>()?;
@@ -213,16 +284,16 @@ pub fn apply_record_meta_for_delete(
     Ok(policy)
 }
 
-/// Parse the per-record-policy dict into a [`BatchUDFPolicy`].
+/// Parse the per-record-policy dict into a [`BatchUdfPolicy`].
 ///
 /// Covers `commit_level`, `expiration` (via the user-facing `ttl` key,
 /// matching the `WritePolicy` parser convention), `key` (send_key),
 /// `durable_delete`, and `filter_expression`. UDFs may write — keeping
 /// the same field surface as `BatchWritePolicy` minus `gen`/`exists`
 /// keeps the parsers consistent for downstream `apply_record_meta_for_apply`.
-pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchUDFPolicy> {
+pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResult<BatchUdfPolicy> {
     trace!("Parsing batch UDF policy");
-    let mut policy = BatchUDFPolicy::default();
+    let mut policy = BatchUdfPolicy::default();
 
     let dict = match policy_dict {
         Some(d) => d,
@@ -237,7 +308,7 @@ pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResu
         policy.send_key = val.extract::<i32>()? == 1;
     }
     if let Some(val) = dict.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(val.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(val.extract::<i32>()?)?;
     }
     if let Some(val) = dict.get_item("ttl")? {
         policy.expiration = parse_ttl(val.extract::<i64>()?)?;
@@ -248,7 +319,7 @@ pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResu
     Ok(policy)
 }
 
-/// Apply per-record meta to a [`BatchUDFPolicy`], overriding the batch-level
+/// Apply per-record meta to a [`BatchUdfPolicy`], overriding the batch-level
 /// default. Per-record settings always win.
 ///
 /// Supported meta keys (single flat `BatchUDFMeta` dict, mirroring
@@ -257,9 +328,9 @@ pub fn parse_batch_udf_policy(policy_dict: Option<&Bound<'_, PyDict>>) -> PyResu
 /// extracted separately by `prepare_batch_apply_args` — they affect
 /// the UDF call shape, not the policy.
 pub fn apply_record_meta_for_apply(
-    base: &BatchUDFPolicy,
+    base: &BatchUdfPolicy,
     meta: &Bound<'_, PyDict>,
-) -> PyResult<BatchUDFPolicy> {
+) -> PyResult<BatchUdfPolicy> {
     let mut policy = base.clone();
 
     if let Some(ttl) = meta.get_item("ttl")? {
@@ -269,7 +340,7 @@ pub fn apply_record_meta_for_apply(
         policy.send_key = key.extract::<i32>()? == 1;
     }
     if let Some(commit_level) = meta.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?)?;
     }
     if let Some(durable_delete) = meta.get_item("durable_delete")? {
         policy.durable_delete = durable_delete.extract::<bool>()?;
@@ -302,10 +373,10 @@ pub fn apply_record_meta(
         policy.send_key = key.extract::<i32>()? == 1;
     }
     if let Some(exists) = meta.get_item("exists")? {
-        policy.record_exists_action = parse_record_exists_action(exists.extract::<i32>()?);
+        policy.record_exists_action = parse_record_exists_action(exists.extract::<i32>()?)?;
     }
     if let Some(commit_level) = meta.get_item("commit_level")? {
-        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?);
+        policy.commit_level = parse_commit_level(commit_level.extract::<i32>()?)?;
     }
     if let Some(durable_delete) = meta.get_item("durable_delete")? {
         policy.durable_delete = durable_delete.extract::<bool>()?;
@@ -456,8 +527,27 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("replica", 0i32).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).unwrap();
-            assert_eq!(p.replica, aerospike_core::policy::Replica::Master);
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).unwrap();
+            assert_eq!(
+                p.base_policy.replica,
+                aerospike_core::policy::Replica::Master
+            );
+        });
+    }
+
+    #[test]
+    fn master_retries_are_allowed_only_for_read_batches() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| {
+                d.set_item("replica", 0).unwrap();
+                d.set_item("max_retries", 1).unwrap();
+            });
+            assert!(parse_batch_policy(Some(&d), BatchKind::Read).is_ok());
+            let err = parse_batch_policy(Some(&d), BatchKind::Write).unwrap_err();
+            assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
+            d.set_item("max_retries", 0).unwrap();
+            assert!(parse_batch_policy(Some(&d), BatchKind::Write).is_ok());
         });
     }
 
@@ -468,7 +558,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("timeout_delay", 500u32).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).unwrap();
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).unwrap();
             assert_eq!(p.base_policy.timeout_delay, 500);
         });
     }
@@ -480,14 +570,14 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("sleep_between_retries", 250u32).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).unwrap();
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).unwrap();
             assert_eq!(p.base_policy.sleep_between_retries, 250);
         });
     }
 
     #[test]
     fn parse_batch_policy_default_concurrency_is_parallel() {
-        let p = parse_batch_policy(None).expect("parse ok");
+        let p = parse_batch_policy(None, BatchKind::Read).expect("parse ok");
         assert!(matches!(p.concurrency, Concurrency::Parallel));
     }
 
@@ -498,7 +588,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("concurrency", 0i64).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).expect("parse ok");
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).expect("parse ok");
             assert!(matches!(p.concurrency, Concurrency::Sequential));
         });
     }
@@ -510,7 +600,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("concurrency", 1i64).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).expect("parse ok");
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).expect("parse ok");
             assert!(matches!(p.concurrency, Concurrency::Parallel));
         });
     }
@@ -522,7 +612,7 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("concurrency", -1i64).unwrap();
             });
-            assert!(parse_batch_policy(Some(&d)).is_err());
+            assert!(parse_batch_policy(Some(&d), BatchKind::Read).is_err());
         });
     }
 
@@ -533,7 +623,94 @@ mod tests {
             let d = build_dict(py, |d| {
                 d.set_item("concurrency", 4i64).unwrap();
             });
-            assert!(parse_batch_policy(Some(&d)).is_err());
+            assert!(parse_batch_policy(Some(&d), BatchKind::Read).is_err());
+        });
+    }
+
+    // ── BatchKind: who retries by default (issue #453) ──────────
+
+    #[test]
+    fn a_read_batch_retries_by_default_and_a_write_batch_does_not() {
+        let read = parse_batch_policy(None, BatchKind::Read).unwrap();
+        let write = parse_batch_policy(None, BatchKind::Write).unwrap();
+        assert_eq!(read.base_policy.max_retries, 2);
+        assert_eq!(
+            write.base_policy.max_retries, 0,
+            "a re-sent increment or UDF call is applied twice"
+        );
+    }
+
+    #[test]
+    fn the_kind_changes_nothing_but_the_retry_default() {
+        let read = parse_batch_policy(None, BatchKind::Read).unwrap();
+        let write = parse_batch_policy(None, BatchKind::Write).unwrap();
+        assert_eq!(
+            read.base_policy.total_timeout,
+            write.base_policy.total_timeout
+        );
+        assert_eq!(
+            read.base_policy.socket_timeout,
+            write.base_policy.socket_timeout
+        );
+        assert_eq!(
+            read.base_policy.sleep_between_retries,
+            write.base_policy.sleep_between_retries
+        );
+    }
+
+    #[test]
+    fn an_explicit_max_retries_wins_for_either_kind() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| d.set_item("max_retries", 5u32).unwrap());
+            for kind in [BatchKind::Read, BatchKind::Write] {
+                let p = parse_batch_policy(Some(&d), kind).unwrap();
+                assert_eq!(p.base_policy.max_retries, 5, "{kind:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_policy_without_max_retries_keeps_the_kind_default() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| d.set_item("total_timeout", 3000u32).unwrap());
+            let write = parse_batch_policy(Some(&d), BatchKind::Write).unwrap();
+            assert_eq!(write.base_policy.max_retries, 0);
+            assert_eq!(write.base_policy.total_timeout, 3000);
+        });
+    }
+
+    #[test]
+    fn retry_together_with_max_retries_is_rejected() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| d.set_item("max_retries", 2u32).unwrap());
+            let policy = parse_batch_policy(Some(&d), BatchKind::Write).unwrap();
+
+            let err = reject_doubled_retry(3, &policy).expect_err("both were given");
+            assert!(err.is_instance_of::<crate::errors::InvalidArgError>(py));
+            let message = err.to_string();
+            assert!(
+                message.contains("retry=3")
+                    && message.contains("max_retries")
+                    && message.contains("12"),
+                "the message names both settings and the product, got: {message}"
+            );
+        });
+    }
+
+    #[test]
+    fn either_retry_setting_alone_is_accepted() {
+        Python::initialize();
+        Python::attach(|py| {
+            let d = build_dict(py, |d| d.set_item("max_retries", 2u32).unwrap());
+            let with_max_retries = parse_batch_policy(Some(&d), BatchKind::Write).unwrap();
+            assert!(reject_doubled_retry(0, &with_max_retries).is_ok());
+
+            let default_policy = parse_batch_policy(None, BatchKind::Write).unwrap();
+            assert!(reject_doubled_retry(3, &default_policy).is_ok());
+            assert!(reject_doubled_retry(0, &default_policy).is_ok());
         });
     }
 
@@ -545,14 +722,11 @@ mod tests {
                 d.set_item("read_mode_ap", 1i32).unwrap();
                 d.set_item("read_touch_ttl_percent", 80i64).unwrap();
             });
-            let p = parse_batch_policy(Some(&d)).unwrap();
-            assert_eq!(
-                p.base_policy.consistency_level,
-                aerospike_core::ConsistencyLevel::ConsistencyAll
-            );
+            let p = parse_batch_policy(Some(&d), BatchKind::Read).unwrap();
+            assert_eq!(p.base_policy.read_mode_ap, aerospike_core::ReadModeAp::All);
             assert!(matches!(
                 p.base_policy.read_touch_ttl,
-                aerospike_core::ReadTouchTTL::Percent(80)
+                aerospike_core::ReadTouchTtl::Percent(80)
             ));
         });
     }
@@ -582,7 +756,7 @@ mod tests {
         let p = parse_batch_read_policy(None).expect("parse ok");
         assert!(matches!(
             p.read_touch_ttl,
-            aerospike_core::ReadTouchTTL::ServerDefault
+            aerospike_core::ReadTouchTtl::ServerDefault
         ));
         assert!(p.filter_expression.is_none());
     }
@@ -597,7 +771,7 @@ mod tests {
             let p = parse_batch_read_policy(Some(&d)).expect("parse ok");
             assert!(matches!(
                 p.read_touch_ttl,
-                aerospike_core::ReadTouchTTL::Percent(80)
+                aerospike_core::ReadTouchTtl::Percent(80)
             ));
         });
     }
@@ -674,7 +848,7 @@ mod tests {
         });
     }
 
-    // ── BatchUDFPolicy ───────────────────────────────────────────────────
+    // ── BatchUdfPolicy ───────────────────────────────────────────────────
 
     #[test]
     fn parse_batch_udf_policy_default_when_dict_is_none() {
@@ -718,7 +892,7 @@ mod tests {
     fn apply_record_meta_for_apply_overrides_ttl_and_send_key() {
         Python::initialize();
         Python::attach(|py| {
-            let base = BatchUDFPolicy::default();
+            let base = BatchUdfPolicy::default();
             let meta = build_dict(py, |d| {
                 d.set_item("ttl", 3600i64).unwrap();
                 d.set_item("key", 1i32).unwrap();
@@ -733,7 +907,7 @@ mod tests {
     fn apply_record_meta_for_apply_per_record_wins_over_base() {
         Python::initialize();
         Python::attach(|py| {
-            let base = BatchUDFPolicy {
+            let base = BatchUdfPolicy {
                 send_key: false,
                 commit_level: CommitLevel::CommitAll,
                 ..Default::default()

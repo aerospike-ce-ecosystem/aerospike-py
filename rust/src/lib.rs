@@ -21,10 +21,14 @@ mod logging;
 pub mod metrics;
 #[deny(unsafe_op_in_unsafe_fn)]
 mod numpy_support;
+#[cfg(feature = "fuzzing")]
+pub use numpy_support::fuzzing;
+mod operate_result;
 mod operations;
 pub mod panic_safety;
 mod policy;
 pub mod query;
+mod query_stream;
 mod record_helpers;
 mod runtime;
 pub mod tracing;
@@ -94,6 +98,7 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<client::PyClient>()?;
     m.add_class::<async_client::PyAsyncClient>()?;
     m.add_class::<query::PyQuery>()?;
+    m.add_class::<query_stream::PyRecordStream>()?;
     m.add_class::<types::partition_filter::PyPartitionFilter>()?;
     m.add_class::<batch_types::PyBatchRecord>()?;
     m.add_class::<batch_types::PyBatchRecords>()?;
@@ -106,6 +111,7 @@ fn _aerospike(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_internal_stage_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(is_internal_stage_metrics_enabled, m)?)?;
     m.add_function(wrap_pyfunction!(dropped_log_count, m)?)?;
+    m.add_function(wrap_pyfunction!(numpy_support::validate_numpy_dtype, m)?)?;
     m.add_function(wrap_pyfunction!(
         types::partition_filter::partition_filter_all,
         m

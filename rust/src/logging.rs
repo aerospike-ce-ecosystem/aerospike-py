@@ -5,6 +5,7 @@
 //! when the Python GIL is unavailable (e.g. during shutdown).
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
+use pyo3::exceptions::PyKeyboardInterrupt;
 use pyo3::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -18,6 +19,45 @@ fn rust_to_python_level(level: Level) -> u32 {
         Level::Debug => 10,
         Level::Trace => 5,
     }
+}
+
+// A Python signal handler has already run when its KeyboardInterrupt reaches
+// the bridge. Preserve the exception, including its arguments and traceback.
+thread_local! {
+    static INTERRUPT: std::cell::Cell<Option<PyErr>> = const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn check_interrupt() -> PyResult<()> {
+    INTERRUPT.with(|slot| slot.take().map_or(Ok(()), Err))
+}
+
+extern "C" fn restore_interrupt(_: *mut std::ffi::c_void) -> std::ffi::c_int {
+    if let Err(err) = check_interrupt() {
+        // SAFETY: CPython invokes a pending call with an attached thread state.
+        err.restore(unsafe { Python::assume_attached() });
+        -1
+    } else {
+        0
+    }
+}
+
+fn defer_interrupt(py: Python<'_>, interrupt: PyErr) -> PyResult<()> {
+    let threads = py.import("threading")?;
+    if !threads
+        .call_method0("current_thread")?
+        .is(&threads.call_method0("main_thread")?)
+    {
+        return Err(interrupt);
+    }
+    INTERRUPT.with(|slot| {
+        if let Some(first) = slot.replace(Some(interrupt)) {
+            slot.set(Some(first));
+        }
+    });
+    // CPython will raise the original exception on the main thread. If the
+    // pending-call queue is full it is still available at the native boundary.
+    unsafe { pyo3::ffi::Py_AddPendingCall(Some(restore_interrupt), std::ptr::null_mut()) };
+    Ok(())
 }
 
 /// A `log::Log` implementation that forwards to Python's `logging` module.
@@ -51,10 +91,18 @@ impl Log for PyLogger {
         // If we can't (e.g., during shutdown), fall back to stderr for
         // WARN/ERROR messages so critical diagnostics are not lost.
         match Python::try_attach(|py| -> PyResult<()> {
-            let logging = py.import("logging")?;
-            let logger = logging.call_method1("getLogger", (target,))?;
-            logger.call_method1("log", (level, &message))?;
-            Ok(())
+            let forwarded = (|| -> PyResult<()> {
+                let logging = py.import("logging")?;
+                let logger = logging.call_method1("getLogger", (target,))?;
+                logger.call_method1("log", (level, &message))?;
+                Ok(())
+            })();
+            match forwarded {
+                Err(interrupt) if interrupt.is_instance_of::<PyKeyboardInterrupt>(py) => {
+                    defer_interrupt(py, interrupt)
+                }
+                other => other,
+            }
         }) {
             Some(Ok(())) => {} // Successfully forwarded to Python
             None => {

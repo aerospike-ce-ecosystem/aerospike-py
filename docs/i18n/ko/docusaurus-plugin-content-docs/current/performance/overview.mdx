@@ -1,91 +1,50 @@
 ---
-title: 성능 개요
-sidebar_label: 개요
+title: aerospike-py 0.15 벤치마크
+sidebar_label: 0.15 벤치마크
 sidebar_position: 1
-description: aerospike-py vs 공식 C client 의 latency · throughput · Python 3.14t 효과 요약
+description: aerospike-py 0.14.4 및 공식 Aerospike Python SDK 대비 배치·쿼리 성능.
 ---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
+aerospike-py 0.15 후보판(`4aabf09`)을 **직전 버전 0.14.4**, **공식 Aerospike Python SDK 1.0.0**(`aerospike-sdk`)과 비교했습니다. [측정 빌드](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c) · [공식 SDK](https://github.com/aerospike/aerospike-client-python-sdk/releases/tag/v1.0.0)
 
-이 문서는 **aerospike-py**(Rust, PyO3, native async)와 **공식 `aerospike` Python client**(C extension을 `loop.run_in_executor`로 실행)를 비교합니다.
+<span id="which-benchmark-matches-your-workload" />
 
-:::tip TL;DR — DLRM 서빙 p95 누적 효과
-**324 ms → 97 ms (−70%)** — 세 단계 누적: 클라이언트 교체 → batch_read 통합 → Python 3.14t.
-:::
+## 배치 읽기·쓰기 처리량 {#batch-throughput}
 
-## p95 누적 효과
+M4 Pro에서 스레드 4개로 호출당 720키를 처리했습니다. **초당 처리 행 수 ↑ 높을수록 좋습니다.** 각 열은 비교 대상 대비 0.15의 변화율입니다.
 
-```text
-원본 (공식 client, 3.11 GIL, gather)            ████████████████████████  324 ms   baseline
-+ aerospike-py 로 교체                          ██████████████             189 ms   −42%
-+ gather(N) → 단일 batch_read(mixed keys)       █████████                  126 ms   −61%
-+ Python 3.14t free-threaded                    ███████                     97 ms   −70%  🔥
-                                                                           ↑ 3.3× 빠름
-```
+| CPython | 작업 | 0.14.4 대비 | 공식 SDK 대비 |
+| --- | --- | ---: | ---: |
+| 일반 | NumPy 읽기 | +13.7% | +34.3% |
+| 일반 | NumPy 쓰기 | +17.9% | +18.6% |
+| 일반 | dict 읽기 | +5.3% | +19.2% |
+| 일반 | dict 쓰기 | +7.5% | +15.7% |
+| Free-threaded | NumPy 읽기 | +18.8% | +17.3% |
+| Free-threaded | NumPy 쓰기 | +11.6% | +16.8% |
+| Free-threaded | dict 읽기 | +3.3% | +4.0% |
+| Free-threaded | dict 쓰기 | −2.3% | −16.4% |
 
-환경: FastAPI + DLRM + Aerospike CE, k6 10 VUs × 60s, replica 2개 (4 CPU / 4 GiB request).
+[클라이언트별 처리량과 사용한 API](./client-comparison.md)
 
-## 권장 조치 (순서)
+## 동일 처리량에서 2,000키 NumPy 읽기
 
-| # | 조치 | p95 효과 |
-|---|---|---|
-| 1 | 공식 client → **aerospike-py** 교체 | **−42%** (Python 3.11) |
-| 2 | `gather(N)` → 단일 `batch_read(mixed keys)` | **−33%** 추가 (GIL 환경) |
-| 3 | 런타임을 **Python 3.14t free-threaded** 로 전환 | **−49%** 추가, TPS **+47%** |
-| 4 | `AEROSPIKE_PY_INTERNAL_METRICS=1` 상시 ON | E2E 오버헤드 ≈ 0 |
+Ncloud 재측정에서 일반 CPython은 초당 6만 행, free-threaded는 초당 9만 행을 처리했습니다. **CPU 시간·최대 상주 메모리(RSS)·p99 지연 ↓ 낮을수록 좋습니다.**
 
-## 환경별 격차 (Python 3.11 + GIL)
+| CPython | 지표 ↓ | 0.14.4 대비 | 공식 SDK 대비 |
+| --- | --- | ---: | ---: |
+| 일반 | 행당 CPU 시간 | −6.1% | −38.7% |
+| 일반 | 최대 RSS | +10.7% | −34.7% |
+| 일반 | p99 지연 | −1.9% | −47.6% |
+| Free-threaded | 행당 CPU 시간 | −1.7% | −43.1% |
+| Free-threaded | 최대 RSS | +7.3% | −40.2% |
+| Free-threaded | p99 지연 | +1.9% | −48.9% |
 
-Application stack이 단순할수록 client 자체의 차이가 크게 보입니다. 실제 serving workload에서도 비율은 줄지만 tail latency의 이점은 유지됩니다.
+[500·1,000·2,000키 상세 비교](./ncloud-equal-rate.mdx) · [동시 호출 수에 따른 메모리 사용량](../guides/version-compatibility.md#memory-under-concurrent-batch-load)
 
-<Tabs>
-  <TabItem value="dlrm" label="C — uvicorn + DLRM (실 서빙)" default>
+## 비동기 쿼리 {#async-queries}
 
-HTTP 요청부터 `batch_read`, DLRM CPU inference, 응답까지 전체 경로를 측정합니다. 실제 recommendation serving pod와 가장 비슷한 환경입니다.
+12,000행을 비동기 목록으로 수집하는 데 걸린 시간은 0.14.4 대비 일반 CPython에서 **38.7%**, free-threaded에서 **22.6%** 줄었습니다. 0.15에서 추가된 `async for`로 같은 행을 순회하면 공식 SDK가 0.15보다 각각 **9.97배**, **4.70배** 오래 걸렸습니다. [조회 방식별 시간](./client-comparison.md#full-set-queries) · [비동기 순회 프로파일](./async-stream-profile.md)
 
-| 지표 | aerospike-py | 공식 | aerospike-py 우위 |
-|---|---:|---:|---:|
-| avg | **118 ms** | 146 ms | −19% |
-| p90 | **173 ms** | 293 ms | **−41%** |
-| **p95** | **189 ms** | 324 ms | **−42%** 🔥 |
+## 0.14 이전 벤치마크 {#earlier-application-benchmarks}
 
-[→ 상세 (Production Benchmark, env C)](./production-benchmark?env=C)
-
-  </TabItem>
-  <TabItem value="asgi" label="B — uvicorn ASGI only">
-
-FastAPI + uvicorn + `batch_read`, 모델 추론 없음. "Key-value 조회 앞단 REST API" 형태.
-
-| 지표 | aerospike-py | 공식 | 우위 |
-|---|---:|---:|---:|
-| total mean | **228 ms** | 290 ms | **−21%** |
-| TPS | **19.4** | 16.6 | **+17%** |
-
-[→ 상세 (Production Benchmark, env B)](./production-benchmark?env=B)
-
-  </TabItem>
-  <TabItem value="pure" label="A — 순수 DB client (HTTP/ML 없음)">
-
-Python loop가 `batch_read`를 직접 호출합니다. HTTP나 ML layer가 없어 client 자체의 차이가 가장 크게 나타납니다.
-
-| 지표 | aerospike-py | 공식 | 우위 |
-|---|---:|---:|---:|
-| avg mean | **22 ms** | 108 ms | **−80%** 🔥 |
-| avg p99 | **121 ms** | 195 ms | −38% |
-| TPS | **374** | 138 | **+171%** 🔥 |
-
-[→ 상세 (Production Benchmark, env A)](./production-benchmark?env=A)
-
-  </TabItem>
-</Tabs>
-
-## 문서 구성
-
-| 페이지 | 언제 읽나 |
-|---|---|
-| **[Isolated Benchmark](./isolated-benchmark)** | "client 라이브러리 자체가 격차에서 얼마나 차지하나?" — 5 시나리오 (s1..s5) 를 로컬 podman/oha 하네스로 측정, 응답 직렬화 비용 제거. 시나리오마다 materialisation 경로 하나만 격리 (dict / `to_numpy` zero-copy / gather vs single / lazy subset). 3.14t 섹션 포함. |
-| **[Production Benchmark](./production-benchmark)** | "실 서빙 pod 가 보는 값은?" — FastAPI + DLRM + Aerospike CE on k8s, k6 부하, response body 직렬화 포함, replica 2개. 324→189→97 ms 누적 효과 스토리. 3.14t 섹션 포함. |
-| **[Bottleneck Analysis](./bottleneck-analysis)** | Stage profiling 및 recipe (`gather→single` 등). 새 isolated 하네스 기반으로 재측정 진행 중. |
-
-로컬 재현은 `benchmark/README.md` 참조.
+당시 서빙 실험의 비교 대상은 `aerospike` C 확장입니다. [서빙 벤치마크](./production-benchmark.mdx) · [ASGI 부하 테스트](./isolated-benchmark.mdx) · [배치 읽기 프로파일](./bottleneck-analysis.mdx)

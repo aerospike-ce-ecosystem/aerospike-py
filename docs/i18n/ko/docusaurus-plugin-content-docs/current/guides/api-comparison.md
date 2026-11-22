@@ -6,7 +6,7 @@ slug: /guides/api-comparison
 description: 공식 C 기반 Client와 aerospike-py의 API를 나란히 비교
 ---
 
-이 문서는 **공식 C 기반 client**(PyPI의 `aerospike`)와 Rust 기반 **aerospike-py**를 비교합니다. 단계별 이전 방법은 [Migration Guide](/docs/guides/migration)를 참고하세요.
+이 문서는 **공식 C 기반 client**(PyPI의 `aerospike`)와 Rust 기반 **aerospike-py**를 비교합니다.
 
 ## Connection
 
@@ -35,7 +35,7 @@ description: 공식 C 기반 Client와 aerospike-py의 API를 나란히 비교
 | Increment | `client.increment(key, bin, offset)` | `client.increment(key, bin, offset)` | 동일 |
 | Remove bin | `client.remove_bin(key, bin_names)` | `client.remove_bin(key, bin_names)` | 동일 |
 | Operate | `client.operate(key, ops)` | `client.operate(key, ops)` | 동일; `Record` 반환 |
-| Operate ordered | `client.operate_ordered(key, ops)` | `client.operate_ordered(key, ops)` | 동일; `OperateOrderedResult` 반환 |
+| Operate ordered | `client.operate_ordered(key, ops)` | `client.operate_ordered(key, ops)` | 동일; `OperateOrderedResult` 반환. 일부 결과가 다름, [연산별 반환값](/docs/guides/version-compatibility#operate_ordered-returns-one-entry-per-operation) 참고 |
 
 ## Batch Operations
 
@@ -117,7 +117,7 @@ description: 공식 C 기반 Client와 aerospike-py의 API를 나란히 비교
 | Module | Official C Client | aerospike-py | Notes |
 |--------|------------------|--------------|-------|
 | List operations | `aerospike_helpers.operations.list_operations` | `aerospike_py.list_operations` | 37 operation; 동일 의미 |
-| Map operations | `aerospike_helpers.operations.map_operations` | `aerospike_py.map_operations` | 33 operation; 동일 의미 |
+| Map operations | `aerospike_helpers.operations.map_operations` | `aerospike_py.map_operations` | 33 operation; 동일 의미. 단, `MAP_RETURN_KEY_VALUE`는 `(key, value)` tuple의 list를 반환 (공식 client는 평평한 list) |
 
 ## Expression Filters
 

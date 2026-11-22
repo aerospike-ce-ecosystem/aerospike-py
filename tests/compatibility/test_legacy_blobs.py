@@ -2,30 +2,21 @@
 
 Brownfield clusters often hold records written by the official Python client
 where Python-side values that have no native Aerospike mapping
-(e.g. pickled objects) get stored on the wire as PYTHON_BLOB (particle
-type 8). Before #280, ``aerospike-core 2.0.0`` panicked with
-``unreachable!()`` on such records and ``panic = "abort"`` aborted the
-Python process — uncatchable from Python.
+(e.g. pickled objects) get stored on the wire as PYTHON_BLOB. Rust client 2.x
+panicked with ``unreachable!()`` on such records. aerospike-py first turned
+that panic into ``RustPanicError`` (panic = "unwind" plus a panic-safety
+wrapper around every entry point); with Rust client 3.0 the bin is returned as
+``bytes`` and nothing is raised.
 
-The fix in aerospike-py:
-1. Switches release profile to ``panic = "unwind"``.
-2. Wraps every read/write entry point with a panic-safety helper that
-   surfaces the panic as ``aerospike_py.RustPanicError`` (subclass of
-   ``ClientError``).
+Reading such records is tested in
+``tests/integration/test_legacy_blob_particles.py``, which puts them on the
+server through the wire protocol — the modern official client
+(``aerospike >= 18.x``) refuses to write the values it used to pickle, so it
+cannot seed them.
 
-These tests verify that:
-- Normal read paths remain regression-free under the new wrapping
-  (covered indirectly by the rest of ``tests/compatibility/``).
-- An empty bins write succeeds and does not surface ``RustPanicError``
-  (sanity check that the wrapping is transparent on success).
-
-The PYTHON_BLOB scenario itself cannot be reproduced reliably with the
-modern official Python client (``aerospike >= 18.x``) because it now
-refuses non-native types instead of auto-pickling them. To verify the
-panic catch end-to-end, see the manual smoke test in
-``CHANGELOG.md`` (issue #280): write a PYTHON_BLOB via an older
-language-specific client (Java / Python <= 11.x) and read it back with
-aerospike-py. The expected behaviour is ``RustPanicError``.
+What stays here is the other half: the panic-safety wrapping is still in place
+for whatever panics next, and it must stay transparent on ordinary reads and
+writes next to the official client.
 """
 
 from __future__ import annotations
@@ -60,27 +51,4 @@ class TestNormalReadRegression:
         key = (NS, SET_NAME, "definitely_missing_xyz")
         cleanup.append(key)
         with pytest.raises(aerospike_py.RecordNotFound):
-            rust_client.get(key)
-
-
-class TestRustPanicErrorIfTriggered:
-    """If a panic does fire (e.g. via legacy data on the cluster), it must
-    arrive as ``RustPanicError``. We can't auto-reproduce PYTHON_BLOB on
-    modern aerospike client 18.x, so this is a manual smoke template:
-    drop a record with a language-specific particle type into the cluster
-    via an older client, then run this with ``--run-legacy-blob``.
-
-    The decorator skips the test by default; flip it on locally to verify
-    the catch path against real legacy data."""
-
-    @pytest.mark.skip(
-        reason="Requires legacy data (PYTHON_BLOB / JAVA_BLOB) seeded by an "
-        "older language client. Run manually after seeding — see issue #280 "
-        "and the module docstring."
-    )
-    def test_legacy_blob_surfaces_rust_panic_error(self, rust_client):
-        # Replace the key below with one that exists on the cluster and
-        # contains a PYTHON_BLOB / JAVA_BLOB / etc. bin.
-        key = (NS, SET_NAME, "legacy_record_seeded_by_old_client")
-        with pytest.raises(aerospike_py.RustPanicError):
             rust_client.get(key)

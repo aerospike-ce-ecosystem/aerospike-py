@@ -10,6 +10,15 @@ import pytest
 import aerospike_py
 from aerospike_py import predicates as p
 
+#: Slack for the upper bound of a TTL that was just written.
+#:
+#: The client turns a record's expiration time into a TTL with its own clock,
+#: in whole seconds. When that clock is behind the server's, and milliseconds
+#: are enough if the write lands just after a full second, the record reports
+#: one second more than was set. In CI the client and the server share a clock;
+#: a server inside a container VM on a developer machine does not.
+CLOCK_SKEW_SECONDS = 1
+
 
 async def invoke(client, method_name, *args, **kwargs):
     """Call a method on either sync or async client transparently.

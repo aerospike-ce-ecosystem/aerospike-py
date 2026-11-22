@@ -107,30 +107,42 @@ class TestInvalidPolicyValueTypes:
             c.get(key, policy={policy_key: invalid_value})
 
 
-class TestPolicyOutOfRangeDefaults:
-    """Out-of-range integer policy values fall back to defaults silently.
-    On unconnected client, ClientError is raised after successful parsing."""
+class TestPolicyOutOfRangeValues:
+    """An unknown policy enum value is rejected before anything is sent.
+
+    These used to fall back to the enum's default, so ``exists=999`` silently
+    became a plain update and ``gen=999`` silently disabled the generation
+    check. The client here is unconnected: ``InvalidArgError`` proves the value
+    was rejected while parsing, before the connection was ever needed.
+    """
 
     @pytest.mark.parametrize(
         "policy_key,out_of_range_value",
         [
             ("exists", 999),
+            ("exists", -1),
             ("gen", 999),
-            ("key", 999),
             ("commit_level", 999),
         ],
-        ids=["exists_999", "gen_999", "key_999", "commit_level_999"],
+        ids=["exists_999", "exists_negative", "gen_999", "commit_level_999"],
     )
-    def test_put_out_of_range_policy_raises_client_error(self, policy_key, out_of_range_value):
-        """put() with out-of-range policy values still parses OK but raises
-        ClientError due to unconnected client."""
+    def test_put_rejects_unknown_policy_value(self, policy_key, out_of_range_value):
         c = _make_client()
-        key = ("test", "demo", "key1")
-        bins = {"a": 1}
-        # The policy parses without error (falls back to default),
-        # but the unconnected client raises ClientError.
+        with pytest.raises(aerospike_py.InvalidArgError, match=f"invalid {policy_key} value"):
+            c.put(("test", "demo", "key1"), {"a": 1}, policy={policy_key: out_of_range_value})
+
+    @pytest.mark.parametrize("meta_key", ["exists", "commit_level"])
+    def test_put_rejects_unknown_meta_value(self, meta_key):
+        c = _make_client()
+        with pytest.raises(aerospike_py.InvalidArgError, match=f"invalid {meta_key} value"):
+            c.put(("test", "demo", "key1"), {"a": 1}, meta={meta_key: 999})
+
+    def test_put_key_policy_is_still_lenient(self):
+        """``key`` is a boolean-like switch: any value other than
+        POLICY_KEY_SEND means "do not send the key", as before."""
+        c = _make_client()
         with pytest.raises(aerospike_py.ClientError):
-            c.put(key, bins, policy={policy_key: out_of_range_value})
+            c.put(("test", "demo", "key1"), {"a": 1}, policy={"key": 999})
 
 
 # ═══════════════════════════════════════════════════════════════════

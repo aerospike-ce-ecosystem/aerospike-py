@@ -6,7 +6,7 @@
 
 use log::error;
 
-const REPO: &str = "KimSoungRyoul/aerospike-py";
+const REPO: &str = "aerospike-ce-ecosystem/aerospike-py";
 
 /// Escape single quotes for shell single-quoted strings: `'` → `'\''`.
 fn shell_escape(s: &str) -> String {

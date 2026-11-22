@@ -11,16 +11,17 @@ use crate::policy::batch_policy::{
     parse_batch_write_policy,
 };
 use aerospike_core::{
-    operations::Operation, BatchDeletePolicy, BatchOperation, BatchUDFPolicy, BatchWritePolicy,
-    Bin, Bins, Key, ReadPolicy, UDFLang, Value, WritePolicy,
+    operations::Operation, BatchDeletePolicy, BatchOperation, BatchUdfPolicy, BatchWritePolicy,
+    Bin, Bins, Key, ReadPolicy, UdfLang, Value, WritePolicy,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::{PyDict, PyList, PyTuple};
 
-use crate::operations::{py_ops_to_rust, py_ops_to_rust_checked};
+use crate::operate_result::OrderedPlan;
+use crate::operations::{py_ops_to_rust_checked, py_ops_to_rust_ordered};
 use crate::policy::admin_policy::parse_admin_policy;
-use crate::policy::batch_policy::parse_batch_policy;
+use crate::policy::batch_policy::{parse_batch_policy, reject_doubled_retry, BatchKind};
 use crate::policy::read_policy::{parse_read_policy, DEFAULT_READ_POLICY};
 use crate::policy::write_policy::parse_write_policy;
 use crate::tracing::ConnectionInfo;
@@ -147,6 +148,13 @@ pub struct GetArgs {
     pub otel: OtelContext,
 }
 
+/// The read policy of one call: the shared default, or the caller's own.
+///
+/// `Custom` holds the policy inline. Boxing it would trade the size clippy
+/// points at for a heap allocation on every read that passes a policy, and
+/// the enum is a field of a per-call argument struct that is built once and
+/// moved once.
+#[allow(clippy::large_enum_variant)]
 pub enum ReadPolicyChoice {
     Default,
     Custom(ReadPolicy),
@@ -419,7 +427,45 @@ pub struct OperateArgs {
     pub key: Key,
     pub write_policy: WritePolicy,
     pub ops: Vec<Operation>,
+    pub has_write: bool,
     pub otel: OtelContext,
+}
+
+/// `OperateArgs` plus the layout of the ordered result.
+pub struct OperateOrderedArgs {
+    pub args: OperateArgs,
+    pub plan: OrderedPlan,
+}
+
+pub fn prepare_operate_ordered_args(
+    py: Python<'_>,
+    key: &Bound<'_, PyAny>,
+    ops: &Bound<'_, PyList>,
+    meta: Option<&Bound<'_, PyDict>>,
+    policy: Option<&Bound<'_, PyDict>>,
+    conn_info: &Arc<ConnectionInfo>,
+) -> PyResult<OperateOrderedArgs> {
+    let rust_key = py_to_key(key)?;
+    let mut write_policy = parse_write_policy(policy, meta)?;
+    let (rust_ops, plan) = py_ops_to_rust_ordered(ops)?;
+    // One answer per operation, also for an operation that has none. Without
+    // it the server leaves out a read that found nothing (a missing bin, a
+    // list element that is nil) from a request that only reads, and the
+    // answers that do come carry no position: which operation each belongs to
+    // could then only be guessed. aerospike-core already asks for this
+    // whenever the request writes; asking does not turn a read into a write.
+    write_policy.respond_per_each_op = true;
+
+    Ok(OperateOrderedArgs {
+        args: OperateArgs {
+            key: rust_key,
+            write_policy,
+            ops: rust_ops,
+            has_write: plan.has_write(),
+            otel: OtelContext::new(py, conn_info),
+        },
+        plan,
+    })
 }
 
 pub fn prepare_operate_args(
@@ -432,12 +478,13 @@ pub fn prepare_operate_args(
 ) -> PyResult<OperateArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, meta)?;
-    let rust_ops = py_ops_to_rust(ops)?;
+    let (rust_ops, has_write) = py_ops_to_rust_checked(ops)?;
 
     Ok(OperateArgs {
         key: rust_key,
         write_policy,
         ops: rust_ops,
+        has_write,
         otel: OtelContext::new(py, conn_info),
     })
 }
@@ -461,7 +508,7 @@ pub fn prepare_batch_read_args(
     policy: Option<&Bound<'_, PyDict>>,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchReadArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
+    let batch_policy = parse_batch_policy(policy, BatchKind::Read)?;
     let read_policy = parse_batch_read_policy(policy)?;
     let bins_selector = match bins {
         None => Bins::All,
@@ -476,7 +523,7 @@ pub fn prepare_batch_read_args(
 
     let (batch_ns, batch_set) = rust_keys
         .first()
-        .map(|k| (k.namespace.clone(), k.set_name.clone()))
+        .map(|k| (k.namespace().to_string(), k.set_name().to_string()))
         .unwrap_or_default();
 
     Ok(BatchReadArgs {
@@ -501,15 +548,16 @@ impl BatchReadArgs {
 
 // ── batch_operate ────────────────────────────────────────────────────────────
 
+enum BatchOperatePolicy {
+    Read(aerospike_core::BatchReadPolicy),
+    Write(BatchWritePolicy),
+}
+
 pub struct BatchOperateArgs {
     pub rust_keys: Vec<Key>,
     pub batch_policy: aerospike_core::BatchPolicy,
-    pub read_policy: aerospike_core::BatchReadPolicy,
+    row_policy: BatchOperatePolicy,
     pub ops: Vec<Operation>,
-    /// `true` when at least one op in `ops` is a write. An all-read op list must
-    /// be issued as a batch *read*: `aerospike-core` refuses to encode a batch
-    /// write that contains no write op.
-    pub has_write: bool,
     pub batch_ns: String,
     pub batch_set: String,
     pub otel: OtelContext,
@@ -522,22 +570,47 @@ pub fn prepare_batch_operate_args(
     policy: Option<&Bound<'_, PyDict>>,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchOperateArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
-    let read_policy = parse_batch_read_policy(policy)?;
     let (rust_ops, has_write) = py_ops_to_rust_checked(ops)?;
+    // An op list that only reads is sent as a batch read and may be retried
+    // like one; anything that writes starts from the no-retry defaults.
+    let kind = if has_write {
+        BatchKind::Write
+    } else {
+        BatchKind::Read
+    };
+    let batch_policy = parse_batch_policy(policy, kind)?;
+    let row_policy = if has_write {
+        let write_policy = parse_batch_write_policy(policy)?;
+        if write_policy.generation_policy != aerospike_core::GenerationPolicy::None {
+            return Err(crate::errors::InvalidArgError::new_err(
+                "batch_operate cannot compare gen without an expected generation; use operate() with meta['gen']"
+            ));
+        }
+        BatchOperatePolicy::Write(write_policy)
+    } else {
+        if let Some(dict) = policy {
+            for field in ["exists", "gen", "commit_level"] {
+                if dict.contains(field)? {
+                    return Err(crate::errors::InvalidArgError::new_err(format!(
+                        "{field} requires a write operation in batch_operate"
+                    )));
+                }
+            }
+        }
+        BatchOperatePolicy::Read(parse_batch_read_policy(policy)?)
+    };
     let rust_keys = py_to_keys(py, keys)?;
 
     let (batch_ns, batch_set) = rust_keys
         .first()
-        .map(|k| (k.namespace.clone(), k.set_name.clone()))
+        .map(|k| (k.namespace().to_string(), k.set_name().to_string()))
         .unwrap_or_default();
 
     Ok(BatchOperateArgs {
         rust_keys,
         batch_policy,
-        read_policy,
+        row_policy,
         ops: rust_ops,
-        has_write,
         batch_ns,
         batch_set,
         otel: OtelContext::new(py, conn_info),
@@ -545,23 +618,21 @@ pub fn prepare_batch_operate_args(
 }
 
 impl BatchOperateArgs {
+    pub fn has_write(&self) -> bool {
+        matches!(self.row_policy, BatchOperatePolicy::Write(_))
+    }
+
     pub fn to_batch_ops(&self) -> Vec<BatchOperation> {
-        // An op list without a write cannot be sent as a batch write:
-        // `aerospike-core` fails buffer preparation with "Batch write
-        // operations do not contain a write". Read-only op lists (OPERATOR_READ,
-        // list_get*/map_get*/bit_get*/hll_get*, ...) are valid batch reads, so
-        // route them there instead.
-        if !self.has_write {
-            return self
-                .rust_keys
-                .iter()
-                .map(|k| BatchOperation::read_ops(&self.read_policy, k.clone(), self.ops.clone()))
-                .collect();
-        }
-        let write_policy = BatchWritePolicy::default();
         self.rust_keys
             .iter()
-            .map(|k| BatchOperation::write(&write_policy, k.clone(), self.ops.clone()))
+            .map(|key| match &self.row_policy {
+                BatchOperatePolicy::Read(policy) => {
+                    BatchOperation::read_ops(policy, key.clone(), self.ops.clone())
+                }
+                BatchOperatePolicy::Write(policy) => {
+                    BatchOperation::write(policy, key.clone(), self.ops.clone())
+                }
+            })
             .collect()
     }
 }
@@ -585,7 +656,7 @@ pub fn prepare_batch_remove_args(
     policy: Option<&Bound<'_, PyDict>>,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchRemoveArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
+    let batch_policy = parse_batch_policy(policy, BatchKind::Write)?;
     // Parse the batch-level delete policy once and share it via Arc; the
     // common "no per-record meta" path bumps refcount instead of cloning.
     let base_delete_policy = Arc::new(parse_batch_delete_policy(policy)?);
@@ -632,7 +703,7 @@ pub fn prepare_batch_remove_args(
 
     let (batch_ns, batch_set) = records
         .first()
-        .map(|(k, _)| (k.namespace.clone(), k.set_name.clone()))
+        .map(|(k, _)| (k.namespace().to_string(), k.set_name().to_string()))
         .unwrap_or_default();
 
     Ok(BatchRemoveArgs {
@@ -659,12 +730,12 @@ impl BatchRemoveArgs {
 ///
 /// `policy` is `Arc`-shared across records that did not provide a per-record
 /// override, so the no-meta fast path is a refcount bump rather than a clone.
-pub type BatchApplyEntry = (Key, String, String, Option<Vec<Value>>, Arc<BatchUDFPolicy>);
+pub type BatchApplyEntry = (Key, String, String, Option<Vec<Value>>, Arc<BatchUdfPolicy>);
 
 /// Pre-parsed input for `Client.batch_apply` / `AsyncClient.batch_apply`.
 ///
 /// Each entry pairs the parsed key with its UDF call shape and the
-/// `BatchUDFPolicy` that applies to it. Per-record `BatchUDFMeta` may
+/// `BatchUdfPolicy` that applies to it. Per-record `BatchUDFMeta` may
 /// override `module`, `function`, `args`, plus any policy field — the
 /// shared base policy is allocated once and `Arc::clone`d on the no-meta
 /// fast path.
@@ -692,7 +763,7 @@ pub fn prepare_batch_apply_args(
     policy: Option<&Bound<'_, PyDict>>,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchApplyArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
+    let batch_policy = parse_batch_policy(policy, BatchKind::Write)?;
     // Parse the batch-level UDF policy once and share via Arc; the no-meta
     // fast path bumps refcount instead of cloning.
     let base_udf_policy = Arc::new(parse_batch_udf_policy(policy)?);
@@ -779,7 +850,7 @@ pub fn prepare_batch_apply_args(
 
     let (batch_ns, batch_set) = records
         .first()
-        .map(|(k, _, _, _, _)| (k.namespace.clone(), k.set_name.clone()))
+        .map(|(k, _, _, _, _)| (k.namespace().to_string(), k.set_name().to_string()))
         .unwrap_or_default();
 
     Ok(BatchApplyArgs {
@@ -796,7 +867,13 @@ impl BatchApplyArgs {
         self.records
             .iter()
             .map(|(k, m, f, a, p)| {
-                BatchOperation::udf(p.as_ref(), k.clone(), m.as_str(), f.as_str(), a.clone())
+                BatchOperation::udf(
+                    p.as_ref(),
+                    k.clone(),
+                    m.as_str(),
+                    f.as_str(),
+                    a.clone().unwrap_or_default(),
+                )
             })
             .collect()
     }
@@ -820,7 +897,8 @@ pub fn prepare_batch_write_args(
     retry: u32,
     conn_info: &Arc<ConnectionInfo>,
 ) -> PyResult<BatchWriteGenericArgs> {
-    let batch_policy = parse_batch_policy(policy)?;
+    let batch_policy = parse_batch_policy(policy, BatchKind::Write)?;
+    reject_doubled_retry(retry, &batch_policy)?;
     // Parse batch-level write policy once (TTL default for all records).
     // Wrap in Arc so the common "all records share the batch policy" path
     // reuses a single allocation via Arc::clone (refcount bump) rather than
@@ -828,7 +906,7 @@ pub fn prepare_batch_write_args(
     let base_write_policy = Arc::new(parse_batch_write_policy(policy)?);
     let mut rust_records = Vec::with_capacity(records.len());
 
-    for item in records.iter() {
+    for (position, item) in records.iter().enumerate() {
         let tuple = item.cast::<PyTuple>().map_err(|_| {
             pyo3::exceptions::PyTypeError::new_err("Each record must be a tuple of (key, bins)")
         })?;
@@ -843,6 +921,18 @@ pub fn prepare_batch_write_args(
             .cast::<PyDict>()
             .map_err(|_| pyo3::exceptions::PyTypeError::new_err("bins element must be a dict"))?;
         let bins = py_dict_to_bins(bins_dict)?;
+        // A write of no bins is refused by the server (parameter error), and
+        // aerospike-core refuses to build a request for a node whose share of
+        // the batch contains one: every record that happens to live on that
+        // node then fails with it, and the records on other nodes are written.
+        // Which records an argument error took down would depend on the
+        // partition map, so it is refused here, before anything is sent.
+        if bins.is_empty() {
+            return Err(crate::errors::InvalidArgError::new_err(format!(
+                "record {position} has no bins: batch_write cannot write an empty record \
+                 (to delete records use batch_remove)"
+            )));
+        }
 
         // Per-record meta (3rd tuple element) overrides batch-level TTL.
         // When present we allocate a fresh Arc; without meta all records
@@ -862,7 +952,7 @@ pub fn prepare_batch_write_args(
 
     let (batch_ns, batch_set) = rust_records
         .first()
-        .map(|(k, _, _)| (k.namespace.clone(), k.set_name.clone()))
+        .map(|(k, _, _)| (k.namespace().to_string(), k.set_name().to_string()))
         .unwrap_or_default();
 
     Ok(BatchWriteGenericArgs {
@@ -895,7 +985,7 @@ pub fn prepare_info_args(command: &str, policy: Option<&Bound<'_, PyDict>>) -> P
 pub fn info_node_result(
     node: &aerospike_core::Node,
     cmd: &str,
-    result: Result<std::collections::HashMap<String, String>, aerospike_core::Error>,
+    result: Result<aerospike_core::IndexMap<String, String>, aerospike_core::Error>,
 ) -> (String, i32, String) {
     match result {
         Ok(map) => {
@@ -903,13 +993,10 @@ pub fn info_node_result(
             (node.name().to_string(), 0, response)
         }
         Err(e) => {
-            let code = match &e {
-                aerospike_core::Error::ServerError(rc, _, _) => {
-                    crate::errors::result_code_to_int(rc)
-                }
-                _ => -1,
-            };
-            (node.name().to_string(), code, e.to_string())
+            // Same convention as the Python exceptions: the wire code when the
+            // node answered with one, the client-side sentinel otherwise.
+            let code = crate::errors::ErrorClass::of(&e).result_code();
+            (node.name().to_string(), code, crate::errors::describe(&e))
         }
     }
 }
@@ -942,7 +1029,7 @@ pub fn prepare_truncate_args(
 
 pub struct UdfPutArgs {
     pub admin_policy: aerospike_core::AdminPolicy,
-    pub language: UDFLang,
+    pub language: UdfLang,
     pub udf_body: Vec<u8>,
     pub server_path: String,
 }
@@ -954,7 +1041,7 @@ pub fn prepare_udf_put_args(
 ) -> PyResult<UdfPutArgs> {
     let admin_policy = parse_admin_policy(policy)?;
     let language = match udf_type {
-        0 => UDFLang::Lua,
+        0 => UdfLang::Lua,
         _ => {
             return Err(crate::errors::InvalidArgError::new_err(
                 "Only Lua UDF (udf_type=0) is supported.",
@@ -1005,6 +1092,7 @@ pub fn prepare_udf_remove_args(
 
 pub struct ApplyArgs {
     pub key: Key,
+    pub connection_info: Arc<ConnectionInfo>,
     pub write_policy: WritePolicy,
     pub module: String,
     pub function: String,
@@ -1017,6 +1105,7 @@ pub fn prepare_apply_args(
     function: &str,
     args: Option<&Bound<'_, PyList>>,
     policy: Option<&Bound<'_, PyDict>>,
+    connection_info: &Arc<ConnectionInfo>,
 ) -> PyResult<ApplyArgs> {
     let rust_key = py_to_key(key)?;
     let write_policy = parse_write_policy(policy, None)?;
@@ -1032,6 +1121,7 @@ pub fn prepare_apply_args(
     };
 
     Ok(ApplyArgs {
+        connection_info: Arc::clone(connection_info),
         key: rust_key,
         write_policy,
         module: module.to_string(),
@@ -1187,10 +1277,7 @@ mod tests {
                 batch_ops_for(py, &[read.clone(), cdt_read.clone()]),
             ] {
                 assert!(
-                    matches!(
-                        batch_ops.as_slice(),
-                        [BatchOperation::Read { ops: Some(_), .. }]
-                    ),
+                    matches!(batch_ops.as_slice(), [op] if !op.batch_record().has_write()),
                     "read-only op list must produce a batch read, got {batch_ops:?}"
                 );
             }
@@ -1212,7 +1299,7 @@ mod tests {
 
             let batch_ops = batch_ops_for(py, &[read, incr]);
             assert!(
-                matches!(batch_ops.as_slice(), [BatchOperation::Write { .. }]),
+                matches!(batch_ops.as_slice(), [op] if op.batch_record().has_write()),
                 "a mixed op list must stay on the batch-write path, got {batch_ops:?}"
             );
         });

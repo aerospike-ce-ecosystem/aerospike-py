@@ -102,6 +102,7 @@ results = client.batch_write_numpy(data, "test", "demo", dtype)
 ### Key field 규약
 
 - 기본 key field: `"_key"` (`key_field` 파라미터로 설정 가능)
+- Key field는 값 하나, 즉 scalar 정수이거나 고정 폭 bytes field여야 합니다. `("_key", "i4", (1,))` 같은 sub-array는 `TypeError`를 발생시킵니다
 - `_` 로 prefix 된 field 는 bin 에서 제외 (record key 로는 `_key` 만 사용)
 - 나머지 모든 field는 Aerospike bin이 됩니다.
 
