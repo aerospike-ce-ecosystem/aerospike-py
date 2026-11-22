@@ -378,7 +378,10 @@ fn settle_batch<'k>(
         };
     };
     let stand_ins = restore_keys(&mut rows, keys);
-    let failure = if rows.iter().all(row_has_a_server_answer) {
+    let failure = if rows
+        .iter()
+        .all(|row| RowOutcome::of(row).has_server_answer())
+    {
         None
     } else {
         Some(err)
@@ -414,39 +417,39 @@ fn settle_batch<'k>(
 /// some hundreds of rows per call said "refused, not in doubt" of records
 /// that had been written.
 ///
-/// The binding cannot see whether a row was sent before. So when re-sending
-/// is switched on (it is off by default for a batch that writes), every row
-/// of a write that ends in one of these ways is reported in doubt: the call
-/// does not know, and says so. That includes a record that could not be
-/// routed at the first send either, which was certainly not written.
+/// A singleton group uses the single-command routing path. On resend it
+/// can stamp the raw routing error on the write instead of returning code 11.
 fn rows_a_resend_leaves_in_doubt(rows: &[BatchRecord], batch_policy: &BatchPolicy) -> Vec<usize> {
-    if batch_policy.base_policy.max_retries == 0 {
+    core_retry_uncertain_indices(
+        batch_policy.base_policy.max_retries,
+        rows.iter()
+            .map(|row| (row.has_write(), RowOutcome::of(row))),
+    )
+}
+
+fn core_retry_uncertain_indices(
+    max_retries: usize,
+    rows: impl Iterator<Item = (bool, RowOutcome)>,
+) -> Vec<usize> {
+    if max_retries == 0 {
         return Vec::new();
     }
-    rows.iter()
-        .enumerate()
-        .filter(|(_, row)| {
-            row.has_write()
-                && (crate::batch_types::could_not_be_routed(row)
-                    || matches!(
-                        RowOutcome::of(row),
-                        RowOutcome::Failed(ErrorClass::Server(
-                            ResultCode::KeyNotFoundError
-                                | ResultCode::FilteredOut
-                                | ResultCode::UdfBadResponse
-                        ))
-                    ))
-        })
+    rows.enumerate()
+        .filter(|(_, (writes, outcome))| *writes && core_resend_may_have_applied(*outcome))
         .map(|(index, _)| index)
         .collect()
 }
 
-/// Whether a server said what happened to this row's record: success, or a
-/// result code of its own.
-fn row_has_a_server_answer(row: &BatchRecord) -> bool {
+fn core_resend_may_have_applied(outcome: RowOutcome) -> bool {
     matches!(
-        RowOutcome::of(row),
-        RowOutcome::Ok | RowOutcome::Failed(ErrorClass::Server(_))
+        outcome,
+        RowOutcome::NotRouted {
+            initial_split: false,
+            ..
+        } | RowOutcome::MissingNamespace
+            | RowOutcome::Failed(ErrorClass::Server(
+                ResultCode::KeyNotFoundError | ResultCode::FilteredOut | ResultCode::UdfBadResponse
+            ))
     )
 }
 
@@ -631,19 +634,18 @@ fn judge_row(
     in_doubt: bool,
     idempotent: impl FnOnce() -> bool,
 ) -> RowJudgement {
-    let (transient, unanswered) = match outcome {
+    let transient = match outcome {
         RowOutcome::Ok => return RowJudgement::default(),
-        RowOutcome::NoResponse => (true, true),
-        RowOutcome::Failed(class) => (
-            failure_may_pass(class),
-            !matches!(class, ErrorClass::Server(_)),
-        ),
+        RowOutcome::NoResponse => true,
+        RowOutcome::MissingNamespace => false,
+        RowOutcome::NotRouted { code, .. } => is_retryable_result_code(&code),
+        RowOutcome::Failed(class) => failure_may_pass(class),
     };
     RowJudgement {
         failed: true,
         retry: transient && (!in_doubt || idempotent()),
         in_doubt,
-        unanswered,
+        unanswered: !outcome.has_server_answer(),
     }
 }
 
@@ -2227,6 +2229,66 @@ mod tests {
 
     fn drive(env: &ScriptedAttempts, max_retries: u32, timeout_ms: u64) -> BatchWriteOutcome<Row> {
         futures::executor::block_on(drive_batch_write_retries(env, max_retries, timeout_ms))
+    }
+
+    #[test]
+    fn lost_route_on_resend_keeps_call_failure_and_ordered_partial_rows() {
+        let partition_error = ErrorClass::Server(ResultCode::PartitionUnavailable);
+        let local = RowOutcome::from_failure(partition_error, None, false);
+        let remote = RowOutcome::from_failure(partition_error, Some("node"), false);
+        assert_eq!(local.result_code(), remote.result_code());
+        assert_eq!(local.error_type(), remote.error_type());
+        assert!(!local.has_server_answer());
+        assert!(remote.has_server_answer());
+
+        for (outcome, should_raise) in [(local, true), (remote, false)] {
+            let final_row = Row {
+                outcome,
+                in_doubt: false,
+            };
+            let env = ScriptedAttempts::new(
+                2,
+                1,
+                vec![
+                    Scripted::CallFailed(vec![OK, LOST]),
+                    Scripted::CallFailed(vec![final_row]),
+                ],
+            );
+            let result = drive(&env, 1, 1000);
+            assert_eq!(result.error.is_some(), should_raise);
+            assert_eq!(result.rows[0].outcome, RowOutcome::Ok);
+            assert_eq!(result.rows[1].outcome, outcome);
+            assert_eq!(result.in_doubt_rows, vec![1]);
+        }
+    }
+
+    #[test]
+    fn singleton_resend_losing_namespace_preserves_write_uncertainty() {
+        // The initial batch split wraps routing failures in a server code
+        // with a cause. The singleton command instead stamps its raw error.
+        let invalid_input = AsError::invalid_argument("invalid operation count");
+        let rejected = RowOutcome::from_parts(Some(&invalid_input), false);
+        assert!(!core_resend_may_have_applied(rejected));
+
+        let raw = RowOutcome::MissingNamespace;
+        assert_eq!(raw.result_code(), rejected.result_code());
+        assert_eq!(raw.error_type(), rejected.error_type());
+        assert!(!raw.has_server_answer());
+        assert!(core_resend_may_have_applied(raw));
+        let outcomes = [(true, RowOutcome::Ok), (true, raw)];
+        assert!(core_retry_uncertain_indices(0, outcomes.into_iter()).is_empty());
+        let indices = core_retry_uncertain_indices(1, outcomes.into_iter());
+        let (row_flags, call_flag) = call_in_doubt_with_rows(indices);
+        assert_eq!(row_flags, vec![false, true]);
+        assert!(call_flag);
+        for rc in [
+            ResultCode::InvalidNamespace,
+            ResultCode::PartitionUnavailable,
+        ] {
+            let before_send = RowOutcome::from_failure(ErrorClass::Server(rc), None, true);
+            assert!(!before_send.has_server_answer());
+            assert!(!core_resend_may_have_applied(before_send));
+        }
     }
 
     #[test]

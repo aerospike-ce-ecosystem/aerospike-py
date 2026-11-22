@@ -21,7 +21,7 @@ use half::f16;
 use log::{debug, warn};
 use pyo3::exceptions::{PyMemoryError, PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyBytes, PyDict};
 
 use crate::record_helpers::record_ttl_seconds;
 use crate::types::key::compute_bytes_key_digest;
@@ -1163,30 +1163,12 @@ unsafe fn read_value_from_buffer(row_ptr: *const u8, field: &FieldInfo) -> PyRes
     }
 }
 
-/// Extract the raw data pointer from a **read-only** numpy array via `__array_interface__`.
-///
-/// # Safety contract for callers
-///
-/// The returned pointer is only valid while the numpy array is alive and not
-/// reallocated. Callers must ensure:
-/// - The array outlives all reads through the returned pointer.
-/// - No concurrent Python code resizes or replaces the array's buffer.
-fn get_array_data_ptr_readonly(array: &Bound<'_, PyAny>) -> PyResult<*const u8> {
-    let iface = array.getattr("__array_interface__")?;
-    let data_tuple = iface.get_item("data")?;
-    let ptr_int: usize = data_tuple.get_item(0)?.extract()?;
-    if ptr_int == 0 {
-        return Err(PyValueError::new_err("numpy array data pointer is null"));
-    }
-    Ok(ptr_int as *const u8)
-}
-
-/// Resolve the actual byte stride between logical rows in a 1-D numpy structured array.
+/// Validate the source shape and the spacing of logical rows before packing.
 ///
 /// NumPy views can expose row strides larger than `dtype.itemsize` (for sliced
 /// arrays) or negative strides (for reversed views). The native batch-write path
 /// must honor those strides instead of assuming packed contiguous rows.
-fn get_array_row_stride(array: &Bound<'_, PyAny>, row_size: usize) -> PyResult<isize> {
+fn validate_array_stride(array: &Bound<'_, PyAny>, row_size: usize) -> PyResult<()> {
     let iface = array.getattr("__array_interface__")?;
     let shape: Vec<usize> = iface.get_item("shape")?.extract()?;
     if shape.len() != 1 {
@@ -1205,7 +1187,7 @@ fn get_array_row_stride(array: &Bound<'_, PyAny>, row_size: usize) -> PyResult<i
 
     let strides_obj = iface.get_item("strides")?;
     if strides_obj.is_none() {
-        return Ok(row_size);
+        return Ok(());
     }
 
     let strides: Vec<isize> = strides_obj.extract()?;
@@ -1232,23 +1214,7 @@ fn get_array_row_stride(array: &Bound<'_, PyAny>, row_size: usize) -> PyResult<i
         }
     }
 
-    Ok(stride)
-}
-
-fn checked_row_offset(index: usize, row_stride: isize) -> PyResult<isize> {
-    let index = isize::try_from(index).map_err(|_| {
-        PyValueError::new_err(format!(
-            "array index {} exceeds supported pointer offset range",
-            index
-        ))
-    })?;
-
-    index.checked_mul(row_stride).ok_or_else(|| {
-        PyValueError::new_err(format!(
-            "buffer offset overflow: index {} * stride {} exceeds isize",
-            index, row_stride
-        ))
-    })
+    Ok(())
 }
 
 /// Convert a numpy structured array into a list of ``(Key, Vec<Bin>)`` pairs
@@ -1266,10 +1232,8 @@ fn checked_row_offset(index: usize, row_stride: isize) -> PyResult<isize> {
 /// row is converted, so nothing is sent. Reading the buffer through a dtype
 /// other than its own would reinterpret the bytes.
 ///
-/// Every row is converted into owned `Key` / `Bin` values here, under the GIL.
-/// The array's buffer pointer never leaves this function, so the async client
-/// can release the GIL and run the write without the caller being able to
-/// mutate memory the write is still reading.
+/// A base ndarray view owns a private shape/stride header. NumPy packs its
+/// records in logical order into immutable bytes before Rust decodes them.
 ///
 /// # Arguments
 ///
@@ -1287,22 +1251,19 @@ pub fn numpy_to_records(
     set_name: &str,
     key_field: &str,
 ) -> PyResult<Vec<(Key, Vec<Bin>)>> {
-    if !data_array.hasattr("dtype")?
-        || !data_array.is_instance(&py.import("numpy")?.getattr("ndarray")?)?
-    {
+    if !data_array.get_type().hasattr("dtype")? {
         return Err(PyTypeError::new_err(format!(
             "data must be a numpy structured array, got {}",
             data_array.get_type().name()?
         )));
     }
-    // The rows are read through a raw pointer, `len` rows of `dtype.itemsize`
-    // bytes. An exact `numpy.ndarray` cannot misreport either; a subclass, or
-    // any object that only looks like an array, can override `__len__`,
-    // `dtype` or `__array_interface__` and send the reads past the buffer.
-    // `numpy.asarray` returns the base-class view of the same memory (no
-    // copy), whose attributes are NumPy's own.
-    let data_array = &py.import("numpy")?.call_method1("asarray", (data_array,))?;
-    records_of_array(data_array, expected_dtype, namespace, set_name, key_field)
+    let ndarray = py.import("numpy")?.getattr("ndarray")?;
+    // Call the base descriptor even for ndarray subclasses. Unlike asarray,
+    // view always creates a separate header, including for exact ndarrays.
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("type", &ndarray)?;
+    let view = ndarray.call_method("view", (data_array,), Some(&kwargs))?;
+    records_of_array(&view, expected_dtype, namespace, set_name, key_field)
 }
 
 /// Whether the field `name` of a structured dtype is itself structured, like
@@ -1316,9 +1277,7 @@ fn is_structured_field(dtype: &Bound<'_, PyAny>, name: &str) -> PyResult<bool> {
     Ok(!field_dtype.getattr("names")?.is_none())
 }
 
-/// [`numpy_to_records`] for an array whose `dtype`, `len()` and
-/// `__array_interface__` can be trusted to describe its buffer — an exact
-/// `numpy.ndarray`, which is what the caller above makes of its argument.
+/// Decode a one-dimensional base-class view in request order.
 fn records_of_array(
     data_array: &Bound<'_, PyAny>,
     expected_dtype: Option<&Bound<'_, PyAny>>,
@@ -1327,14 +1286,6 @@ fn records_of_array(
     key_field: &str,
 ) -> PyResult<Vec<(Key, Vec<Bin>)>> {
     let dtype_obj = data_array.getattr("dtype")?;
-    if let Some(expected) = expected_dtype.filter(|d| !d.is_none()) {
-        if !dtype_obj.eq(expected)? {
-            return Err(PyValueError::new_err(format!(
-                "_dtype does not match the array: data.dtype is {dtype_obj}, _dtype is {expected}. \
-                 Omit _dtype to use data.dtype, or convert the array first with data.astype(_dtype).",
-            )));
-        }
-    }
     let dtype_obj = &dtype_obj;
 
     let n: usize = data_array.len()?;
@@ -1346,15 +1297,12 @@ fn records_of_array(
     let (fields, row_size) = parse_dtype_fields(dtype_obj)?;
 
     // Overflow check: ensure n * row_stride does not overflow usize
-    if n.checked_mul(row_size).is_none() {
-        return Err(PyValueError::new_err(format!(
-            "buffer size overflow: {} rows * {} bytes/row exceeds usize",
-            n, row_size,
-        )));
-    }
-
-    let data_ptr = get_array_data_ptr_readonly(data_array)?;
-    let row_stride = get_array_row_stride(data_array, row_size)?;
+    let byte_len = n.checked_mul(row_size).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "buffer size overflow: {n} rows * {row_size} bytes/row"
+        ))
+    })?;
+    validate_array_stride(data_array, row_size)?;
 
     // Partition fields into key-fields and bin-fields
     let key_field_info = fields.iter().find(|f| f.name == key_field);
@@ -1417,35 +1365,48 @@ fn records_of_array(
         PyMemoryError::new_err(format!("cannot hold {n} rows in memory for one batch"))
     })?;
 
-    for i in 0..n {
-        let row_offset = checked_row_offset(i, row_stride)?;
-        let row_ptr = unsafe { data_ptr.offset(row_offset) };
+    // Copy whole records (including opaque padding) in logical order. The
+    // lifetime and bounds of the Rust reads come solely from these bytes.
+    let packed;
+    let bytes: &[u8] = if byte_len == 0 {
+        &[]
+    } else {
+        let opaque = data_array.call_method1("view", (format!("V{row_size}"),))?;
+        packed = opaque.call_method0("tobytes")?.cast_into::<PyBytes>()?;
+        packed.as_bytes()
+    };
+    if bytes.len() != byte_len {
+        return Err(PyValueError::new_err(
+            "array layout does not match the captured bytes",
+        ));
+    }
 
-        // Extract key value.
-        // For bytes keys from fixed-length numpy fields (e.g. S10), trim
-        // trailing null bytes so the digest matches lookups with unpadded keys.
-        // This mirrors the trimming already applied to _namespace and _set fields.
-        let key_value = unsafe { read_value_from_buffer(row_ptr, key_fi)? };
-        let key_value = match key_value {
-            Value::Blob(ref b) if key_fi.kind == DtypeKind::FixedBytes => {
-                let end = b.iter().rposition(|&x| x != 0).map_or(0, |p| p + 1);
-                if end < b.len() {
-                    Value::Blob(b[..end].to_vec())
-                } else {
-                    key_value
-                }
-            }
-            _ => key_value,
-        };
+    if let Some(expected) = expected_dtype.filter(|d| !d.is_none()) {
+        if !dtype_obj.eq(expected)? {
+            return Err(PyValueError::new_err(format!(
+                "_dtype does not match the array: data.dtype is {dtype_obj}, _dtype is {expected}. \
+                 Omit _dtype to use data.dtype, or convert the array first with data.astype(_dtype).",
+            )));
+        }
+    }
+    for i in 0..n {
+        // parse_dtype_fields bounds-checks each field against row_size.
+        let row = &bytes[i * row_size..(i + 1) * row_size];
+        let row_ptr = row.as_ptr();
+        // 0.14.x removed trailing NULs from both S and V user keys before
+        // hashing. Keep the same record address across upgrades. Bin payloads
+        // keep their full width.
+        let mut key_value = unsafe { read_value_from_buffer(row_ptr, key_fi)? };
+        if let Value::Blob(bytes) = &mut key_value {
+            let len = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+            bytes.truncate(len);
+        }
 
         let route = |field: Option<&FieldInfo>, default: &str| -> PyResult<String> {
             let Some(field) = field else {
                 return Ok(default.to_owned());
             };
-            // SAFETY: parse_dtype_fields checked the byte range of this
-            // fixed-width field against the row layout.
-            let bytes =
-                unsafe { std::slice::from_raw_parts(row_ptr.add(field.offset), field.itemsize) };
+            let bytes = &row[field.offset..field.offset + field.itemsize];
             let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |p| p + 1);
             std::str::from_utf8(&bytes[..end])
                 .map(str::to_owned)
@@ -1712,6 +1673,16 @@ class FakeArray:
 
     def __len__(self):
         return self._length
+
+    def view(self, dtype):
+        assert dtype == 'V8'
+        return self
+
+    def tobytes(self):
+        start = self.__array_interface__['data'][0] - ctypes.addressof(self._buf)
+        step = self.__array_interface__['strides'][0]
+        data = self._buf.raw
+        return b''.join(data[start+i*step:start+i*step+8] for i in range(self._length))
 
 def _build_buffer():
     buf = ctypes.create_string_buffer(24)

@@ -41,6 +41,15 @@ pub(crate) enum RowOutcome {
     /// The row failed, either with a server result code or on the client side
     /// (timeout, connection loss, ...).
     Failed(ErrorClass),
+    /// A row rejected locally during the initial split carries the routing
+    /// cause. A row stranded during a grouped retry carries only code 11.
+    NotRouted {
+        code: ResultCode,
+        initial_split: bool,
+    },
+    /// A singleton command returned its raw routing failure, without the
+    /// grouped executor's per-key result code.
+    MissingNamespace,
     /// No node answered for this row and no failure was recorded for it.
     NoResponse,
 }
@@ -59,10 +68,32 @@ impl RowOutcome {
         match (error, has_record) {
             // A failed UDF row keeps a record (its FAILURE bin) next to the
             // error; the error decides.
-            (Some(e), _) => Self::Failed(ErrorClass::of(e)),
+            (Some(e), _) if matches!(e.kind(), aerospike_core::ErrorKind::InvalidNamespace) => {
+                Self::MissingNamespace
+            }
+            (Some(e), _) => Self::from_failure(ErrorClass::of(e), e.node(), e.cause().is_some()),
             (None, true) => Self::Ok,
             (None, false) => Self::NoResponse,
         }
+    }
+
+    pub(crate) fn from_failure(class: ErrorClass, node: Option<&str>, has_cause: bool) -> Self {
+        match (class, node) {
+            (ErrorClass::Server(code), None)
+                if code == ResultCode::PartitionUnavailable
+                    || (code == ResultCode::InvalidNamespace && has_cause) =>
+            {
+                Self::NotRouted {
+                    code,
+                    initial_split: has_cause,
+                }
+            }
+            _ => Self::Failed(class),
+        }
+    }
+
+    pub(crate) fn has_server_answer(self) -> bool {
+        matches!(self, Self::Ok | Self::Failed(ErrorClass::Server(_)))
     }
 
     /// `BatchRecord.result`: `0` on success, the server's wire code when a
@@ -72,7 +103,8 @@ impl RowOutcome {
         match self {
             Self::Ok => 0,
             Self::Failed(class) => class.result_code(),
-            Self::NoResponse => CLIENT_SIDE_RESULT_CODE,
+            Self::NotRouted { code, .. } => ErrorClass::Server(code).result_code(),
+            Self::NoResponse | Self::MissingNamespace => CLIENT_SIDE_RESULT_CODE,
         }
     }
 
@@ -82,6 +114,8 @@ impl RowOutcome {
         match self {
             Self::Ok => None,
             Self::Failed(class) => Some(class.label()),
+            Self::NotRouted { code, .. } => Some(ErrorClass::Server(code).label()),
+            Self::MissingNamespace => Some(ErrorClass::InvalidArgument.label()),
             Self::NoResponse => Some(Cow::Borrowed(NO_RESPONSE_LABEL)),
         }
     }
@@ -110,24 +144,6 @@ pub(crate) fn row_in_doubt(br: &BatchRecord, outcome: RowOutcome) -> bool {
 /// The row was answered with the server's own `TIMEOUT` result code.
 pub(crate) fn server_gave_up_waiting(outcome: RowOutcome) -> bool {
     outcome == RowOutcome::Failed(ErrorClass::Server(ResultCode::Timeout))
-}
-
-/// Whether aerospike-core gave this row `PARTITION_UNAVAILABLE` itself,
-/// because it found no node to send the record to.
-///
-/// It reports that with the server's result code, so the row looks like one a
-/// server refused. What tells them apart is the node: a server's answer names
-/// the node that gave it, and a code the client made up names none.
-pub(crate) fn could_not_be_routed(br: &BatchRecord) -> bool {
-    br.error().is_some_and(|err| {
-        matches!(
-            err.kind(),
-            aerospike_core::ErrorKind::Server {
-                rc: ResultCode::PartitionUnavailable,
-                ..
-            }
-        ) && err.node().is_none()
-    })
 }
 
 /// Whether the server answered this row with success.
