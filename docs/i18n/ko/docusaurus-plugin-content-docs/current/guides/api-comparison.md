@@ -6,7 +6,7 @@ slug: /guides/api-comparison
 description: 공식 C 기반 Client와 aerospike-py의 API를 나란히 비교
 ---
 
-이 문서는 **공식 C 기반 client**(PyPI의 `aerospike`)와 Rust 기반 **aerospike-py**를 비교합니다. 단계별 이전 방법은 [Migration Guide](/docs/guides/migration)를 참고하세요.
+이 문서는 **공식 C 기반 client**(PyPI의 `aerospike`)와 Rust 기반 **aerospike-py**를 비교합니다.
 
 ## Connection
 

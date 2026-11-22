@@ -85,7 +85,7 @@ import aerospike
 import aerospike_py as aerospike
 ```
 
-Most API signatures, constants, exception classes, and policy dicts are compatible. See the [Migration Guide](/docs/guides/migration) for a step-by-step walkthrough and the [API Comparison](/docs/guides/api-comparison) for a detailed side-by-side table.
+Most API signatures, constants, exception classes, and policy dicts are compatible. [Compare the client APIs](/docs/guides/api-comparison).
 
 ## How do I enable OpenTelemetry tracing?
 

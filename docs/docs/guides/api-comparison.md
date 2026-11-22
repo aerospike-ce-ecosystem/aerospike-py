@@ -6,7 +6,7 @@ slug: /guides/api-comparison
 description: Side-by-side API comparison between the official C-based client and aerospike-py.
 ---
 
-This page compares the **official C-based client** (`aerospike` on PyPI) with the Rust-based **aerospike-py** client. For step-by-step migration instructions, see the [Migration Guide](/docs/guides/migration).
+This page compares the **official C-based client** (`aerospike` on PyPI) with the Rust-based **aerospike-py** client.
 
 ## Connection
 

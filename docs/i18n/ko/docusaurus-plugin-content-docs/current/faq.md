@@ -86,7 +86,7 @@ import aerospike
 import aerospike_py as aerospike
 ```
 
-대부분의 API signature, 상수, exception class, policy dict가 호환됩니다. 단계별 절차는 [Migration Guide](/docs/guides/migration), 자세한 비교는 [API Comparison](/docs/guides/api-comparison)을 참고하세요.
+대부분의 API signature, 상수, exception class, policy dict가 호환됩니다. [클라이언트 API 비교](/docs/guides/api-comparison)
 
 ## OpenTelemetry tracing 은 어떻게 활성화하나요?
 
