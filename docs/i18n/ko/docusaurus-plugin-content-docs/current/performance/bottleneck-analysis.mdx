@@ -1,26 +1,24 @@
 ---
-title: 병목 분석
-sidebar_label: 병목 분석
-sidebar_position: 4
-description: aerospike-py 의 stage-별 profiling 및 최적화 recipe. 새 isolated 하네스 기반 재측정 대기 중.
+title: 서빙 앱의 배치 읽기 구간 측정
+sidebar_label: 배치 읽기 프로파일링
+sidebar_position: 6
+description: 배치 읽기에서 시간을 측정할 구간과 2026년 4월 서빙 프로파일을 해석하는 방법.
 ---
 
-:::caution TODO — 재측정 대기 중
-이전 분석은 현재 삭제된 `benchmark/results/*` 산출물(`bottleneck-analysis.md`, `internal-stage-toggle-comparison.md`)을 사용했습니다. 당시 측정에서는 GIL 환경에서 `spawn_blocking_delay`와 `event_loop_resume_delay`가 가장 큰 비용을 차지했습니다. [Production Benchmark → Python 3.14t](./production-benchmark#what-gets-faster-and-why)에는 이 결과와 함께 free-threaded Python에서 두 stage가 거의 0으로 줄어드는 과정이 남아 있습니다.
+2026년 4월 서빙 실험에서는 HTTP 요청마다 9개 set에서 200키씩 읽었습니다. 앱은 병렬 호출 전체를 측정하고, 클라이언트 히스토그램은 각 `batch_read()`의 세부 구간을 측정했습니다. 9개 호출의 실행 시간이 겹치므로 각 호출의 구간 평균을 더해 HTTP 요청 한 건의 지연 시간을 구할 수 없습니다. 당시 보고서는 개발 빌드 `aerospike-py v0.1.0`과 C 확장 `aerospike 19.2.0`을 사용했다고 기록합니다. [4월 분석 보고서](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/524cadf9d5864ed8aeeabdfca88861eca4113cfe/benchmark/results/bottleneck-analysis.md)
 
-아직 필요한 작업은 새 [Isolated Benchmark](./isolated-benchmark) harness(s1–s5, oha, Podman, 로컬 Aerospike CE 8.1.2.1_3)에서 stage별 결과를 다시 측정하는 것입니다. Harness는 `AEROSPIKE_PY_INTERNAL_METRICS=1`을 통해 `db_client_internal_stage_seconds` histogram을 이미 지원합니다. 하지만 전체 matrix를 실행하고 결과를 문서로 정리하는 작업은 끝나지 않았습니다.
+| 측정 구간 | 포함되는 작업 |
+|---|---|
+| HTTP 요청 | 키 구성, 모든 DB 호출, 결과 변환, 추론, 응답 |
+| `batch_read()` 한 건 | 실행 슬롯 대기, 클라이언트 처리와 Aerospike 요청 |
+| 결과 변환 | 소비자가 지연 핸들을 받은 뒤 `to_dict()` 또는 `to_numpy()`를 호출하는 작업 |
 
-추적 항목:
+3.11과 3.14t를 비교한 curl 실험에서 평균 `spawn_blocking_delay`는 각각 234 ms와 0.12 ms였습니다. 3.11 실행은 메모리 부족을 겪었고, FT에서는 `event_loop_resume_delay` 표본이 부족했습니다. 당시 부하와 지표의 상세 조건은 [서빙 프로파일 기록](./production-benchmark#what-gets-faster-and-why)에 있습니다.
 
-- [ ] Isolated 하네스에서 stage profiling 매트릭스 재측정 (s1 / s3 / s4_gather × py3.11 GIL × py3.14t free-threaded)
-- [ ] **s4_gather vs s4_single** 에서 `gather(N) → single batch_read(mixed keys)` recipe 재검증
-- [ ] 새 측정값 반영 후 stage profiling 활성화 표면 (env var · 런타임 토글 · scoped context manager) 정리
-:::
+## 새로 측정할 때 {#재측정-시-다룰-내용}
 
-## 재측정 시 다룰 내용
+1. 사용자가 기다리는 범위를 선택합니다. 예를 들어 NumPy 결과를 쓰는 엔드포인트에서는 `to_numpy()`와 배열 소비까지 측정합니다. 시간과 함께 성공한 행 수와 오류를 기록합니다.
+2. `AEROSPIKE_PY_INTERNAL_METRICS=1` 또는 Python 컨텍스트 매니저로 `db_client_internal_stage_seconds`를 수집합니다. 같은 작업과 부하에서 `limiter_wait`, `io`, 결과 변환 구간을 비교합니다. [구간 정의와 활성화 방법](../integrations/observability/internal-stage-metrics.md)
+3. 병렬 배치를 검증하려면 같은 총 키 개수로 `/s4/gather`와 `/s4/single`을 실행합니다. 배치 호출 수와 함께 HTTP p95와 오류 수를 기록합니다. [로컬 ASGI 시나리오](./isolated-benchmark)
 
-1. **stage 별 breakdown** — `batch_read` 의 stage 이름 (`key_parse`, `limiter_wait`, `tokio_schedule_delay`, `io`, `into_pyobject`, `spawn_blocking_delay`, `event_loop_resume_delay`, `to_dict`, `to_numpy`, `merge_to_dict`, `future_into_py_setup`) 별 latency 분포.
-2. **stage profiling 활성화 방법** — `AEROSPIKE_PY_INTERNAL_METRICS=1` env var, `aerospike_py.set_internal_stage_metrics_enabled(True)` 런타임 토글, scoped context manager. 세 가지 모두 현재 존재; 비활성 시 오버헤드는 stage entry 당 `AtomicBool` 로드 1회 수준.
-3. **유의미한 최적화 recipe**. 이전 round 의 우승자: (a) aerospike-py 로 교체, (b) `gather(N batch_reads)` 를 단일 `batch_read(mixed keys)` 로 통합, (c) Python 3.14t free-threaded 로 전환. (a) 와 (c) 는 [Isolated Benchmark](./isolated-benchmark) 와 [Production Benchmark](./production-benchmark) 에 이미 정량화되어 있고, (b) 는 **s4_gather vs s4_single** 에서 재측정 예정.
-
-새 측정이 나오기 전까지는 [Production Benchmark의 3.14t stage breakdown](./production-benchmark#what-gets-faster-and-why)을 각 단계의 비용을 설명하는 기준 자료로 사용하세요.
+현재 CPython 3.14.2의 배치 측정값은 [클라이언트 비교](./client-comparison)에 있습니다. 쿼리 순회에서 한 행씩 또는 여러 행씩 결과를 넘기는 비용은 [비동기 스트림 프로파일](./async-stream-profile)에 정리했습니다.

@@ -1,26 +1,24 @@
 ---
-title: Bottleneck Analysis
-sidebar_label: Bottleneck Analysis
-sidebar_position: 4
-description: Per-stage profiling and optimisation recipes for aerospike-py. Pending re-measurement on the new isolated harness.
+title: Profiling batch reads in a serving application
+sidebar_label: Batch-read profiling
+sidebar_position: 6
+description: Where to measure batch-read time and how to interpret the archived April 2026 serving profiles.
 ---
 
-:::caution TODO — pending re-measurement
-The previous analysis relied on deleted `benchmark/results/*` artifacts (`bottleneck-analysis.md` and `internal-stage-toggle-comparison.md`). Those measurements found that `spawn_blocking_delay` and `event_loop_resume_delay` dominated the cost under the GIL. The [Production Benchmark → Python 3.14t](./production-benchmark#what-gets-faster-and-why) section preserves that result and shows both stages falling to nearly zero under free-threaded Python.
+The April 2026 serving experiment read nine sets of 200 keys per HTTP request. The application timed the complete fan-out, while the client's histograms timed stages within each individual `batch_read()`. The nine requests can overlap. Adding their stage averages cannot reconstruct one HTTP request's elapsed time. The archived profiling report identifies the clients as development `aerospike-py v0.1.0` and C extension `aerospike 19.2.0`. [April report](https://github.com/aerospike-ce-ecosystem/aerospike-py/blob/524cadf9d5864ed8aeeabdfca88861eca4113cfe/benchmark/results/bottleneck-analysis.md)
 
-The page still needs a fresh per-stage breakdown from the new [Isolated Benchmark](./isolated-benchmark) harness (s1–s5, oha, Podman, and local Aerospike CE 8.1.2.1_3). The harness already supports stage profiling through `AEROSPIKE_PY_INTERNAL_METRICS=1`, which enables the `db_client_internal_stage_seconds` histograms with negligible disabled-path overhead. The full matrix has not yet been run and summarized.
+| Timing boundary | What it includes |
+|---|---|
+| HTTP request | Key construction, all database calls, output conversion, inference and response |
+| One `batch_read()` | Its wait for admission, client work and the Aerospike operation |
+| Materialization | Work done after the lazy handle returns when the consumer calls `to_dict()` or `to_numpy()` |
 
-Tracked work:
+The 3.11/3.14t curl experiment observed mean `spawn_blocking_delay` of 234 and 0.12 ms respectively. The 3.11 run reached memory pressure and there were too few FT samples of `event_loop_resume_delay` to compare. For the load configuration and recorded metrics see the [archived serving profile](./production-benchmark#what-gets-faster-and-why).
 
-- [ ] Re-run the per-stage profiling matrix on the isolated harness (s1 / s3 / s4_gather × py3.11 GIL × py3.14t free-threaded)
-- [ ] Re-validate the `gather(N) → single batch_read(mixed keys)` recipe on **s4_gather vs s4_single**
-- [ ] Document the stage-profiling activation surface (env var · runtime toggle · scoped context manager) once the new numbers exist
-:::
+## Profiling a new run {#what-this-page-will-cover-when-re-measured}
 
-## What this page will cover (when re-measured)
+1. Choose the user's latency boundary. For an endpoint consuming NumPy results, time through `to_numpy()` and the downstream use of the array. Record successful rows and errors alongside elapsed time.
+2. Use `AEROSPIKE_PY_INTERNAL_METRICS=1` or the scoped Python context manager to collect `db_client_internal_stage_seconds`. Compare `limiter_wait`, `io` and the output-conversion stage for the same operation and load. [Stage definitions and activation](../integrations/observability/internal-stage-metrics.md)
+3. For fan-out, run `/s4/gather` and `/s4/single` with the same total number of keys. Record HTTP p95 and errors alongside batch call counts. [Local ASGI scenarios](./isolated-benchmark)
 
-1. **Per-stage breakdown** of `batch_read` under load, with named stages (`key_parse`, `limiter_wait`, `tokio_schedule_delay`, `io`, `into_pyobject`, `spawn_blocking_delay`, `event_loop_resume_delay`, `to_dict`, `to_numpy`, `merge_to_dict`, `future_into_py_setup`).
-2. **Stage-profiling activation** — `AEROSPIKE_PY_INTERNAL_METRICS=1` env var, `aerospike_py.set_internal_stage_metrics_enabled(True)` runtime toggle, scoped context manager. All three exist today; their overhead is roughly one `AtomicBool` load per stage entry when disabled.
-3. **Recipes that measurably help.** The known winners from the previous round were (a) switch to aerospike-py, (b) consolidate `gather(N batch_reads)` into a single `batch_read(mixed keys)`, (c) move to Python 3.14t free-threaded. (a) and (c) are already quantified on the new harness in [Isolated Benchmark](./isolated-benchmark) and [Production Benchmark](./production-benchmark); (b) is what **s4_gather vs s4_single** is set up to re-measure.
-
-Until new measurements are available, use the [Production Benchmark's 3.14t stage breakdown](./production-benchmark#what-gets-faster-and-why) as the reference for where time is spent.
+For the current CPython 3.14.2 batch data see [Client comparison](./client-comparison). For the query iterator's per-row versus grouped completion path see [Async stream profile](./async-stream-profile).

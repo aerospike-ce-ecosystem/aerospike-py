@@ -34,7 +34,7 @@ function FeatureCardsSection() {
       title: translate({id: 'homepage.feature.rust.title', message: 'Rust Performance'}),
       description: translate({
         id: 'homepage.feature.rust.description',
-        message: 'Native binary via PyO3 — zero Python overhead on the hot path.',
+        message: 'The Rust client handles network I/O. Python can consume query records as they arrive.',
       }),
     },
     {

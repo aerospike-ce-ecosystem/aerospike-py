@@ -80,6 +80,8 @@ const sidebars: SidebarsConfig = {
       label: 'Performance',
       items: [
         'performance/overview',
+        'performance/client-comparison',
+        'performance/async-stream-profile',
         'performance/isolated-benchmark',
         'performance/production-benchmark',
         'performance/bottleneck-analysis',

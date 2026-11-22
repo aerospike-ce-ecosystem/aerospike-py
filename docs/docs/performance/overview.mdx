@@ -1,91 +1,59 @@
 ---
-title: Performance Overview
+title: Performance benchmarks
 sidebar_label: Overview
 sidebar_position: 1
-description: TL;DR — measured latency, throughput, and Python 3.14t gains for aerospike-py vs official C client
+description: Batch reads and writes, NumPy conversion, queries and async streaming on standard and free-threaded CPython.
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-These benchmarks compare **aerospike-py** (Rust, PyO3, and native async) with the **official `aerospike` Python client** (a C extension wrapped with `loop.run_in_executor`).
+## Which benchmark matches your workload?
 
-:::tip TL;DR — cumulative effect on DLRM-serving p95
-**324 ms → 97 ms (−70%)** by stacking 3 actions: switch client → batch_read consolidation → Python 3.14t.
-:::
+The [client comparison](./client-comparison.md) measures three versions side by side: aerospike-py built on Aerospike Rust client 3.0 at [commit `4aabf09`](https://github.com/aerospike-ce-ecosystem/aerospike-py/commit/4aabf09f7ca1911a5ba00a3d668ec799c19ed54c), the previous aerospike-py release **0.14.4**, and Aerospike’s **`aerospike-sdk` 1.0.0**. Each ran on CPython 3.14.2 and 3.14.2t against one local Aerospike CE 8.2.0.1 node.
 
-## How fast — cumulative gain on p95
+### Batch throughput
 
-```text
-Original (official client, 3.11 GIL, gather)    ████████████████████████  324 ms   baseline
-+ Replace with aerospike-py                     ██████████████             189 ms   −42%
-+ gather(N) → single batch_read(mixed keys)     █████████                  126 ms   −61%
-+ Python 3.14t free-threaded                    ███████                     97 ms   −70%  🔥
-                                                                           ↑ 3.3× faster
-```
+Four synchronous threads each read or wrote 720 records with eight integer bins. Each column shows the percentage change in **rows per second** from that baseline to the new build. Dictionary writes include preparing each client's request from the input dictionaries.
 
-Setup: FastAPI + DLRM + Aerospike CE, k6 10 VUs × 60s, 2 replicas (4 CPU / 4 GiB request).
+<Tabs groupId="benchmark-interpreter" queryString="python">
 
-## Recommended actions (in order)
+<TabItem value="gil" label="CPython 3.14.2">
 
-| # | Action | Effect on p95 |
-|---|---|---|
-| 1 | Replace official client → **aerospike-py** | **−42%** (Python 3.11) |
-| 2 | `gather(N)` → single `batch_read(mixed keys)` | **−33%** more (under GIL) |
-| 3 | Move runtime to **Python 3.14t free-threaded** | **−49%** more, TPS **+47%** |
-| 4 | Keep `AEROSPIKE_PY_INTERNAL_METRICS=1` on | E2E overhead ≈ 0 |
+| Workload | vs. 0.14.4 | vs. official SDK |
+|---|---:|---:|
+| Read to Python dictionaries | +5.3% | +19.2% |
+| Write from Python dictionaries | +7.5% | +15.7% |
+| Read to a NumPy array | +13.7% | +34.3% |
+| Write from a NumPy array | +17.9% | +18.6% |
 
-## Pick your environment (Python 3.11 + GIL)
+</TabItem>
 
-A thinner application stack makes the client-level difference easier to see. The tail-latency advantage remains visible in production-shaped workloads.
+<TabItem value="ft" label="Free-threaded 3.14.2t">
 
-<Tabs>
-  <TabItem value="dlrm" label="C — uvicorn + DLRM (real serving)" default>
+| Workload | vs. 0.14.4 | vs. official SDK |
+|---|---:|---:|
+| Read to Python dictionaries | +3.3% | +4.0% |
+| Write from Python dictionaries | −2.3% | −16.4% |
+| Read to a NumPy array | +18.8% | +17.3% |
+| Write from a NumPy array | +11.6% | +16.8% |
 
-This environment covers the full path from HTTP through `batch_read` and DLRM CPU inference to the response. It most closely resembles a recommendation-serving pod.
+</TabItem>
 
-| Metric | aerospike-py | official | aerospike-py advantage |
-|---|---:|---:|---:|
-| avg | **118 ms** | 146 ms | −19% |
-| p90 | **173 ms** | 293 ms | **−41%** |
-| **p95** | **189 ms** | 324 ms | **−42%** 🔥 |
-
-[→ Full numbers (Production Benchmark, env C)](./production-benchmark?env=C)
-
-  </TabItem>
-  <TabItem value="asgi" label="B — uvicorn ASGI only">
-
-FastAPI + uvicorn around `batch_read`, no model inference. The "REST API in front of a key-value lookup" shape.
-
-| Metric | aerospike-py | official | advantage |
-|---|---:|---:|---:|
-| total mean | **228 ms** | 290 ms | **−21%** |
-| TPS | **19.4** | 16.6 | **+17%** |
-
-[→ Full numbers (Production Benchmark, env B)](./production-benchmark?env=B)
-
-  </TabItem>
-  <TabItem value="pure" label="A — Pure DB client (no HTTP/ML)">
-
-A Python loop calls `batch_read` directly. With no HTTP or ML layers, this environment shows the largest client-level difference.
-
-| Metric | aerospike-py | official | advantage |
-|---|---:|---:|---:|
-| avg mean | **22 ms** | 108 ms | **−80%** 🔥 |
-| avg p99 | **121 ms** | 195 ms | −38% |
-| TPS | **374** | 138 | **+171%** 🔥 |
-
-[→ Full numbers (Production Benchmark, env A)](./production-benchmark?env=A)
-
-  </TabItem>
 </Tabs>
 
-## How the three docs split up
+The [client comparison](./client-comparison.md) includes absolute throughput, CPU per row, p99 per batch and single-caller results. For peak RSS at higher batch concurrency, see [memory under concurrent batch load](../guides/migration-0.15.md#memory-under-concurrent-batch-load).
 
-| Page | When to read it |
+### Async queries
+
+On standard Python, consuming 12,000 rows with `async for` took **33.75 ms** with the new build and **336.53 ms** with the SDK. On free-threaded Python the times were **41.80 ms** and **196.64 ms**. The [stream profile](./async-stream-profile.md) shows what happened when the record delivery size and event-loop wake-up transport were changed independently. The SDK's `get_many()` submits independent point reads and has its own [window benchmark](./client-comparison.md#independent-point-operations).
+
+## Earlier application benchmarks
+
+These studies used the classic `aerospike` C extension. The historical label `official-async` refers to synchronous C calls submitted to a Python thread pool.
+
+| Study | What was measured |
 |---|---|
-| **[Isolated Benchmark](./isolated-benchmark)** | "How much of the gap belongs to the client library itself?" — 5 scenarios (s1..s5) on a local podman/oha harness, response serialisation stripped out. Each scenario isolates one materialisation path (dict / `to_numpy` zero-copy / gather vs single / lazy subset). Includes a 3.14t section. |
-| **[Production Benchmark](./production-benchmark)** | "What do real serving pods see?" — FastAPI + DLRM + Aerospike CE on k8s, k6 load, response body serialised, and two replicas. Shows how the measured p95 falls from 324 to 189 to 97 ms as the changes accumulate. Includes a 3.14t section. |
-| **[Bottleneck Analysis](./bottleneck-analysis)** | Internal stage profiling and recipes (`gather→single`, etc.). Currently being re-measured on the new isolated harness. |
-
-To reproduce locally, see `benchmark/README.md`.
+| [Isolated benchmark](./isolated-benchmark.mdx) | A local HTTP harness measuring five batch scenarios, including dict and NumPy conversion. |
+| [Production benchmark](./production-benchmark.mdx) | FastAPI serving latency and throughput, including the DLRM inference workload. |
+| [Bottleneck analysis](./bottleneck-analysis.mdx) | Batch-read stage measurements and how to interpret time spent around the event loop. |

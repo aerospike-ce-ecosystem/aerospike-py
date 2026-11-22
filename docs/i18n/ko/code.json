@@ -342,10 +342,7 @@
     "message": "Rust + PyO3 기반"
   },
   "homepage.hero.title": {
-    "message": "가장 {fastest} Aerospike Python Client"
-  },
-  "homepage.hero.fastest": {
-    "message": "빠른"
+    "message": "{python}용 Aerospike 클라이언트"
   },
   "homepage.hero.subtitle": {
     "message": "Rust로 구현한 고성능 Aerospike Python client — native 성능, 추가 Python dependency 없음, 완전한 Sync 및 Async 지원."
@@ -356,8 +353,8 @@
   "homepage.hero.viewBenchmarks": {
     "message": "벤치마크 보기"
   },
-  "homepage.stats.faster": {
-    "message": "공식 client 대비 빠름"
+  "homepage.stats.numpy": {
+    "message": "구조화 배열 배치 읽기·쓰기"
   },
   "homepage.stats.dependencies": {
     "message": "Python dependency"
@@ -372,13 +369,13 @@
     "message": "Aerospike Python client"
   },
   "homepage.meta.description": {
-    "message": "PyO3와 Rust로 구현한 고성능 Aerospike Python client — 2배 빠른 성능, 추가 dependency 없음, Sync 및 Async 지원."
+    "message": "동기·비동기 API, 쿼리 스트리밍, NumPy 배치 읽기와 쓰기를 지원하는 Aerospike Python 클라이언트."
   },
   "homepage.feature.rust.title": {
     "message": "Rust 성능"
   },
   "homepage.feature.rust.description": {
-    "message": "PyO3 native binary를 사용해 성능이 중요한 경로에서 Python overhead를 없앴습니다."
+    "message": "Rust 클라이언트가 네트워크 I/O를 처리합니다. Python에서는 쿼리 레코드를 도착하는 대로 읽을 수 있습니다."
   },
   "homepage.feature.async.title": {
     "message": "Sync 및 Async"

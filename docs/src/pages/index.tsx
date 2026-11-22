@@ -65,13 +65,9 @@ function HeroSection() {
           <Translate
             id="homepage.hero.title"
             values={{
-              fastest: (
-                <span className={styles.heroTitleAccent}>
-                  <Translate id="homepage.hero.fastest">Fastest</Translate>
-                </span>
-              ),
+              python: <span className={styles.heroTitleAccent}>Python</span>,
             }}>
-            {'The {fastest} Aerospike Python Client'}
+            {'Aerospike client for {python}'}
           </Translate>
         </h1>
         <p className={styles.heroSubtitle}>
@@ -97,7 +93,7 @@ function HeroSection() {
 
 function StatsBar() {
   const stats = [
-    {value: '2×', label: translate({id: 'homepage.stats.faster', message: 'Faster than Official'})},
+    {value: 'NumPy 2', label: translate({id: 'homepage.stats.numpy', message: 'Structured batch I/O'})},
     {value: '0', label: translate({id: 'homepage.stats.dependencies', message: 'Python Dependencies'})},
     {value: 'Sync + Async', label: translate({id: 'homepage.stats.apis', message: 'Both APIs'})},
     {value: 'PyO3', label: translate({id: 'homepage.stats.binding', message: 'Native Rust Binding'})},
@@ -121,7 +117,7 @@ export default function Home(): ReactNode {
       title={translate({id: 'homepage.meta.title', message: 'Aerospike Python client'})}
       description={translate({
         id: 'homepage.meta.description',
-        message: 'High-performance Aerospike Python Client built with PyO3 and Rust — 2× faster, zero dependencies, Sync and Async.',
+        message: 'Aerospike client for Python with synchronous and asynchronous APIs, streaming queries and NumPy batch reads and writes.',
       })}>
       <HeroSection />
       <StatsBar />

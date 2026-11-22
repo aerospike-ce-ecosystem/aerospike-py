@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache%202.0-647283?logo=apache&amp;logoColor=FFC72C&amp;labelColor=0B1F33"></a>
 </p>
 
-High-performance Python client for Aerospike, built with Rust and PyO3 on top of the [Aerospike Rust Client v2](https://github.com/aerospike/aerospike-client-rust).
+High-performance Python client for Aerospike, built with Rust and PyO3 on top of the [Aerospike Rust Client](https://github.com/aerospike/aerospike-client-rust).
 
 ## Features
 
@@ -81,14 +81,7 @@ asyncio.run(main())
 
 ## Performance
 
-Benchmark: **5,000 ops x 100 rounds**, Aerospike CE (Docker), Apple M4 Pro
-
-| Operation | aerospike-py sync | official C client | aerospike-py async | Async vs C |
-| --------- | ----------------: | ----------------: | -----------------: | ---------: |
-| put (ms)  |             0.140 |             0.139 |              0.058 | **2.4x faster** |
-| get (ms)  |             0.141 |             0.141 |              0.063 | **2.2x faster** |
-
-> **Sync** is on par with the official C client. **Async** is **2.2-2.4x faster** via native Tokio async/await.
+Compare [batch and query performance](docs/docs/performance/client-comparison.md) with aerospike-py 0.14.4 and the official `aerospike-sdk` 1.0.0 on standard and free-threaded CPython. The [async iterator profile](docs/docs/performance/async-stream-profile.md) measures how often each client hands records from Rust to Python. Earlier [FastAPI serving results](docs/docs/performance/production-benchmark.mdx) use the classic `aerospike` C extension.
 
 ## Claude Code Skills & Agents
 
