@@ -136,6 +136,8 @@ numpy structured array             Aerospike
 
 ## Key Field
 
+As in 0.14.4, trailing NUL bytes in scalar `S<N>` and `V<N>` keys are removed before hashing. Bin values retain their declared width. While the client captures the batch, synchronize writers to the source array, its views and its dtype. The client decodes an immutable snapshot.
+
 By default, the dtype field named `"_key"` is used as the record key. The key field must be one value: a scalar integer or a fixed-width bytes field. A sub-array, even a one-element `("_key", "i8", (1,))`, or a nested structured field raises `TypeError` before anything is written; declare it as `("_key", "i8")`. You can specify a different field with `key_field`:
 
 <Tabs>

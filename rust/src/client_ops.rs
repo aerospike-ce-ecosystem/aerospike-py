@@ -378,7 +378,10 @@ fn settle_batch<'k>(
         };
     };
     let stand_ins = restore_keys(&mut rows, keys);
-    let failure = if rows.iter().all(row_has_a_server_answer) {
+    let failure = if rows
+        .iter()
+        .all(|row| RowOutcome::of(row).has_server_answer())
+    {
         None
     } else {
         Some(err)
@@ -427,27 +430,18 @@ fn rows_a_resend_leaves_in_doubt(rows: &[BatchRecord], batch_policy: &BatchPolic
         .enumerate()
         .filter(|(_, row)| {
             row.has_write()
-                && (crate::batch_types::could_not_be_routed(row)
-                    || matches!(
-                        RowOutcome::of(row),
-                        RowOutcome::Failed(ErrorClass::Server(
+                && matches!(
+                    RowOutcome::of(row),
+                    RowOutcome::NotRouted
+                        | RowOutcome::Failed(ErrorClass::Server(
                             ResultCode::KeyNotFoundError
                                 | ResultCode::FilteredOut
                                 | ResultCode::UdfBadResponse
                         ))
-                    ))
+                )
         })
         .map(|(index, _)| index)
         .collect()
-}
-
-/// Whether a server said what happened to this row's record: success, or a
-/// result code of its own.
-fn row_has_a_server_answer(row: &BatchRecord) -> bool {
-    matches!(
-        RowOutcome::of(row),
-        RowOutcome::Ok | RowOutcome::Failed(ErrorClass::Server(_))
-    )
 }
 
 /// Read multiple records in a batch.
@@ -631,19 +625,16 @@ fn judge_row(
     in_doubt: bool,
     idempotent: impl FnOnce() -> bool,
 ) -> RowJudgement {
-    let (transient, unanswered) = match outcome {
+    let transient = match outcome {
         RowOutcome::Ok => return RowJudgement::default(),
-        RowOutcome::NoResponse => (true, true),
-        RowOutcome::Failed(class) => (
-            failure_may_pass(class),
-            !matches!(class, ErrorClass::Server(_)),
-        ),
+        RowOutcome::NoResponse | RowOutcome::NotRouted => true,
+        RowOutcome::Failed(class) => failure_may_pass(class),
     };
     RowJudgement {
         failed: true,
         retry: transient && (!in_doubt || idempotent()),
         in_doubt,
-        unanswered,
+        unanswered: !outcome.has_server_answer(),
     }
 }
 
@@ -2227,6 +2218,37 @@ mod tests {
 
     fn drive(env: &ScriptedAttempts, max_retries: u32, timeout_ms: u64) -> BatchWriteOutcome<Row> {
         futures::executor::block_on(drive_batch_write_retries(env, max_retries, timeout_ms))
+    }
+
+    #[test]
+    fn lost_route_on_resend_keeps_call_failure_and_ordered_partial_rows() {
+        let partition_error = ErrorClass::Server(ResultCode::PartitionUnavailable);
+        let local = RowOutcome::from_failure(partition_error, None);
+        let remote = RowOutcome::from_failure(partition_error, Some("node"));
+        assert_eq!(local.result_code(), remote.result_code());
+        assert_eq!(local.error_type(), remote.error_type());
+        assert!(!local.has_server_answer());
+        assert!(remote.has_server_answer());
+
+        for (outcome, should_raise) in [(local, true), (remote, false)] {
+            let final_row = Row {
+                outcome,
+                in_doubt: false,
+            };
+            let env = ScriptedAttempts::new(
+                2,
+                1,
+                vec![
+                    Scripted::CallFailed(vec![OK, LOST]),
+                    Scripted::CallFailed(vec![final_row]),
+                ],
+            );
+            let result = drive(&env, 1, 1000);
+            assert_eq!(result.error.is_some(), should_raise);
+            assert_eq!(result.rows[0].outcome, RowOutcome::Ok);
+            assert_eq!(result.rows[1].outcome, outcome);
+            assert_eq!(result.in_doubt_rows, vec![1]);
+        }
     }
 
     #[test]

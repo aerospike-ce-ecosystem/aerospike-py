@@ -815,9 +815,36 @@ async def test_nested_numeric_vectors_validate_full_blob(any_client, any_cleanup
     np.testing.assert_array_equal(result.batch_records["v"][0], [[0, 1], [2, 3]])
 
 
-async def test_void_key_preserves_trailing_zero(any_client, any_cleanup):
+async def test_void_key_updates_record_at_0144_address(any_client, any_cleanup):
+    legacy_key = (NS, SET, b"K")
+    full_width_key = (NS, SET, b"K\x00")
+    any_cleanup.extend([legacy_key, full_width_key])
+    await invoke(any_client, "put", legacy_key, {"v": 1, "marker": "legacy"})
     data = np.array([(np.void(b"K\x00"), 876)], dtype=[("_key", "V2"), ("v", "i8")])
-    key = (NS, SET, b"K\x00")
-    any_cleanup.append(key)
+
     await invoke(any_client, "batch_write_numpy", data, NS, SET)
-    assert (await invoke(any_client, "get", key)).bins["v"] == 876
+
+    assert (await invoke(any_client, "get", legacy_key)).bins == {"v": 876, "marker": "legacy"}
+    assert (await invoke(any_client, "exists", full_width_key)).meta is None
+
+
+async def test_write_captures_keys_and_bins_before_dtype_comparison(any_client, any_cleanup):
+    data = np.array([(93483, 10), (93484, 20)], dtype=[("_key", "i8"), ("v", "i8")])
+    original_dtype = data.dtype
+    keys = _keys([93483, 93484])
+    any_cleanup.extend(keys)
+
+    class DeclaredDtype:
+        @property
+        def dtype(self):
+            # A sequential, in-bounds edit after capture. The submitted
+            # records must be independent of later changes to the source.
+            data["v"] = 99
+            data.shape = (1, 2)
+            return original_dtype
+
+    result = await invoke(any_client, "batch_write_numpy", data, NS, SET, DeclaredDtype())
+
+    assert data.shape == (1, 2)
+    assert [r.result for r in result.batch_records] == [0, 0]
+    assert [(await invoke(any_client, "get", key)).bins["v"] for key in keys] == [10, 20]
