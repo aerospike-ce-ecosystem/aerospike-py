@@ -500,7 +500,7 @@ results: BatchWriteResult = await client.batch_write_numpy(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `data` | `np.ndarray` | required | Structured numpy array with record data. Its own `data.dtype` defines the layout. The rows are read from `numpy.asarray(data)`: an array subclass such as `numpy.recarray` is written as the plain array it is, and the mask of a masked array is ignored. |
+| `data` | `np.ndarray` | required | The client copies records in logical row order using the array’s dtype. Masked arrays use the underlying values. |
 | `namespace` | `str` | required | Target Aerospike namespace |
 | `set_name` | `str` | required | Target set name |
 | `_dtype` | `np.dtype \| None` | `None` | Optional dtype the array is expected to have. When given and different from `data.dtype`, `ValueError` is raised before anything is sent. |
@@ -508,6 +508,6 @@ results: BatchWriteResult = await client.batch_write_numpy(
 | `policy` | `dict \| None` | `None` | Optional [`BatchPolicy`](/docs/api/types#batchpolicy) overrides. `max_retries` defaults to `0` and cannot be combined with `retry`. |
 | `retry` | `int` | `0` | Max retries for transient failures (timeout, device overload, key busy). `0` = no retry. Only records that failed are re-sent; a `CREATE_ONLY` or generation-checked record that is `in_doubt` is not. Giving a non-zero `policy["max_retries"]` as well raises `InvalidArgError`. |
 
-**Returns:** `BatchWriteResult` — NamedTuple with `batch_records: list[BatchRecord]` and `retry` (`BatchRetryInfo`). Each `BatchRecord` carries `key`, `result` (`0` success, the server's code, or `-1` when no server answered), `record` (a `Record` or `None`), `in_doubt` (the write may have been applied) and `error_type` (`None` on success, otherwise the kind of failure). If the call fails as a whole, the exception's `partial_result` holds these rows.
+**Returns:** `BatchWriteResult` — NamedTuple with `batch_records: list[BatchRecord]` and `retry` (`BatchRetryInfo`). Each `BatchRecord` carries `key`, `result` (`0` success, a server or routing result code, or `-1` if no result code is available), `record` (a `Record` or `None`), `in_doubt` (the write may have been applied) and `error_type` (`None` on success, otherwise the kind of failure). If the call fails as a whole, the exception's `partial_result` holds these rows.
 
 **See also:** [NumPy Batch Read Guide](./numpy-batch.md) for reading records back into numpy arrays.

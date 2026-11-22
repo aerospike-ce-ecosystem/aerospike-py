@@ -446,7 +446,7 @@ fn core_resend_may_have_applied(outcome: RowOutcome) -> bool {
         RowOutcome::NotRouted {
             initial_split: false,
             ..
-        } | RowOutcome::Failed(ErrorClass::InvalidArgument)
+        } | RowOutcome::MissingNamespace
             | RowOutcome::Failed(ErrorClass::Server(
                 ResultCode::KeyNotFoundError | ResultCode::FilteredOut | ResultCode::UdfBadResponse
             ))
@@ -637,6 +637,7 @@ fn judge_row(
     let transient = match outcome {
         RowOutcome::Ok => return RowJudgement::default(),
         RowOutcome::NoResponse => true,
+        RowOutcome::MissingNamespace => false,
         RowOutcome::NotRouted { code, .. } => is_retryable_result_code(&code),
         RowOutcome::Failed(class) => failure_may_pass(class),
     };
@@ -2265,7 +2266,13 @@ mod tests {
     fn singleton_resend_losing_namespace_preserves_write_uncertainty() {
         // The initial batch split wraps routing failures in a server code
         // with a cause. The singleton command instead stamps its raw error.
-        let raw = RowOutcome::from_failure(ErrorClass::InvalidArgument, None, false);
+        let invalid_input = AsError::invalid_argument("invalid operation count");
+        let rejected = RowOutcome::from_parts(Some(&invalid_input), false);
+        assert!(!core_resend_may_have_applied(rejected));
+
+        let raw = RowOutcome::MissingNamespace;
+        assert_eq!(raw.result_code(), rejected.result_code());
+        assert_eq!(raw.error_type(), rejected.error_type());
         assert!(!raw.has_server_answer());
         assert!(core_resend_may_have_applied(raw));
         let outcomes = [(true, RowOutcome::Ok), (true, raw)];

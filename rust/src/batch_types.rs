@@ -47,6 +47,9 @@ pub(crate) enum RowOutcome {
         code: ResultCode,
         initial_split: bool,
     },
+    /// A singleton command returned its raw routing failure, without the
+    /// grouped executor's per-key result code.
+    MissingNamespace,
     /// No node answered for this row and no failure was recorded for it.
     NoResponse,
 }
@@ -65,6 +68,9 @@ impl RowOutcome {
         match (error, has_record) {
             // A failed UDF row keeps a record (its FAILURE bin) next to the
             // error; the error decides.
+            (Some(e), _) if matches!(e.kind(), aerospike_core::ErrorKind::InvalidNamespace) => {
+                Self::MissingNamespace
+            }
             (Some(e), _) => Self::from_failure(ErrorClass::of(e), e.node(), e.cause().is_some()),
             (None, true) => Self::Ok,
             (None, false) => Self::NoResponse,
@@ -98,7 +104,7 @@ impl RowOutcome {
             Self::Ok => 0,
             Self::Failed(class) => class.result_code(),
             Self::NotRouted { code, .. } => ErrorClass::Server(code).result_code(),
-            Self::NoResponse => CLIENT_SIDE_RESULT_CODE,
+            Self::NoResponse | Self::MissingNamespace => CLIENT_SIDE_RESULT_CODE,
         }
     }
 
@@ -109,6 +115,7 @@ impl RowOutcome {
             Self::Ok => None,
             Self::Failed(class) => Some(class.label()),
             Self::NotRouted { code, .. } => Some(ErrorClass::Server(code).label()),
+            Self::MissingNamespace => Some(ErrorClass::InvalidArgument.label()),
             Self::NoResponse => Some(Cow::Borrowed(NO_RESPONSE_LABEL)),
         }
     }
