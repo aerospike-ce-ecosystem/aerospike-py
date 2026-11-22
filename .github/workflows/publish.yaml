@@ -16,13 +16,17 @@ on:
         options:
           - testpypi
           - pypi
+      release_tag:
+        description: 'Existing published release tag to rebuild (optional)'
+        required: false
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build wheels (${{ matrix.os }})
+  source:
+    name: Resolve package source
     # Only run for valid PEP 440 dot-separated tags: vX.Y.Z or vX.Y.Z.alpha4 (not v0.0.1alpha4)
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -36,6 +40,34 @@ jobs:
           contains(github.event.release.tag_name, '.dev')
         )
       )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.ref.outputs.sha }}
+    steps:
+      - name: Resolve release tag to a commit
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          sha="$GITHUB_SHA"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\.(alpha|beta|rc|dev)[0-9]+)?$ ]] || {
+              echo "::error::Expected a version tag such as v0.15.0"
+              exit 1
+            }
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft |
+              jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and (.isDraft | not)' >/dev/null
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs%2Ftags%2F$RELEASE_TAG" --jq .sha)
+          fi
+          echo "Building source commit $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build wheels (${{ matrix.os }})
+    needs: source
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,14 +77,16 @@ jobs:
             target: x86_64
           - os: ubuntu-latest
             target: aarch64
-          - os: macos-14
+          - os: macos-15
             target: x86_64
-          - os: macos-14
+          - os: macos-15
             target: aarch64
           - os: windows-latest
             target: x64
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
 
       # Installed FIRST, on purpose. actions/setup-python prepends every
       # install to PATH and the free-threaded framework symlinks
@@ -91,8 +125,8 @@ jobs:
         with:
           event_name: ${{ github.event_name }}
           tag_name: ${{ github.event.release.tag_name }}
-          ref_name: ${{ github.ref_name }}
-          ref: ${{ github.ref }}
+          ref_name: ${{ inputs.release_tag || github.ref_name }}
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
           run_number: ${{ github.run_number }}
 
       - name: Build wheels (Linux)
@@ -133,22 +167,12 @@ jobs:
 
   sdist:
     name: Build source distribution
-    # Only run for valid PEP 440 dot-separated tags: vX.Y.Z or vX.Y.Z.alpha4 (not v0.0.1alpha4)
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (
-        startsWith(github.event.release.tag_name, 'v') &&
-        (
-          (!contains(github.event.release.tag_name, 'alpha') && !contains(github.event.release.tag_name, 'beta') && !contains(github.event.release.tag_name, 'rc') && !contains(github.event.release.tag_name, 'dev')) ||
-          contains(github.event.release.tag_name, '.alpha') ||
-          contains(github.event.release.tag_name, '.beta') ||
-          contains(github.event.release.tag_name, '.rc') ||
-          contains(github.event.release.tag_name, '.dev')
-        )
-      )
+    needs: source
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
 
       - name: Extract version and update Cargo.toml
         id: version
@@ -156,8 +180,8 @@ jobs:
         with:
           event_name: ${{ github.event_name }}
           tag_name: ${{ github.event.release.tag_name }}
-          ref_name: ${{ github.ref_name }}
-          ref: ${{ github.ref }}
+          ref_name: ${{ inputs.release_tag || github.ref_name }}
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
           run_number: ${{ github.run_number }}
 
       - name: Build sdist
